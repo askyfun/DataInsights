@@ -17,7 +17,9 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte) {
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
 	dsDatasetSvc := dataset.NewService(db)
+	dsDatasetSvc.SetSecurityKey(securityKey)
 	dsChartSvc := chart.NewService(db)
+	dsChartSvc.SetSecurityKey(securityKey)
 	dsShareSvc := share.NewService(db)
 
 	// Initialize handlers

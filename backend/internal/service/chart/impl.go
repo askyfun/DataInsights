@@ -9,6 +9,7 @@ import (
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
 	"dataray/internal/query"
+	dsservice "dataray/internal/service/datasource"
 
 	"github.com/uptrace/bun"
 )
@@ -25,12 +26,19 @@ type Service interface {
 	// Data operations
 	GetData(ctx context.Context, id int) (entity.ChartDataResult, error)
 	Query(ctx context.Context, req *entity.ChartQueryRequest) (entity.ChartDataResult, error)
+
+
+	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
+	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
+	SetSecurityKey(key []byte)
 }
 
 // chartService implements the Service interface
 type chartService struct {
 	db                   *bun.DB
+	key                  []byte // 32-byte AES key; nil => plaintext passthrough
 	connectFn            func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error)
+	dialFn               func(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error)
 	executorFactory      func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor
 	getDatasetModelFn    func(ctx context.Context, id int) (*model.Dataset, error)
 	getDatasourceModelFn func(ctx context.Context, id int) (*model.Datasource, error)
@@ -47,6 +55,7 @@ type queryExecutor interface {
 func NewService(db *bun.DB) Service {
 	service := &chartService{db: db}
 	service.connectFn = service.connect
+	service.dialFn = service.dial
 	service.executorFactory = func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor {
 		return query.NewExecutor(conn, dataset, ds)
 	}
@@ -256,7 +265,22 @@ func (s *chartService) getDatasourceModel(ctx context.Context, id int) (*model.D
 	return ds, nil
 }
 
+// connect resolves the stored password (decrypt / legacy auto-upgrade) before
+// dialing, so encrypted credentials work on every chart/dataset query path.
 func (s *chartService) connect(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
+	password, err := dsservice.ResolvePassword(ctx, s.db, ds, s.key)
+	if err != nil {
+		return nil, err
+	}
+	return s.dialFn(ctx, ds, password)
+}
+
+// SetSecurityKey injects the AES key; nil/empty disables decryption.
+func (s *chartService) SetSecurityKey(key []byte) {
+	s.key = key
+}
+
+func (s *chartService) dial(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {
 	driver, err := datasource.NewDriver(datasource.DriverType(ds.Type))
 	if err != nil {
 		return nil, fmt.Errorf("unsupported driver type: %s", ds.Type)
@@ -267,7 +291,7 @@ func (s *chartService) connect(ctx context.Context, ds *model.Datasource) (datas
 		Port:         ds.Port,
 		DatabaseName: ds.DatabaseName,
 		Username:     ds.Username,
-		Password:     ds.Password,
+		Password:     password,
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

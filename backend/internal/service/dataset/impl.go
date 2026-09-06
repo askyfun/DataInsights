@@ -11,6 +11,7 @@ import (
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
 	"dataray/internal/query"
+	dsservice "dataray/internal/service/datasource"
 
 	"github.com/uptrace/bun"
 )
@@ -31,12 +32,19 @@ type Service interface {
 	// Data operations
 	Preview(ctx context.Context, id int) (*entity.PreviewResult, error)
 	Query(ctx context.Context, id int, config entity.QueryConfig) ([]map[string]any, error)
+
+
+	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
+	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
+	SetSecurityKey(key []byte)
 }
 
 // datasetService implements the Service interface
 type datasetService struct {
 	db                   *bun.DB
+	key                  []byte // 32-byte AES key; nil => plaintext passthrough
 	connectFn            func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error)
+	dialFn               func(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error)
 	getDatasetModelFn    func(ctx context.Context, id int) (*model.Dataset, error)
 	getDatasourceModelFn func(ctx context.Context, id int) (*model.Datasource, error)
 }
@@ -45,6 +53,7 @@ type datasetService struct {
 func NewService(db *bun.DB) Service {
 	service := &datasetService{db: db}
 	service.connectFn = service.connect
+	service.dialFn = service.dial
 	service.getDatasetModelFn = service.getDatasetModel
 	service.getDatasourceModelFn = service.getDatasourceModel
 	return service
@@ -298,7 +307,22 @@ func (s *datasetService) getDatasourceModel(ctx context.Context, id int) (*model
 	return ds, nil
 }
 
+// connect resolves the stored password (decrypt / legacy auto-upgrade) before
+// dialing, so encrypted credentials work on every chart/dataset query path.
 func (s *datasetService) connect(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
+	password, err := dsservice.ResolvePassword(ctx, s.db, ds, s.key)
+	if err != nil {
+		return nil, err
+	}
+	return s.dialFn(ctx, ds, password)
+}
+
+// SetSecurityKey injects the AES key; nil/empty disables decryption.
+func (s *datasetService) SetSecurityKey(key []byte) {
+	s.key = key
+}
+
+func (s *datasetService) dial(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {
 	driver, err := datasource.NewDriver(datasource.DriverType(ds.Type))
 	if err != nil {
 		return nil, fmt.Errorf("unsupported driver type: %s", ds.Type)
@@ -309,7 +333,7 @@ func (s *datasetService) connect(ctx context.Context, ds *model.Datasource) (dat
 		Port:         ds.Port,
 		DatabaseName: ds.DatabaseName,
 		Username:     ds.Username,
-		Password:     ds.Password,
+		Password:     password,
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

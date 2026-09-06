@@ -87,7 +87,6 @@ func TestGetTableDataRejectsInvalidTableName(t *testing.T) {
 }
 
 // --- security integration tests (Task 8b) ---
-// --- security integration tests (Task 8b) ---
 
 func testSecurityKey() []byte {
 	key := make([]byte, 32)

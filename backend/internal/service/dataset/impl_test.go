@@ -7,8 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"dataray/internal/crypto"
 	"dataray/internal/datasource"
 	"dataray/internal/model"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 )
 
 // stubConnection 实现 datasource.Connection，用于替换真实驱动。
@@ -140,4 +145,68 @@ func TestGetColumnsTableDatasetUsesGetColumns(t *testing.T) {
 	if !strings.Contains(cols[0].Expr, "id") {
 		t.Fatalf("unexpected expr: %q", cols[0].Expr)
 	}
+}
+
+// --- password resolution tests (C1 fix) ---
+
+func testAESKey() []byte {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	return key
+}
+
+// TestConnectResolvesPassword 验证 dataset 服务启用 key 后 connect 拿到的是
+// 解密后的密码（dialFn 收到的值即写入 ConnectionConfig.Password 的值），
+// 且存量明文密码被回写为 v1: 密文。
+func TestConnectResolvesPassword(t *testing.T) {
+	key := testAESKey()
+
+	t.Run("encrypted password decrypted for dial", func(t *testing.T) {
+		ct, err := crypto.Encrypt(key, "s3cret")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		s := &datasetService{}
+		s.SetSecurityKey(key)
+		s.dialFn = func(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {
+			got = password
+			return &stubConnection{}, nil
+		}
+		if _, err := s.connect(context.Background(), &model.Datasource{ID: 2, Type: "postgresql", Password: ct}); err != nil {
+			t.Fatal(err)
+		}
+		if got != "s3cret" {
+			t.Fatalf("connect should dial with decrypted password, got %q", got)
+		}
+	})
+
+	t.Run("legacy plaintext upgraded and used", func(t *testing.T) {
+		sqlDB, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("sqlmock.New: %v", err)
+		}
+		defer sqlDB.Close()
+
+		var got string
+		s := &datasetService{db: bun.NewDB(sqlDB, pgdialect.New())}
+		s.SetSecurityKey(key)
+		s.dialFn = func(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {
+			got = password
+			return &stubConnection{}, nil
+		}
+		mock.ExpectExec(`UPDATE "bi_datasource"`).WillReturnResult(sqlmock.NewResult(0, 1))
+
+		if _, err := s.connect(context.Background(), &model.Datasource{ID: 2, Type: "postgresql", Password: "legacy-pass"}); err != nil {
+			t.Fatal(err)
+		}
+		if got != "legacy-pass" {
+			t.Fatalf("connection should use original plaintext, got %q", got)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("legacy password was not upgraded: %v", err)
+		}
+	})
 }

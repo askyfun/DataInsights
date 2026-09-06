@@ -3,9 +3,7 @@ package datasource
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"time"
 
@@ -379,33 +377,10 @@ func (s *datasourceService) encryptPassword(m *model.Datasource) error {
 	return nil
 }
 
-// resolvePassword resolves the password used to establish the connection.
-// With a security key configured, stored ciphertext is decrypted; a legacy
-// plaintext value (no v1: prefix) is used as-is and transparently upgraded by
-// writing the encrypted value back. Without a key, plaintext passthrough.
+// resolvePassword delegates to the shared ResolvePassword so every consumer of
+// a stored datasource password decrypts it exactly once.
 func (s *datasourceService) resolvePassword(ctx context.Context, ds *model.Datasource) (string, error) {
-	if s.key == nil {
-		return ds.Password, nil
-	}
-	if ds.Password == "" {
-		return "", nil
-	}
-	pt, err := crypto.Decrypt(s.key, ds.Password)
-	if err == nil {
-		return pt, nil
-	}
-	if !errors.Is(err, crypto.ErrNotEncrypted) {
-		return "", fmt.Errorf("decrypt datasource password: %w", err)
-	}
-	ct, err := crypto.Encrypt(s.key, ds.Password)
-	if err != nil {
-		return "", fmt.Errorf("upgrade legacy datasource password: %w", err)
-	}
-	if _, err := s.db.NewUpdate().Model(&model.Datasource{ID: ds.ID, Password: ct}).Column("password").WherePK().Exec(ctx); err != nil {
-		return "", fmt.Errorf("upgrade legacy datasource password: %w", err)
-	}
-	slog.Info("upgraded legacy plaintext datasource password", "datasource_id", ds.ID)
-	return ds.Password, nil
+	return ResolvePassword(ctx, s.db, ds, s.key)
 }
 
 // GetTableData returns paginated table data with primary key sorting

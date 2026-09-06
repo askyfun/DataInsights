@@ -39,6 +39,8 @@ func (m *mockChartService) Query(_ context.Context, _ *entity.ChartQueryRequest)
 	return entity.ChartDataResult{}, nil
 }
 
+func (m *mockChartService) SetSecurityKey(_ []byte) {}
+
 func TestUpdate_BindsDatasetID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
