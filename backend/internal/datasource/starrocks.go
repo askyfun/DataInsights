@@ -127,8 +127,8 @@ func (c *starRocksConnection) GetPrimaryKeys(ctx context.Context, tableName stri
 	return keys, nil
 }
 
-func (c *starRocksConnection) Execute(ctx context.Context, sql string) (*QueryResult, error) {
-	rows, err := c.db.QueryContext(ctx, sql)
+func (c *starRocksConnection) Execute(ctx context.Context, sql string, args ...any) (*QueryResult, error) {
+	rows, err := c.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

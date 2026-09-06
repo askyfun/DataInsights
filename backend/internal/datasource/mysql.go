@@ -127,8 +127,8 @@ func (c *mysqlConnection) GetPrimaryKeys(ctx context.Context, tableName string) 
 	return keys, nil
 }
 
-func (c *mysqlConnection) Execute(ctx context.Context, sql string) (*QueryResult, error) {
-	rows, err := c.db.QueryContext(ctx, sql)
+func (c *mysqlConnection) Execute(ctx context.Context, sql string, args ...any) (*QueryResult, error) {
+	rows, err := c.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

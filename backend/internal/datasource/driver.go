@@ -73,8 +73,8 @@ type Connection interface {
 	// GetPrimaryKeys returns the primary key column names for a table
 	GetPrimaryKeys(ctx context.Context, tableName string) ([]string, error)
 
-	// Execute executes a query and returns the result
-	Execute(ctx context.Context, sql string) (*QueryResult, error)
+	// Execute executes a query with positional args (? placeholders).
+	Execute(ctx context.Context, sql string, args ...any) (*QueryResult, error)
 }
 
 // NewDriver creates a new driver instance based on the driver type

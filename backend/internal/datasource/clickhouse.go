@@ -114,8 +114,8 @@ func (c *clickhouseConnection) GetPrimaryKeys(ctx context.Context, tableName str
 	return keys, nil
 }
 
-func (c *clickhouseConnection) Execute(ctx context.Context, sql string) (*QueryResult, error) {
-	rows, err := c.conn.Query(ctx, sql)
+func (c *clickhouseConnection) Execute(ctx context.Context, sql string, args ...any) (*QueryResult, error) {
+	rows, err := c.conn.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

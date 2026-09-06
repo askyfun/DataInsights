@@ -42,7 +42,7 @@ func (c *stubConnection) GetPrimaryKeys(ctx context.Context, tableName string) (
 }
 
 // Execute service 层测试通过 executor stub 断言，不应直接调用连接执行 SQL。
-func (c *stubConnection) Execute(ctx context.Context, sql string) (*datasource.QueryResult, error) {
+func (c *stubConnection) Execute(ctx context.Context, sql string, args ...any) (*datasource.QueryResult, error) {
 	return nil, nil
 }
 

@@ -3,6 +3,8 @@ package datasource
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -128,8 +130,23 @@ func (c *postgresqlConnection) GetPrimaryKeys(ctx context.Context, tableName str
 	return keys, nil
 }
 
-func (c *postgresqlConnection) Execute(ctx context.Context, sql string) (*QueryResult, error) {
-	rows, err := c.pool.Query(ctx, sql)
+// rebind converts '?' placeholders to pgx's '$N' ordinals.
+func rebind(query string) string {
+	n := 0
+	var b strings.Builder
+	for _, r := range query {
+		if r == '?' {
+			n++
+			b.WriteString("$" + strconv.Itoa(n))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func (c *postgresqlConnection) Execute(ctx context.Context, sql string, args ...any) (*QueryResult, error) {
+	rows, err := c.pool.Query(ctx, rebind(sql), args...)
 	if err != nil {
 		return nil, err
 	}

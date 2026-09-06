@@ -15,7 +15,7 @@ type MockConnection struct {
 	queryErr error
 }
 
-func (m *MockConnection) Execute(ctx context.Context, sql string) (*datasource.QueryResult, error) {
+func (m *MockConnection) Execute(ctx context.Context, sql string, args ...any) (*datasource.QueryResult, error) {
 	if m.queryErr != nil {
 		return nil, m.queryErr
 	}
