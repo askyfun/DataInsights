@@ -59,7 +59,15 @@ func (s *stubConnection) Execute(ctx context.Context, query string, args ...any)
 // 会让 PG 报 invalid input syntax for type json；toDatasetModel 必须把
 // 空 JSON 字段归一为合法 JSON（与空集合序列化为 [] 的响应契约一致）。
 func TestToDatasetModelNormalizesEmptyJSONFields(t *testing.T) {
-	m := toDatasetModel(&entity.Dataset{Name: "fixture", DatasourceID: 1, QueryType: "table"})
+	empty := ""
+	m := toDatasetModel(&entity.Dataset{
+		Name:             "fixture",
+		DatasourceID:     1,
+		QueryType:        "table",
+		AccelerateConfig: &empty,
+		RefreshStrategy:  &empty,
+		PreviewData:      &empty,
+	})
 	if m.Tags != "[]" {
 		t.Fatalf("empty tags must normalize to [], got %q", m.Tags)
 	}
@@ -71,6 +79,10 @@ func TestToDatasetModelNormalizesEmptyJSONFields(t *testing.T) {
 	}
 	if m.ShardKeys != "[]" {
 		t.Fatalf("empty shard_keys must normalize to [], got %q", m.ShardKeys)
+	}
+	// 空 JSON 指针字段置 NULL，让列默认值生效，而不是把 "" 写进 JSONB
+	if m.AccelerateConfig.Valid || m.RefreshStrategy.Valid || m.PreviewData.Valid {
+		t.Fatalf("empty json pointer fields must be stored as NULL, got %+v", m)
 	}
 }
 

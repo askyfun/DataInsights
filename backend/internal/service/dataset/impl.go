@@ -424,16 +424,16 @@ func toDatasetModel(e *entity.Dataset) *model.Dataset {
 		m.QuerySQL = sql.NullString{String: *e.QuerySQL, Valid: true}
 	}
 	if e.AccelerateConfig != nil {
-		m.AccelerateConfig = sql.NullString{String: *e.AccelerateConfig, Valid: true}
+		m.AccelerateConfig = sql.NullString{String: *e.AccelerateConfig, Valid: strings.TrimSpace(*e.AccelerateConfig) != ""}
 	}
 	if e.Description != nil {
 		m.Description = sql.NullString{String: *e.Description, Valid: true}
 	}
 	if e.RefreshStrategy != nil {
-		m.RefreshStrategy = sql.NullString{String: *e.RefreshStrategy, Valid: true}
+		m.RefreshStrategy = sql.NullString{String: *e.RefreshStrategy, Valid: strings.TrimSpace(*e.RefreshStrategy) != ""}
 	}
 	if e.PreviewData != nil {
-		m.PreviewData = sql.NullString{String: *e.PreviewData, Valid: true}
+		m.PreviewData = sql.NullString{String: *e.PreviewData, Valid: strings.TrimSpace(*e.PreviewData) != ""}
 	}
 	return m
 }
