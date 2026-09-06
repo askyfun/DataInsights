@@ -35,12 +35,19 @@ type Service interface {
 
 // datasetService implements the Service interface
 type datasetService struct {
-	db *bun.DB
+	db                   *bun.DB
+	connectFn            func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error)
+	getDatasetModelFn    func(ctx context.Context, id int) (*model.Dataset, error)
+	getDatasourceModelFn func(ctx context.Context, id int) (*model.Datasource, error)
 }
 
 // NewService creates a new dataset service
 func NewService(db *bun.DB) Service {
-	return &datasetService{db: db}
+	service := &datasetService{db: db}
+	service.connectFn = service.connect
+	service.getDatasetModelFn = service.getDatasetModel
+	service.getDatasourceModelFn = service.getDatasourceModel
+	return service
 }
 
 // List returns all datasets with pagination
@@ -101,7 +108,7 @@ func (s *datasetService) Delete(ctx context.Context, id int) error {
 
 // GetColumns returns columns for a dataset
 func (s *datasetService) GetColumns(ctx context.Context, id int) ([]entity.DatasetColumn, error) {
-	ds, err := s.getDatasetModel(ctx, id)
+	ds, err := s.getDatasetModelFn(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -115,31 +122,46 @@ func (s *datasetService) GetColumns(ctx context.Context, id int) ([]entity.Datas
 	}
 
 	// Fetch columns from datasource
-	dsModel, err := s.getDatasourceModel(ctx, ds.DatasourceID)
+	dsModel, err := s.getDatasourceModelFn(ctx, ds.DatasourceID)
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := s.connect(ctx, dsModel)
+	conn, err := s.connectFn(ctx, dsModel)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 
-	var tableName string
+	var dbColumns []datasource.ColumnInfo
 	if ds.QueryType == "sql" && ds.QuerySQL.Valid {
-		tableName = fmt.Sprintf("(%s) as subq", ds.QuerySQL.String)
+		// SQL 型数据集：querySQL 不能作为表名传给 GetColumns（会被驱动
+		// 标识符校验拒绝，且本就是注入面）。改经 query 包单一通道执行一次
+		// 包装后的查询，从结果列名推导列，所有驱动行为一致。
+		previewSQL := query.WrapPreviewSQL(ds.QuerySQL.String, query.SourceTypeSQL, 1)
+		result, err := conn.Execute(ctx, previewSQL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query: %w", err)
+		}
+		for _, name := range result.Columns {
+			dbColumns = append(dbColumns, datasource.ColumnInfo{Name: name})
+		}
 	} else if ds.TableName.Valid {
-		tableName = ds.TableName.String
+		dbColumns, err = conn.GetColumns(ctx, ds.TableName.String)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get columns: %w", err)
+		}
 	} else {
 		return nil, fmt.Errorf("no table or query defined")
 	}
 
-	dbColumns, err := conn.GetColumns(ctx, tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get columns: %w", err)
-	}
+	return mapDatasetColumns(dbColumns), nil
+}
 
+// mapDatasetColumns converts driver columns to entity columns with inferred
+// roles. Unknown (empty) types map to the standard "unknown" type via the
+// existing mapper.
+func mapDatasetColumns(dbColumns []datasource.ColumnInfo) []entity.DatasetColumn {
 	// Convert to entity columns with inferred roles
 	mapper, _ := model.NewDataTypeMapper("starrocks")
 	result := make([]entity.DatasetColumn, len(dbColumns))
@@ -154,7 +176,7 @@ func (s *datasetService) GetColumns(ctx context.Context, id int) ([]entity.Datas
 			Role:       inferRole(string(stdType)),
 		}
 	}
-	return result, nil
+	return result
 }
 
 // UpdateColumns updates columns for a dataset

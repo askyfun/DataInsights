@@ -209,24 +209,33 @@ func previewSource(tableName, querySQL, queryType string) (string, query.SourceT
 	return tableName, query.SourceTypeTable, nil
 }
 
+// buildDistributionSQLs builds both the distribution and the total SQL from
+// the resolved source, mirroring previewSource: for SQL-type datasets the
+// product-allowed querySQL is the source (wrapped in a subquery), for table
+// datasets the validated tableName is used. Both SQLs are built up front so
+// identifier validation happens before any DB access.
+func buildDistributionSQLs(fieldName, tableName, querySQL, queryType string, limit int) (distSQL, totalSQL string, err error) {
+	source, sourceType, err := previewSource(tableName, querySQL, queryType)
+	if err != nil {
+		return "", "", err
+	}
+	distSQL, err = query.BuildFieldDistributionSQL(fieldName, source, sourceType, limit)
+	if err != nil {
+		return "", "", err
+	}
+	return distSQL, query.WrapCountSQL(source, sourceType), nil
+}
+
 // GetFieldDistribution returns field value distribution
 func (s *datasourceService) GetFieldDistribution(ctx context.Context, id int, tableName, querySQL, queryType, fieldName string, limit int) (*entity.FieldDistribution, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 
-	sourceType := query.SourceTypeSQL
-	if queryType != "sql" {
-		sourceType = query.SourceTypeTable
-	}
-
-	// Build both SQLs (pure functions) up front so identifier validation
-	// happens before any DB access.
-	distSQL, err := query.BuildFieldDistributionSQL(fieldName, tableName, sourceType, limit)
+	distSQL, totalSQL, err := buildDistributionSQLs(fieldName, tableName, querySQL, queryType, limit)
 	if err != nil {
 		return nil, err
 	}
-	totalSQL := query.WrapCountSQL(tableName, sourceType)
 
 	ds, err := s.getDatasourceModel(ctx, id)
 	if err != nil {
