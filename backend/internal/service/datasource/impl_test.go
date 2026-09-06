@@ -111,9 +111,9 @@ func TestBuildPreviewSQL(t *testing.T) {
 		{
 			name:      "sql branch wraps user SQL in subquery",
 			tableName: "",
-			querySQL:  "SELECT id, name FROM users WHERE active = 1; -- done",
+			querySQL:  "SELECT id, name FROM users WHERE active = 1 LIMIT 5",
 			queryType: "sql",
-			want:      "SELECT * FROM (SELECT id, name FROM users WHERE active = 1; -- done) AS _preview LIMIT 10",
+			want:      "SELECT * FROM (SELECT id, name FROM users WHERE active = 1 LIMIT 5) AS _preview LIMIT 10",
 		},
 		{
 			name:      "table branch invalid table name rejected",

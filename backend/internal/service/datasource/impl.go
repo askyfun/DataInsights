@@ -166,9 +166,12 @@ func (s *datasourceService) GetColumns(ctx context.Context, id int, tableName st
 }
 
 // buildPreviewSQL builds the preview SQL. For the sql branch, the user-provided
-// querySQL is wrapped in a subquery so appending LIMIT never breaks on user SQL
-// containing trailing semicolons or its own LIMIT clause. For the table branch,
-// tableName must be a valid identifier before interpolation.
+// querySQL is wrapped in a subquery instead of appending LIMIT directly, so user
+// SQL containing its own LIMIT clause no longer produces a broken statement.
+// Note: querySQL ending with a semicolon or a "--" line comment still yields a
+// non-executable statement; the database will reject it and the error is
+// returned as-is. For the table branch, tableName must be a valid identifier
+// before interpolation.
 func buildPreviewSQL(tableName, querySQL, queryType string) (string, error) {
 	if queryType == "sql" {
 		return fmt.Sprintf("SELECT * FROM (%s) AS _preview LIMIT 10", querySQL), nil
