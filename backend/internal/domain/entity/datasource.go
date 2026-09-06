@@ -9,9 +9,11 @@ type Datasource struct {
 	Port         int    `json:"port"`
 	DatabaseName string `json:"database_name"`
 	Username     string `json:"username"`
-	Password     string `json:"password"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	// Password never leaves the API surface: responses must not expose the
+	// stored (encrypted) value; requests use dedicated handler bindings.
+	Password  string `json:"-"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // DatasourceConnectionConfig holds connection parameters for establishing database connections

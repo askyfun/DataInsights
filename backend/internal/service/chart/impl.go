@@ -27,7 +27,6 @@ type Service interface {
 	GetData(ctx context.Context, id int) (entity.ChartDataResult, error)
 	Query(ctx context.Context, req *entity.ChartQueryRequest) (entity.ChartDataResult, error)
 
-
 	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
 	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
 	SetSecurityKey(key []byte)

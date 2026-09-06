@@ -33,7 +33,6 @@ type Service interface {
 	Preview(ctx context.Context, id int) (*entity.PreviewResult, error)
 	Query(ctx context.Context, id int, config entity.QueryConfig) ([]map[string]any, error)
 
-
 	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
 	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
 	SetSecurityKey(key []byte)

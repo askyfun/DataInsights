@@ -201,6 +201,50 @@ func TestConnectDecryptsAndAutoUpgrades(t *testing.T) {
 	}
 }
 
+// TestUpdateKeepsStoredPasswordWhenEmpty 验证脱敏后前端不再回传密码：
+// Update 入参 password 为空时保留库中原值（不覆盖、不二次加密）。
+func TestUpdateKeepsStoredPasswordWhenEmpty(t *testing.T) {
+	var executed []string
+	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureMatcherFunc(&executed)))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer sqlDB.Close()
+	db := bun.NewDB(sqlDB, pgdialect.New())
+
+	storedCt := "v1:storedciphertext"
+	s := &datasourceService{db: db, key: testSecurityKey()}
+	s.getDatasourceModelFn = func(ctx context.Context, id int) (*model.Datasource, error) {
+		return &model.Datasource{ID: 3, Password: storedCt}, nil
+	}
+
+	returnRows := sqlmock.NewRows([]string{"id", "name", "type", "host", "port", "database_name", "username", "password", "created_at", "updated_at"}).
+		AddRow(3, "ds", "postgresql", "h", 5432, "db", "u", storedCt, nil, nil)
+	mock.ExpectExec(`UPDATE "bi_datasource"`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT .* FROM "bi_datasource"`).WillReturnRows(returnRows)
+
+	ds := &entity.Datasource{
+		ID: 3, Name: "ds", Type: "postgresql", Host: "h", Port: 5432,
+		DatabaseName: "db", Username: "u", Password: "",
+	}
+	if _, err := s.Update(context.Background(), ds); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+
+	if len(executed) != 2 {
+		t.Fatalf("expected 2 statements (UPDATE + reselect), got: %q", executed)
+	}
+	if !strings.Contains(executed[0], "'"+storedCt+"'") {
+		t.Fatalf("stored password must be preserved verbatim, got: %s", executed[0])
+	}
+	if strings.Contains(executed[0], "v1:v1:") {
+		t.Fatalf("stored ciphertext must not be re-encrypted, got: %s", executed[0])
+	}
+}
+
 // TestConnectFailsOnGarbageCiphertext 验证带 v1: 前缀但内容损坏的密文
 // 导致连接报错，而不是静默降级为明文。
 func TestConnectFailsOnGarbageCiphertext(t *testing.T) {

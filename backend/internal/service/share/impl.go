@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"dataray/internal/domain/entity"
@@ -12,7 +14,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"github.com/uptrace/bun"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// bcryptCost is the bcrypt work factor used for share passwords.
+const bcryptCost = 10
 
 // Service defines the interface for share operations
 type Service interface {
@@ -49,7 +55,11 @@ func (s *shareService) Create(ctx context.Context, chartID int, password *string
 	}
 
 	if password != nil && *password != "" {
-		m.Password = sql.NullString{String: *password, Valid: true}
+		hash, err := bcrypt.GenerateFromPassword([]byte(*password), bcryptCost)
+		if err != nil {
+			return nil, fmt.Errorf("hash share password: %w", err)
+		}
+		m.Password = sql.NullString{String: string(hash), Valid: true}
 	}
 	if expiresAt != nil && *expiresAt != "" {
 		t, err := time.Parse(time.RFC3339, *expiresAt)
@@ -86,18 +96,46 @@ func (s *shareService) GetByToken(ctx context.Context, token string) (*entity.Sh
 	return toShareEntity(share), nil
 }
 
-// ValidatePassword validates the password for a share
+// ValidatePassword validates the password for a share. Stored bcrypt hashes are
+// verified with bcrypt.CompareHashAndPassword; legacy plaintext values are
+// compared directly and transparently upgraded to a bcrypt hash on success.
 func (s *shareService) ValidatePassword(ctx context.Context, token, password string) error {
-	share, err := s.GetByToken(ctx, token)
-	if err != nil {
-		return err
+	m := &model.Share{}
+	if err := s.db.NewSelect().Model(m).Where("token = ?", token).Scan(ctx); err != nil {
+		return fmt.Errorf("share not found: %w", err)
 	}
 
-	if share.Password != nil && *share.Password != "" {
-		if password != *share.Password {
+	if !m.Password.Valid || m.Password.String == "" {
+		return nil
+	}
+	stored := m.Password.String
+
+	if strings.HasPrefix(stored, "$2") {
+		if err := bcrypt.CompareHashAndPassword([]byte(stored), []byte(password)); err != nil {
 			return fmt.Errorf("invalid password")
 		}
+		return nil
 	}
+
+	// Legacy plaintext storage: compare directly, then upgrade to bcrypt.
+	if password != stored {
+		return fmt.Errorf("invalid password")
+	}
+	return s.upgradeLegacyPassword(ctx, m.ID, password)
+}
+
+// upgradeLegacyPassword writes a bcrypt hash of the verified plaintext back to
+// the share, mirroring the datasource legacy-password auto-upgrade flow.
+func (s *shareService) upgradeLegacyPassword(ctx context.Context, id int, plaintext string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcryptCost)
+	if err != nil {
+		return fmt.Errorf("upgrade legacy share password: %w", err)
+	}
+	m := &model.Share{ID: id, Password: sql.NullString{String: string(hash), Valid: true}}
+	if _, err := s.db.NewUpdate().Model(m).Column("password").WherePK().Exec(ctx); err != nil {
+		return fmt.Errorf("upgrade legacy share password: %w", err)
+	}
+	slog.Info("upgraded legacy plaintext share password", "share_id", id)
 	return nil
 }
 

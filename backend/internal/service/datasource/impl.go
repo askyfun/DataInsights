@@ -103,11 +103,21 @@ func (s *datasourceService) Create(ctx context.Context, ds *entity.Datasource) (
 	return toEntity(m), nil
 }
 
-// Update updates an existing datasource
+// Update updates an existing datasource. An empty incoming password means the
+// client did not send one (passwords are omitted from API responses), so the
+// stored value is preserved verbatim instead of being wiped or re-encrypted.
 func (s *datasourceService) Update(ctx context.Context, ds *entity.Datasource) (*entity.Datasource, error) {
 	m := toModel(ds)
-	if err := s.encryptPassword(m); err != nil {
-		return nil, err
+	if m.Password != "" {
+		if err := s.encryptPassword(m); err != nil {
+			return nil, err
+		}
+	} else {
+		existing, err := s.getDatasourceModelFn(ctx, ds.ID)
+		if err != nil {
+			return nil, err
+		}
+		m.Password = existing.Password
 	}
 	if _, err := s.db.NewUpdate().Model(m).WherePK().Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update datasource: %w", err)

@@ -2,6 +2,7 @@ package entity
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -80,5 +81,18 @@ func TestFieldDistributionMarshalJSONUsesEmptyArrays(t *testing.T) {
 	}
 	if len(decoded["distribution"].([]any)) != 0 {
 		t.Fatalf("expected distribution to be empty, got %s", payload)
+	}
+}
+
+// TestDatasourceMarshalJSONOmitsPassword verifies the stored datasource
+// password (plaintext or encrypted) never leaves the backend through any
+// serialized entity.Datasource.
+func TestDatasourceMarshalJSONOmitsPassword(t *testing.T) {
+	payload, err := json.Marshal(Datasource{Password: "x"})
+	if err != nil {
+		t.Fatalf("marshal datasource: %v", err)
+	}
+	if strings.Contains(string(payload), "password") {
+		t.Fatalf("password leaked in json: %s", payload)
 	}
 }
