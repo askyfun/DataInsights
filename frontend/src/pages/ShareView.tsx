@@ -77,7 +77,7 @@ const ShareView: React.FC = () => {
       setShareInfo(share);
 
       // Check if password is required
-      if (share.password) {
+      if (share.has_password) {
         setNeedsPassword(true);
         setLoading(false);
         return;

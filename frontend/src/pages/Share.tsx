@@ -1,10 +1,4 @@
-import {
-  CopyOutlined,
-  DeleteOutlined,
-  LockOutlined,
-  PlusOutlined,
-  ShareAltOutlined,
-} from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, PlusOutlined, ShareAltOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
@@ -169,19 +163,6 @@ const SharePage: React.FC = () => {
           {token.substring(0, 12)}...
         </Text>
       ),
-    },
-    {
-      title: intl.formatMessage({ id: 'share.passwordOptional' }),
-      dataIndex: 'password',
-      key: 'password',
-      render: (hasPassword: string) =>
-        hasPassword ? (
-          <Tag icon={<LockOutlined />} color="orange">
-            {intl.formatMessage({ id: 'share.protected' })}
-          </Tag>
-        ) : (
-          <Tag color="green">{intl.formatMessage({ id: 'share.public' })}</Tag>
-        ),
     },
     {
       title: intl.formatMessage({ id: 'share.expire' }),

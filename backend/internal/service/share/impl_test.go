@@ -2,6 +2,7 @@ package share
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"golang.org/x/crypto/bcrypt"
+
+	"dataray/internal/model"
 )
 
 // captureMatcherFunc 记录实际执行的 SQL 并保留默认的 regexp 匹配语义，
@@ -34,6 +37,25 @@ func newTestShareService(t *testing.T) (*shareService, sqlmock.Sqlmock, *[]strin
 
 func shareRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{"id", "token", "chart_id", "password", "expires_at", "created_at"})
+}
+
+// TestToShareEntityPopulatesHasPassword 验证 model→entity 映射用存储密码的
+// 存在性填充 has_password（脱敏后前端唯一的"是否受保护"信号）。
+func TestToShareEntityPopulatesHasPassword(t *testing.T) {
+	protected := toShareEntity(&model.Share{Token: "tok", Password: sql.NullString{String: "$2a$10$hash", Valid: true}})
+	if !protected.HasPassword {
+		t.Fatal("expected HasPassword=true for share with stored password")
+	}
+
+	passwordless := toShareEntity(&model.Share{Token: "tok"})
+	if passwordless.HasPassword {
+		t.Fatal("expected HasPassword=false for passwordless share")
+	}
+
+	emptyValid := toShareEntity(&model.Share{Token: "tok", Password: sql.NullString{String: "", Valid: true}})
+	if emptyValid.HasPassword {
+		t.Fatal("expected HasPassword=false for empty stored password")
+	}
 }
 
 // TestCreateShareHashesPassword 验证 Create 存储的是 bcrypt hash（cost 10），

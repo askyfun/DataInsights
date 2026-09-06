@@ -164,7 +164,7 @@ func TestConnectResolvesPassword(t *testing.T) {
 	key := testAESKey()
 
 	t.Run("encrypted password decrypted for dial", func(t *testing.T) {
-		ct, err := crypto.Encrypt(key, "s3cret")
+		ct, err := crypto.Encrypt(key, "fixture-credential-value")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -178,7 +178,7 @@ func TestConnectResolvesPassword(t *testing.T) {
 		if _, err := s.connect(context.Background(), &model.Datasource{ID: 2, Type: "postgresql", Password: ct}); err != nil {
 			t.Fatal(err)
 		}
-		if got != "s3cret" {
+		if got != "fixture-credential-value" {
 			t.Fatalf("connect should dial with decrypted password, got %q", got)
 		}
 	})
@@ -199,10 +199,10 @@ func TestConnectResolvesPassword(t *testing.T) {
 		}
 		mock.ExpectExec(`UPDATE "bi_datasource"`).WillReturnResult(sqlmock.NewResult(0, 1))
 
-		if _, err := s.connect(context.Background(), &model.Datasource{ID: 2, Type: "postgresql", Password: "legacy-pass"}); err != nil {
+		if _, err := s.connect(context.Background(), &model.Datasource{ID: 2, Type: "postgresql", Password: "fixture-plaintext-credential"}); err != nil {
 			t.Fatal(err)
 		}
-		if got != "legacy-pass" {
+		if got != "fixture-plaintext-credential" {
 			t.Fatalf("connection should use original plaintext, got %q", got)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {

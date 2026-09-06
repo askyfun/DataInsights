@@ -29,3 +29,5 @@
 ## Decision Log
 
 - **[2026-05-05] 分页无 sort 时不加默认 ORDER BY**: 当分页查询没有显式 sort 时，不自动添加默认排序。理由：调用方应负责排序语义，自动添加可能掩盖问题。数据库在无 ORDER BY 时返回的顺序是实现细节，不应依赖。
+
+- [2026-05-06] ChartBuilder 定义驱动字段组索引规则：chartDefinitions 的 fieldGroups 是按整页顺序排列，但 queryConfig 的 dimensionGroups / metricGroups 是分开存储。渲染 QueryConfigRow、处理 drop zone 和组装请求时，不能直接复用 definition index，必须先映射到 kind 内部索引，否则指标会写入错误 group，最终请求 metrics 为空。

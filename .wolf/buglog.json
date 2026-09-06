@@ -201,4 +201,15 @@
       "last_seen": "2026-05-05T21:56:32+08:00"
     }
   ]
+}{
+  "id": "bug-013",
+  "timestamp": "2026-05-06T00:15:36+08:00",
+  "error_message": "指标拖到查询配置后，发起查询时请求里的 metrics 数组为空",
+  "file": "frontend/src/pages/ChartBuilder.tsx",
+  "root_cause": "ChartBuilder 按 chartDefinitions 的整页 group 顺序直接把 index 传给 addMetricField/getMetricFieldsByGroup，但 queryConfig 的 metricGroups 与 dimensionGroups 是分开存储的；当图表定义先出现 dimension 组时，metric 会被写入 metricGroups[1]，而请求构造只读取当前类型前 N 个 metricGroups，导致 metrics 丢失。",
+  "fix": "为图表定义渲染建立 kind 内局部索引（dimensionIndex/metricIndex），让指标组始终映射到正确的 metricGroups 下标，并补充拖拽到指标区后执行查询的回归测试。",
+  "tags": ["frontend", "chart-builder", "dnd", "metrics", "tdd"],
+  "related_bugs": [],
+  "occurrences": 1,
+  "last_seen": "2026-05-06T00:15:36+08:00"
 }

@@ -88,6 +88,9 @@ func TestGetTableDataRejectsInvalidTableName(t *testing.T) {
 
 // --- security integration tests (Task 8b) ---
 
+// fixtureLegacyPlaintext 是测试夹具字符串，不是任何真实凭据。
+const fixtureLegacyPlaintext = "fixture-plaintext-credential"
+
 func testSecurityKey() []byte {
 	key := make([]byte, 32)
 	for i := range key {
@@ -121,7 +124,7 @@ func TestCreateEncryptsPassword(t *testing.T) {
 
 	ds := &entity.Datasource{
 		Name: "ds", Type: "postgresql", Host: "h", Port: 5432,
-		DatabaseName: "db", Username: "u", Password: "s3cret",
+		DatabaseName: "db", Username: "u", Password: "fixture-credential-value",
 	}
 
 	// 有 key：INSERT 语句中的 password 是 v1: 密文
@@ -148,7 +151,7 @@ func TestCreateEncryptsPassword(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
 	}
-	if len(executed) != 1 || !strings.Contains(executed[0], "'s3cret'") || strings.Contains(executed[0], "'v1:") {
+	if len(executed) != 1 || !strings.Contains(executed[0], "'fixture-credential-value'") || strings.Contains(executed[0], "'v1:") {
 		t.Fatalf("plaintext mode must keep password as-is, got: %q", executed)
 	}
 }
@@ -169,11 +172,11 @@ func TestConnectDecryptsAndAutoUpgrades(t *testing.T) {
 
 	// 存量明文：返回原文用于连接，同时回写 v1: 密文
 	mock.ExpectExec(`UPDATE "bi_datasource"`).WillReturnResult(sqlmock.NewResult(0, 1))
-	got, err := s.resolvePassword(context.Background(), &model.Datasource{ID: 2, Password: "legacy-pass"})
+	got, err := s.resolvePassword(context.Background(), &model.Datasource{ID: 2, Password: fixtureLegacyPlaintext})
 	if err != nil {
 		t.Fatalf("resolvePassword (legacy): %v", err)
 	}
-	if got != "legacy-pass" {
+	if got != "fixture-plaintext-credential" {
 		t.Fatalf("connection should use original plaintext, got %q", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -185,7 +188,7 @@ func TestConnectDecryptsAndAutoUpgrades(t *testing.T) {
 
 	// 已加密：解密为明文，无额外写库
 	executed = nil
-	ct, err := crypto.Encrypt(key, "s3cret")
+	ct, err := crypto.Encrypt(key, "fixture-credential-value")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +196,7 @@ func TestConnectDecryptsAndAutoUpgrades(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvePassword (encrypted): %v", err)
 	}
-	if got != "s3cret" {
+	if got != "fixture-credential-value" {
 		t.Fatalf("expected decrypted password, got %q", got)
 	}
 	if len(executed) != 0 {

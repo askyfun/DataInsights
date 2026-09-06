@@ -154,9 +154,10 @@ func generateToken() string {
 
 func toShareEntity(m *model.Share) *entity.Share {
 	e := &entity.Share{
-		ID:      m.ID,
-		Token:   m.Token,
-		ChartID: m.ChartID,
+		ID:          m.ID,
+		Token:       m.Token,
+		ChartID:     m.ChartID,
+		HasPassword: m.Password.Valid && m.Password.String != "",
 	}
 	if m.Password.Valid {
 		e.Password = &m.Password.String

@@ -8,14 +8,15 @@ import type { StandardDataType, TypeConfig } from './datatypes';
 export type DatasourceType = 'postgresql' | 'clickhouse' | 'mysql' | 'starrocks';
 
 export interface Datasource {
-  id: number;
+  id?: number;
   name: string;
   type: DatasourceType;
   host: string;
   port: number;
   database_name: string;
   username: string;
-  password: string;
+  // 后端已脱敏：响应不再包含 password（Update 传空则后端保留原值）
+  password?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -112,7 +113,8 @@ export interface Share {
   id: number;
   token: string;
   chart_id: number;
-  password?: string;
+  // 后端已脱敏：password 不再返回，has_password 是唯一的"是否受保护"信号
+  has_password: boolean;
   expires_at?: string;
   created_at?: string;
 }
