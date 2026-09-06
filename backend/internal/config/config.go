@@ -12,10 +12,15 @@ type Config struct {
 	Host     string         `toml:"Host"`
 	Port     int            `toml:"Port"`
 	Database DatabaseConfig `toml:"Database"`
+	Security SecurityConfig `toml:"Security"`
 }
 
 type DatabaseConfig struct {
 	Url string `toml:"Url"`
+}
+
+type SecurityConfig struct {
+	SecurityKey string `toml:"SecurityKey"`
 }
 
 func (c *Config) LoadConfig(path string) error {
@@ -26,6 +31,10 @@ func (c *Config) LoadConfig(path string) error {
 
 	if err := toml.Unmarshal(data, c); err != nil {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	if v := os.Getenv("DATARAY_SECURITY_KEY"); v != "" {
+		c.Security.SecurityKey = v
 	}
 
 	return nil

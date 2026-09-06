@@ -12,9 +12,10 @@ import (
 )
 
 // SetupRoutes configures all routes
-func SetupRoutes(r *gin.Engine, db *bun.DB) {
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte) {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
+	dsSvc.SetSecurityKey(securityKey)
 	dsDatasetSvc := dataset.NewService(db)
 	dsChartSvc := chart.NewService(db)
 	dsShareSvc := share.NewService(db)

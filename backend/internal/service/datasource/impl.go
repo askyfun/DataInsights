@@ -3,10 +3,13 @@ package datasource
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
+	"dataray/internal/crypto"
 	"dataray/internal/datasource"
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
@@ -37,16 +40,32 @@ type Service interface {
 
 	// Table data operations
 	GetTableData(ctx context.Context, id int, tableName string, page, pageSize int, sortField, sortOrder string) (*entity.TableDataResult, error)
+
+	// SetSecurityKey injects the 32-byte AES key used to encrypt datasource
+	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
+	SetSecurityKey(key []byte)
 }
 
 // datasourceService implements the Service interface
 type datasourceService struct {
-	db *bun.DB
+	db  *bun.DB
+	key []byte // 32-byte AES key; nil => plaintext passthrough
+
+	connectFn            func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error)
+	getDatasourceModelFn func(ctx context.Context, id int) (*model.Datasource, error)
 }
 
 // NewService creates a new datasource service
 func NewService(db *bun.DB) Service {
-	return &datasourceService{db: db}
+	service := &datasourceService{db: db}
+	service.connectFn = service.connect
+	service.getDatasourceModelFn = service.getDatasourceModel
+	return service
+}
+
+// SetSecurityKey injects the AES key; nil/empty disables encryption.
+func (s *datasourceService) SetSecurityKey(key []byte) {
+	s.key = key
 }
 
 // List returns all datasources with pagination
@@ -77,6 +96,9 @@ func (s *datasourceService) GetByID(ctx context.Context, id int) (*entity.Dataso
 // Create creates a new datasource
 func (s *datasourceService) Create(ctx context.Context, ds *entity.Datasource) (*entity.Datasource, error) {
 	m := toModel(ds)
+	if err := s.encryptPassword(m); err != nil {
+		return nil, err
+	}
 	if _, err := s.db.NewInsert().Model(m).Returning("*").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create datasource: %w", err)
 	}
@@ -86,6 +108,9 @@ func (s *datasourceService) Create(ctx context.Context, ds *entity.Datasource) (
 // Update updates an existing datasource
 func (s *datasourceService) Update(ctx context.Context, ds *entity.Datasource) (*entity.Datasource, error) {
 	m := toModel(ds)
+	if err := s.encryptPassword(m); err != nil {
+		return nil, err
+	}
 	if _, err := s.db.NewUpdate().Model(m).WherePK().Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update datasource: %w", err)
 	}
@@ -127,7 +152,7 @@ func (s *datasourceService) TestConnection(ctx context.Context, config entity.Da
 
 // GetTables returns all tables from a datasource
 func (s *datasourceService) GetTables(ctx context.Context, id int) ([]entity.TableInfo, error) {
-	ds, err := s.getDatasourceModel(ctx, id)
+	ds, err := s.getDatasourceModelFn(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +172,7 @@ func (s *datasourceService) GetTables(ctx context.Context, id int) ([]entity.Tab
 
 // GetColumns returns all columns for a table
 func (s *datasourceService) GetColumns(ctx context.Context, id int, tableName string) ([]entity.ColumnInfo, error) {
-	ds, err := s.getDatasourceModel(ctx, id)
+	ds, err := s.getDatasourceModelFn(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +198,7 @@ func (s *datasourceService) Preview(ctx context.Context, id int, tableName, quer
 	}
 	sql := query.WrapPreviewSQL(source, sourceType, 10)
 
-	ds, err := s.getDatasourceModel(ctx, id)
+	ds, err := s.getDatasourceModelFn(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +262,7 @@ func (s *datasourceService) GetFieldDistribution(ctx context.Context, id int, ta
 		return nil, err
 	}
 
-	ds, err := s.getDatasourceModel(ctx, id)
+	ds, err := s.getDatasourceModelFn(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -317,12 +342,17 @@ func (s *datasourceService) connect(ctx context.Context, ds *model.Datasource) (
 		return nil, fmt.Errorf("unsupported driver type: %s", ds.Type)
 	}
 
+	password, err := s.resolvePassword(ctx, ds)
+	if err != nil {
+		return nil, err
+	}
+
 	config := datasource.ConnectionConfig{
 		Host:         ds.Host,
 		Port:         ds.Port,
 		DatabaseName: ds.DatabaseName,
 		Username:     ds.Username,
-		Password:     ds.Password,
+		Password:     password,
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -333,6 +363,49 @@ func (s *datasourceService) connect(ctx context.Context, ds *model.Datasource) (
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 	return conn, nil
+}
+
+// encryptPassword encrypts the model password before it is written to the
+// database. Without a security key (or with an empty password) it is a no-op.
+func (s *datasourceService) encryptPassword(m *model.Datasource) error {
+	if s.key == nil || m.Password == "" {
+		return nil
+	}
+	ct, err := crypto.Encrypt(s.key, m.Password)
+	if err != nil {
+		return fmt.Errorf("encrypt datasource password: %w", err)
+	}
+	m.Password = ct
+	return nil
+}
+
+// resolvePassword resolves the password used to establish the connection.
+// With a security key configured, stored ciphertext is decrypted; a legacy
+// plaintext value (no v1: prefix) is used as-is and transparently upgraded by
+// writing the encrypted value back. Without a key, plaintext passthrough.
+func (s *datasourceService) resolvePassword(ctx context.Context, ds *model.Datasource) (string, error) {
+	if s.key == nil {
+		return ds.Password, nil
+	}
+	if ds.Password == "" {
+		return "", nil
+	}
+	pt, err := crypto.Decrypt(s.key, ds.Password)
+	if err == nil {
+		return pt, nil
+	}
+	if !errors.Is(err, crypto.ErrNotEncrypted) {
+		return "", fmt.Errorf("decrypt datasource password: %w", err)
+	}
+	ct, err := crypto.Encrypt(s.key, ds.Password)
+	if err != nil {
+		return "", fmt.Errorf("upgrade legacy datasource password: %w", err)
+	}
+	if _, err := s.db.NewUpdate().Model(&model.Datasource{ID: ds.ID, Password: ct}).Column("password").WherePK().Exec(ctx); err != nil {
+		return "", fmt.Errorf("upgrade legacy datasource password: %w", err)
+	}
+	slog.Info("upgraded legacy plaintext datasource password", "datasource_id", ds.ID)
+	return ds.Password, nil
 }
 
 // GetTableData returns paginated table data with primary key sorting
@@ -355,7 +428,7 @@ func (s *datasourceService) GetTableData(ctx context.Context, id int, tableName 
 
 	// Sort direction is normalized inside query.BuildTableDataSQL.
 
-	ds, err := s.getDatasourceModel(ctx, id)
+	ds, err := s.getDatasourceModelFn(ctx, id)
 	if err != nil {
 		return nil, err
 	}

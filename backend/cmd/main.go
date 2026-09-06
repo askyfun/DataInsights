@@ -31,6 +31,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	securityKey, err := resolveSecurityKey(c)
+	if err != nil {
+		slog.Error("Invalid Security.SecurityKey: expected 32-byte key as 64 hex chars", "error", err)
+		os.Exit(1)
+	}
+
 	db, err := database.InitDB(c.Database.Url)
 	if err != nil {
 		slog.Error("Failed to connect database", "error", err)
@@ -72,7 +78,7 @@ func main() {
 	registerHealthRoute(r)
 
 	// Setup routes
-	SetupRoutes(r, db)
+	SetupRoutes(r, db, securityKey)
 
 	addr := fmt.Sprintf("%s:%d", c.Host, c.Port)
 	slog.Info("Server starting", "addr", addr)
@@ -129,4 +135,22 @@ func requestIDMiddleware() gin.HandlerFunc {
 		c.Set("requestID", requestID)
 		c.Next()
 	}
+}
+
+// resolveSecurityKey decodes the configured 32-byte hex security key.
+// An empty value disables encryption (plaintext passthrough) and is reported
+// with a warning; a malformed or wrong-length key is an error.
+func resolveSecurityKey(c *config.Config) ([]byte, error) {
+	if c.Security.SecurityKey == "" {
+		slog.Warn("security key not configured: datasource passwords will be stored as plaintext")
+		return nil, nil
+	}
+	key, err := hex.DecodeString(c.Security.SecurityKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("expected 32 bytes, got %d", len(key))
+	}
+	return key, nil
 }
