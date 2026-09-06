@@ -311,9 +311,12 @@ func BuildQueryString(dialect DialectType, ast *QueryAST) (string, string) {
 	return selectSQL, countSQL
 }
 
-func BuildQueryStringWithBun(dialect DialectType, ast *QueryAST) (string, string) {
+// BuildQueryStringWithBun 构建带占位符的 SQL 并返回参数化 args。
+// 值经 args 传给驱动，不落入 SQL 文本；sanitizer 仅作为旧路径兜底。
+func BuildQueryStringWithBun(dialect DialectType, ast *QueryAST) (string, string, []any) {
 	qb := NewBunSQLBuilder(dialect)
-	selectSQL := qb.BuildSelect(ast)
-	countSQL := qb.BuildCount(ast)
-	return selectSQL, countSQL
+	selectSQL, selectArgs := qb.BuildSelect(ast)
+	countSQL, countArgs := qb.BuildCount(ast)
+	_ = countArgs // count 与 select 的 filter args 相同
+	return selectSQL, countSQL, selectArgs
 }

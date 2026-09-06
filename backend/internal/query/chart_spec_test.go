@@ -367,7 +367,7 @@ func TestQueryPlanner_PlanAST_MarksAggregatedColumnMappings(t *testing.T) {
 	ast := NewQueryPlanner().PlanAST("test_table", SourceTypeTable, spec)
 	ast.ApplyColumnMappings(map[string]string{"cnt": "count(*)"})
 
-	sql := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
+	sql, _ := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
 
 	expected := "SELECT project_id, count(*) AS cnt FROM test_table GROUP BY project_id"
 	if sql != expected {

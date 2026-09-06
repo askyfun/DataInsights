@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"math"
+	"strings"
 	"testing"
 
 	"dataray/internal/datasource"
@@ -11,14 +12,18 @@ import (
 )
 
 type MockConnection struct {
-	rows     []map[string]any
-	queryErr error
+	rows      []map[string]any
+	queryErr  error
+	sqlCalls  []string
+	argsCalls [][]any
 }
 
 func (m *MockConnection) Execute(ctx context.Context, sql string, args ...any) (*datasource.QueryResult, error) {
 	if m.queryErr != nil {
 		return nil, m.queryErr
 	}
+	m.sqlCalls = append(m.sqlCalls, sql)
+	m.argsCalls = append(m.argsCalls, args)
 	return &datasource.QueryResult{Rows: m.rows}, nil
 }
 
@@ -743,5 +748,102 @@ func TestExecutor_ExecuteRawQuery(t *testing.T) {
 
 	if len(rows) != 1 {
 		t.Errorf("Expected 1 row, got %d", len(rows))
+	}
+}
+
+// 验证 executor 把 filter 值作为 args 传给驱动，而不是拼进 SQL 文本。
+func TestExecutor_PassesFilterArgsToConnection(t *testing.T) {
+	dataset := &model.Dataset{
+		ID:        1,
+		Name:      "Test Dataset",
+		QueryType: "table",
+		TableName: sql.NullString{String: "orders", Valid: true},
+		QuerySQL:  sql.NullString{Valid: false},
+	}
+
+	ds := &model.Datasource{
+		ID:   1,
+		Name: "Test DS",
+		Type: "postgresql",
+	}
+
+	conn := &MockConnection{
+		rows: []map[string]any{
+			{"status": "x", "amount": 1000.0},
+		},
+	}
+	executor := NewExecutor(conn, dataset, ds)
+
+	req := &ChartQueryRequest{
+		DatasetID: 1,
+		ChartType: ChartTypeBar,
+		Dims:      []string{"status"},
+		Metrics:   []MetricConfig{{Field: "amount", Agg: AggSum}},
+		Filters: []FilterConfig{
+			{Field: "status", Op: FilterEq, Value: "'; DROP TABLE users; --"},
+		},
+	}
+
+	if _, err := executor.Execute(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(conn.argsCalls) != 1 {
+		t.Fatalf("expected 1 Execute call (chart branch), got %d", len(conn.argsCalls))
+	}
+	args := conn.argsCalls[0]
+	if len(args) != 1 || args[0] != "'; DROP TABLE users; --" {
+		t.Fatalf("filter value must travel as arg to driver, got args=%v", args)
+	}
+	if strings.Contains(conn.sqlCalls[0], "DROP TABLE") {
+		t.Fatalf("filter value leaked into SQL text: %s", conn.sqlCalls[0])
+	}
+}
+
+// 验证 table 分支的 data 与 count 查询都携带相同的 filter args。
+func TestExecutor_TableBranchPassesArgsToDataAndCount(t *testing.T) {
+	dataset := &model.Dataset{
+		ID:        1,
+		Name:      "Test Dataset",
+		QueryType: "table",
+		TableName: sql.NullString{String: "orders", Valid: true},
+		QuerySQL:  sql.NullString{Valid: false},
+	}
+
+	ds := &model.Datasource{
+		ID:   1,
+		Name: "Test DS",
+		Type: "postgresql",
+	}
+
+	conn := &MockConnection{
+		rows: []map[string]any{
+			{"status": "x", "count": 10},
+		},
+	}
+	executor := NewExecutor(conn, dataset, ds)
+
+	req := &ChartQueryRequest{
+		DatasetID:  1,
+		ChartType:  ChartTypeTable,
+		Dims:       []string{"status"},
+		Metrics:    []MetricConfig{{Field: "id", Agg: AggCount, Alias: "count"}},
+		Pagination: &Pagination{Page: 1, PageSize: 10},
+		Filters: []FilterConfig{
+			{Field: "status", Op: FilterEq, Value: "completed"},
+		},
+	}
+
+	if _, err := executor.Execute(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(conn.argsCalls) != 2 {
+		t.Fatalf("expected 2 Execute calls (data + count), got %d", len(conn.argsCalls))
+	}
+	for i, args := range conn.argsCalls {
+		if len(args) != 1 || args[0] != "completed" {
+			t.Fatalf("Execute call %d must carry filter arg, got args=%v", i, args)
+		}
 	}
 }

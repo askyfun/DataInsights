@@ -1,6 +1,7 @@
 package query
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -378,19 +379,7 @@ func safeIdentifier(name string) string {
 
 // unmarshalJSON 解析 JSON
 func unmarshalJSON(data string, v interface{}) error {
-	// 使用常见的 JSON 解析
-	// 这里为了避免循环依赖，直接使用简单解析
-	data = strings.TrimSpace(data)
-	if len(data) < 2 {
-		return fmt.Errorf("invalid json")
-	}
-	// 简单检查 JSON 格式
-	if (data[0] != '{' && data[0] != '[') || (data[len(data)-1] != '}' && data[len(data)-1] != ']') {
-		return fmt.Errorf("invalid json format")
-	}
-	// 使用 fmt.Sscan 无法解析复杂 JSON，这里简化处理
-	// 实际使用时应该使用 json.Unmarshal
-	return nil
+	return json.Unmarshal([]byte(data), v)
 }
 
 // BunSQLBuilder 使用 bun 方式的 SQL 构建器
@@ -403,24 +392,22 @@ func NewBunSQLBuilder(dialect DialectType) *BunSQLBuilder {
 	return &BunSQLBuilder{dialect: dialect}
 }
 
-// BuildSelect 构建选择查询
-func (b *BunSQLBuilder) BuildSelect(ast *QueryAST) string {
+// BuildSelect 构建选择查询，同时返回参数化 args
+func (b *BunSQLBuilder) BuildSelect(ast *QueryAST) (string, []interface{}) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(b.dialect)
 	qb.columnMappings = ast.ColumnMappings
 
-	sql, _ := qb.BuildSelectQuery(ast)
-	return sql
+	return qb.BuildSelectQuery(ast)
 }
 
-// BuildCount 构建计数查询
-func (b *BunSQLBuilder) BuildCount(ast *QueryAST) string {
+// BuildCount 构建计数查询，同时返回参数化 args（与 select 的 filter args 相同）
+func (b *BunSQLBuilder) BuildCount(ast *QueryAST) (string, []interface{}) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(b.dialect)
 	qb.columnMappings = ast.ColumnMappings
 
-	sql, _ := qb.BuildCountQuery(ast)
-	return sql
+	return qb.BuildCountQuery(ast)
 }
 
 // Dialect 返回方言类型

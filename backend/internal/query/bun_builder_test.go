@@ -2,6 +2,7 @@ package query
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -267,7 +268,7 @@ func TestBunQueryBuilder_WithAggregatedColumnMapping(t *testing.T) {
 		&Pagination{Page: 1, PageSize: 10},
 	)
 
-	sql := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
+	sql, _ := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
 
 	expected := "SELECT project_id, count(*) AS cnt FROM test_table GROUP BY project_id LIMIT 10 OFFSET 0"
 	if sql != expected {
@@ -315,7 +316,7 @@ func TestBunSQLBuilder_BuildSelect(t *testing.T) {
 	)
 
 	builder := NewBunSQLBuilder(DialectPostgreSQL)
-	sql := builder.BuildSelect(ast)
+	sql, _ := builder.BuildSelect(ast)
 
 	t.Logf("Generated SQL: %s", sql)
 
@@ -362,7 +363,7 @@ func TestBunSQLBuilder_BuildSelect_WithQuotedDatasetColumnExpr(t *testing.T) {
 
 	ast.ApplyColumnMappings(ast.ColumnMappings)
 
-	sql := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
+	sql, _ := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
 
 	expected := "SELECT `project_name`, count(*) AS cnt FROM test_table GROUP BY `project_name`"
 	if sql != expected {
@@ -392,7 +393,7 @@ func TestBunQueryBuilder_ColumnMappings(t *testing.T) {
 
 	t.Logf("Generated SQL: %s", sql)
 
-	expected := "SELECT product, SUM(revenue) AS revenue FROM sales GROUP BY product"
+	expected := "SELECT product, SUM(amount) AS revenue FROM sales GROUP BY product"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -411,7 +412,7 @@ func TestBuildQueryStringWithBun(t *testing.T) {
 		nil,
 	)
 
-	selectSQL, countSQL := BuildQueryStringWithBun(DialectPostgreSQL, ast)
+	selectSQL, countSQL, _ := BuildQueryStringWithBun(DialectPostgreSQL, ast)
 
 	t.Logf("Select SQL: %s", selectSQL)
 	t.Logf("Count SQL: %s", countSQL)
@@ -441,7 +442,7 @@ func TestBuildQueryStringWithBun_PostgreSQLGranularityAndLimit(t *testing.T) {
 		Limit:       10,
 	}
 
-	selectSQL, countSQL := BuildQueryStringWithBun(DialectPostgreSQL, ast)
+	selectSQL, countSQL, _ := BuildQueryStringWithBun(DialectPostgreSQL, ast)
 
 	expectedSelect := "SELECT DATE_TRUNC('day', created_at) AS created_at_day, region, SUM(amount) AS total_amount FROM orders GROUP BY DATE_TRUNC('day', created_at), region LIMIT 10"
 	if selectSQL != expectedSelect {
@@ -465,7 +466,7 @@ func TestBuildQueryStringWithBun_MySQLDayGranularity(t *testing.T) {
 		Metrics: []MetricExpr{{Field: "amount", FieldExpr: "amount", Agg: AggSum, Alias: "total_amount"}},
 	}
 
-	selectSQL, _ := BuildQueryStringWithBun(DialectMySQL, ast)
+	selectSQL, _, _ := BuildQueryStringWithBun(DialectMySQL, ast)
 
 	expectedSelect := "SELECT DATE(created_at) AS created_at_day, SUM(amount) AS total_amount FROM orders GROUP BY DATE(created_at)"
 	if selectSQL != expectedSelect {
@@ -484,7 +485,7 @@ func TestBuildQueryStringWithBun_ClickHouseDayGranularity(t *testing.T) {
 		Metrics: []MetricExpr{{Field: "amount", FieldExpr: "amount", Agg: AggSum, Alias: "total_amount"}},
 	}
 
-	selectSQL, _ := BuildQueryStringWithBun(DialectClickHouse, ast)
+	selectSQL, _, _ := BuildQueryStringWithBun(DialectClickHouse, ast)
 
 	expectedSelect := "SELECT toDate(created_at) AS created_at_day, SUM(amount) AS total_amount FROM orders GROUP BY toDate(created_at)"
 	if selectSQL != expectedSelect {
@@ -667,4 +668,40 @@ func BenchmarkOldBuilder_BuildSelect(b *testing.B) {
 
 func init() {
 	_ = json.Marshal
+}
+
+func TestBuildQueryStringWithBunCollectsArgs(t *testing.T) {
+	ast := &QueryAST{
+		Source:     "orders",
+		SourceType: SourceTypeTable,
+		Dimensions: []string{"region"},
+		Filters: []FilterExpr{
+			{FieldExpr: "region", Op: FilterEq, Value: "'; DROP TABLE users; --"},
+		},
+	}
+	selectSQL, _, args := BuildQueryStringWithBun(DialectPostgreSQL, ast)
+
+	if len(args) != 1 {
+		t.Fatalf("expected 1 arg, got %d: args=%v", len(args), args)
+	}
+	if args[0] != "'; DROP TABLE users; --" {
+		t.Fatalf("malicious value must travel as arg, got %v", args[0])
+	}
+	if strings.Contains(selectSQL, "DROP TABLE") {
+		t.Fatalf("value leaked into SQL text: %s", selectSQL)
+	}
+	if !strings.Contains(selectSQL, "?") {
+		t.Fatalf("expected ? placeholder in SQL: %s", selectSQL)
+	}
+}
+
+func TestUnmarshalJSONActuallyParses(t *testing.T) {
+	var cols []map[string]any
+	err := unmarshalJSON(`[{"name":"a","expr":"b"}]`, &cols)
+	if err != nil {
+		t.Fatalf("valid json must parse, got: %v", err)
+	}
+	if len(cols) != 1 || cols[0]["name"] != "a" {
+		t.Fatalf("parsed content wrong: %+v", cols)
+	}
 }

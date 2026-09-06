@@ -67,8 +67,8 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		ast.SourceType = sourceType
 	}
 
-	sql, countSQL := BuildQueryStringWithBun(dialect, ast)
-	slog.Debug("generated SQL", "select", sql, "count", countSQL)
+	sql, countSQL, args := BuildQueryStringWithBun(dialect, ast)
+	slog.Debug("generated SQL", "select", sql, "count", countSQL, "args", args)
 
 	processor := GetProcessor(req.ChartType)
 	if pieProcessor, ok := processor.(*PieProcessor); ok && req.Config != nil && req.Config.QueryOptions != nil {
@@ -80,7 +80,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 	if req.ChartType == ChartTypeTable && req.Pagination != nil {
 		slog.Debug("executing data query", "sql", sql)
 
-		result, err := e.conn.Execute(ctx, sql)
+		result, err := e.conn.Execute(ctx, sql, args...)
 		if err != nil {
 			return ExecutorResult{}, fmt.Errorf("query failed: %v", err)
 		}
@@ -90,7 +90,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		if req.Pagination.PageSize > 0 && countSQL != "" {
 			slog.Debug("executing count query", "sql", countSQL)
 
-			countResult, err := e.conn.Execute(ctx, countSQL)
+			countResult, err := e.conn.Execute(ctx, countSQL, args...)
 			if err == nil && len(countResult.Rows) > 0 {
 				// 有 GROUP BY 时，countResult 返回每个分组的计数
 				// 总数应该是分组的数量（行数），而不是所有计数的总和
@@ -149,7 +149,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 
 	slog.Debug("executing chart query", "sql", sql)
 
-	result, err := e.conn.Execute(ctx, sql)
+	result, err := e.conn.Execute(ctx, sql, args...)
 	if err != nil {
 		return ExecutorResult{}, fmt.Errorf("query failed: %v", err)
 	}
