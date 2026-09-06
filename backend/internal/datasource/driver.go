@@ -2,6 +2,7 @@ package datasource
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 )
 
@@ -88,7 +89,7 @@ func NewDriver(driverType DriverType) (Driver, error) {
 	case DriverStarRocks:
 		return NewStarRocksDriver(), nil
 	default:
-		return nil, nil
+		return nil, fmt.Errorf("unsupported driver type: %s", driverType)
 	}
 }
 
