@@ -50,4 +50,3 @@ func RunMigrations(db *bun.DB) error {
 	slog.Info("Migrations completed successfully")
 	return nil
 }
-

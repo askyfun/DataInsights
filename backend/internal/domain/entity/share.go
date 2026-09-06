@@ -14,4 +14,3 @@ type Share struct {
 	// HasPassword tells clients whether the share is password protected.
 	HasPassword bool `json:"has_password"`
 }
-
