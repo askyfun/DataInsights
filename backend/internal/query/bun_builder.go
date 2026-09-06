@@ -3,6 +3,7 @@ package query
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -227,7 +228,7 @@ func (qb *BunQueryBuilder) buildSelectParts(ast *QueryAST) []string {
 	for _, metric := range ast.Metrics {
 		var expr string
 		if metric.IsAgg {
-			expr = fmt.Sprintf("%s AS %s", safeIdentifier(metric.FieldExpr), safeIdentifier(metric.Alias))
+			expr = fmt.Sprintf("%s AS %s", safeExpr(metric.FieldExpr), safeIdentifier(metric.Alias))
 		} else {
 			aggFunc := metric.Agg.GetAggFunc()
 			expr = fmt.Sprintf("%s(%s) AS %s", aggFunc, safeIdentifier(metric.FieldExpr), safeIdentifier(metric.Alias))
@@ -365,16 +366,31 @@ func (qb *BunQueryBuilder) buildFilterPart(f *FilterExpr, args *[]interface{}) s
 	}
 }
 
-// safeIdentifier 安全地处理标识符（表名、列名）
-// 防止 SQL 注入
+// safeIdentifier 安全地处理标识符（表名、列名），防止 SQL 注入。
+// 允许裸标识符或成对反引号/双引号包裹的标识符（数据集列表达式的受支持特性），
+// 内部仅限 [a-zA-Z0-9_.]，引号不成对即拒绝。数据源连接信息等裸名场景
+// 仍使用 datasource.IsValidIdentifier 的严格白名单。
+var identifierTokenPattern = regexp.MustCompile("^(?:`[a-zA-Z0-9_.]+`|\"[a-zA-Z0-9_.]+\"|[a-zA-Z0-9_.]+)$")
+
 func safeIdentifier(name string) string {
-	// 移除可能导致 SQL 注入的字符
 	name = strings.TrimSpace(name)
-	// 检查是否包含危险字符
-	if strings.ContainsAny(name, ";'\"-") {
+	if !identifierTokenPattern.MatchString(name) {
 		return "_invalid_identifier"
 	}
 	return name
+}
+
+// aggExprPattern 校验聚合表达式（来自列映射的 FieldExpr，如 count(*)、SUM(amount)）：
+// 仅允许"函数名(单个标识符 token 或*)"形态，括号内的标识符同样过白名单。
+var aggExprPattern = regexp.MustCompile(`(?i)^[a-z0-9_]+\(\s*(\*|` + "`[a-z0-9_.]+`" + `|"[a-z0-9_.]+"|[a-z0-9_.]+)\s*\)$`)
+
+// safeExpr 处理可能为聚合表达式的字段表达式（区别于纯标识符）。
+func safeExpr(expr string) string {
+	expr = strings.TrimSpace(expr)
+	if aggExprPattern.MatchString(expr) {
+		return expr
+	}
+	return safeIdentifier(expr)
 }
 
 // unmarshalJSON 解析 JSON

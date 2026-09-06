@@ -93,7 +93,7 @@ func (c *clickhouseConnection) GetColumns(ctx context.Context, tableName string)
 
 // GetPrimaryKeys returns the primary key columns for a table
 func (c *clickhouseConnection) GetPrimaryKeys(ctx context.Context, tableName string) ([]string, error) {
-	if !isValidIdentifier(tableName) {
+	if !IsValidIdentifier(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
 	query := fmt.Sprintf("SELECT name FROM system.columns WHERE table = '%s' AND database = currentDatabase() AND is_in_primary_key = 1 ORDER BY position", tableName)

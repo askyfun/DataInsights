@@ -329,6 +329,29 @@ func TestBunSQLBuilder_BuildSelect(t *testing.T) {
 	}
 }
 
+func TestSafeIdentifierFallsBackOnInvalid(t *testing.T) {
+	if got := safeIdentifier("a;b"); got != "_invalid_identifier" {
+		t.Fatalf("expected fallback, got %q", got)
+	}
+}
+
+func TestSafeExprAllowsAggregateAndRejectsInjection(t *testing.T) {
+	cases := map[string]string{
+		"count(*)":               "count(*)",
+		"SUM(amount)":            "SUM(amount)",
+		"sum(bi_orders.amount)":  "sum(bi_orders.amount)",
+		"a;b":                    "_invalid_identifier",
+		"count(*); DROP TABLE x": "_invalid_identifier",
+		"evil() OR 1=1":          "_invalid_identifier",
+		"plain_col":              "plain_col",
+	}
+	for in, want := range cases {
+		if got := safeExpr(in); got != want {
+			t.Errorf("safeExpr(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestBunQueryBuilder_SafeIdentifier(t *testing.T) {
 	tests := []struct {
 		input    string

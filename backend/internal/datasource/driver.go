@@ -94,8 +94,8 @@ func NewDriver(driverType DriverType) (Driver, error) {
 }
 
 
-// isValidIdentifier checks if a SQL identifier contains only safe characters [a-zA-Z0-9_.]
-func isValidIdentifier(name string) bool {
+// IsValidIdentifier checks if a SQL identifier contains only safe characters [a-zA-Z0-9_.]
+func IsValidIdentifier(name string) bool {
 	if name == "" {
 		return false
 	}

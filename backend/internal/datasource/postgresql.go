@@ -77,6 +77,9 @@ func (c *postgresqlConnection) GetTables(ctx context.Context) ([]TableInfo, erro
 }
 
 func (c *postgresqlConnection) GetColumns(ctx context.Context, tableName string) ([]ColumnInfo, error) {
+	if !IsValidIdentifier(tableName) {
+		return nil, fmt.Errorf("invalid table name: %q", tableName)
+	}
 	query := fmt.Sprintf(`
 		SELECT c.column_name, c.data_type, COALESCE(pgcd.description, '') as column_comment
 		FROM information_schema.columns c
@@ -104,7 +107,7 @@ func (c *postgresqlConnection) GetColumns(ctx context.Context, tableName string)
 
 // GetPrimaryKeys returns the primary key columns for a table
 func (c *postgresqlConnection) GetPrimaryKeys(ctx context.Context, tableName string) ([]string, error) {
-	if !isValidIdentifier(tableName) {
+	if !IsValidIdentifier(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
 	query := fmt.Sprintf(`
