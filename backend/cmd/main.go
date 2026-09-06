@@ -17,6 +17,8 @@ import (
 	"dataray/internal/database"
 	"dataray/internal/response"
 
+	"github.com/getsentry/sentry-go"
+	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
 )
 
@@ -37,6 +39,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if initSentry(c.Sentry.Dsn) {
+		defer sentry.Flush(2 * time.Second)
+	}
+
 	db, err := database.InitDB(c.Database.Url)
 	if err != nil {
 		slog.Error("Failed to connect database", "error", err)
@@ -51,18 +57,12 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
+	if c.Sentry.Dsn != "" {
+		r.Use(sentrygin.New(sentrygin.Options{}))
+	}
+
 	// CORS middleware
-	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
-		c.Writer.Header().Set("Access-Control-Expose-Headers", "*")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	})
+	r.Use(corsMiddleware(c.CORS.AllowedOrigins))
 
 	// Request ID middleware
 	r.Use(requestIDMiddleware())
@@ -135,6 +135,53 @@ func requestIDMiddleware() gin.HandlerFunc {
 		c.Set("requestID", requestID)
 		c.Next()
 	}
+}
+
+// corsMiddleware returns a middleware that echoes Access-Control-Allow-Origin only
+// for origins in the configured allowlist. An empty allowlist defaults to the local
+// frontend origin (http://localhost:3000). Origins not in the allowlist receive no
+// CORS headers.
+func corsMiddleware(origins []string) gin.HandlerFunc {
+	if len(origins) == 0 {
+		origins = []string{"http://localhost:3000"}
+	}
+	allowed := make(map[string]struct{}, len(origins))
+	for _, o := range origins {
+		allowed[o] = struct{}{}
+	}
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if origin != "" {
+			if _, ok := allowed[origin]; ok {
+				c.Writer.Header().Add("Vary", "Origin")
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD")
+				c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
+				c.Writer.Header().Set("Access-Control-Expose-Headers", "*")
+			}
+			if c.Request.Method == http.MethodOptions {
+				c.AbortWithStatus(http.StatusNoContent)
+				return
+			}
+		}
+		c.Next()
+	}
+}
+
+// initSentry initializes Sentry when a DSN is configured and reports whether the
+// SDK is active. An empty DSN skips initialization entirely so tests and local
+// development run without any Sentry side effects; an initialization failure is
+// logged but does not stop the server (monitoring must not block serving).
+func initSentry(dsn string) bool {
+	if dsn == "" {
+		return false
+	}
+	if err := sentry.Init(sentry.ClientOptions{Dsn: dsn}); err != nil {
+		slog.Error("Failed to initialize Sentry, continuing without it", "error", err)
+		return false
+	}
+	slog.Info("Sentry initialized")
+	return true
 }
 
 // resolveSecurityKey decodes the configured 32-byte hex security key.
