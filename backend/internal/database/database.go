@@ -29,6 +29,10 @@ func InitDB(databaseUrl string) (*bun.DB, error) {
 	return db, nil
 }
 
+// migrationsDir is the path of the SQL files inside migrations.FS. The embed
+// directive `//go:embed *.sql` places them at the FS root, hence ".".
+const migrationsDir = "."
+
 // RunMigrations applies all pending goose migrations embedded in the binary.
 func RunMigrations(db *bun.DB) error {
 	sqldb := db.DB
@@ -39,7 +43,7 @@ func RunMigrations(db *bun.DB) error {
 		return fmt.Errorf("failed to set goose dialect: %w", err)
 	}
 
-	if err := goose.Up(sqldb, "migrations"); err != nil {
+	if err := goose.Up(sqldb, migrationsDir); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 

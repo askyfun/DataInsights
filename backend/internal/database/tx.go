@@ -15,6 +15,9 @@ func WithTx(ctx context.Context, db *bun.DB, fn func(ctx context.Context, tx bun
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
+	// Ensure rollback on panic; after a successful Commit this is a no-op
+	// (Rollback returns ErrTxDone, which we ignore).
+	defer tx.Rollback() //nolint:errcheck
 
 	if err := fn(ctx, tx); err != nil {
 		return errors.Join(err, tx.Rollback())
