@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"dataray/internal/datasource"
@@ -408,6 +409,13 @@ func toDatasetModel(e *entity.Dataset) *model.Dataset {
 		Columns:      e.Columns,
 		ShardEnabled: e.ShardEnabled,
 		ShardKeys:    e.ShardKeys,
+	}
+	// JSONB 列不接受空字符串（PG 报 invalid input syntax），
+	// 空 JSON 字段归一为空数组，与空集合序列化为 [] 的响应契约一致。
+	for _, dst := range []*string{&m.Tags, &m.QualityRules, &m.Columns, &m.ShardKeys} {
+		if strings.TrimSpace(*dst) == "" {
+			*dst = "[]"
+		}
 	}
 	if e.TableName != nil {
 		m.TableName = sql.NullString{String: *e.TableName, Valid: true}

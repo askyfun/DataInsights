@@ -9,6 +9,7 @@ import (
 
 	"dataray/internal/crypto"
 	"dataray/internal/datasource"
+	"dataray/internal/domain/entity"
 	"dataray/internal/model"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -52,6 +53,25 @@ func (s *stubConnection) Execute(ctx context.Context, query string, args ...any)
 		return nil, s.executeErr
 	}
 	return &datasource.QueryResult{Columns: s.resultColumns, Rows: s.resultRows}, nil
+}
+
+// TestToDatasetModelNormalizesEmptyJSONFields 先红：空字符串写入 JSONB 列
+// 会让 PG 报 invalid input syntax for type json；toDatasetModel 必须把
+// 空 JSON 字段归一为合法 JSON（与空集合序列化为 [] 的响应契约一致）。
+func TestToDatasetModelNormalizesEmptyJSONFields(t *testing.T) {
+	m := toDatasetModel(&entity.Dataset{Name: "fixture", DatasourceID: 1, QueryType: "table"})
+	if m.Tags != "[]" {
+		t.Fatalf("empty tags must normalize to [], got %q", m.Tags)
+	}
+	if m.QualityRules != "[]" {
+		t.Fatalf("empty quality_rules must normalize to [], got %q", m.QualityRules)
+	}
+	if m.Columns != "[]" {
+		t.Fatalf("empty columns must normalize to [], got %q", m.Columns)
+	}
+	if m.ShardKeys != "[]" {
+		t.Fatalf("empty shard_keys must normalize to [], got %q", m.ShardKeys)
+	}
 }
 
 // TestGetColumnsSQLDatasetDerivesFromQuery 验证 SQL 型数据集在无已存列时，
