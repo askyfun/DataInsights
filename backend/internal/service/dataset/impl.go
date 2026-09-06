@@ -177,8 +177,10 @@ func mapDatasetColumns(dbColumns []datasource.ColumnInfo) []entity.DatasetColumn
 	for i, col := range dbColumns {
 		stdType, typeConfig, _ := mapper.ToStandard(col.Type)
 		result[i] = entity.DatasetColumn{
-			Name:       col.Name,
-			Expr:       "`" + col.Name + "`",
+			Name: col.Name,
+			// 裸标识符：方言引号由查询层（safeIdentifier/方言 builder）负责，
+			// 这里带反引号会在 PostgreSQL 下原样渲染导致语法错误。
+			Expr:       col.Name,
 			Type:       string(stdType),
 			TypeConfig: entity.TypeConfig{Precision: typeConfig.Precision, Scale: typeConfig.Scale},
 			Comment:    "",

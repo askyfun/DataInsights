@@ -179,6 +179,24 @@ func TestGetColumnsTableDatasetUsesGetColumns(t *testing.T) {
 	}
 }
 
+// TestMapDatasetColumnsBareIdentifier 先红：列表达式不能带 MySQL 反引号——
+// 反引号会被查询层原样渲染，PostgreSQL 报 syntax error at or near "`"。
+// 方言相关的引号是查询层（safeIdentifier/方言 builder）的职责。
+func TestMapDatasetColumnsBareIdentifier(t *testing.T) {
+	cols := mapDatasetColumns([]datasource.ColumnInfo{
+		{Name: "region", Type: "varchar"},
+		{Name: "amount", Type: "numeric"},
+	})
+	for _, col := range cols {
+		if strings.ContainsAny(col.Expr, "`\"") {
+			t.Fatalf("column expr must be a bare identifier, got %q", col.Expr)
+		}
+		if col.Expr != col.Name {
+			t.Fatalf("expr should equal column name, got expr %q for %q", col.Expr, col.Name)
+		}
+	}
+}
+
 // --- password resolution tests (C1 fix) ---
 
 func testAESKey() []byte {
