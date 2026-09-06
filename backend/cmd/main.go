@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -114,10 +116,17 @@ func requestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := c.GetHeader("X-Request-ID")
 		if requestID == "" {
-			b := make([]byte, 8)
-			c.Request.Header.Set("X-Request-ID", fmt.Sprintf("%x", b))
+			b := make([]byte, 16)
+			if _, err := rand.Read(b); err != nil {
+				slog.Error("generate request id failed", "error", err)
+				requestID = fmt.Sprintf("%d", time.Now().UnixNano())
+			} else {
+				requestID = hex.EncodeToString(b)
+			}
+			c.Request.Header.Set("X-Request-ID", requestID)
 		}
-		c.Header("X-Request-ID", c.GetHeader("X-Request-ID"))
+		c.Header("X-Request-ID", requestID)
+		c.Set("requestID", requestID)
 		c.Next()
 	}
 }
