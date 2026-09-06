@@ -185,7 +185,7 @@ describe('ChartBuilder drag overlay', () => {
       expect(useStore.getState().chartBuilderFields[0]?.name).toBe('region');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '透视表' }));
+    fireEvent.click(screen.getByRole('button', { name: /透视表/ }));
 
     act(() => {
       dndCallbacks.onDragEnd?.({

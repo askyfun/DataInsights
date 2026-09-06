@@ -24,7 +24,39 @@ vi.mock('../../components/ChartBuilder/FilterBuilder', () => ({
 }));
 
 vi.mock('../../components/ChartBuilder/QueryConfigRow', () => ({
-  default: ({ label }: { label: string }) => <div data-testid="query-config-row">{label}</div>,
+  default: ({
+    label,
+    groupIndex,
+    onAddField,
+    availableFields,
+    rowType,
+  }: {
+    label: string;
+    groupIndex?: number;
+    onAddField?: (field: { id: string; name: string; type: 'dimension' | 'metric' }) => void;
+    availableFields?: Array<{ id: string; name: string; type: 'dimension' | 'metric' }>;
+    rowType: 'dimension' | 'metric' | 'filter';
+  }) => (
+    <div data-testid="query-config-row">
+      <span>{label}</span>
+      <span data-testid={`group-index-${label}`}>{String(groupIndex ?? '')}</span>
+      {rowType === 'metric' &&
+        onAddField &&
+        availableFields?.some((field) => field.type === 'metric') && (
+          <button
+            type="button"
+            onClick={() => {
+              const metricField = availableFields.find((field) => field.type === 'metric');
+              if (metricField) {
+                onAddField(metricField);
+              }
+            }}
+          >
+            添加{label}
+          </button>
+        )}
+    </div>
+  ),
 }));
 
 vi.mock('../../api', async (importOriginal) => {
@@ -241,6 +273,30 @@ describe('ChartBuilder', () => {
     expect(screen.getByText('行维度')).toBeInTheDocument();
     expect(screen.getByText('列维度')).toBeInTheDocument();
     expect(screen.getByText('值指标')).toBeInTheDocument();
+  });
+
+  it('maps table metric row to metric group 0 and keeps metrics in execute query request', async () => {
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('group-index-维度')).toHaveTextContent('0');
+    });
+
+    expect(screen.getByTestId('group-index-指标')).toHaveTextContent('0');
+
+    fireEvent.click(screen.getByRole('button', { name: '添加指标' }));
+
+    await waitFor(() => {
+      expect(useStore.getState().queryConfig.metricGroups[0]?.fields).toEqual(['field-1']);
+    });
+
+    expect(mockExecuteChartQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chart_type: 'table',
+        dims: ['region'],
+        metrics: [{ field: 'revenue', agg: 'sum', alias: 'revenue' }],
+      })
+    );
   });
 
   it('restores metric aliases and aggregations from saved chart config', async () => {

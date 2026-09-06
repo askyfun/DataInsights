@@ -130,6 +130,23 @@ const getActiveFieldGroups = (chartType: ChartConfig['chartType'], queryConfig: 
   };
 };
 
+/**
+ * 把图表定义中的顺序索引映射为 kind 内部索引，避免维度组和指标组共用一套下标。
+ * 调用场景：定义驱动渲染 QueryConfigRow，以及拖拽 drop zone 回写 queryConfig 时。
+ * 主要逻辑：只统计当前定义中同 kind 且位于当前组之前的数量，得到 dimensionGroups/metricGroups 的真实下标。
+ */
+const getFieldGroupKindIndex = (
+  chartType: ChartConfig['chartType'],
+  definitionIndex: number,
+  kind: 'dimension' | 'metric'
+): number => {
+  return (
+    chartDefinitions[chartType].fieldGroups
+      .slice(0, definitionIndex + 1)
+      .filter((group) => group.kind === kind).length - 1
+  );
+};
+
 interface ChartCanvasProps {
   config: ChartConfig;
   data: any[];
@@ -818,16 +835,17 @@ const ChartBuilder: React.FC = () => {
     const definition = chartDefinitions[chartBuilderConfig.chartType];
 
     return definition.fieldGroups.map((group, index) => {
+      const groupIndex = getFieldGroupKindIndex(chartBuilderConfig.chartType, index, group.kind);
       const fields =
         group.kind === 'dimension'
-          ? getDimensionFieldsByGroup(index)
-          : getMetricFieldsByGroup(index);
+          ? getDimensionFieldsByGroup(groupIndex)
+          : getMetricFieldsByGroup(groupIndex);
 
       return (
         <QueryConfigRow
           key={`${chartBuilderConfig.chartType}-${group.id}`}
           rowType={group.kind}
-          groupIndex={index}
+          groupIndex={groupIndex}
           label={group.label}
           emptyText={group.emptyText}
           fields={fields}
@@ -836,19 +854,19 @@ const ChartBuilder: React.FC = () => {
           aliases={metricAliases}
           onRemoveField={(fieldId) =>
             group.kind === 'dimension'
-              ? removeDimensionField(fieldId, index)
-              : removeMetricField(fieldId, index)
+              ? removeDimensionField(fieldId, groupIndex)
+              : removeMetricField(fieldId, groupIndex)
           }
           onAggregationChange={setMetricAggregation}
           onAddField={(field) =>
             group.kind === 'dimension'
-              ? addDimensionField(field, index)
-              : addMetricField(field, index)
+              ? addDimensionField(field, groupIndex)
+              : addMetricField(field, groupIndex)
           }
           onReorderField={(oldIndex, newIndex) =>
             group.kind === 'dimension'
-              ? reorderDimensionField(oldIndex, newIndex, index)
-              : reorderMetricField(oldIndex, newIndex, index)
+              ? reorderDimensionField(oldIndex, newIndex, groupIndex)
+              : reorderMetricField(oldIndex, newIndex, groupIndex)
           }
           onOpenSettings={
             group.kind === 'metric'
