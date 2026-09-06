@@ -38,27 +38,6 @@ type ColumnInfo struct {
 	Comment  string `json:"comment"`
 }
 
-// DatasourceService defines operations for datasource management
-type DatasourceService interface {
-	// CRUD operations
-	List(limit, offset int) ([]Datasource, error)
-	GetByID(id int) (*Datasource, error)
-	Create(ds *Datasource) (*Datasource, error)
-	Update(ds *Datasource) (*Datasource, error)
-	Delete(id int) error
-
-	// Connection testing
-	TestConnection(config DatasourceConnectionConfig, driverType string) error
-
-	// Schema operations
-	GetTables(id int) ([]TableInfo, error)
-	GetColumns(id int, tableName string) ([]ColumnInfo, error)
-
-	// Preview operations
-	Preview(id int, tableName, querySQL, queryType string) (*PreviewResult, error)
-	GetFieldDistribution(id int, tableName, querySQL, queryType, fieldName string, limit int) (*FieldDistribution, error)
-}
-
 // PreviewResult represents data preview from a datasource
 type PreviewResult struct {
 	Columns []string         `json:"columns"`

@@ -35,20 +35,6 @@ type Pagination struct {
 	PageSize int `json:"page_size"`
 }
 
-// ChartService defines operations for chart management
-type ChartService interface {
-	// CRUD operations
-	List(limit, offset int) ([]Chart, error)
-	GetByID(id int) (*Chart, error)
-	Create(chart *Chart) (*Chart, error)
-	Update(chart *Chart) (*Chart, error)
-	Delete(id int) error
-
-	// Data operations
-	GetData(id int) (ChartDataResult, error)
-	Query(req *ChartQueryRequest) (ChartDataResult, error)
-}
-
 // ChartDataResult represents chart data result
 type ChartDataResult struct {
 	Data      interface{} `json:"data"`

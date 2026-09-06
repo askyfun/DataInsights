@@ -38,24 +38,6 @@ type TypeConfig struct {
 	Scale     int `json:"scale"`
 }
 
-// DatasetService defines operations for dataset management
-type DatasetService interface {
-	// CRUD operations
-	List(limit, offset int) ([]Dataset, error)
-	GetByID(id int) (*Dataset, error)
-	Create(ds *Dataset) (*Dataset, error)
-	Update(ds *Dataset) (*Dataset, error)
-	Delete(id int) error
-
-	// Column operations
-	GetColumns(id int) ([]DatasetColumn, error)
-	UpdateColumns(id int, columns []DatasetColumn) (*Dataset, error)
-
-	// Data operations
-	Preview(id int) (*PreviewResult, error)
-	Query(id int, config QueryConfig) ([]map[string]any, error)
-}
-
 // QueryConfig represents a query configuration for dataset
 type QueryConfig struct {
 	DimensionGroups []FieldGroup `json:"dimension_groups"`

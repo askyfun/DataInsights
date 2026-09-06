@@ -15,14 +15,3 @@ type Share struct {
 	HasPassword bool `json:"has_password"`
 }
 
-// ShareService defines operations for share management
-type ShareService interface {
-	// Create a new share link
-	Create(chartID int, password *string, expiresAt *string) (*Share, error)
-
-	// Get share by token
-	GetByToken(token string) (*Share, error)
-
-	// Validate password if required
-	ValidatePassword(token, password string) error
-}
