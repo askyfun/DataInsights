@@ -78,6 +78,36 @@ func (h *ShareHandler) Get(c *gin.Context) {
 	response.Success(c, share)
 }
 
+// Verify handles POST /api/shares/:token/verify — validates the share password
+// and returns the share (chart_id included) on success.
+func (h *ShareHandler) Verify(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		response.BadRequest(c, "token is required")
+		return
+	}
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	if err := h.svc.ValidatePassword(c.Request.Context(), token, req.Password); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	share, err := h.svc.GetByToken(c.Request.Context(), token)
+	if err != nil {
+		response.NotFound(c, "share not found")
+		return
+	}
+	response.Success(c, share)
+}
+
 // View handles GET /share/:token
 func (h *ShareHandler) View(c *gin.Context) {
 	token := c.Param("token")

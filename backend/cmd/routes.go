@@ -71,6 +71,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte) {
 	shares.GET("", shareHandler.List)
 	shares.POST("", shareHandler.Create)
 	shares.GET("/:token", shareHandler.Get)
+	shares.POST("/:token/verify", shareHandler.Verify)
 
 	// Share view route (no /api prefix)
 	r.GET("/share/:token", shareHandler.View)
