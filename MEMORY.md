@@ -35,3 +35,8 @@
 - 使用 Codex 工具改文件时，应直接调用 `apply_patch`，不要通过 `exec_command` 包一层 `apply_patch`。虽然当前环境仍会执行成功，但会产生明确告警，属于应主动避免的操作失误。
 
 - ChartBuilder 的图表定义行顺序不能直接当作 `queryConfig.dimensionGroups` / `metricGroups` 下标使用；维度组和指标组是分开存储的，必须先按 kind 计算局部索引，否则会出现“UI 看起来已添加指标，但请求里的 metrics 为空”。
+
+## Batch 1 安全与查询收敛的经验（2026-09-06）
+
+- **参数化通道断裂的根因**：`Connection.Execute` 早期接口设计成只收 SQL 字符串（没有 args），导致 bun_builder 层辛苦收集的值参数无处可传、最终被拼回 SQL 字符串——builder 层等于白做。教训：底层执行接口的签名决定了上层所有安全投入能否生效；先打通“接口能传参”，再做“上层会传参”，顺序不能反。修复时以 `Execute(ctx, sql string, args ...any)` 为锚点，从 builder 收集 args → executor 透传 → 驱动执行逐层贯通并补测试。
+- **go.mod 依赖连带升级是确定性副作用**：引入 goose / sentry-go / bcrypt 等新依赖时，`go mod tidy` 常会连带升级既有间接依赖（如 bun、gin 相关），这不是意外而是必然副作用。应在引入新依赖的提交里预期并审查这些升级，避免把“意外的依赖升级”当作回归排查。

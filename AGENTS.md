@@ -22,14 +22,22 @@ DataRay 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构�
 |------|------|------|
 | Handler | `backend/internal/handler/` | Gin HTTP 处理器，请求绑定，响应格式化 |
 | Service | `backend/internal/service/` | 业务逻辑（按领域：chart, dataset, datasource, share） |
-| Domain | `backend/internal/domain/` | 领域实体和业务规则 |
+| Domain | `backend/internal/domain/entity/` | 领域实体类型 |
+| Query | `backend/internal/query/` | SQL 构造唯一出口：AST + bun_builder（结构化查询）+ raw.go（原始 SQL 构造） |
 | Model | `backend/internal/model/` | 数据库模型（bun ORM） |
-| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]` |
+| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（已设计，Batch 2 将启用，当前未接入） |
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
+| Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `DATARAY_SECURITY_KEY`） |
 
-路由通过 `backend/internal/router/router.go` 中的泛型函数注册：`RegisterGetRoute`、`RegisterPostRoute`、`RegisterPutRoute`、`RegisterDeleteRoute`。路由器自动绑定 query 参数和 JSON body，并通过 `response.Success/Error/BadRequest` 统一包装响应。
+查询链路：handler → service → `query` 包（AST + bun_builder / raw.go）→ datasource 驱动。`Connection.Execute(ctx, sql string, args ...any)` 已支持参数化执行，bun_builder 是图表 SQL 的唯一出口，值参数一律通过 args 传递；标识符使用白名单校验（裸名 `datasource.IsValidIdentifier`，query 包 `safeIdentifier` 额外允许成对引号包裹的标识符）。
+
+`backend/internal/router/router.go` 中的泛型路由函数（`RegisterGetRoute`、`RegisterPostRoute`、`RegisterPutRoute`、`RegisterDeleteRoute`）已设计完成但 Batch 1 未启用，计划 Batch 2 接入；路由器自动绑定 query 参数和 JSON body，并通过 `response.Success/Error/BadRequest` 统一包装响应。
 
 `datasource/` 包实现了 `Driver` 接口用于多数据库后端——新增驱动只需实现该接口。
+
+数据库 schema 由 goose 版本化迁移管理（`backend/migrations/00001_init_schema.sql`，通过 `embed.FS` 内嵌），`model.CreateTables` 已删除；事务统一走 `database.WithTx`。
+
+运维与安全已落地：Sentry 通过 `[Sentry] Dsn` 配置接通（sentrygin Repanic）；CORS 按 `[CORS] AllowedOrigins` 配置化（默认 `localhost:3000`）；requestID 中间件返回非全零 ID；datasource 密码 AES-GCM 加密存储，API 响应中 `password` 字段 `json:"-"` 不外泄，share 使用 bcrypt 哈希并对外暴露 `has_password` 契约。
 
 ### 前端结构
 

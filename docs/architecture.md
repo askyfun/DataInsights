@@ -29,14 +29,17 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 │   ├── cmd/main.go           # 入口 + 路由注册
 │   ├── internal/
 │   │   ├── config/           # 配置加载 (TOML)
-│   │   ├── database/         # 数据库连接
+│   │   ├── database/         # 数据库连接与事务抽象（WithTx）
+│   │   ├── migrations/       # goose 版本化迁移（embed.FS 内嵌）
+│   │   ├── crypto/           # AES-GCM 加解密（DATARAY_SECURITY_KEY）
+│   │   ├── domain/entity/    # 领域实体类型
+│   │   ├── query/            # SQL 构造唯一出口（AST + bun_builder + raw.go）
 │   │   ├── datasource/       # 数据源驱动抽象
-│   │   │   ├── driver.go     # Driver 接口
+│   │   │   ├── driver.go     # Driver 接口（Execute(ctx, sql, args...) 参数化执行）
 │   │   │   ├── postgresql.go
 │   │   │   ├── mysql.go
 │   │   │   ├── clickhouse.go
 │   │   │   └── starrocks.go
-│   │   ├── middleware/       # Gin 中间件
 │   │   └── model/            # 数据模型
 │   ├── etc/config.toml       # 配置文件
 │   └── go.mod
@@ -90,14 +93,28 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 - `QueryPlanner`：将 QuerySpec 转换为 QueryAST
 - `QueryAST`：数据库无关的查询中间表示
 
+## 查询链路（Batch 1 收敛后）
+
+Batch 1 完成查询通道收敛后，图表/数据集查询只有一个通道：
+
+```
+handler → service → query 包（QueryAST + bun_builder / raw.go）→ datasource 驱动 Connection.Execute(ctx, sql, args...) 参数化执行
+```
+
+要点：
+
+- `query` 包是 SQL 构造的唯一出口。结构化查询走 `QueryPlanner → QueryAST → bun_builder`（bun_builder 同时收集值参数与构造 SQL）；原始 SQL（表预览、字段分布等）走 `raw.go` 构造。
+- `Connection.Execute(ctx, sql string, args ...any)` 支持参数化执行，值参数一律通过 args 传递，禁止字符串拼接进 SQL。
+- 标识符一律通过白名单校验：裸名用 `datasource.IsValidIdentifier`；query 包 `safeIdentifier` 额外允许成对引号包裹的标识符。
+- 旧的 `query/builder.go` 与平铺参数兼容链路已删除。
+- 数据库 schema 由 goose 版本化迁移管理（`backend/migrations/`，embed.FS 内嵌），事务统一走 `database.WithTx`。
+
 当前落地状态：
 
 - 对外接口仍使用旧协议：`chart_type` + `dims` + `metrics` + `filters` + `pagination` + `sort`。
-- `backend/internal/service/chart/impl.go` 已先将旧请求转换为内部 `QuerySpec`。
-- `QueryPlanner` 已同时支持两条内部规划路径：`QuerySpec -> 旧 executor / builder 可消费的平铺参数`，以及 `QuerySpec -> 增强版 QueryAST`。
-- `chartService.Query` 已在内部先生成 `PlannedAST`，并由 `query.Executor` 优先消费该 AST 生成 SQL；平铺参数链路仍作为兼容回退保留。
+- `backend/internal/service/chart/impl.go` 将旧请求转换为内部 `QuerySpec`，再经 `QueryPlanner` 生成 `PlannedAST`，由 `query.Executor` 消费 AST 生成参数化 SQL。
 - `QueryAST` 第一阶段已支持结构化维度/指标元信息、`limit`，以及日期维度 `day` 粒度的 PostgreSQL / MySQL / ClickHouse 方言 SQL 生成。
-- 分桶、复杂过滤组、更多时间粒度，以及彻底移除平铺参数兼容链路仍属于后续阶段。
+- 分桶、复杂过滤组、更多时间粒度仍属于后续阶段。
 
 ### 响应层
 
