@@ -165,8 +165,27 @@ func (s *datasourceService) GetColumns(ctx context.Context, id int, tableName st
 	return toColumnInfoList(columns), nil
 }
 
+// buildPreviewSQL builds the preview SQL. For the sql branch, the user-provided
+// querySQL is wrapped in a subquery so appending LIMIT never breaks on user SQL
+// containing trailing semicolons or its own LIMIT clause. For the table branch,
+// tableName must be a valid identifier before interpolation.
+func buildPreviewSQL(tableName, querySQL, queryType string) (string, error) {
+	if queryType == "sql" {
+		return fmt.Sprintf("SELECT * FROM (%s) AS _preview LIMIT 10", querySQL), nil
+	}
+	if !datasource.IsValidIdentifier(tableName) {
+		return "", fmt.Errorf("invalid table name: %q", tableName)
+	}
+	return fmt.Sprintf("SELECT * FROM %s LIMIT 10", tableName), nil
+}
+
 // Preview returns preview data from a datasource
 func (s *datasourceService) Preview(ctx context.Context, id int, tableName, querySQL, queryType string) (*entity.PreviewResult, error) {
+	sql, err := buildPreviewSQL(tableName, querySQL, queryType)
+	if err != nil {
+		return nil, err
+	}
+
 	ds, err := s.getDatasourceModel(ctx, id)
 	if err != nil {
 		return nil, err
@@ -177,13 +196,6 @@ func (s *datasourceService) Preview(ctx context.Context, id int, tableName, quer
 		return nil, err
 	}
 	defer conn.Close()
-
-	var sql string
-	if queryType == "sql" {
-		sql = fmt.Sprintf("%s LIMIT 10", querySQL)
-	} else {
-		sql = fmt.Sprintf("SELECT * FROM %s LIMIT 10", tableName)
-	}
 
 	result, err := conn.Execute(ctx, sql)
 	if err != nil {
@@ -196,10 +208,36 @@ func (s *datasourceService) Preview(ctx context.Context, id int, tableName, quer
 	}, nil
 }
 
+// buildFieldDistributionSQL builds the field distribution SQL. fieldName is
+// always validated as an identifier before interpolation. In the table branch,
+// source (the table name) is validated too; in the sql branch, source is the
+// user-provided querySQL, which the product intentionally allows to be
+// arbitrary SQL, so it is not identifier-validated.
+func buildFieldDistributionSQL(fieldName, source, queryType string, limit int) (string, error) {
+	if !datasource.IsValidIdentifier(fieldName) {
+		return "", fmt.Errorf("invalid field name: %q", fieldName)
+	}
+	if queryType == "sql" {
+		return fmt.Sprintf("SELECT %s, COUNT(*) as _count FROM (%s) as _subquery GROUP BY %s ORDER BY _count DESC LIMIT %d",
+			fieldName, source, fieldName, limit), nil
+	}
+	if !datasource.IsValidIdentifier(source) {
+		return "", fmt.Errorf("invalid table name: %q", source)
+	}
+	return fmt.Sprintf("SELECT %s, COUNT(*) as _count FROM %s GROUP BY %s ORDER BY _count DESC LIMIT %d",
+		fieldName, source, fieldName, limit), nil
+}
+
 // GetFieldDistribution returns field value distribution
 func (s *datasourceService) GetFieldDistribution(ctx context.Context, id int, tableName, querySQL, queryType, fieldName string, limit int) (*entity.FieldDistribution, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
+	}
+
+	// Validate identifiers and build SQL before any DB access.
+	sql, err := buildFieldDistributionSQL(fieldName, tableName, queryType, limit)
+	if err != nil {
+		return nil, err
 	}
 
 	ds, err := s.getDatasourceModel(ctx, id)
@@ -212,15 +250,6 @@ func (s *datasourceService) GetFieldDistribution(ctx context.Context, id int, ta
 		return nil, err
 	}
 	defer conn.Close()
-
-	var sql string
-	if queryType == "sql" {
-		sql = fmt.Sprintf("SELECT %s, COUNT(*) as _count FROM (%s) as _subquery GROUP BY %s ORDER BY _count DESC LIMIT %d",
-			fieldName, querySQL, fieldName, limit)
-	} else {
-		sql = fmt.Sprintf("SELECT %s, COUNT(*) as _count FROM %s GROUP BY %s ORDER BY _count DESC LIMIT %d",
-			fieldName, tableName, fieldName, limit)
-	}
 
 	result, err := conn.Execute(ctx, sql)
 	if err != nil {
