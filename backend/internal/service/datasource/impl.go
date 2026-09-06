@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
-	"regexp"
 	"time"
 
 	"dataray/internal/datasource"
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
+	"dataray/internal/query"
 
 	"github.com/uptrace/bun"
 )
@@ -165,29 +165,13 @@ func (s *datasourceService) GetColumns(ctx context.Context, id int, tableName st
 	return toColumnInfoList(columns), nil
 }
 
-// buildPreviewSQL builds the preview SQL. For the sql branch, the user-provided
-// querySQL is wrapped in a subquery instead of appending LIMIT directly, so user
-// SQL containing its own LIMIT clause no longer produces a broken statement.
-// Note: querySQL ending with a semicolon or a "--" line comment still yields a
-// non-executable statement; the database will reject it and the error is
-// returned as-is. For the table branch, tableName must be a valid identifier
-// before interpolation.
-func buildPreviewSQL(tableName, querySQL, queryType string) (string, error) {
-	if queryType == "sql" {
-		return fmt.Sprintf("SELECT * FROM (%s) AS _preview LIMIT 10", querySQL), nil
-	}
-	if !datasource.IsValidIdentifier(tableName) {
-		return "", fmt.Errorf("invalid table name: %q", tableName)
-	}
-	return fmt.Sprintf("SELECT * FROM %s LIMIT 10", tableName), nil
-}
-
 // Preview returns preview data from a datasource
 func (s *datasourceService) Preview(ctx context.Context, id int, tableName, querySQL, queryType string) (*entity.PreviewResult, error) {
-	sql, err := buildPreviewSQL(tableName, querySQL, queryType)
+	source, sourceType, err := previewSource(tableName, querySQL, queryType)
 	if err != nil {
 		return nil, err
 	}
+	sql := query.WrapPreviewSQL(source, sourceType, 10)
 
 	ds, err := s.getDatasourceModel(ctx, id)
 	if err != nil {
@@ -211,24 +195,18 @@ func (s *datasourceService) Preview(ctx context.Context, id int, tableName, quer
 	}, nil
 }
 
-// buildFieldDistributionSQL builds the field distribution SQL. fieldName is
-// always validated as an identifier before interpolation. In the table branch,
-// source (the table name) is validated too; in the sql branch, source is the
-// user-provided querySQL, which the product intentionally allows to be
-// arbitrary SQL, so it is not identifier-validated.
-func buildFieldDistributionSQL(fieldName, source, queryType string, limit int) (string, error) {
-	if !datasource.IsValidIdentifier(fieldName) {
-		return "", fmt.Errorf("invalid field name: %q", fieldName)
-	}
+// previewSource resolves the preview source. For the sql branch, querySQL is
+// the product-allowed arbitrary user SQL (wrapped into a subquery by the query
+// package). For the table branch, tableName must be a valid identifier before
+// any SQL is built.
+func previewSource(tableName, querySQL, queryType string) (string, query.SourceType, error) {
 	if queryType == "sql" {
-		return fmt.Sprintf("SELECT %s, COUNT(*) as _count FROM (%s) as _subquery GROUP BY %s ORDER BY _count DESC LIMIT %d",
-			fieldName, source, fieldName, limit), nil
+		return querySQL, query.SourceTypeSQL, nil
 	}
-	if !datasource.IsValidIdentifier(source) {
-		return "", fmt.Errorf("invalid table name: %q", source)
+	if !datasource.IsValidIdentifier(tableName) {
+		return "", query.SourceTypeTable, fmt.Errorf("invalid table name: %q", tableName)
 	}
-	return fmt.Sprintf("SELECT %s, COUNT(*) as _count FROM %s GROUP BY %s ORDER BY _count DESC LIMIT %d",
-		fieldName, source, fieldName, limit), nil
+	return tableName, query.SourceTypeTable, nil
 }
 
 // GetFieldDistribution returns field value distribution
@@ -237,11 +215,18 @@ func (s *datasourceService) GetFieldDistribution(ctx context.Context, id int, ta
 		limit = 20
 	}
 
-	// Validate identifiers and build SQL before any DB access.
-	sql, err := buildFieldDistributionSQL(fieldName, tableName, queryType, limit)
+	sourceType := query.SourceTypeSQL
+	if queryType != "sql" {
+		sourceType = query.SourceTypeTable
+	}
+
+	// Build both SQLs (pure functions) up front so identifier validation
+	// happens before any DB access.
+	distSQL, err := query.BuildFieldDistributionSQL(fieldName, tableName, sourceType, limit)
 	if err != nil {
 		return nil, err
 	}
+	totalSQL := query.WrapCountSQL(tableName, sourceType)
 
 	ds, err := s.getDatasourceModel(ctx, id)
 	if err != nil {
@@ -254,21 +239,14 @@ func (s *datasourceService) GetFieldDistribution(ctx context.Context, id int, ta
 	}
 	defer conn.Close()
 
-	result, err := conn.Execute(ctx, sql)
+	result, err := conn.Execute(ctx, distSQL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query: %w", err)
 	}
 
 	// Get total count
-	var totalQuery string
-	if queryType == "sql" {
-		totalQuery = fmt.Sprintf("SELECT COUNT(*) as _total FROM (%s) as _subquery", querySQL)
-	} else {
-		totalQuery = fmt.Sprintf("SELECT COUNT(*) as _total FROM %s", tableName)
-	}
-
 	var totalCount int64
-	totalResult, err := conn.Execute(ctx, totalQuery)
+	totalResult, err := conn.Execute(ctx, totalSQL)
 	if err == nil && len(totalResult.Rows) > 0 {
 		if val, ok := totalResult.Rows[0]["_total"]; ok {
 			switch v := val.(type) {
@@ -361,13 +339,12 @@ func (s *datasourceService) GetTableData(ctx context.Context, id int, tableName 
 		pageSize = 100
 	}
 
-	// Validate table name to prevent SQL injection
-	if !isValidSQLIdentifier(tableName) {
+	// Validate table name to prevent SQL injection (fail fast before DB access)
+	if !datasource.IsValidIdentifier(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
 
-	// Validate sortOrder
-	sortOrder = normalizeSortOrder(sortOrder)
+	// Sort direction is normalized inside query.BuildTableDataSQL.
 
 	ds, err := s.getDatasourceModel(ctx, id)
 	if err != nil {
@@ -386,7 +363,7 @@ func (s *datasourceService) GetTableData(ctx context.Context, id int, tableName 
 	// Determine sort field: use provided sortField if valid, otherwise use first primary key
 	effectiveSortField := ""
 	if sortField != "" {
-		if !isValidSQLIdentifier(sortField) {
+		if !datasource.IsValidIdentifier(sortField) {
 			return nil, fmt.Errorf("invalid sort field: %s", sortField)
 		}
 		// sortField must be in primary keys to prevent full table scans
@@ -398,14 +375,16 @@ func (s *datasourceService) GetTableData(ctx context.Context, id int, tableName 
 		effectiveSortField = primaryKeys[0]
 	}
 
-	// Build ORDER BY clause
-	orderByClause := ""
-	if effectiveSortField != "" {
-		orderByClause = fmt.Sprintf(" ORDER BY %s %s", effectiveSortField, sortOrder)
+	// Build data and count SQL via the query package (identifier validation
+	// and sort direction normalization happen there).
+	offset := (page - 1) * pageSize
+	dataSQL, err := query.BuildTableDataSQL(tableName, effectiveSortField, sortOrder, pageSize, offset)
+	if err != nil {
+		return nil, err
 	}
 
 	// Query total count
-	countSQL := fmt.Sprintf("SELECT COUNT(*) AS _total FROM %s", tableName)
+	countSQL := query.WrapCountSQL(tableName, query.SourceTypeTable)
 	countResult, err := conn.Execute(ctx, countSQL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count rows: %w", err)
@@ -424,8 +403,6 @@ func (s *datasourceService) GetTableData(ctx context.Context, id int, tableName 
 	}
 
 	// Query data with pagination
-	offset := (page - 1) * pageSize
-	dataSQL := fmt.Sprintf("SELECT * FROM %s%s LIMIT %d OFFSET %d", tableName, orderByClause, pageSize, offset)
 	dataResult, err := conn.Execute(ctx, dataSQL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query data: %w", err)
@@ -439,34 +416,6 @@ func (s *datasourceService) GetTableData(ctx context.Context, id int, tableName 
 		Page:        page,
 		PageSize:    pageSize,
 	}, nil
-}
-
-// isValidSQLIdentifier validates that a SQL identifier contains only safe characters [a-zA-Z0-9_.]
-func isValidSQLIdentifier(name string) bool {
-	if name == "" {
-		return false
-	}
-	re := regexp.MustCompile(`^[a-zA-Z0-9_.]+$`)
-	return re.MatchString(name)
-}
-
-// normalizeSortOrder validates and normalizes sort order, defaults to ASC
-func normalizeSortOrder(order string) string {
-	if order == "" {
-		return "ASC"
-	}
-	upper := ""
-	for _, c := range order {
-		if c >= 'a' && c <= 'z' {
-			upper += string(c - 32)
-		} else {
-			upper += string(c)
-		}
-	}
-	if upper == "DESC" {
-		return "DESC"
-	}
-	return "ASC"
 }
 
 // containsString checks if a string slice contains a value

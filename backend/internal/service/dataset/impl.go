@@ -10,6 +10,7 @@ import (
 	"dataray/internal/datasource"
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
+	"dataray/internal/query"
 
 	"github.com/uptrace/bun"
 )
@@ -194,17 +195,21 @@ func (s *datasetService) Preview(ctx context.Context, id int) (*entity.PreviewRe
 	}
 	defer conn.Close()
 
-	var tableName string
+	// Build preview SQL via the query package: sql branch wraps the user SQL
+	// in a subquery, table branch sanitizes the identifier.
+	var source string
+	sourceType := query.SourceTypeTable
 	if ds.QueryType == "sql" && ds.QuerySQL.Valid {
-		tableName = fmt.Sprintf("(%s) as subq", ds.QuerySQL.String)
+		source = ds.QuerySQL.String
+		sourceType = query.SourceTypeSQL
 	} else if ds.TableName.Valid {
-		tableName = ds.TableName.String
+		source = ds.TableName.String
 	} else {
 		return nil, fmt.Errorf("no table or query defined")
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT 10", tableName)
-	result, err := conn.Execute(ctx, query)
+	sql := query.WrapPreviewSQL(source, sourceType, 10)
+	result, err := conn.Execute(ctx, sql)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query: %w", err)
 	}
@@ -233,18 +238,17 @@ func (s *datasetService) Query(ctx context.Context, id int, config entity.QueryC
 	}
 	defer conn.Close()
 
-	// Build query SQL
-	baseSQL := ""
+	// Build query SQL via the query package; limit <= 0 omits the LIMIT clause.
+	var source string
+	sourceType := query.SourceTypeTable
 	if ds.QueryType == "sql" && ds.QuerySQL.Valid {
-		baseSQL = fmt.Sprintf("SELECT * FROM (%s) as _subq", ds.QuerySQL.String)
+		source = ds.QuerySQL.String
+		sourceType = query.SourceTypeSQL
 	} else if ds.TableName.Valid {
-		baseSQL = fmt.Sprintf("SELECT * FROM %s", ds.TableName.String)
+		source = ds.TableName.String
 	}
 
-	sql := baseSQL
-	if config.Limit > 0 {
-		sql = fmt.Sprintf("%s LIMIT %d", sql, config.Limit)
-	}
+	sql := query.WrapPreviewSQL(source, sourceType, config.Limit)
 
 	result, err := conn.Execute(ctx, sql)
 	if err != nil {

@@ -1,10 +1,5 @@
 package query
 
-import (
-	"fmt"
-	"strings"
-)
-
 // ChartType 可视化图表类型
 type ChartType string
 
@@ -202,26 +197,5 @@ func (op FilterOperator) ToString() string {
 		return "IS NOT NULL"
 	default:
 		return "="
-	}
-}
-
-// FormatValue 格式化过滤值
-func FormatValue(op FilterOperator, value interface{}) string {
-	switch op {
-	case FilterIsNull, FilterIsNotNull:
-		return ""
-	case FilterIn:
-		if vals, ok := value.([]any); ok {
-			strVals := make([]string, len(vals))
-			for i, v := range vals {
-				strVals[i] = fmt.Sprintf("'%v'", v)
-			}
-			return fmt.Sprintf("(%s)", strings.Join(strVals, ", "))
-		}
-		return fmt.Sprintf("('%v')", value)
-	case FilterBetween:
-		return ""
-	default:
-		return fmt.Sprintf("'%v'", value)
 	}
 }

@@ -133,14 +133,13 @@ func (s *chartService) GetData(ctx context.Context, id int) (entity.ChartDataRes
 	}
 	defer conn.Close()
 
-	// Build query based on dataset type
-	baseQuery, err := getBaseQuery(dataset)
-	if err != nil {
-		return entity.ChartDataResult{}, err
+	// Build query based on dataset type via the query package
+	source := getPlannerSource(dataset)
+	if source == "" {
+		return entity.ChartDataResult{}, fmt.Errorf("dataset has no valid query_sql or table_name")
 	}
-
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT 100", baseQuery)
-	result, err := conn.Execute(ctx, query)
+	dataSQL := query.WrapPreviewSQL(source, getPlannerSourceType(dataset), 100)
+	result, err := conn.Execute(ctx, dataSQL)
 	if err != nil {
 		return entity.ChartDataResult{}, fmt.Errorf("query failed: %w", err)
 	}
@@ -279,16 +278,6 @@ func (s *chartService) connect(ctx context.Context, ds *model.Datasource) (datas
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 	return conn, nil
-}
-
-func getBaseQuery(ds *model.Dataset) (string, error) {
-	if ds.QueryType == "sql" && ds.QuerySQL.Valid {
-		return fmt.Sprintf("(%s) as _subq", ds.QuerySQL.String), nil
-	}
-	if ds.TableName.Valid {
-		return ds.TableName.String, nil
-	}
-	return "", fmt.Errorf("dataset has no valid query_sql or table_name")
 }
 
 // Conversion functions
