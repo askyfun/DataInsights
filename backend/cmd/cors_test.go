@@ -29,6 +29,9 @@ func TestCORSAllowsConfiguredOrigin(t *testing.T) {
 	if w2.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("unexpected origin allowed: %q", w2.Header().Get("Access-Control-Allow-Origin"))
 	}
+	if got := w2.Header().Get("Vary"); got != "Origin" {
+		t.Fatalf("expected Vary: Origin on non-allowed origin response, got %q", got)
+	}
 }
 
 func TestCORSPreflightAllowedOrigin(t *testing.T) {

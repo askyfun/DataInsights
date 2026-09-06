@@ -42,6 +42,40 @@ func TestHealthRouteUsesUnifiedResponse(t *testing.T) {
 	}
 }
 
+// TestSentryPanicPathReturns500 验证 panic 场景不会变成 200 空响应：
+// sentrygin 默认吞 panic，生产配置必须 Repanic: true 让 panic 穿透到外层
+// gin Recovery（gin.Default()），从而返回 500。
+func TestSentryPanicPathReturns500(t *testing.T) {
+	t.Run("sentrygin mounted with repanic", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.Use(gin.Recovery()) // 模拟 gin.Default() 的外层 Recovery
+		r.Use(newSentryginMiddleware())
+		r.GET("/boom", func(c *gin.Context) { panic("boom") })
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/boom", nil))
+
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 after panic, got %d", w.Code)
+		}
+	})
+
+	t.Run("sentry not active, sentrygin not mounted", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.Use(gin.Recovery())
+		r.GET("/boom", func(c *gin.Context) { panic("boom") })
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/boom", nil))
+
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 after panic, got %d", w.Code)
+		}
+	})
+}
+
 func TestRequestIDMiddlewareGeneratesRandomID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

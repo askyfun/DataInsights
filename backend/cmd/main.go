@@ -39,7 +39,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if initSentry(c.Sentry.Dsn) {
+	sentryActive := initSentry(c.Sentry.Dsn)
+	if sentryActive {
 		defer sentry.Flush(2 * time.Second)
 	}
 
@@ -57,8 +58,8 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	if c.Sentry.Dsn != "" {
-		r.Use(sentrygin.New(sentrygin.Options{}))
+	if sentryActive {
+		r.Use(newSentryginMiddleware())
 	}
 
 	// CORS middleware
@@ -152,8 +153,10 @@ func corsMiddleware(origins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		if origin != "" {
+			// Vary on every response carrying an Origin (hit or miss) so shared
+			// caches never serve one origin's CORS verdict to another origin.
+			c.Writer.Header().Add("Vary", "Origin")
 			if _, ok := allowed[origin]; ok {
-				c.Writer.Header().Add("Vary", "Origin")
 				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 				c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD")
 				c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
@@ -166,6 +169,14 @@ func corsMiddleware(origins []string) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// newSentryginMiddleware builds the Sentry gin middleware. Repanic is required:
+// without it sentrygin swallows panics and never re-raises, so the outer
+// gin.Recovery never fires and clients get a 200 with an empty body instead of
+// a 500 through the unified response wrapping.
+func newSentryginMiddleware() gin.HandlerFunc {
+	return sentrygin.New(sentrygin.Options{Repanic: true})
 }
 
 // initSentry initializes Sentry when a DSN is configured and reports whether the
