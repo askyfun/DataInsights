@@ -30,7 +30,6 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 │   ├── internal/
 │   │   ├── config/           # 配置加载 (TOML)
 │   │   ├── database/         # 数据库连接与事务抽象（WithTx）
-│   │   ├── migrations/       # goose 版本化迁移（embed.FS 内嵌）
 │   │   ├── crypto/           # AES-GCM 加解密（DATARAY_SECURITY_KEY）
 │   │   ├── domain/entity/    # 领域实体类型
 │   │   ├── query/            # SQL 构造唯一出口（AST + bun_builder + raw.go）
@@ -41,6 +40,7 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 │   │   │   ├── clickhouse.go
 │   │   │   └── starrocks.go
 │   │   └── model/            # 数据模型
+│   ├── migrations/           # goose 版本化迁移（embed.FS 内嵌）
 │   ├── etc/config.toml       # 配置文件
 │   └── go.mod
 ├── Makefile
