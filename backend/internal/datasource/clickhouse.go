@@ -73,6 +73,9 @@ func (c *clickhouseConnection) GetTables(ctx context.Context) ([]TableInfo, erro
 }
 
 func (c *clickhouseConnection) GetColumns(ctx context.Context, tableName string) ([]ColumnInfo, error) {
+	if !IsValidIdentifier(tableName) {
+		return nil, fmt.Errorf("invalid table name: %q", tableName)
+	}
 	query := fmt.Sprintf("SELECT name, type, comment FROM system.columns WHERE table = '%s' AND database = currentDatabase() ORDER BY position", tableName)
 	rows, err := c.conn.Query(ctx, query)
 	if err != nil {

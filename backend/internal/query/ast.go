@@ -2,6 +2,8 @@ package query
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -80,6 +82,38 @@ type SortExpr struct {
 	Field     string
 	FieldExpr string
 	Order     string
+}
+
+// granularityTokenPattern 限制时间粒度为纯小写字母/下划线 token。
+// 粒度值来自请求 JSON 且会被拼入 SQL 表达式（如 DATE_TRUNC('%s', ...)），必须先过白名单形态。
+var granularityTokenPattern = regexp.MustCompile(`^[a-z_]+$`)
+
+// ValidateGranularity 校验 AST 中带时间粒度的维度在目标方言下可被正确渲染。
+// 调用场景：executor 在生成 SQL 前调用，使 MySQL/ClickHouse 下不支持的粒度
+// （如 week/month）显式报错，而不是静默降级为原始字段并产出错误的分组结果；
+// 同时拒绝含引号/括号等注入字符的粒度值。
+func (q *QueryAST) ValidateGranularity(dialect DialectType) error {
+	for _, dim := range q.DimensionExprs {
+		if dim.Granularity == "" {
+			continue
+		}
+		if !granularityTokenPattern.MatchString(dim.Granularity) {
+			return fmt.Errorf("invalid time granularity: %q", dim.Granularity)
+		}
+		switch dialect {
+		case DialectPostgreSQL:
+			// DATE_TRUNC 支持任意标准粒度，由数据库校验具体值。
+		case DialectMySQL, DialectClickHouse:
+			if dim.Granularity != "day" {
+				return fmt.Errorf("time granularity %q is not supported on dialect %s: only \"day\" is supported", dim.Granularity, dialect)
+			}
+		default:
+			if dim.Granularity != "day" {
+				return fmt.Errorf("time granularity %q is not supported on dialect %s: only \"day\" is supported", dim.Granularity, dialect)
+			}
+		}
+	}
+	return nil
 }
 
 // ApplyColumnMappings 将列映射回填到已规划的 AST 上。

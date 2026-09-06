@@ -174,7 +174,7 @@ func TestBunQueryBuilder_WithSort(t *testing.T) {
 
 	t.Logf("Generated SQL: %s", sql)
 
-	expected := "SELECT product, SUM(revenue) AS total_revenue FROM sales GROUP BY product ORDER BY total_revenue desc"
+	expected := "SELECT product, SUM(revenue) AS total_revenue FROM sales GROUP BY product ORDER BY total_revenue DESC"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -198,7 +198,7 @@ func TestBunQueryBuilder_SortWithPagination(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 
 	// 分页查询必须保留 ORDER BY，否则分页结果不确定
-	expected := "SELECT status, SUM(amount) AS total_amount FROM orders GROUP BY status ORDER BY total_amount desc LIMIT 20 OFFSET 20"
+	expected := "SELECT status, SUM(amount) AS total_amount FROM orders GROUP BY status ORDER BY total_amount DESC LIMIT 20 OFFSET 20"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}

@@ -151,7 +151,7 @@ func (qb *BunQueryBuilder) BuildSelectQuery(ast *QueryAST) (string, []interface{
 		sb.WriteString(" ORDER BY ")
 		sb.WriteString(safeIdentifier(ast.Sort.FieldExpr))
 		sb.WriteString(" ")
-		sb.WriteString(ast.Sort.Order)
+		sb.WriteString(normalizeSortOrder(ast.Sort.Order))
 	}
 
 	// LIMIT/OFFSET 子句 - 直接嵌入数值，因为某些数据库驱动不支持预处理语句的 ? 占位符用于 LIMIT/OFFSET

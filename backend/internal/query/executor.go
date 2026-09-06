@@ -67,6 +67,9 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		ast.SourceType = sourceType
 	}
 
+	if err := ast.ValidateGranularity(dialect); err != nil {
+		return ExecutorResult{}, err
+	}
 	sql, countSQL, args := BuildQueryStringWithBun(dialect, ast)
 	slog.Debug("generated SQL", "select", sql, "count", countSQL, "args", args)
 

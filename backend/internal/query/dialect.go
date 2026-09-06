@@ -111,7 +111,7 @@ func (b *baseSQLBuilder) buildOrderByClause(ast *QueryAST) string {
 	if ast.Sort == nil {
 		return ""
 	}
-	return fmt.Sprintf("ORDER BY %s %s", ast.Sort.FieldExpr, ast.Sort.Order)
+	return fmt.Sprintf("ORDER BY %s %s", ast.Sort.FieldExpr, normalizeSortOrder(ast.Sort.Order))
 }
 
 func (b *baseSQLBuilder) buildLimitClause(ast *QueryAST) string {
@@ -293,7 +293,7 @@ func NewSQLBuilder(dialect DialectType) SQLBuilder {
 
 func ParseDialect(s string) DialectType {
 	switch strings.ToLower(s) {
-	case "mysql":
+	case "mysql", "starrocks":
 		return DialectMySQL
 	case "postgresql", "postgres":
 		return DialectPostgreSQL
