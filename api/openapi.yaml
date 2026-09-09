@@ -1,0 +1,96 @@
+# DataRay API 契约（单一权威来源）
+#
+# 修改接口时：先改本文件 → `make api-gen` 双端重新生成 → 双端消费生成物。
+# 禁止直接编辑生成物（backend/internal/idls/gen_types.go、frontend/src/idls/gen_types.ts）。
+openapi: 3.0.3
+info:
+  title: DataRay API
+  description: |
+    拖拽式 BI 可视化分析平台 API。
+
+    ## 响应契约
+    所有端点（含 /health）HTTP 状态码恒为 200；业务结果由响应体 Envelope 表达：
+    `{ code, msg, trace, data }`。code 枚举与
+    `backend/internal/response/response.go` 的常量一一对应
+    （20000 成功，20100–20500 客户端/业务错误，50000 服务端内部错误）。
+
+    data 在错误或无数据时统一归一化为空对象 `{}` / 空数组 `[]`，不会出现 null。
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+    description: 本地开发后端
+tags:
+  - name: health
+    description: 健康检查（响应 Envelope 建模样例）
+paths:
+  /health:
+    get:
+      tags:
+        - health
+      summary: 健康检查
+      description: 样例端点，验证统一响应 Envelope 的契约建模。
+      operationId: getHealth
+      responses:
+        '200':
+          description: HTTP 恒 200；服务健康由 Envelope.code = 20000 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+components:
+  schemas:
+    ResponseCode:
+      type: integer
+      description: |
+        业务状态码，与 backend/internal/response/response.go 常量一一对应。
+      enum:
+        - 20000
+        - 20100
+        - 20200
+        - 20300
+        - 20400
+        - 20500
+        - 50000
+      x-enum-varnames:
+        - CodeSuccess
+        - CodeBadRequest
+        - CodeUnauthorized
+        - CodeNotFound
+        - CodeBusinessError
+        - CodeThirdPartyErr
+        - CodeInternalError
+    Envelope:
+      type: object
+      description: 统一响应封装；HTTP 状态码恒为 200，业务状态由 code 表达。
+      required:
+        - code
+        - msg
+        - trace
+        - data
+      properties:
+        code:
+          $ref: '#/components/schemas/ResponseCode'
+        msg:
+          type: string
+          description: 提示消息；成功为 "success"，错误为可读错误描述
+        trace:
+          type: string
+          description: 请求追踪 ID（X-Request-ID）
+        data:
+          description: 业务数据；错误或无数据时为空对象 {}，不为 null
+    HealthData:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: ok
+    HealthResponse:
+      description: GET /health 响应：Envelope 特化 data 为 HealthData。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/HealthData'

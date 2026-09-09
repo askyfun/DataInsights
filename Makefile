@@ -6,7 +6,7 @@ YELLOW := \033[0;33m
 BLUE := \033[0;34m
 NC := \033[0m # No Color
 
-.PHONY: help install dev dev-frontend dev-backend build build-frontend build-backend docker-up docker-down docker-logs clean
+.PHONY: help install dev dev-frontend dev-backend build build-frontend build-backend api-gen docker-up docker-down docker-logs clean
 
 # 默认目标
 help:
@@ -26,6 +26,9 @@ help:
 	@echo "  make build            构建前后端"
 	@echo "  make build-frontend   构建前端"
 	@echo "  make build-backend    构建后端"
+	@echo ""
+	@echo "$(GREEN)API 契约:$NC"
+	@echo "  make api-gen          从 api/openapi.yaml 生成双端类型 (Go + TS)"
 	@echo ""
 	@echo "$(GREEN)Docker:$NC"
 	@echo "  make docker-up        启动 Docker 容器"
@@ -75,6 +78,13 @@ build-frontend:
 build-backend:
 	@echo "$(YELLOW)构建后端...$(NC)"
 	cd backend && go build -o bin/server cmd/main.go
+
+# 从 api/openapi.yaml 生成双端契约类型（backend/internal/idls 与 frontend/src/idls）
+api-gen:
+	@echo "$(YELLOW)生成后端契约类型 (oapi-codegen)...$(NC)"
+	cd backend && go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen -config ../api/gen/backend.cfg.yaml ../api/openapi.yaml
+	@echo "$(YELLOW)生成前端契约类型 (openapi-typescript)...$(NC)"
+	cd frontend && pnpm api:gen
 
 # Docker
 docker-up:

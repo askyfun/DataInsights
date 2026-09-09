@@ -1,0 +1,6 @@
+# oapi-codegen 配置：仅生成模型类型（不要 server stub）。
+# 产物为纯生成类型包，禁止手改；重新生成入口：仓库根 `make api-gen`。
+package: idls
+generate:
+  models: true
+output: internal/idls/gen_types.go

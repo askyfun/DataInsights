@@ -13,7 +13,8 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "build:check": "pnpm check && pnpm test"
+    "build:check": "pnpm check && pnpm test",
+    "api:gen": "openapi-typescript ../api/openapi.yaml -o src/idls/gen_types.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^6.2.2",
@@ -41,6 +42,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "jsdom": "^29.1.1",
     "lint-staged": "^16.4.0",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.3",
     "vitest": "^4.1.5"
