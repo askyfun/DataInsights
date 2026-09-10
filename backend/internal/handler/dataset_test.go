@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"dataray/internal/domain/entity"
+	"dataray/internal/router"
 	"dataray/internal/service/dataset"
 
 	"github.com/gin-gonic/gin"
@@ -85,23 +86,23 @@ func (m *mockDatasetService) Query(ctx context.Context, id int, config entity.Qu
 	return nil, nil
 }
 
-// newDatasetTestRouter mirrors the dataset section of cmd/routes.go exactly
-// as it is registered today. During the Batch 2 migration only this wiring
-// helper changes; every response-body assertion below must keep passing
-// byte-for-byte before and after migration — that is the zero-behavior-change
-// guard (same contract as datasource_test.go's newDatasourceTestRouter).
+// newDatasetTestRouter mirrors the dataset section of cmd/routes.go.
+// During the Batch 2 migration only this wiring helper changes; every
+// response-body assertion below must keep passing byte-for-byte before and
+// after migration — that is the zero-behavior-change guard (same contract as
+// newDatasourceTestRouter in datasource_test.go).
 func newDatasetTestRouter(h *DatasetHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	datasets := r.Group("/api/datasets")
-	datasets.GET("", h.List)
-	datasets.POST("", h.Create)
-	datasets.GET("/:id", h.Get)
-	datasets.DELETE("/:id", h.Delete)
-	datasets.GET("/:id/columns", h.GetColumns)
-	datasets.POST("/:id/columns", h.UpdateColumns)
-	datasets.GET("/:id/preview", h.Preview)
-	datasets.POST("/:id/query", h.Query)
+	router.RegisterGetRoute(datasets, "", h.List)
+	router.RegisterPostRoute(datasets, "", h.Create)
+	router.RegisterGetRoute(datasets, "/:id", h.Get)
+	router.RegisterDeleteRoute(datasets, "/:id", h.Delete)
+	router.RegisterGetRoute(datasets, "/:id/columns", h.GetColumns)
+	router.RegisterPostRoute(datasets, "/:id/columns", h.UpdateColumns)
+	router.RegisterGetRoute(datasets, "/:id/preview", h.Preview)
+	router.RegisterPostRoute(datasets, "/:id/query", h.Query)
 	return r
 }
 
@@ -305,9 +306,11 @@ func TestDatasetCreate_EmptyBody(t *testing.T) {
 }
 
 func TestDatasetCreate_TypeMismatchBody(t *testing.T) {
-	// PRE-MIGRATION baseline: the old handler binds an anonymous struct, so
-	// the json error carries an empty struct name. Migration replaces it with
-	// the named In type (accepted unavoidable diff #1 in the package doc).
+	// Accepted unavoidable diff #1 (datasource package doc): the named In
+	// type leaks into the json bind-error text. Pre-migration the handler
+	// bound an anonymous struct, so the old message was
+	// "…Go struct field .datasource_id…"; the datasource baseline
+	// (datasourceUpdateIn.port) pins the same class of change.
 	h := NewDatasetHandler(&mockDatasetService{
 		createFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
 			t.Fatal("Create must not be called when the body fails to bind")
@@ -315,7 +318,7 @@ func TestDatasetCreate_TypeMismatchBody(t *testing.T) {
 		},
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets", `{"name":"x","datasource_id":"abc"}`)
-	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field .datasource_id of type int","trace":"","data":{}}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field datasetCreateIn.datasource_id of type int","trace":"","data":{}}`)
 }
 
 func TestDatasetCreate_QueryMustNotPolluteBody(t *testing.T) {
@@ -471,13 +474,14 @@ func TestDatasetUpdateColumns_InvalidIDValidBody(t *testing.T) {
 	assertBody(t, w, badRequestInvalidID)
 }
 
-func TestDatasetUpdateColumns_InvalidIDAndEmptyBody(t *testing.T) {
-	// PRE-MIGRATION baseline for a doubly-invalid path+body request: the old
-	// handler parses the id first, so "invalid id" wins over the body-bind
-	// error. After migration the generic router binds the body before the
-	// API runs and this answers "EOF" instead — the accepted unavoidable
-	// diff #2 documented in the datasource package doc (see the datasource
-	// Test*_InvalidIDPrefersBodyBindError baselines for the same flip).
+func TestDatasetUpdateColumns_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
+	// Pinned accepted unavoidable diff #2 (datasource package doc): the
+	// generic router binds the POST body before the handler parses the path
+	// id, so a request carrying BOTH an unparseable :id AND an empty body
+	// answers with the body-bind error ("EOF") where the pre-migration
+	// handler answered "invalid id". Same shape as the datasource
+	// Test*_InvalidIDPrefersBodyBindError baselines. Requests valid on
+	// either input are unaffected (see InvalidIDValidBody / EmptyBody above).
 	h := NewDatasetHandler(&mockDatasetService{
 		updateColumnsFunc: func(_ context.Context, _ int, _ []entity.DatasetColumn) (*entity.Dataset, error) {
 			t.Fatal("UpdateColumns must not run when both inputs are invalid")
@@ -485,7 +489,7 @@ func TestDatasetUpdateColumns_InvalidIDAndEmptyBody(t *testing.T) {
 		},
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets/abc/columns", "")
-	assertBody(t, w, badRequestInvalidID)
+	assertBody(t, w, badRequestEOF)
 }
 
 func TestDatasetUpdateColumns_TypeMismatchBody(t *testing.T) {
@@ -594,11 +598,10 @@ func TestDatasetQuery_InvalidIDValidBody(t *testing.T) {
 	assertBody(t, w, badRequestInvalidID)
 }
 
-func TestDatasetQuery_InvalidIDAndEmptyBody(t *testing.T) {
-	// PRE-MIGRATION baseline for a doubly-invalid path+body request: old
-	// handler parses the id first, so "invalid id" wins. Post-migration the
-	// router's body bind answers "EOF" — accepted unavoidable diff #2, same
-	// flip as the datasource Test*_InvalidIDPrefersBodyBindError baselines.
+func TestDatasetQuery_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
+	// Pinned accepted unavoidable diff #2 (see the UpdateColumns twin):
+	// invalid :id + empty body now answers "EOF" (body bound before the
+	// path id), where the pre-migration handler answered "invalid id".
 	h := NewDatasetHandler(&mockDatasetService{
 		queryFunc: func(_ context.Context, _ int, _ entity.QueryConfig) ([]map[string]any, error) {
 			t.Fatal("Query must not run when both inputs are invalid")
@@ -606,13 +609,18 @@ func TestDatasetQuery_InvalidIDAndEmptyBody(t *testing.T) {
 		},
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets/abc/query", "")
-	assertBody(t, w, badRequestInvalidID)
+	assertBody(t, w, badRequestEOF)
 }
 
 func TestDatasetQuery_TypeMismatchBody(t *testing.T) {
-	// PRE-MIGRATION baseline: error text names the shared entity struct
-	// QueryConfig. Migration binds a handler-local In type instead, so the
-	// struct name changes (accepted unavoidable diff #1).
+	// Accepted unavoidable diff #1 (datasource package doc): the migration
+	// binds a handler-local mirror struct with form:"-" (entity.QueryConfig
+	// cannot carry the tags), so the struct name in the json error changes
+	// from "QueryConfig.limit" to "datasetQueryIn.limit". Using
+	// entity.QueryConfig directly as In would keep this message identical
+	// but let query params leak into the body (ShouldBindQuery falls back to
+	// Go field names), a worse contract break; the tradeoff is ruled in
+	// task-5-report.md.
 	h := NewDatasetHandler(&mockDatasetService{
 		queryFunc: func(_ context.Context, _ int, _ entity.QueryConfig) ([]map[string]any, error) {
 			t.Fatal("Query must not be called when the body fails to bind")
@@ -620,7 +628,7 @@ func TestDatasetQuery_TypeMismatchBody(t *testing.T) {
 		},
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets/4/query", `{"limit":"abc"}`)
-	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field QueryConfig.limit of type int","trace":"","data":{}}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field datasetQueryIn.limit of type int","trace":"","data":{}}`)
 }
 
 func TestDatasetQuery_ServiceError(t *testing.T) {

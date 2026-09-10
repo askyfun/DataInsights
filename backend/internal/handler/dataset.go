@@ -5,9 +5,8 @@ import (
 
 	"dataray/internal/domain/entity"
 	"dataray/internal/response"
+	"dataray/internal/router"
 	"dataray/internal/service/dataset"
-
-	"github.com/gin-gonic/gin"
 )
 
 // DatasetHandler handles dataset HTTP requests
@@ -20,75 +19,109 @@ func NewDatasetHandler(svc dataset.Service) *DatasetHandler {
 	return &DatasetHandler{svc: svc}
 }
 
-// List handles GET /api/datasets
-func (h *DatasetHandler) List(c *gin.Context) {
-	limit, offset := getPaginationParams(c)
+// datasetPathIn is the In shape for routes that carry only the path id:
+// nothing to bind, the id is read from req.Ctx (see the datasource package
+// doc, which is the project-wide migration reference).
+type datasetPathIn struct{}
 
-	datasets, err := h.svc.List(c.Request.Context(), limit, offset)
+// datasetStatusOut is the {"status":"ok"} payload for Delete (previously
+// gin.H{"status": "ok"}).
+type datasetStatusOut struct {
+	Status string `json:"status"`
+}
+
+// datasetListIn carries the pagination query params for List. Values are
+// bound as strings so non-numeric input keeps the pre-migration
+// fall-back-to-default behaviour instead of turning into a 400 bind error.
+type datasetListIn struct {
+	Limit  string `form:"limit"`
+	Offset string `form:"offset"`
+}
+
+// pagination is the List binding post-processing step: it reproduces the
+// old getPaginationParams defaults and clamps exactly (limit=100 when
+// missing/garbage/out of range, offset>=0).
+func (in datasetListIn) pagination() (limit, offset int) {
+	limit, _ = strconv.Atoi(orDefault(in.Limit, "100"))
+	offset, _ = strconv.Atoi(orDefault(in.Offset, "0"))
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return
+}
+
+// List handles GET /api/datasets
+func (h *DatasetHandler) List(req router.Request[datasetListIn], res *router.Response[[]entity.Dataset]) error {
+	limit, offset := req.In.pagination()
+
+	datasets, err := h.svc.List(req.Ctx.Request.Context(), limit, offset)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
 	if datasets == nil {
 		datasets = []entity.Dataset{}
 	}
-	response.Success(c, datasets)
+	res.Out = datasets
+	return nil
 }
 
 // Get handles GET /api/datasets/:id
-func (h *DatasetHandler) Get(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasetHandler) Get(req router.Request[datasetPathIn], res *router.Response[*entity.Dataset]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	ds, err := h.svc.GetByID(c.Request.Context(), id)
+	ds, err := h.svc.GetByID(req.Ctx.Request.Context(), id)
 	if err != nil {
-		response.NotFound(c, err.Error())
-		return
+		return router.NewBusinessError(response.CodeNotFound, err.Error())
 	}
-	response.Success(c, ds)
+	res.Out = ds
+	return nil
+}
+
+// datasetCreateIn is the JSON body of POST /api/datasets. Every field
+// carries form:"-" so the router's ShouldBindQuery pass cannot touch the
+// body struct (see the datasource package doc).
+type datasetCreateIn struct {
+	Name         string `json:"name" form:"-"`
+	DatasourceID int    `json:"datasource_id" form:"-"`
+	TableName    string `json:"table_name" form:"-"`
+	QuerySQL     string `json:"query_sql" form:"-"`
+	QueryType    string `json:"query_type" form:"-"`
+	Mode         string `json:"mode" form:"-"`
+	Description  string `json:"description" form:"-"`
+	Tags         string `json:"tags" form:"-"`
+	Columns      string `json:"columns" form:"-"`
+	ShardEnabled bool   `json:"shard_enabled" form:"-"`
+	ShardKeys    string `json:"shard_keys" form:"-"`
 }
 
 // Create handles POST /api/datasets
-func (h *DatasetHandler) Create(c *gin.Context) {
-	var req struct {
-		Name         string `json:"name"`
-		DatasourceID int    `json:"datasource_id"`
-		TableName    string `json:"table_name"`
-		QuerySQL     string `json:"query_sql"`
-		QueryType    string `json:"query_type"`
-		Mode         string `json:"mode"`
-		Description  string `json:"description"`
-		Tags         string `json:"tags"`
-		Columns      string `json:"columns"`
-		ShardEnabled bool   `json:"shard_enabled"`
-		ShardKeys    string `json:"shard_keys"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
+func (h *DatasetHandler) Create(req router.Request[datasetCreateIn], res *router.Response[*entity.Dataset]) error {
+	in := req.In
 
 	ds := &entity.Dataset{
-		Name:         req.Name,
-		DatasourceID: req.DatasourceID,
-		QueryType:    req.QueryType,
-		Mode:         req.Mode,
-		Tags:         req.Tags,
-		Columns:      req.Columns,
-		ShardEnabled: req.ShardEnabled,
-		ShardKeys:    req.ShardKeys,
+		Name:         in.Name,
+		DatasourceID: in.DatasourceID,
+		QueryType:    in.QueryType,
+		Mode:         in.Mode,
+		Tags:         in.Tags,
+		Columns:      in.Columns,
+		ShardEnabled: in.ShardEnabled,
+		ShardKeys:    in.ShardKeys,
 	}
-	if req.TableName != "" {
-		ds.TableName = &req.TableName
+	if in.TableName != "" {
+		ds.TableName = &in.TableName
 	}
-	if req.QuerySQL != "" {
-		ds.QuerySQL = &req.QuerySQL
+	if in.QuerySQL != "" {
+		ds.QuerySQL = &in.QuerySQL
 	}
-	if req.Description != "" {
-		ds.Description = &req.Description
+	if in.Description != "" {
+		ds.Description = &in.Description
 	}
 	if ds.QueryType == "" {
 		ds.QueryType = "table"
@@ -106,101 +139,113 @@ func (h *DatasetHandler) Create(c *gin.Context) {
 		ds.Columns = "[]"
 	}
 
-	result, err := h.svc.Create(c.Request.Context(), ds)
+	result, err := h.svc.Create(req.Ctx.Request.Context(), ds)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
 }
 
 // Delete handles DELETE /api/datasets/:id
-func (h *DatasetHandler) Delete(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasetHandler) Delete(req router.Request[datasetPathIn], res *router.Response[datasetStatusOut]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
-		response.InternalError(c, err.Error())
-		return
+	if err := h.svc.Delete(req.Ctx.Request.Context(), id); err != nil {
+		return err
 	}
-	response.Success(c, gin.H{"status": "ok"})
+	res.Out = datasetStatusOut{Status: "ok"}
+	return nil
 }
 
-// GetColumns handles GET /api/datasets/:id/columns
-func (h *DatasetHandler) GetColumns(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+// GetColumns handles GET /api/datasets/:id/columns. The Out keeps the
+// entity.DatasetColumn projection (key order follows the struct tags).
+func (h *DatasetHandler) GetColumns(req router.Request[datasetPathIn], res *router.Response[[]entity.DatasetColumn]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	columns, err := h.svc.GetColumns(c.Request.Context(), id)
+	columns, err := h.svc.GetColumns(req.Ctx.Request.Context(), id)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, columns)
+	res.Out = columns
+	return nil
 }
 
-// UpdateColumns handles POST /api/datasets/:id/columns
-func (h *DatasetHandler) UpdateColumns(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+// UpdateColumns handles POST /api/datasets/:id/columns. The In is the bare
+// []entity.DatasetColumn slice (not a wrapper object, and deliberately not a
+// named alias: the name would leak into the json bind-error text, breaking
+// the pre-migration message). ShouldBindQuery on a non-struct In is a no-op,
+// so query params cannot reach the body.
+func (h *DatasetHandler) UpdateColumns(req router.Request[[]entity.DatasetColumn], res *router.Response[*entity.Dataset]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	var columns []entity.DatasetColumn
-	if err := c.ShouldBindJSON(&columns); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-
-	result, err := h.svc.UpdateColumns(c.Request.Context(), id, columns)
+	result, err := h.svc.UpdateColumns(req.Ctx.Request.Context(), id, req.In)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
 }
 
-// Preview handles GET /api/datasets/:id/preview
-func (h *DatasetHandler) Preview(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+// Preview handles GET /api/datasets/:id/preview. Unlike the datasource
+// Preview this route is a bodyless GET, so it has no path+body bind shape.
+func (h *DatasetHandler) Preview(req router.Request[datasetPathIn], res *router.Response[*entity.PreviewResult]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	result, err := h.svc.Preview(c.Request.Context(), id)
+	result, err := h.svc.Preview(req.Ctx.Request.Context(), id)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
+}
+
+// datasetQueryIn mirrors entity.QueryConfig (the JSON body of
+// POST /api/datasets/:id/query) with form:"-" on every field so the
+// router's ShouldBindQuery pass cannot read query params into the body
+// struct. The entity itself cannot carry the tags (shared domain type),
+// so the handler keeps a local mirror and converts.
+type datasetQueryIn struct {
+	DimensionGroups []entity.FieldGroup `json:"dimension_groups" form:"-"`
+	MetricGroups    []entity.FieldGroup `json:"metric_groups" form:"-"`
+	Filters         []entity.Filter     `json:"filters" form:"-"`
+	Sort            *entity.SortConfig  `json:"sort" form:"-"`
+	Limit           int                 `json:"limit" form:"-"`
+}
+
+func (in datasetQueryIn) toQueryConfig() entity.QueryConfig {
+	return entity.QueryConfig{
+		DimensionGroups: in.DimensionGroups,
+		MetricGroups:    in.MetricGroups,
+		Filters:         in.Filters,
+		Sort:            in.Sort,
+		Limit:           in.Limit,
+	}
 }
 
 // Query handles POST /api/datasets/:id/query
-func (h *DatasetHandler) Query(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasetHandler) Query(req router.Request[datasetQueryIn], res *router.Response[[]map[string]any]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	var config entity.QueryConfig
-	if err := c.ShouldBindJSON(&config); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-
-	result, err := h.svc.Query(c.Request.Context(), id, config)
+	result, err := h.svc.Query(req.Ctx.Request.Context(), id, req.In.toQueryConfig())
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
 }

@@ -46,16 +46,16 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte) {
 	router.RegisterPostRoute(ds, "/:id/preview", datasourceHandler.Preview)
 	router.RegisterPostRoute(ds, "/:id/field-distribution", datasourceHandler.GetFieldDistribution)
 
-	// Dataset routes
+	// Dataset routes (generic router)
 	datasets := api.Group("/datasets")
-	datasets.GET("", datasetHandler.List)
-	datasets.POST("", datasetHandler.Create)
-	datasets.GET("/:id", datasetHandler.Get)
-	datasets.DELETE("/:id", datasetHandler.Delete)
-	datasets.GET("/:id/columns", datasetHandler.GetColumns)
-	datasets.POST("/:id/columns", datasetHandler.UpdateColumns)
-	datasets.GET("/:id/preview", datasetHandler.Preview)
-	datasets.POST("/:id/query", datasetHandler.Query)
+	router.RegisterGetRoute(datasets, "", datasetHandler.List)
+	router.RegisterPostRoute(datasets, "", datasetHandler.Create)
+	router.RegisterGetRoute(datasets, "/:id", datasetHandler.Get)
+	router.RegisterDeleteRoute(datasets, "/:id", datasetHandler.Delete)
+	router.RegisterGetRoute(datasets, "/:id/columns", datasetHandler.GetColumns)
+	router.RegisterPostRoute(datasets, "/:id/columns", datasetHandler.UpdateColumns)
+	router.RegisterGetRoute(datasets, "/:id/preview", datasetHandler.Preview)
+	router.RegisterPostRoute(datasets, "/:id/query", datasetHandler.Query)
 
 	// Chart routes
 	charts := api.Group("/charts")
