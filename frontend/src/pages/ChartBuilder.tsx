@@ -927,7 +927,7 @@ const ChartBuilder: React.FC = () => {
       const field = chartBuilderFields.find((field) => field.id === f.field);
       return {
         field: field?.name || f.field,
-        op: f.operator as any,
+        operator: f.operator,
         value: f.value,
         value_end: (f as any).valueEnd,
         logic: f.logic,
@@ -1072,7 +1072,7 @@ const ChartBuilder: React.FC = () => {
         const field = state.chartBuilderFields.find((field) => field.id === f.field);
         return {
           field: field?.name || f.field,
-          op: f.operator as any,
+          operator: f.operator,
           value: f.value,
           value_end: (f as any).valueEnd,
           logic: f.logic,
@@ -1126,7 +1126,7 @@ const ChartBuilder: React.FC = () => {
         const field = chartBuilderFields.find((field) => field.id === f.field);
         return {
           field: field?.name || f.field,
-          op: f.operator as any,
+          operator: f.operator,
           value: f.value,
           value_end: (f as any).valueEnd,
           logic: f.logic,

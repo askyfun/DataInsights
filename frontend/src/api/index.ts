@@ -191,7 +191,7 @@ export interface ChartQueryMetric {
 
 export interface ChartQueryFilter {
   field: string;
-  op:
+  operator:
     | 'eq'
     | 'neq'
     | 'gt'

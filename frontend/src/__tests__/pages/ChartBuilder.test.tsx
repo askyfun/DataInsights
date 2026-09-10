@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { AxiosResponse } from 'axios';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -483,6 +483,35 @@ describe('ChartBuilder', () => {
         metrics: [{ field: 'revenue', agg: 'sum', alias: 'revenue' }],
       })
     );
+  });
+
+  it('sends filters with the operator key to match the backend entity.Filter contract', async () => {
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      useStore.getState().addFilter({
+        id: 'filter-gt-1',
+        field: 'field-0',
+        operator: 'gt',
+        value: 100,
+        logic: 'and',
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(2);
+    });
+
+    const request = mockExecuteChartQuery.mock.calls[1][0];
+    expect(request.filters).toHaveLength(1);
+    expect(request.filters[0]).toEqual(
+      expect.objectContaining({ field: 'region', operator: 'gt', value: 100, logic: 'and' })
+    );
+    expect(request.filters[0]).not.toHaveProperty('op');
   });
 
   it('loads sparse saved metric groups without crashing and normalizes them for scatter charts', async () => {

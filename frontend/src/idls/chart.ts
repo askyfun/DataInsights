@@ -51,7 +51,7 @@ export type ChartQueryFilterOp =
 
 export interface ChartQueryFilter {
   field: string;
-  op: ChartQueryFilterOp;
+  operator: ChartQueryFilterOp;
   value: unknown;
   value_end?: unknown;
   logic: 'and' | 'or';
