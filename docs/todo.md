@@ -532,5 +532,12 @@
 - [ ] **ghost 路由 bug**：`datasetsApi.update` 调用 `PUT /api/datasets/:id`，后端无此路由（`gen put?: never`），DatasetEdit 保存实际会 404；载荷 `tags`/`shard_keys` 数组 vs JSON 字符串也不匹配 → 补后端端点或调整前端编辑路径
 - [ ] **`ChartQueryRequest.config` 幽灵字段**：前端仍发送 `config.query_options.pie_merge_other_below_ratio`，后端 entity/handler 不解析、静默丢弃 → 决定后端接入或前端移除（pie 合并其他比例功能）
 - [ ] **`lib/api/client.ts:120` baseURL 尾部多余 `}`**：当前无调用方（仅 `ApiResponse` 类型被引用），一旦被路由调用即暴露 → 顺手修
-- [ ] ChartBuilder 三处 filters 构造点合并；`/datasets/new` 路由（React Router v6 静态段优先于动态段，经 E2E 确认无 bug，非待办）
+- [ ] ChartBuilder 三处 filters 构造点合并；`/datasets/new` 路由（React Router v6 静态段优先于动态段，经 E2E 确认非 bug——实际命中 DatasetEdit 后其 new 模式重定向回列表，属既有产品设计，App.tsx 本批未改）
+- [ ] **漂移 #2（body 优先于 path）pin 不均衡**：`GetFieldDistribution` 缺"双非法"（unparseable :id + 空/坏 body）pin（现仅分别覆盖 id 非法+body 合法、id 合法+body 空），`Preview`/dataset `Query`/`UpdateColumns`/share `Verify` 仅 EmptyBody 变体、缺 MalformedBody 孪生（各任务评审时已记为 minor 并显式延后）—— Batch 3 统一补齐 baseline
+- [ ] **`query.BuildBunQuery`（bun_builder.go:438）零调用者**：master 上即存在的死导出符号（AGENTS.md 禁止顺手删既有死代码），并入 Batch 3 死代码清单
+- [ ] **ShareView.tsx 不可达分支**（:84/:87/:120 的 `error.response?.status===401/403` 与 `error.response?.data?.share`）：全 200 信封下拦截器 reject 裸 `new Error(msg)` 无 `.response`，这些分支永不触发（master 即如此；live 门控是 `has_password`）—— Batch 3 清理
+
+### 全分支评审结论（2026-09 收口）
+
+- 结论：**SHIP**（可合并 master），无 Critical、无行为回归；上述 Important 均为文档/测试卫生，不阻断合并。`make api-gen` 端到端重跑零漂移；15 个后端测试包 green；前端 tsc clean、vitest 68/4（4 为 master 既有 DatasourceDetail Intl 基线）；浏览器 E2E 实测 ShareView 渲染 v1 图表通过。评审驱动的文档修正（api.md `op`→`operator`、AGENTS.md 端点数 30+2 例外）已在收口 commit。
 

@@ -905,7 +905,7 @@ POST /api/charts/query
     {"field": "count", "agg": "sum", "alias": "total_count"}
   ],
   "filters": [
-    {"field": "date", "op": "gte", "value": "2026-01-01", "logic": "and"}
+    {"field": "date", "operator": "gte", "value": "2026-01-01", "logic": "and"}
   ],
   "pagination": {
     "page": 1,
@@ -943,7 +943,7 @@ POST /api/charts/query
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | field | string | 是 | 字段名 |
-| op | string | 是 | 操作符: eq, neq, gt, gte, lt, lte, like, in, between, isNull, isNotNull |
+| operator | string | 是 | 操作符: eq, neq, gt, gte, lt, lte, like, in, between, isNull, isNotNull |
 | value | any | 是 | 过滤值 |
 | value_end | any | 否 | 结束值 (between时使用) |
 | logic | string | 否 | 逻辑: and, or |
