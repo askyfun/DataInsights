@@ -26,6 +26,10 @@ tags:
     description: 数据源管理（CRUD、连接测试、库表元数据、预览与字段分布）
   - name: datasets
     description: 数据集管理（CRUD、列定义、预览、查询）
+  - name: charts
+    description: 图表管理（CRUD、数据集取数预览、图表语义查询）
+  - name: shares
+    description: 分享管理（创建、列表、详情、密码校验）与公开视图跳转
 paths:
   /health:
     get:
@@ -462,6 +466,271 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DatasetQueryResponse'
+  /api/charts:
+    get:
+      tags:
+        - charts
+      summary: 图表列表
+      description: |
+        分页返回图表数组；无结果时 data 为空数组（handler 将 nil 归一化为 []）。
+        分页参数与数据源/数据集列表一致（helpers.go getPaginationParams：
+        limit 缺省 100、≤0 或 >1000 回落 100；offset 缺省 0、负数归一为 0）。
+      operationId: listCharts
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: 每页条数；缺省 100，≤0 或 >1000 后端回落为 100。
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          description: 偏移量；缺省 0，负数被后端归一化为 0。
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartListResponse'
+    post:
+      tags:
+        - charts
+      summary: 创建图表
+      description: |
+        config 是 JSON 文档的字符串形态（后端以 string 存储，非对象）；为空时
+        后端缺省填 "{}"。chart_type 与 dataset_id 后端不做存在性/枚举强校验
+        （无效 dataset_id 要到取数时才暴露）；name/dataset_id/chart_type 为
+        规范性收紧的 required（后端 ShouldBindJSON 零值可过，见 task-3 报告）。
+      operationId: createChart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChartCreateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为新建 Chart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartResponse'
+  /api/charts/{id}:
+    get:
+      tags:
+        - charts
+      summary: 获取图表详情
+      operationId: getChart
+      parameters:
+        - $ref: '#/components/parameters/ChartId'
+      responses:
+        '200':
+          description: HTTP 恒 200；不存在或 id 非法时 Envelope.code = 20300/20100，data = {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartResponse'
+    put:
+      tags:
+        - charts
+      summary: 更新图表
+      description: |
+        PUT 为全量覆盖：请求体绑定 {name, dataset_id, chart_type, config} 四字段，
+        未提供的字段以零值写库（不是增量合并）。config 缺省/空串被后端替换为 "{}"。
+        成功 data 为更新后回读的 Chart。
+      operationId: updateChart
+      parameters:
+        - $ref: '#/components/parameters/ChartId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChartUpdateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为更新后的 Chart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartResponse'
+    delete:
+      tags:
+        - charts
+      summary: 删除图表
+      operationId: deleteChart
+      parameters:
+        - $ref: '#/components/parameters/ChartId'
+      responses:
+        '200':
+          description: 'HTTP 恒 200；成功 data 为 {status: "ok"}'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /api/charts/{id}/data:
+    get:
+      tags:
+        - charts
+      summary: 图表数据预览取数
+      description: |
+        非语义化图表查询：按图表绑定数据集的表/SQL 源实时取前 100 行
+        （query.WrapPreviewSQL，service/chart.GetData）。响应 data 是裸数据行数组
+        （DataRow[]，经归一化恒为数组），不是 POST /api/charts/query 的
+        ChartDataResult 形状。所有失败（含图表/数据集不存在、取数失败）统一
+        Envelope.code = 50000（handler.GetData 走 InternalError，不区分 404）。
+      operationId: getChartData
+      parameters:
+        - $ref: '#/components/parameters/ChartId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartDataRowsResponse'
+  /api/charts/query:
+    post:
+      tags:
+        - charts
+      summary: 图表语义查询（旧协议）
+      description: |
+        请求体为 entity.ChartQueryRequest（字段级核对清单见 ChartQueryRequest schema
+        注释；Batch 3 将迁移到 ChartSpec/QuerySpec 协议，见 components 中的内部建模）。
+        成功 data 为 ChartDataResult：{ data, select_sql, count_sql }，其中 data 的
+        形状由 chart_type 决定（table/pie/axis/scatter 四族，另加 pivot，详见
+        ChartDataResult 描述）。select_sql 成功时恒返回；count_sql 仅 table +
+        pagination 分支返回。执行失败统一 Envelope.code = 50000。
+      operationId: queryChart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChartQueryRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartQueryResponse'
+  /api/shares:
+    get:
+      tags:
+        - shares
+      summary: 分享列表
+      description: |
+        返回全部分享（按 id 倒序），不支持分页参数（handler 不读取 limit/offset）。
+        无结果时 data 为空数组。
+      operationId: listShares
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareListResponse'
+    post:
+      tags:
+        - shares
+      summary: 创建分享
+      description: |
+        后端生成随机 token（16 字节，格式 hex(8B)-hex(8B)）。password 非空时以
+        bcrypt（cost 10）哈希落库；expires_at 必须是 RFC3339，格式非法被后端静默
+        忽略（即不设置过期）。chart_id 不校验图表存在性。响应 data 为 Share，
+        password 永不回显（json:"-"），密码保护状态经 has_password 暴露。
+      operationId: createShare
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareCreateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为新建 Share（含 token）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareResponse'
+  /api/shares/{token}:
+    get:
+      tags:
+        - shares
+      summary: 按 token 获取分享详情
+      description: |
+        token 不存在时 Envelope.code = 20300（"share not found"）。不做密码校验、
+        不校验过期（过期只在 GET /share/{token} 公开视图判断）。
+      operationId: getShare
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareResponse'
+  /api/shares/{token}/verify:
+    post:
+      tags:
+        - shares
+      summary: 校验分享密码
+      description: |
+        校验通过后返回 Share（含 chart_id，供前端跳转取数）。无密码的分享恒通过。
+        密码错误或分享不存在统一 Envelope.code = 20100（handler 走 BadRequest）。
+        存储侧 bcrypt 校验；遗留明文比对成功后透明升级为 bcrypt 哈希。
+      operationId: verifySharePassword
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareVerifyRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；校验通过 data 为 Share，失败 data = {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareResponse'
+  /share/{token}:
+    get:
+      tags:
+        - shares
+      summary: 公开分享视图（浏览器入口，302 跳转）
+      description: |
+        非 Envelope JSON 端点：成功返回 HTTP 302，Location 指向前端 hash 路由
+        "/#/share/{token}"。密码保护不拦截本端点（密码校验走
+        /api/shares/{token}/verify），有/无密码均 302。失败才返回 HTTP 200
+        Envelope：分享不存在 code=20300；已过期 code=20400
+        （"share link has expired"，按 expires_at RFC3339 与当前时间比较）。
+      operationId: viewShare
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+      responses:
+        '302':
+          description: 重定向到前端分享页面（唯一成功形态，无响应体）
+          headers:
+            Location:
+              description: '前端 hash 路由 /#/share/{token}'
+              schema:
+                type: string
+        '200':
+          description: HTTP 200 仅出现在失败路径（20300 不存在 / 20400 已过期）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
 components:
   schemas:
     ResponseCode:
@@ -1164,6 +1433,629 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/DataRow'
+    Chart:
+      type: object
+      description: |
+        图表响应实体（entity.Chart，backend/internal/domain/entity/chart.go）。
+        config 是 JSON 文档的字符串形态（后端以 string 存储，非对象）。
+      required:
+        - id
+        - name
+        - dataset_id
+        - chart_type
+        - config
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        dataset_id:
+          type: integer
+        chart_type:
+          type: string
+          description: >-
+            后端不做强校验、落库什么返回什么。查询层已知取值：table / bar / line /
+            pie / area / scatter / pivot；未知值按 axis 处理器回退
+            （query.GetProcessor default 分支）。
+        config:
+          type: string
+          description: 图表配置的 JSON 字符串；创建/更新为空时后端写 "{}"。
+        created_at:
+          type: string
+          description: RFC3339 时间；数据库时间戳无效时为空字符串。
+        updated_at:
+          type: string
+          description: RFC3339 时间；数据库时间戳无效时为空字符串。
+    ChartCreateRequest:
+      type: object
+      description: >-
+        POST /api/charts 请求体。后端整体绑定 entity.Chart（额外键与 id/created_at
+        不参与 service 落库映射）；name/dataset_id/chart_type 为规范性收紧的 required
+        （后端零值可过，见 task-3 报告）。
+      required:
+        - name
+        - dataset_id
+        - chart_type
+      properties:
+        name:
+          type: string
+        dataset_id:
+          type: integer
+        chart_type:
+          type: string
+          description: 已知取值见 Chart.chart_type；后端不做枚举校验。
+        config:
+          type: string
+          description: JSON 字符串；缺省/空串后端填 "{}"。
+    ChartUpdateRequest:
+      type: object
+      description: >-
+        PUT /api/charts/{id} 请求体（handler 匿名 struct：name/dataset_id/
+        chart_type/config）。全量覆盖语义：未提供的可填字段以零值写库。
+      required:
+        - name
+        - dataset_id
+        - chart_type
+      properties:
+        name:
+          type: string
+        dataset_id:
+          type: integer
+        chart_type:
+          type: string
+        config:
+          type: string
+          description: 缺省/空串被后端替换为 "{}"（覆盖原配置，非保留）。
+    ChartMetricConfig:
+      type: object
+      description: 指标聚合配置（entity.MetricConfig，chart.go:26-30）。
+      required:
+        - field
+        - agg
+      properties:
+        field:
+          type: string
+        agg:
+          type: string
+          description: >-
+            聚合函数：sum / avg / count / max / min；未知值后端按 SUM 回退
+            （query.AggregationType.GetAggFunc default）。
+        alias:
+          type: string
+          description: omitempty：结果列别名，缺省时后端用 field 原名（ResolveAlias）。
+    ChartPagination:
+      type: object
+      description: >-
+        图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为
+        limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset，
+        当前实现仍以本对象为准，故字段保留并标记 deprecated。
+      required:
+        - page
+        - page_size
+      properties:
+        page:
+          type: integer
+          deprecated: true
+          description: 页码（从 1 开始）；executor 生成 OFFSET = (page-1)*page_size。
+        page_size:
+          type: integer
+          deprecated: true
+          description: 每页行数；executor 生成 LIMIT。0 会参与除零（total_pages），调用方须给正值。
+    # ChartQueryRequest 字段级核对清单（旧协议，handler 绑定 entity.ChartQueryRequest）：
+    #   entity.ChartQueryRequest   backend/internal/domain/entity/chart.go:15-23
+    #     dataset_id  int            -> json "dataset_id"
+    #     chart_type  string         -> json "chart_type"
+    #     dims        []string       -> json "dims"
+    #     metrics     []MetricConfig -> json "metrics"（chart.go:26-30: field / agg / alias(omitempty)）
+    #     filters     []Filter       -> json "filters"（dataset.go:58-65: id / field / operator /
+    #                                  value / value_end(omitempty) / logic；注意键是 operator）
+    #     pagination  *Pagination    -> json "pagination"（chart.go:33-36: page / page_size）
+    #     sort        *SortConfig    -> json "sort"（dataset.go:67-71: field / order）
+    #   差异记录：查询层 query.ChartQueryRequest（internal/query/types.go:81-91）另有
+    #   config.query_options.pie_merge_other_below_ratio（饼图长尾合并阈值），但 entity 层
+    #   不含 config 字段、handler 也不解析，当前该请求字段整体被静默忽略（Batch 3 契约化）。
+    ChartQueryRequest:
+      type: object
+      description: POST /api/charts/query 请求体（entity.ChartQueryRequest，旧协议）。
+      required:
+        - dataset_id
+        - chart_type
+        - metrics
+      properties:
+        dataset_id:
+          type: integer
+        chart_type:
+          type: string
+          description: >-
+            决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse；
+            bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse；
+            pivot -> ChartPivotResponse。
+        dims:
+          type: array
+          items:
+            type: string
+          description: 分组维度列；pie/axis 族取 dims[0] 作类目/X 轴，多余维度作 series 组合。
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartMetricConfig'
+          description: 指标数组；scatter 需至少 2 个指标（第 1 个为 X、第 2 个为 Y），空则 pie/axis 返回空形状。
+        filters:
+          type: array
+          items:
+            $ref: '#/components/schemas/Filter'
+          description: 过滤条件（entity.Filter）；键为 operator（非 op），含前端未使用的 id 键。
+        pagination:
+          $ref: '#/components/schemas/ChartPagination'
+        sort:
+          $ref: '#/components/schemas/SortConfig'
+    ChartDataResult:
+      type: object
+      description: >-
+        POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。
+        data 为查询处理器输出，oneOf 五形状（契约上按 chart_type 判别，见
+        ChartQueryRequest.chart_type 映射；oneOf 成员在 pie/scatter/table 间存在结构
+        重叠，消费方以 chart_type 为准，不做运行时判别）。data 成功时恒为非 null
+        （response 归一化保证集合字段不为 null）。
+      required:
+        - data
+      properties:
+        data:
+          description: >-
+            查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema；
+            为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}，
+            消费方按 ChartQueryRequest.chart_type 手动判别，五成员为
+            ChartTableResponse / ChartPieResponse / ChartAxisResponse /
+            ChartScatterResponse / ChartPivotResponse）。
+        select_sql:
+          type: string
+          description: 生成的取数 SQL（entity omitempty；成功路径恒非空）。
+        count_sql:
+          type: string
+          description: >-
+            生成的计数 SQL；仅 chart_type=table 且携带 pagination 分支返回
+            （executor.Execute 的 count 查询路径），其余形状缺省。
+    ChartTableResponse:
+      type: object
+      description: table 图表响应（query.TableResponse）。
+      required:
+        - columns
+        - data
+        - pagination
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+          description: 维度在前、指标别名在后（pagination 分支按 dims/metrics 顺序组装）。
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataRow'
+        pagination:
+          $ref: '#/components/schemas/ChartTablePagination'
+    ChartTablePagination:
+      type: object
+      description: table 响应分页回显（query.TablePagination）。
+      required:
+        - page
+        - page_size
+        - total
+        - total_pages
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+          description: 总行数；GROUP BY 场景取 count 结果行数而非求和。
+        total_pages:
+          type: integer
+    ChartPieResponse:
+      type: object
+      description: pie 图表响应（query.PieResponse）。
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartPieDataItem'
+          description: 长尾超过 20 项时截断并合并为名为 "其他" 的条目。
+        other:
+          $ref: '#/components/schemas/ChartPieDataItem'
+          description: Go 类型保留字段（omitempty）；当前处理器不产出，合并项直接进 data。
+    ChartPieDataItem:
+      type: object
+      description: 饼图数据项（query.PieDataItem）。
+      required:
+        - name
+        - value
+        - percentage
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+          format: double
+        percentage:
+          type: number
+          format: double
+          description: 百分比，保留两位小数；总值为 0 时恒为 0。
+    ChartAxisResponse:
+      type: object
+      description: 坐标轴族响应 bar/line/area（query.AxisResponse）。
+      required:
+        - x_axis
+        - series
+      properties:
+        x_axis:
+          type: array
+          items:
+            type: string
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartAxisSeries'
+    ChartAxisSeries:
+      type: object
+      description: 坐标轴系列数据（query.AxisSeries）。
+      required:
+        - name
+        - data
+      properties:
+        name:
+          type: string
+          description: 单维度时为指标别名；多维度为 "指标 - 维度组合"（仅多指标时加指标前缀）。
+        data:
+          type: array
+          items: {}
+          description: 与 x_axis 等长的值序列；空洞位置为 null（键存在但值缺失时）。
+    ChartScatterResponse:
+      type: object
+      description: scatter 图表响应（query.ScatterResponse）；每点为 [x, y] 二元数组。
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
+              format: double
+    ChartPivotResponse:
+      type: object
+      description: pivot 图表响应（query.PivotResponse）；当前实现同 table 但不含分页。
+      required:
+        - columns
+        - data
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataRow'
+    Share:
+      type: object
+      description: >-
+        分享响应实体（entity.Share，backend/internal/domain/entity/share.go）。
+        password 为 json:"-" 永不外泄（bcrypt 哈希也不回显），has_password 是
+        唯一的密码保护信号。
+      required:
+        - id
+        - token
+        - chart_id
+        - expires_at
+        - created_at
+        - has_password
+      properties:
+        id:
+          type: integer
+        token:
+          type: string
+          description: 后端随机生成，格式 hex(8 字节)-hex(8 字节)，如 "3a7f...c2-9d1e...f0"。
+        chart_id:
+          type: integer
+        expires_at:
+          type: string
+          nullable: true
+          description: RFC3339 过期时间；指针字段，键恒在，无过期设置时为 null。
+        created_at:
+          type: string
+          description: RFC3339 时间；数据库时间戳无效时为空字符串。
+        has_password:
+          type: boolean
+          description: 是否设置了访问密码（替代外泄的 password 字段）。
+    ShareCreateRequest:
+      type: object
+      description: POST /api/shares 请求体（handler 匿名 struct：chart_id/password/expires_at）。
+      required:
+        - chart_id
+      properties:
+        chart_id:
+          type: integer
+          description: 被分享的图表 ID；后端不校验其存在性。
+        password:
+          type: string
+          writeOnly: true
+          description: 访问密码；空串/缺省表示不设密码；非空以 bcrypt 哈希落库。
+        expires_at:
+          type: string
+          description: >-
+            RFC3339 过期时间；非 RFC3339 的字符串被后端解析失败后静默忽略
+            （等同不设置过期）。
+    ShareVerifyRequest:
+      type: object
+      description: POST /api/shares/{token}/verify 请求体。
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          writeOnly: true
+          description: 待校验密码；无密码的分享恒通过。
+    ChartListResponse:
+      description: GET /api/charts 响应：data 为 Chart 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Chart'
+    ChartResponse:
+      description: 图表 CRUD 响应：data 为单个 Chart。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/Chart'
+    ChartDataRowsResponse:
+      description: >-
+        GET /api/charts/{id}/data 响应：data 为裸数据行数组（非 ChartDataResult）。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DataRow'
+    ChartQueryResponse:
+      description: POST /api/charts/query 响应：data 为 ChartDataResult。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/ChartDataResult'
+    ShareListResponse:
+      description: GET /api/shares 响应：data 为 Share 数组（id 倒序，无分页）。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Share'
+    ShareResponse:
+      description: 分享 CRUD / verify 响应：data 为单个 Share。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/Share'
+    # ---- ChartSpec / QuerySpec：内部建模首版（backend/internal/query/chart_spec.go）----
+    # 为 Batch 3 的 chart_spec 协议铺路。当前对外 API（POST /api/charts/query 请求体）
+    # 仍是 ChartQueryRequest 旧字段；service 层经 query.ChartSpecFromRequest /
+    # QuerySpecFromRequest 适配器把旧请求转成这两个规格后进入查询链路，
+    # 因此本组 schema 不出现在任何 paths 的 requestBody/response 引用中。
+    ChartSpec:
+      type: object
+      description: >-
+        图表语义规格（query.ChartSpec:5）：表达图表实例绑定了什么字段和配置，
+        属于 Chart 语义层，不直接生成 SQL。
+      required:
+        - chart_type
+        - dimension_groups
+        - metric_groups
+      properties:
+        chart_type:
+          type: string
+          description: table / bar / line / pie / area / scatter / pivot；未知值按 axis 回退。
+        dimension_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartDimensionGroup'
+          description: 旧协议 dims 映射为默认维度组（pivot=rows、pie=category、scatter=dims、其余=x_axis）。
+        metric_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartMetricGroup'
+          description: 旧协议 metrics 映射为默认指标组 values。
+        style:
+          type: object
+          additionalProperties: true
+          description: 视觉样式扩展袋（Go map[string]any，omitempty）；当前 adapter 输出空对象。
+        query_options:
+          type: object
+          additionalProperties: true
+          description: 查询选项扩展袋（Go map[string]any，omitempty），如饼图长尾合并阈值。
+    ChartDimensionGroup:
+      type: object
+      description: 维度组（query.DimensionGroup）。
+      required:
+        - name
+        - label
+        - fields
+      properties:
+        name:
+          type: string
+          description: 组标识，如 x_axis / rows / columns / category。
+        label:
+          type: string
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartDimensionField'
+    ChartDimensionField:
+      type: object
+      description: 维度字段绑定（query.DimensionField）。
+      required:
+        - field
+      properties:
+        field:
+          type: string
+        label:
+          type: string
+        granularity:
+          type: string
+          description: 时间粒度（day / week / month 等）；执行前按方言校验（ValidateGranularity）。
+    ChartMetricGroup:
+      type: object
+      description: 指标组（query.MetricGroup）。
+      required:
+        - name
+        - label
+        - fields
+      properties:
+        name:
+          type: string
+          description: 组标识，如 values / primary_values / secondary_values。
+        label:
+          type: string
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartMetricField'
+    ChartMetricField:
+      type: object
+      description: 指标字段绑定（query.MetricField）。
+      required:
+        - field
+        - agg
+      properties:
+        field:
+          type: string
+        label:
+          type: string
+        agg:
+          type: string
+          description: sum / avg / count / max / min（query.AggregationType）。
+        alias:
+          type: string
+        unit:
+          type: string
+        format:
+          type: string
+    QuerySpec:
+      type: object
+      description: >-
+        查询语义规格（query.QuerySpec:46）：表达"查什么"，不含视觉语义，
+        由 ChartSpec/旧请求转换而来，是 BunQueryBuilder 的上游输入。
+      required:
+        - dimensions
+        - metrics
+        - filters
+      properties:
+        dimensions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DimensionExpr'
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricExpr'
+        filters:
+          type: array
+          items:
+            $ref: '#/components/schemas/FilterConfig'
+        sort:
+          $ref: '#/components/schemas/SortConfig'
+        pagination:
+          $ref: '#/components/schemas/ChartPagination'
+        limit:
+          type: integer
+          description: 行数上限（Go omitempty，0 不出现在序列化 JSON）。
+    DimensionExpr:
+      type: object
+      description: 结构化维度表达式（query.DimensionExpr）。
+      required:
+        - field
+      properties:
+        field:
+          type: string
+        label:
+          type: string
+        granularity:
+          type: string
+    MetricExpr:
+      type: object
+      description: 结构化指标表达式（query.MetricExpr2；命名避开 ast.go 的 MetricExpr）。
+      required:
+        - field
+        - agg
+      properties:
+        field:
+          type: string
+        agg:
+          type: string
+          description: sum / avg / count / max / min（query.AggregationType）。
+        alias:
+          type: string
+        unit:
+          type: string
+        format:
+          type: string
+    FilterConfig:
+      type: object
+      description: >-
+        查询层过滤条件（query.FilterConfig）：JSON 键是 op，与旧协议 entity.Filter
+        的 operator 不同；Batch 3 chart_spec 协议统一采用本形状。
+      required:
+        - field
+        - op
+        - value
+        - logic
+      properties:
+        field:
+          type: string
+        op:
+          type: string
+          description: >-
+            eq / neq / gt / gte / lt / lte / like / in / between / isNull / isNotNull；
+            未知值后端按 "=" 回退（FilterOperator.ToString default）。
+        value: {}
+        value_end: {}
+          # query.FilterConfig.ValueEnd interface{} omitempty：between 上界，任意 JSON 值
+        logic:
+          type: string
+          description: 与其他条件的连接逻辑（如 "and" / "or"）。
   parameters:
     DatasourceId:
       name: id
@@ -1179,6 +2071,22 @@ components:
       description: 数据集 ID（gin 通配符 :id；非法数字返回 20100）。
       schema:
         type: integer
+    ChartId:
+      name: id
+      in: path
+      required: true
+      description: 图表 ID（gin 通配符 :id；非法数字返回 20100）。
+      schema:
+        type: integer
+    ShareToken:
+      name: token
+      in: path
+      required: true
+      description: >-
+        分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)，
+        API 层按不透明字符串处理。
+      schema:
+        type: string
     TableName:
       name: table
       in: path

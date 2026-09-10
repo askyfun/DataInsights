@@ -51,6 +51,156 @@ func (e ResponseCode) Valid() bool {
 	}
 }
 
+// Chart 图表响应实体（entity.Chart，backend/internal/domain/entity/chart.go）。
+// config 是 JSON 文档的字符串形态（后端以 string 存储，非对象）。
+type Chart struct {
+	// ChartType 后端不做强校验、落库什么返回什么。查询层已知取值：table / bar / line / pie / area / scatter / pivot；未知值按 axis 处理器回退 （query.GetProcessor default 分支）。
+	ChartType string `json:"chart_type"`
+
+	// Config 图表配置的 JSON 字符串；创建/更新为空时后端写 "{}"。
+	Config string `json:"config"`
+
+	// CreatedAt RFC3339 时间；数据库时间戳无效时为空字符串。
+	CreatedAt string `json:"created_at"`
+	DatasetId int    `json:"dataset_id"`
+	Id        int    `json:"id"`
+	Name      string `json:"name"`
+
+	// UpdatedAt RFC3339 时间；数据库时间戳无效时为空字符串。
+	UpdatedAt string `json:"updated_at"`
+}
+
+// ChartCreateRequest POST /api/charts 请求体。后端整体绑定 entity.Chart（额外键与 id/created_at 不参与 service 落库映射）；name/dataset_id/chart_type 为规范性收紧的 required （后端零值可过，见 task-3 报告）。
+type ChartCreateRequest struct {
+	// ChartType 已知取值见 Chart.chart_type；后端不做枚举校验。
+	ChartType string `json:"chart_type"`
+
+	// Config JSON 字符串；缺省/空串后端填 "{}"。
+	Config    *string `json:"config,omitempty"`
+	DatasetId int     `json:"dataset_id"`
+	Name      string  `json:"name"`
+}
+
+// ChartDataResult POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，oneOf 五形状（契约上按 chart_type 判别，见 ChartQueryRequest.chart_type 映射；oneOf 成员在 pie/scatter/table 间存在结构 重叠，消费方以 chart_type 为准，不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。
+type ChartDataResult struct {
+	// CountSql 生成的计数 SQL；仅 chart_type=table 且携带 pagination 分支返回 （executor.Execute 的 count 查询路径），其余形状缺省。
+	CountSql *string `json:"count_sql,omitempty"`
+
+	// Data 查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema； 为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}， 消费方按 ChartQueryRequest.chart_type 手动判别，五成员为 ChartTableResponse / ChartPieResponse / ChartAxisResponse / ChartScatterResponse / ChartPivotResponse）。
+	Data interface{} `json:"data"`
+
+	// SelectSql 生成的取数 SQL（entity omitempty；成功路径恒非空）。
+	SelectSql *string `json:"select_sql,omitempty"`
+}
+
+// ChartDataRowsResponse GET /api/charts/{id}/data 响应：data 为裸数据行数组（非 ChartDataResult）。
+type ChartDataRowsResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+	Data []DataRow    `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// ChartListResponse GET /api/charts 响应：data 为 Chart 数组。
+type ChartListResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+	Data []Chart      `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// ChartMetricConfig 指标聚合配置（entity.MetricConfig，chart.go:26-30）。
+type ChartMetricConfig struct {
+	// Agg 聚合函数：sum / avg / count / max / min；未知值后端按 SUM 回退 （query.AggregationType.GetAggFunc default）。
+	Agg string `json:"agg"`
+
+	// Alias omitempty：结果列别名，缺省时后端用 field 原名（ResolveAlias）。
+	Alias *string `json:"alias,omitempty"`
+	Field string  `json:"field"`
+}
+
+// ChartPagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
+type ChartPagination struct {
+	// Page 页码（从 1 开始）；executor 生成 OFFSET = (page-1)*page_size。
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Page int `json:"page"`
+
+	// PageSize 每页行数；executor 生成 LIMIT。0 会参与除零（total_pages），调用方须给正值。
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	PageSize int `json:"page_size"`
+}
+
+// ChartQueryRequest POST /api/charts/query 请求体（entity.ChartQueryRequest，旧协议）。
+type ChartQueryRequest struct {
+	// ChartType 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse。
+	ChartType string `json:"chart_type"`
+	DatasetId int    `json:"dataset_id"`
+
+	// Dims 分组维度列；pie/axis 族取 dims[0] 作类目/X 轴，多余维度作 series 组合。
+	Dims *[]string `json:"dims,omitempty"`
+
+	// Filters 过滤条件（entity.Filter）；键为 operator（非 op），含前端未使用的 id 键。
+	Filters *[]Filter `json:"filters,omitempty"`
+
+	// Metrics 指标数组；scatter 需至少 2 个指标（第 1 个为 X、第 2 个为 Y），空则 pie/axis 返回空形状。
+	Metrics []ChartMetricConfig `json:"metrics"`
+
+	// Pagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
+	Pagination *ChartPagination `json:"pagination,omitempty"`
+	Sort       *SortConfig      `json:"sort,omitempty"`
+}
+
+// ChartQueryResponse POST /api/charts/query 响应：data 为 ChartDataResult。
+type ChartQueryResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，oneOf 五形状（契约上按 chart_type 判别，见 ChartQueryRequest.chart_type 映射；oneOf 成员在 pie/scatter/table 间存在结构 重叠，消费方以 chart_type 为准，不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。
+	Data ChartDataResult `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// ChartResponse 图表 CRUD 响应：data 为单个 Chart。
+type ChartResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data 图表响应实体（entity.Chart，backend/internal/domain/entity/chart.go）。
+	// config 是 JSON 文档的字符串形态（后端以 string 存储，非对象）。
+	Data Chart `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// ChartUpdateRequest PUT /api/charts/{id} 请求体（handler 匿名 struct：name/dataset_id/ chart_type/config）。全量覆盖语义：未提供的可填字段以零值写库。
+type ChartUpdateRequest struct {
+	ChartType string `json:"chart_type"`
+
+	// Config 缺省/空串被后端替换为 "{}"（覆盖原配置，非保留）。
+	Config    *string `json:"config,omitempty"`
+	DatasetId int     `json:"dataset_id"`
+	Name      string  `json:"name"`
+}
+
 // ColumnInfo 列元数据；datasource handler 以 map 组装，仅含 name/data_type/comment 三个键（前端手写的 role/is_virtual/expression 不由该端点返回）。
 type ColumnInfo struct {
 	Comment  string `json:"comment"`
@@ -475,6 +625,70 @@ type QueryConfig struct {
 // ResponseCode 业务状态码，与 backend/internal/response/response.go 常量一一对应。
 type ResponseCode int
 
+// Share 分享响应实体（entity.Share，backend/internal/domain/entity/share.go）。 password 为 json:"-" 永不外泄（bcrypt 哈希也不回显），has_password 是 唯一的密码保护信号。
+type Share struct {
+	ChartId int `json:"chart_id"`
+
+	// CreatedAt RFC3339 时间；数据库时间戳无效时为空字符串。
+	CreatedAt string `json:"created_at"`
+
+	// ExpiresAt RFC3339 过期时间；指针字段，键恒在，无过期设置时为 null。
+	ExpiresAt *string `json:"expires_at"`
+
+	// HasPassword 是否设置了访问密码（替代外泄的 password 字段）。
+	HasPassword bool `json:"has_password"`
+	Id          int  `json:"id"`
+
+	// Token 后端随机生成，格式 hex(8 字节)-hex(8 字节)，如 "3a7f...c2-9d1e...f0"。
+	Token string `json:"token"`
+}
+
+// ShareCreateRequest POST /api/shares 请求体（handler 匿名 struct：chart_id/password/expires_at）。
+type ShareCreateRequest struct {
+	// ChartId 被分享的图表 ID；后端不校验其存在性。
+	ChartId int `json:"chart_id"`
+
+	// ExpiresAt RFC3339 过期时间；非 RFC3339 的字符串被后端解析失败后静默忽略 （等同不设置过期）。
+	ExpiresAt *string `json:"expires_at,omitempty"`
+
+	// Password 访问密码；空串/缺省表示不设密码；非空以 bcrypt 哈希落库。
+	Password *string `json:"password,omitempty"`
+}
+
+// ShareListResponse GET /api/shares 响应：data 为 Share 数组（id 倒序，无分页）。
+type ShareListResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+	Data []Share      `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// ShareResponse 分享 CRUD / verify 响应：data 为单个 Share。
+type ShareResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data 分享响应实体（entity.Share，backend/internal/domain/entity/share.go）。 password 为 json:"-" 永不外泄（bcrypt 哈希也不回显），has_password 是 唯一的密码保护信号。
+	Data Share `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// ShareVerifyRequest POST /api/shares/{token}/verify 请求体。
+type ShareVerifyRequest struct {
+	// Password 待校验密码；无密码的分享恒通过。
+	Password *string `json:"password,omitempty"`
+}
+
 // SortConfig defines model for SortConfig.
 type SortConfig struct {
 	Field string `json:"field"`
@@ -533,14 +747,29 @@ type TypeConfig struct {
 	Scale     int `json:"scale"`
 }
 
+// ChartId defines model for ChartId.
+type ChartId = int
+
 // DatasetId defines model for DatasetId.
 type DatasetId = int
 
 // DatasourceId defines model for DatasourceId.
 type DatasourceId = int
 
+// ShareToken defines model for ShareToken.
+type ShareToken = string
+
 // TableName defines model for TableName.
 type TableName = string
+
+// ListChartsParams defines parameters for ListCharts.
+type ListChartsParams struct {
+	// Limit 每页条数；缺省 100，≤0 或 >1000 后端回落为 100。
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset 偏移量；缺省 0，负数被后端归一化为 0。
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
 
 // ListDatasetsParams defines parameters for ListDatasets.
 type ListDatasetsParams struct {
@@ -579,6 +808,15 @@ type GetTableDataParams struct {
 	SortOrder *string `form:"sort_order,omitempty" json:"sort_order,omitempty"`
 }
 
+// CreateChartJSONRequestBody defines body for CreateChart for application/json ContentType.
+type CreateChartJSONRequestBody = ChartCreateRequest
+
+// QueryChartJSONRequestBody defines body for QueryChart for application/json ContentType.
+type QueryChartJSONRequestBody = ChartQueryRequest
+
+// UpdateChartJSONRequestBody defines body for UpdateChart for application/json ContentType.
+type UpdateChartJSONRequestBody = ChartUpdateRequest
+
 // CreateDatasetJSONRequestBody defines body for CreateDataset for application/json ContentType.
 type CreateDatasetJSONRequestBody = DatasetCreateRequest
 
@@ -602,3 +840,9 @@ type GetDatasourceFieldDistributionJSONRequestBody = FieldDistributionRequest
 
 // PreviewDatasourceJSONRequestBody defines body for PreviewDatasource for application/json ContentType.
 type PreviewDatasourceJSONRequestBody = DatasourcePreviewRequest
+
+// CreateShareJSONRequestBody defines body for CreateShare for application/json ContentType.
+type CreateShareJSONRequestBody = ShareCreateRequest
+
+// VerifySharePasswordJSONRequestBody defines body for VerifySharePassword for application/json ContentType.
+type VerifySharePasswordJSONRequestBody = ShareVerifyRequest

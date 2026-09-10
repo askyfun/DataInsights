@@ -309,6 +309,203 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/charts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 图表列表
+         * @description 分页返回图表数组；无结果时 data 为空数组（handler 将 nil 归一化为 []）。
+         *     分页参数与数据源/数据集列表一致（helpers.go getPaginationParams：
+         *     limit 缺省 100、≤0 或 >1000 回落 100；offset 缺省 0、负数归一为 0）。
+         */
+        get: operations["listCharts"];
+        put?: never;
+        /**
+         * 创建图表
+         * @description config 是 JSON 文档的字符串形态（后端以 string 存储，非对象）；为空时
+         *     后端缺省填 "{}"。chart_type 与 dataset_id 后端不做存在性/枚举强校验
+         *     （无效 dataset_id 要到取数时才暴露）；name/dataset_id/chart_type 为
+         *     规范性收紧的 required（后端 ShouldBindJSON 零值可过，见 task-3 报告）。
+         */
+        post: operations["createChart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/charts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取图表详情 */
+        get: operations["getChart"];
+        /**
+         * 更新图表
+         * @description PUT 为全量覆盖：请求体绑定 {name, dataset_id, chart_type, config} 四字段，
+         *     未提供的字段以零值写库（不是增量合并）。config 缺省/空串被后端替换为 "{}"。
+         *     成功 data 为更新后回读的 Chart。
+         */
+        put: operations["updateChart"];
+        post?: never;
+        /** 删除图表 */
+        delete: operations["deleteChart"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/charts/{id}/data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 图表数据预览取数
+         * @description 非语义化图表查询：按图表绑定数据集的表/SQL 源实时取前 100 行
+         *     （query.WrapPreviewSQL，service/chart.GetData）。响应 data 是裸数据行数组
+         *     （DataRow[]，经归一化恒为数组），不是 POST /api/charts/query 的
+         *     ChartDataResult 形状。所有失败（含图表/数据集不存在、取数失败）统一
+         *     Envelope.code = 50000（handler.GetData 走 InternalError，不区分 404）。
+         */
+        get: operations["getChartData"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/charts/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 图表语义查询（旧协议）
+         * @description 请求体为 entity.ChartQueryRequest（字段级核对清单见 ChartQueryRequest schema
+         *     注释；Batch 3 将迁移到 ChartSpec/QuerySpec 协议，见 components 中的内部建模）。
+         *     成功 data 为 ChartDataResult：{ data, select_sql, count_sql }，其中 data 的
+         *     形状由 chart_type 决定（table/pie/axis/scatter 四族，另加 pivot，详见
+         *     ChartDataResult 描述）。select_sql 成功时恒返回；count_sql 仅 table +
+         *     pagination 分支返回。执行失败统一 Envelope.code = 50000。
+         */
+        post: operations["queryChart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 分享列表
+         * @description 返回全部分享（按 id 倒序），不支持分页参数（handler 不读取 limit/offset）。
+         *     无结果时 data 为空数组。
+         */
+        get: operations["listShares"];
+        put?: never;
+        /**
+         * 创建分享
+         * @description 后端生成随机 token（16 字节，格式 hex(8B)-hex(8B)）。password 非空时以
+         *     bcrypt（cost 10）哈希落库；expires_at 必须是 RFC3339，格式非法被后端静默
+         *     忽略（即不设置过期）。chart_id 不校验图表存在性。响应 data 为 Share，
+         *     password 永不回显（json:"-"），密码保护状态经 has_password 暴露。
+         */
+        post: operations["createShare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/shares/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按 token 获取分享详情
+         * @description token 不存在时 Envelope.code = 20300（"share not found"）。不做密码校验、
+         *     不校验过期（过期只在 GET /share/{token} 公开视图判断）。
+         */
+        get: operations["getShare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/shares/{token}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 校验分享密码
+         * @description 校验通过后返回 Share（含 chart_id，供前端跳转取数）。无密码的分享恒通过。
+         *     密码错误或分享不存在统一 Envelope.code = 20100（handler 走 BadRequest）。
+         *     存储侧 bcrypt 校验；遗留明文比对成功后透明升级为 bcrypt 哈希。
+         */
+        post: operations["verifySharePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/share/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 公开分享视图（浏览器入口，302 跳转）
+         * @description 非 Envelope JSON 端点：成功返回 HTTP 302，Location 指向前端 hash 路由
+         *     "/#/share/{token}"。密码保护不拦截本端点（密码校验走
+         *     /api/shares/{token}/verify），有/无密码均 302。失败才返回 HTTP 200
+         *     Envelope：分享不存在 code=20300；已过期 code=20400
+         *     （"share link has expired"，按 expires_at RFC3339 与当前时间比较）。
+         */
+        get: operations["viewShare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -608,6 +805,272 @@ export interface components {
         DatasetQueryResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["DataRow"][];
         };
+        /**
+         * @description 图表响应实体（entity.Chart，backend/internal/domain/entity/chart.go）。
+         *     config 是 JSON 文档的字符串形态（后端以 string 存储，非对象）。
+         */
+        Chart: {
+            id: number;
+            name: string;
+            dataset_id: number;
+            /** @description 后端不做强校验、落库什么返回什么。查询层已知取值：table / bar / line / pie / area / scatter / pivot；未知值按 axis 处理器回退 （query.GetProcessor default 分支）。 */
+            chart_type: string;
+            /** @description 图表配置的 JSON 字符串；创建/更新为空时后端写 "{}"。 */
+            config: string;
+            /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
+            created_at: string;
+            /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
+            updated_at: string;
+        };
+        /** @description POST /api/charts 请求体。后端整体绑定 entity.Chart（额外键与 id/created_at 不参与 service 落库映射）；name/dataset_id/chart_type 为规范性收紧的 required （后端零值可过，见 task-3 报告）。 */
+        ChartCreateRequest: {
+            name: string;
+            dataset_id: number;
+            /** @description 已知取值见 Chart.chart_type；后端不做枚举校验。 */
+            chart_type: string;
+            /** @description JSON 字符串；缺省/空串后端填 "{}"。 */
+            config?: string;
+        };
+        /** @description PUT /api/charts/{id} 请求体（handler 匿名 struct：name/dataset_id/ chart_type/config）。全量覆盖语义：未提供的可填字段以零值写库。 */
+        ChartUpdateRequest: {
+            name: string;
+            dataset_id: number;
+            chart_type: string;
+            /** @description 缺省/空串被后端替换为 "{}"（覆盖原配置，非保留）。 */
+            config?: string;
+        };
+        /** @description 指标聚合配置（entity.MetricConfig，chart.go:26-30）。 */
+        ChartMetricConfig: {
+            field: string;
+            /** @description 聚合函数：sum / avg / count / max / min；未知值后端按 SUM 回退 （query.AggregationType.GetAggFunc default）。 */
+            agg: string;
+            /** @description omitempty：结果列别名，缺省时后端用 field 原名（ResolveAlias）。 */
+            alias?: string;
+        };
+        /** @description 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。 */
+        ChartPagination: {
+            /**
+             * @deprecated
+             * @description 页码（从 1 开始）；executor 生成 OFFSET = (page-1)*page_size。
+             */
+            page: number;
+            /**
+             * @deprecated
+             * @description 每页行数；executor 生成 LIMIT。0 会参与除零（total_pages），调用方须给正值。
+             */
+            page_size: number;
+        };
+        /** @description POST /api/charts/query 请求体（entity.ChartQueryRequest，旧协议）。 */
+        ChartQueryRequest: {
+            dataset_id: number;
+            /** @description 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse。 */
+            chart_type: string;
+            /** @description 分组维度列；pie/axis 族取 dims[0] 作类目/X 轴，多余维度作 series 组合。 */
+            dims?: string[];
+            /** @description 指标数组；scatter 需至少 2 个指标（第 1 个为 X、第 2 个为 Y），空则 pie/axis 返回空形状。 */
+            metrics: components["schemas"]["ChartMetricConfig"][];
+            /** @description 过滤条件（entity.Filter）；键为 operator（非 op），含前端未使用的 id 键。 */
+            filters?: components["schemas"]["Filter"][];
+            pagination?: components["schemas"]["ChartPagination"];
+            sort?: components["schemas"]["SortConfig"];
+        };
+        /** @description POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，oneOf 五形状（契约上按 chart_type 判别，见 ChartQueryRequest.chart_type 映射；oneOf 成员在 pie/scatter/table 间存在结构 重叠，消费方以 chart_type 为准，不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。 */
+        ChartDataResult: {
+            /** @description 查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema； 为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}， 消费方按 ChartQueryRequest.chart_type 手动判别，五成员为 ChartTableResponse / ChartPieResponse / ChartAxisResponse / ChartScatterResponse / ChartPivotResponse）。 */
+            data: unknown;
+            /** @description 生成的取数 SQL（entity omitempty；成功路径恒非空）。 */
+            select_sql?: string;
+            /** @description 生成的计数 SQL；仅 chart_type=table 且携带 pagination 分支返回 （executor.Execute 的 count 查询路径），其余形状缺省。 */
+            count_sql?: string;
+        };
+        /** @description table 图表响应（query.TableResponse）。 */
+        ChartTableResponse: {
+            /** @description 维度在前、指标别名在后（pagination 分支按 dims/metrics 顺序组装）。 */
+            columns: string[];
+            data: components["schemas"]["DataRow"][];
+            pagination: components["schemas"]["ChartTablePagination"];
+        };
+        /** @description table 响应分页回显（query.TablePagination）。 */
+        ChartTablePagination: {
+            page: number;
+            page_size: number;
+            /** @description 总行数；GROUP BY 场景取 count 结果行数而非求和。 */
+            total: number;
+            total_pages: number;
+        };
+        /** @description pie 图表响应（query.PieResponse）。 */
+        ChartPieResponse: {
+            /** @description 长尾超过 20 项时截断并合并为名为 "其他" 的条目。 */
+            data: components["schemas"]["ChartPieDataItem"][];
+            /** @description Go 类型保留字段（omitempty）；当前处理器不产出，合并项直接进 data。 */
+            other?: components["schemas"]["ChartPieDataItem"];
+        };
+        /** @description 饼图数据项（query.PieDataItem）。 */
+        ChartPieDataItem: {
+            name: string;
+            /** Format: double */
+            value: number;
+            /**
+             * Format: double
+             * @description 百分比，保留两位小数；总值为 0 时恒为 0。
+             */
+            percentage: number;
+        };
+        /** @description 坐标轴族响应 bar/line/area（query.AxisResponse）。 */
+        ChartAxisResponse: {
+            x_axis: string[];
+            series: components["schemas"]["ChartAxisSeries"][];
+        };
+        /** @description 坐标轴系列数据（query.AxisSeries）。 */
+        ChartAxisSeries: {
+            /** @description 单维度时为指标别名；多维度为 "指标 - 维度组合"（仅多指标时加指标前缀）。 */
+            name: string;
+            /** @description 与 x_axis 等长的值序列；空洞位置为 null（键存在但值缺失时）。 */
+            data: unknown[];
+        };
+        /** @description scatter 图表响应（query.ScatterResponse）；每点为 [x, y] 二元数组。 */
+        ChartScatterResponse: {
+            data: number[][];
+        };
+        /** @description pivot 图表响应（query.PivotResponse）；当前实现同 table 但不含分页。 */
+        ChartPivotResponse: {
+            columns: string[];
+            data: components["schemas"]["DataRow"][];
+        };
+        /** @description 分享响应实体（entity.Share，backend/internal/domain/entity/share.go）。 password 为 json:"-" 永不外泄（bcrypt 哈希也不回显），has_password 是 唯一的密码保护信号。 */
+        Share: {
+            id: number;
+            /** @description 后端随机生成，格式 hex(8 字节)-hex(8 字节)，如 "3a7f...c2-9d1e...f0"。 */
+            token: string;
+            chart_id: number;
+            /** @description RFC3339 过期时间；指针字段，键恒在，无过期设置时为 null。 */
+            expires_at: string | null;
+            /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
+            created_at: string;
+            /** @description 是否设置了访问密码（替代外泄的 password 字段）。 */
+            has_password: boolean;
+        };
+        /** @description POST /api/shares 请求体（handler 匿名 struct：chart_id/password/expires_at）。 */
+        ShareCreateRequest: {
+            /** @description 被分享的图表 ID；后端不校验其存在性。 */
+            chart_id: number;
+            /** @description 访问密码；空串/缺省表示不设密码；非空以 bcrypt 哈希落库。 */
+            password?: string;
+            /** @description RFC3339 过期时间；非 RFC3339 的字符串被后端解析失败后静默忽略 （等同不设置过期）。 */
+            expires_at?: string;
+        };
+        /** @description POST /api/shares/{token}/verify 请求体。 */
+        ShareVerifyRequest: {
+            /** @description 待校验密码；无密码的分享恒通过。 */
+            password: string;
+        };
+        /** @description GET /api/charts 响应：data 为 Chart 数组。 */
+        ChartListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Chart"][];
+        };
+        /** @description 图表 CRUD 响应：data 为单个 Chart。 */
+        ChartResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Chart"];
+        };
+        /** @description GET /api/charts/{id}/data 响应：data 为裸数据行数组（非 ChartDataResult）。 */
+        ChartDataRowsResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["DataRow"][];
+        };
+        /** @description POST /api/charts/query 响应：data 为 ChartDataResult。 */
+        ChartQueryResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["ChartDataResult"];
+        };
+        /** @description GET /api/shares 响应：data 为 Share 数组（id 倒序，无分页）。 */
+        ShareListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Share"][];
+        };
+        /** @description 分享 CRUD / verify 响应：data 为单个 Share。 */
+        ShareResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Share"];
+        };
+        /** @description 图表语义规格（query.ChartSpec:5）：表达图表实例绑定了什么字段和配置， 属于 Chart 语义层，不直接生成 SQL。 */
+        ChartSpec: {
+            /** @description table / bar / line / pie / area / scatter / pivot；未知值按 axis 回退。 */
+            chart_type: string;
+            /** @description 旧协议 dims 映射为默认维度组（pivot=rows、pie=category、scatter=dims、其余=x_axis）。 */
+            dimension_groups: components["schemas"]["ChartDimensionGroup"][];
+            /** @description 旧协议 metrics 映射为默认指标组 values。 */
+            metric_groups: components["schemas"]["ChartMetricGroup"][];
+            /** @description 视觉样式扩展袋（Go map[string]any，omitempty）；当前 adapter 输出空对象。 */
+            style?: {
+                [key: string]: unknown;
+            };
+            /** @description 查询选项扩展袋（Go map[string]any，omitempty），如饼图长尾合并阈值。 */
+            query_options?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description 维度组（query.DimensionGroup）。 */
+        ChartDimensionGroup: {
+            /** @description 组标识，如 x_axis / rows / columns / category。 */
+            name: string;
+            label: string;
+            fields: components["schemas"]["ChartDimensionField"][];
+        };
+        /** @description 维度字段绑定（query.DimensionField）。 */
+        ChartDimensionField: {
+            field: string;
+            label?: string;
+            /** @description 时间粒度（day / week / month 等）；执行前按方言校验（ValidateGranularity）。 */
+            granularity?: string;
+        };
+        /** @description 指标组（query.MetricGroup）。 */
+        ChartMetricGroup: {
+            /** @description 组标识，如 values / primary_values / secondary_values。 */
+            name: string;
+            label: string;
+            fields: components["schemas"]["ChartMetricField"][];
+        };
+        /** @description 指标字段绑定（query.MetricField）。 */
+        ChartMetricField: {
+            field: string;
+            label?: string;
+            /** @description sum / avg / count / max / min（query.AggregationType）。 */
+            agg: string;
+            alias?: string;
+            unit?: string;
+            format?: string;
+        };
+        /** @description 查询语义规格（query.QuerySpec:46）：表达"查什么"，不含视觉语义， 由 ChartSpec/旧请求转换而来，是 BunQueryBuilder 的上游输入。 */
+        QuerySpec: {
+            dimensions: components["schemas"]["DimensionExpr"][];
+            metrics: components["schemas"]["MetricExpr"][];
+            filters: components["schemas"]["FilterConfig"][];
+            sort?: components["schemas"]["SortConfig"];
+            pagination?: components["schemas"]["ChartPagination"];
+            /** @description 行数上限（Go omitempty，0 不出现在序列化 JSON）。 */
+            limit?: number;
+        };
+        /** @description 结构化维度表达式（query.DimensionExpr）。 */
+        DimensionExpr: {
+            field: string;
+            label?: string;
+            granularity?: string;
+        };
+        /** @description 结构化指标表达式（query.MetricExpr2；命名避开 ast.go 的 MetricExpr）。 */
+        MetricExpr: {
+            field: string;
+            /** @description sum / avg / count / max / min（query.AggregationType）。 */
+            agg: string;
+            alias?: string;
+            unit?: string;
+            format?: string;
+        };
+        /** @description 查询层过滤条件（query.FilterConfig）：JSON 键是 op，与旧协议 entity.Filter 的 operator 不同；Batch 3 chart_spec 协议统一采用本形状。 */
+        FilterConfig: {
+            field: string;
+            /** @description eq / neq / gt / gte / lt / lte / like / in / between / isNull / isNotNull； 未知值后端按 "=" 回退（FilterOperator.ToString default）。 */
+            op: string;
+            value: unknown;
+            value_end?: unknown;
+            /** @description 与其他条件的连接逻辑（如 "and" / "or"）。 */
+            logic: string;
+        };
     };
     responses: never;
     parameters: {
@@ -615,6 +1078,10 @@ export interface components {
         DatasourceId: number;
         /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
         DatasetId: number;
+        /** @description 图表 ID（gin 通配符 :id；非法数字返回 20100）。 */
+        ChartId: number;
+        /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
+        ShareToken: string;
         /** @description 表名；spec 占位符 {table} 与 gin 通配符 `:table` 对应，须为合法标识符， 前端以 URL 编码传输。 */
         TableName: string;
     };
@@ -1121,6 +1588,301 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DatasetQueryResponse"];
                 };
+            };
+        };
+    };
+    listCharts: {
+        parameters: {
+            query?: {
+                /** @description 每页条数；缺省 100，≤0 或 >1000 后端回落为 100。 */
+                limit?: number;
+                /** @description 偏移量；缺省 0，负数被后端归一化为 0。 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartListResponse"];
+                };
+            };
+        };
+    };
+    createChart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChartCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为新建 Chart */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartResponse"];
+                };
+            };
+        };
+    };
+    getChart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 图表 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["ChartId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；不存在或 id 非法时 Envelope.code = 20300/20100，data = {} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartResponse"];
+                };
+            };
+        };
+    };
+    updateChart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 图表 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["ChartId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChartUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为更新后的 Chart */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartResponse"];
+                };
+            };
+        };
+    };
+    deleteChart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 图表 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["ChartId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为 {status: "ok"} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+        };
+    };
+    getChartData: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 图表 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["ChartId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartDataRowsResponse"];
+                };
+            };
+        };
+    };
+    queryChart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChartQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartQueryResponse"];
+                };
+            };
+        };
+    };
+    listShares: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShareListResponse"];
+                };
+            };
+        };
+    };
+    createShare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShareCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为新建 Share（含 token） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShareResponse"];
+                };
+            };
+        };
+    };
+    getShare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
+                token: components["parameters"]["ShareToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShareResponse"];
+                };
+            };
+        };
+    };
+    verifySharePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
+                token: components["parameters"]["ShareToken"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShareVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；校验通过 data 为 Share，失败 data = {} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShareResponse"];
+                };
+            };
+        };
+    };
+    viewShare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
+                token: components["parameters"]["ShareToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 200 仅出现在失败路径（20300 不存在 / 20400 已过期） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description 重定向到前端分享页面（唯一成功形态，无响应体） */
+            302: {
+                headers: {
+                    /** @description 前端 hash 路由 /#/share/{token} */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
