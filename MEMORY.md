@@ -48,3 +48,9 @@
 - **逐字节一致要盯序列化细节**：`map[string]any` 的 JSON key 按字典序、struct 按声明序，投影方式改动会改变响应字节；`response` 包 normalizer 已把 nil slice/map 归一化为 `[]`/`{}`，迁移时勿据此“顺手”删掉旧 nil 兜底以外的逻辑。命名 In struct 会让 JSON 类型错误的报错信息带上类型名（匿名 struct 时为空），属设计强制的不可消除差异，应显式裁定并记录而非默默接受。
 - **裸数组 body 端点要用匿名切片类型当 In**（Task 5 dataset UpdateColumns 实测）：`[]entity.DatasetColumn` 直接作泛型 In 时，元素类型错误文本保持 `.0 of type entity.DatasetColumn`，与迁移前 `ShouldBindJSON(&columns)` 逐字节一致；若命名为具名切片类型，错误会带上类型名反而破坏一致。`ShouldBindQuery` 对非 struct In 是 no-op（gin v1.11 `tryToSetValue` 空字段名直接返回），无需 `form:"-"`。
 - **共享领域实体不能当泛型 In**（Task 5 dataset Query 裁定）：`entity.QueryConfig` 无法携带 `form:"-"`（跨包领域类型），直接作 In 会让 `?Limit=…` 经 ShouldBindQuery 回退字段名注入 body——比“struct 名进入 json 错误文本”（diff #1）更严重的契约破坏。做法是 handler 本地镜像 struct + `form:"-"` + 转换函数，代价是镜像需与实体手工同步、错误文本 struct 名变化要钉测裁定。
+
+## Batch 2 Task 7b chart-config v1 持久化经验（2026-09-09）
+
+- **组件内重复 `await import('...')` 在 vitest 下可能第二跳逃过 mock 直连真实服务**：ChartBuilder 加载 effect 把 `chartBuilderFields` 加入依赖后会跑第二遍，第二遍的 `await import('../api')` 返回了未被 `vi.mock` 包装的原始模块，请求打到了本机 8080 正在运行的 dev 后端，用真实 seed 数据（`New Chart`/bar/`field-0`）覆盖测试 store，3 个页面测试出现无法从 fixture 解释的 received 状态。根因是"effect 重跑 = 网络请求重发"的隐含假设，叠加 mock 解析不稳定。教训：由依赖变化触发的重跑 effect 若要复用一次性数据，必须按 key 缓存请求 Promise（本次用 `useRef<{id, promise}>`），失败时清缓存允许重试；页面级 mock 测试要警惕本机同端口真实服务，received 与任何 mock 都不符时先查网络侧。
+- **fieldId 从位置 id 改为列名后，旧位置 id 只能靠"列顺序重建映射"解析**：`migrateChartConfig` 的 resolver 以 `field.id` 为键，而运行时 `id === name` 之后映射里不再有 `field-N` 键；加载旧配置时必须传入 `chartBuilderFields.map((f, i) => ({id: `field-${i}`, name}))` 的位置映射才能把 `field-N` 解析为列名（v1 列名解析不到时原样保留，无损）。这属于契约文档未明说的缝隙，实现时要在代码注释里写死这个重建规则，否则会被后人"优化掉"。
+- **antd Button 带图标时 accessible name 含图标的 aria-label 前缀**（如 `save 更新`），`getByRole('button', {name: '更新'})` 精确匹配会失败，须用 `/更新$/` 锚定——与该文件既有测试 `/饼图$/` 的写法一致。
