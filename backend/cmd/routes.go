@@ -5,6 +5,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"dataray/internal/handler"
+	"dataray/internal/router"
 	"dataray/internal/service/chart"
 	"dataray/internal/service/dataset"
 	"dataray/internal/service/datasource"
@@ -35,7 +36,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte) {
 	ds := api.Group("/datasources")
 	ds.GET("", datasourceHandler.List)
 	ds.POST("", datasourceHandler.Create)
-	ds.GET("/:id", datasourceHandler.Get)
+	router.RegisterGetRoute(ds, "/:id", datasourceHandler.Get)
 	ds.PUT("/:id", datasourceHandler.Update)
 	ds.DELETE("/:id", datasourceHandler.Delete)
 	ds.POST("/test", datasourceHandler.TestConnection)

@@ -1,3 +1,68 @@
+// Package handler contains the DataRay HTTP handlers.
+//
+// Batch 2 migration pattern — converting a handler to the generic router
+// (dataray/internal/router). The datasource handlers in this file are the
+// project-wide reference; copy this pattern for the dataset/chart/share
+// domains. Hard rule: zero observable behavior change. The exact response
+// bodies are pinned byte-for-byte by datasource_test.go (envelope
+// {code,msg,trace,data}, HTTP always 200); after migrating an endpoint,
+// re-wire only the registration lines in the test router helper — every
+// assertion must keep passing untouched.
+//
+// # Handler signature
+//
+//	func (h *DatasourceHandler) Get(req router.Request[datasourcePathIn],
+//	    res *router.Response[*entity.Datasource]) error
+//
+// Registration in cmd/routes.go: router.RegisterGetRoute / RegisterPostRoute
+// / RegisterPutRoute / RegisterDeleteRoute(ds, path, h.Method) — In/Out are
+// inferred from the method value; never call response.* from inside an
+// migrated handler, the router wraps success and errors.
+//
+// # In struct rules
+//
+//   - Query params: fields with `form` tags. Declare them as string and
+//     parse in a post-bind method that mirrors the old DefaultQuery+strconv
+//     clamping (see datasourceListIn.pagination). Binding int directly is a
+//     behavior change: a garbage ?limit=abc would answer 20100 where the old
+//     handler silently used the default 100.
+//   - Path params (:id, :table): NOT part of In. Read them via
+//     req.Ctx.Param("id") inside the handler and parse there; an unparseable
+//     id keeps returning BusinessError(CodeBadRequest, "invalid id").
+//   - JSON body: the In struct itself. Give every body field `form:"-"`,
+//     because gin's ShouldBindQuery (which the router always runs first)
+//     falls back to the Go field name as key when no form tag exists —
+//     without form:"-" a stray ?Name=evil would leak into the body struct
+//     that the old handler never read from.
+//   - Body binding gate: the router binds JSON for POST/PUT/PATCH only
+//     (unconditionally, so an empty body yields the same 20100/"EOF" as the
+//     old unconditional ShouldBindJSON); GET/DELETE never bind a body.
+//
+// # Out rules
+//
+// res.Out carries the payload only; response.Success wraps it in the
+// envelope. response's normalizer turns nil slices/maps into [] / {} and
+// nil root data into {}, so a typed nil slice Out already serializes as [] —
+// keep any explicit nil guards only where the old code had them. Preserve
+// map vs struct projection choices: GetColumns deliberately returns
+// []map[string]any so key order stays alphabetical byte-for-byte; switching
+// it to a struct would reorder the JSON keys.
+//
+// # Error mapping table
+//
+//	old response.BadRequest(c, msg)      → return router.NewBusinessError(response.CodeBadRequest, msg)
+//	old response.NotFound(c, msg)       → return router.NewBusinessError(response.CodeNotFound, msg)
+//	old response.InternalError(c, msg)  → return err (bare; the router's fallback calls
+//	                                      response.InternalError(c, err.Error()) — identical body incl. trace)
+//	other old response.Xxx(c, msg)      → NewBusinessError with that same code constant
+//
+// Do not "improve" existing semantics: every GetByID error currently maps
+// to 404, TestConnection failures currently map to 400 — keep both.
+//
+// Known unavoidable diff (accepted): JSON type-mismatch bind errors embed
+// the Go struct name, so "…Go struct field .port…" now reads
+// "…Go struct field datasourceCreateIn.port…". Every code/msg/data shape on
+// the normal contract paths is unchanged.
 package handler
 
 import (
@@ -5,6 +70,7 @@ import (
 
 	"dataray/internal/domain/entity"
 	"dataray/internal/response"
+	"dataray/internal/router"
 	"dataray/internal/service/datasource"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +85,10 @@ type DatasourceHandler struct {
 func NewDatasourceHandler(svc datasource.Service) *DatasourceHandler {
 	return &DatasourceHandler{svc: svc}
 }
+
+// datasourcePathIn is the In shape for routes that carry only path params
+// (id / table): nothing to bind, params are read from req.Ctx.
+type datasourcePathIn struct{}
 
 // List handles GET /api/datasources
 func (h *DatasourceHandler) List(c *gin.Context) {
@@ -36,19 +106,18 @@ func (h *DatasourceHandler) List(c *gin.Context) {
 }
 
 // Get handles GET /api/datasources/:id
-func (h *DatasourceHandler) Get(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasourceHandler) Get(req router.Request[datasourcePathIn], res *router.Response[*entity.Datasource]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	ds, err := h.svc.GetByID(c.Request.Context(), id)
+	ds, err := h.svc.GetByID(req.Ctx.Request.Context(), id)
 	if err != nil {
-		response.NotFound(c, err.Error())
-		return
+		return router.NewBusinessError(response.CodeNotFound, err.Error())
 	}
-	response.Success(c, ds)
+	res.Out = ds
+	return nil
 }
 
 // Create handles POST /api/datasources

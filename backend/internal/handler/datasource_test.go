@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"dataray/internal/domain/entity"
+	"dataray/internal/router"
 	"dataray/internal/service/datasource"
 
 	"github.com/gin-gonic/gin"
@@ -121,7 +122,7 @@ func newDatasourceTestRouter(h *DatasourceHandler) *gin.Engine {
 	ds := r.Group("/api/datasources")
 	ds.GET("", h.List)
 	ds.POST("", h.Create)
-	ds.GET("/:id", h.Get)
+	router.RegisterGetRoute(ds, "/:id", h.Get)
 	ds.PUT("/:id", h.Update)
 	ds.DELETE("/:id", h.Delete)
 	ds.POST("/test", h.TestConnection)
