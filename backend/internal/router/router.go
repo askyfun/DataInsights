@@ -1,6 +1,7 @@
 package router
 
 import (
+	"net/http"
 	"reflect"
 
 	"dataray/internal/response"
@@ -46,8 +47,12 @@ func RegisterRoute[In, Out any](
 			return
 		}
 
-		// Bind JSON body (if present)
-		if c.Request.ContentLength > 0 {
+		// Bind JSON body for methods that carry one. This mirrors the
+		// per-handler behavior it replaces: POST/PUT/PATCH handlers called
+		// ShouldBindJSON unconditionally (so an empty body yields the same
+		// EOF binding error), while GET/DELETE handlers ignored bodies.
+		switch c.Request.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch:
 			if err := c.ShouldBindJSON(&req.In); err != nil {
 				response.BadRequest(c, err.Error())
 				return

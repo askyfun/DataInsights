@@ -206,6 +206,90 @@ func TestRegisterDeleteRoute(t *testing.T) {
 	}
 }
 
+// TestRegisterRoute_PostEmptyBody pins the pre-migration handler semantics:
+// body-carrying handlers (POST/PUT/PATCH) called ShouldBindJSON
+// unconditionally, so an empty body must surface as the same binding error
+// (code 20100, msg "EOF") instead of skipping the bind and running the
+// handler with a zero In value.
+func TestRegisterRoute_PostEmptyBody(t *testing.T) {
+	router := gin.New()
+
+	RegisterPostRoute[testCreateRequest, testResponse](
+		router.Group("/api"),
+		"/users",
+		func(req Request[testCreateRequest], res Response[testResponse]) error {
+			res.Out = testResponse{ID: 1, Name: req.In.Name}
+			return nil
+		},
+	)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/users", http.NoBody)
+	r.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, r)
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["code"] != float64(20100) {
+		t.Errorf("expected code 20100 for empty POST body, got %v, body: %s", resp["code"], w.Body.String())
+	}
+	if resp["msg"] != "EOF" {
+		t.Errorf("expected msg 'EOF', got %v, body: %s", resp["msg"], w.Body.String())
+	}
+}
+
+// TestRegisterRoute_PutEmptyBody is the PUT counterpart of
+// TestRegisterRoute_PostEmptyBody.
+func TestRegisterRoute_PutEmptyBody(t *testing.T) {
+	router := gin.New()
+
+	RegisterPutRoute[testCreateRequest, testResponse](
+		router.Group("/api"),
+		"/users/:id",
+		func(req Request[testCreateRequest], res Response[testResponse]) error {
+			res.Out = testResponse{ID: 1, Name: req.In.Name}
+			return nil
+		},
+	)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/users/1", http.NoBody)
+	r.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, r)
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["code"] != float64(20100) {
+		t.Errorf("expected code 20100 for empty PUT body, got %v, body: %s", resp["code"], w.Body.String())
+	}
+}
+
+// TestRegisterRoute_GetIgnoresBody pins that GET requests never bind a JSON
+// body: pre-migration GET handlers only read path/query params and ignored
+// any stray body entirely.
+func TestRegisterRoute_GetIgnoresBody(t *testing.T) {
+	router := gin.New()
+
+	RegisterGetRoute[routingRequest, testResponse](
+		router.Group("/api"),
+		"/users/:id",
+		func(req Request[routingRequest], res Response[testResponse]) error {
+			res.Out = testResponse{ID: 1, Name: "ok"}
+			return nil
+		},
+	)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/users/1", strings.NewReader(`not json`))
+	router.ServeHTTP(w, r)
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["code"] != float64(20000) {
+		t.Errorf("expected GET with stray body to succeed (20000), got %v, body: %s", resp["code"], w.Body.String())
+	}
+}
+
 // TestNewBusinessError tests business error creation
 func TestNewBusinessError(t *testing.T) {
 	err := NewBusinessError(20400, "test error")
