@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { AxisResponse, ChartType, ScatterResponse } from '@/idls/chart';
+import type { components } from '@/idls/gen_types';
+import type { ChartType } from '@/lib/chartConfigSchema';
+
+type AxisResponse = components['schemas']['ChartAxisResponse'];
+type ScatterResponse = components['schemas']['ChartScatterResponse'];
 
 /**
  * Pure transformation function matching the logic in store/index.ts executeChartQuery

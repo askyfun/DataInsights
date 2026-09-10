@@ -85,7 +85,7 @@ const DatasetDetailPage: React.FC = () => {
       const response = await datasetsApi.getById(datasetId);
       setDataset(response.data.data);
     } catch (error: any) {
-      message.error(error.response?.data?.message || 'Failed to load dataset');
+      message.error(error.message || 'Failed to load dataset');
     } finally {
       setDatasetLoading(false);
     }
@@ -103,7 +103,7 @@ const DatasetDetailPage: React.FC = () => {
       const response = await datasetsApi.getColumns(datasetId);
       setColumns(response.data.data);
     } catch (error: any) {
-      message.error(error.response?.data?.message || 'Failed to load columns');
+      message.error(error.message || 'Failed to load columns');
     } finally {
       setColumnsLoading(false);
     }
@@ -121,7 +121,7 @@ const DatasetDetailPage: React.FC = () => {
       const response = await datasetsApi.getPreview(datasetId);
       setPreview(response.data.data);
     } catch (error: any) {
-      message.error(error.response?.data?.message || 'Failed to load preview');
+      message.error(error.message || 'Failed to load preview');
     } finally {
       setPreviewLoading(false);
     }
@@ -143,7 +143,7 @@ const DatasetDetailPage: React.FC = () => {
       await datasetsApi.updateColumns(datasetId, columns);
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
       setSavingColumns(false);
     }
@@ -198,7 +198,7 @@ const DatasetDetailPage: React.FC = () => {
       if (error.errorFields) {
         return;
       }
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
       setSavingColumns(false);
     }
@@ -212,7 +212,7 @@ const DatasetDetailPage: React.FC = () => {
       setColumns(updatedColumns);
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
       setSavingColumns(false);
     }
@@ -234,7 +234,7 @@ const DatasetDetailPage: React.FC = () => {
           message.success(intl.formatMessage({ id: 'dataset.detail.deleteSuccess' }));
           navigate('/datasets');
         } catch (error: any) {
-          message.error(error.response?.data?.message || 'Failed to delete dataset');
+          message.error(error.message || 'Failed to delete dataset');
         }
       },
     });

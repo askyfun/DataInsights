@@ -75,7 +75,7 @@ const DatasourcePage: React.FC = () => {
       setEditingId(null);
       fetchDatasources();
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
       setSubmitLoading(false);
     }
@@ -96,9 +96,7 @@ const DatasourcePage: React.FC = () => {
       });
       message.success(intl.formatMessage({ id: 'datasource.connectionSuccess' }));
     } catch (error: any) {
-      message.error(
-        error.response?.data?.message || intl.formatMessage({ id: 'datasource.connectionFailed' })
-      );
+      message.error(error.message || intl.formatMessage({ id: 'datasource.connectionFailed' }));
     } finally {
       setTestLoading(false);
     }
@@ -109,7 +107,7 @@ const DatasourcePage: React.FC = () => {
       await deleteDatasource(id);
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     }
   };
 

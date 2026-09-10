@@ -120,7 +120,7 @@ const ShareView: React.FC = () => {
       if (error.response?.status === 401 || error.response?.status === 403) {
         setPasswordError('Invalid password');
       } else {
-        setPasswordError(error.response?.data?.message || 'Verification failed');
+        setPasswordError(error.message || 'Verification failed');
       }
     } finally {
       setAuthLoading(false);

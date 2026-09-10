@@ -1325,7 +1325,7 @@ const ChartBuilder: React.FC = () => {
         setEditingChartId(newChart.id);
       }
     } catch (error: any) {
-      message.error(error.response?.data?.message || '保存失败');
+      message.error(error.message || '保存失败');
     }
   };
 

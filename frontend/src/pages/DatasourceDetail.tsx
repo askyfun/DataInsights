@@ -41,8 +41,8 @@ const getTypeInfo = (type: string) => {
 // getApiErrorMessage extracts the backend error message from unknown API errors and keeps
 // fallback text for network errors or unexpected response shapes.
 const getApiErrorMessage = (error: unknown, fallback: string) => {
-  const err = error as { response?: { data?: { message?: unknown } } };
-  return typeof err.response?.data?.message === 'string' ? err.response.data.message : fallback;
+  const err = error as { message?: unknown };
+  return typeof err.message === 'string' ? err.message : fallback;
 };
 
 // normalizeTableDataResult protects the preview table from legacy or Go nil-slice responses

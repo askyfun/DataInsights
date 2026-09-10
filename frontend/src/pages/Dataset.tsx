@@ -196,7 +196,7 @@ const DatasetPage: React.FC = () => {
       // 跳转到数据集详情页
       navigate(`/datasets/${newDataset.id}`);
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
       setSubmitLoading(false);
     }
@@ -271,9 +271,7 @@ const DatasetPage: React.FC = () => {
       if (error.errorFields) {
         return;
       }
-      message.error(
-        error.response?.data?.message || intl.formatMessage({ id: 'virtualField.saveFailed' })
-      );
+      message.error(error.message || intl.formatMessage({ id: 'virtualField.saveFailed' }));
     } finally {
       setSavingColumns(false);
     }
@@ -290,9 +288,7 @@ const DatasetPage: React.FC = () => {
       setDatasetColumns(updatedColumns);
       message.success(intl.formatMessage({ id: 'virtualField.fieldDeleted' }));
     } catch (error: any) {
-      message.error(
-        error.response?.data?.message || intl.formatMessage({ id: 'virtualField.saveFailed' })
-      );
+      message.error(error.message || intl.formatMessage({ id: 'virtualField.saveFailed' }));
     } finally {
       setSavingColumns(false);
     }
@@ -386,7 +382,7 @@ const DatasetPage: React.FC = () => {
         const response = await datasourcesApi.getTables(datasourceId);
         setTables(response.data.data || []);
       } catch (error: any) {
-        message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+        message.error(error.message || intl.formatMessage({ id: 'common.error' }));
         setTables([]);
       } finally {
         setTablesLoading(false);
@@ -524,7 +520,7 @@ const DatasetPage: React.FC = () => {
       await deleteDataset(id);
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     }
   };
 
@@ -567,7 +563,7 @@ const DatasetPage: React.FC = () => {
       setQueryType('table');
       fetchDatasets();
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
       setSubmitLoading(false);
     }
@@ -594,7 +590,7 @@ const DatasetPage: React.FC = () => {
       await datasetsApi.updateColumns(editingDataset.id, datasetColumns);
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
       setSavingColumns(false);
     }

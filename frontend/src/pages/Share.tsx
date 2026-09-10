@@ -56,9 +56,7 @@ const SharePage: React.FC = () => {
       });
       setShares(enrichedShares);
     } catch (error: any) {
-      message.error(
-        error.response?.data?.message || intl.formatMessage({ id: 'share.fetchFailed' })
-      );
+      message.error(error.message || intl.formatMessage({ id: 'share.fetchFailed' }));
     } finally {
       setLoading(false);
     }
@@ -100,9 +98,7 @@ const SharePage: React.FC = () => {
       // Close modal but keep link visible
       form.resetFields();
     } catch (error: any) {
-      message.error(
-        error.response?.data?.message || intl.formatMessage({ id: 'share.createFailed' })
-      );
+      message.error(error.message || intl.formatMessage({ id: 'share.createFailed' }));
     } finally {
       setCreateLoading(false);
     }
@@ -116,9 +112,7 @@ const SharePage: React.FC = () => {
       setShares(shares.filter((s) => s.token !== token));
       message.success(intl.formatMessage({ id: 'share.shareRemoved' }));
     } catch (error: any) {
-      message.error(
-        error.response?.data?.message || intl.formatMessage({ id: 'share.deleteFailed' })
-      );
+      message.error(error.message || intl.formatMessage({ id: 'share.deleteFailed' }));
     }
   };
 

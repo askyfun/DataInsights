@@ -53,7 +53,7 @@ const DatasetEditPage: React.FC = () => {
         const response = await datasourcesApi.getAll();
         setDatasources(response.data.data || []);
       } catch (error: any) {
-        message.error(error.response?.data?.message || 'Failed to fetch datasources');
+        message.error(error.message || 'Failed to fetch datasources');
       }
     };
     fetchDatasources();
@@ -66,7 +66,7 @@ const DatasetEditPage: React.FC = () => {
       const response = await datasourcesApi.getTables(datasourceId);
       setTables(response.data.data || []);
     } catch (error: any) {
-      message.error(error.response?.data?.message || 'Failed to fetch tables');
+      message.error(error.message || 'Failed to fetch tables');
       setTables([]);
     } finally {
       setTablesLoading(false);
@@ -80,7 +80,7 @@ const DatasetEditPage: React.FC = () => {
       const response = await datasetsApi.getColumns(dsId);
       setDatasetColumns(response.data.data || []);
     } catch (error: any) {
-      message.error(error.response?.data?.message || 'Failed to fetch columns');
+      message.error(error.message || 'Failed to fetch columns');
       setDatasetColumns([]);
     } finally {
       setColumnsLoading(false);
@@ -130,7 +130,7 @@ const DatasetEditPage: React.FC = () => {
         // Fetch columns
         fetchColumns(datasetId);
       } catch (error: any) {
-        message.error(error.response?.data?.message || 'Failed to fetch dataset');
+        message.error(error.message || 'Failed to fetch dataset');
         navigate('/datasets');
       } finally {
         setLoading(false);
@@ -184,9 +184,7 @@ const DatasetEditPage: React.FC = () => {
       message.success(intl.formatMessage({ id: 'dataset.edit.success' }));
       navigate('/datasets');
     } catch (error: any) {
-      message.error(
-        error.response?.data?.message || intl.formatMessage({ id: 'dataset.edit.error' })
-      );
+      message.error(error.message || intl.formatMessage({ id: 'dataset.edit.error' }));
     } finally {
       setSubmitting(false);
     }

@@ -49,7 +49,7 @@ const ChartsPage: React.FC = () => {
       await deleteChart(id);
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
-      message.error(error.response?.data?.message || intl.formatMessage({ id: 'common.error' }));
+      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     }
   };
 
