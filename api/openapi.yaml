@@ -91,6 +91,8 @@ components:
       allOf:
         - $ref: '#/components/schemas/Envelope'
         - type: object
+          required:
+            - data
           properties:
             data:
               $ref: '#/components/schemas/HealthData'

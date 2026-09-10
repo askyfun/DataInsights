@@ -49,7 +49,7 @@ export interface components {
         };
         /** @description GET /health 响应：Envelope 特化 data 为 HealthData。 */
         HealthResponse: components["schemas"]["Envelope"] & {
-            data?: components["schemas"]["HealthData"];
+            data: components["schemas"]["HealthData"];
         };
     };
     responses: never;
