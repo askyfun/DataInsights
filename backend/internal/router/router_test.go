@@ -43,7 +43,7 @@ func TestRegisterGetRoute_QueryParams(t *testing.T) {
 	RegisterGetRoute[listRequest, []testResponse](
 		router.Group("/api"),
 		"/users",
-		func(req Request[listRequest], res Response[[]testResponse]) error {
+		func(req Request[listRequest], res *Response[[]testResponse]) error {
 			if req.In.Limit != 10 {
 				t.Errorf("expected limit 10, got %d", req.In.Limit)
 			}
@@ -74,7 +74,7 @@ func TestRegisterRoute_PathParams(t *testing.T) {
 	RegisterGetRoute[routingRequest, testResponse](
 		router.Group("/api"),
 		"/users/:id",
-		func(req Request[routingRequest], res Response[testResponse]) error {
+		func(req Request[routingRequest], res *Response[testResponse]) error {
 			id := req.Ctx.Param("id")
 			if id != "123" {
 				t.Errorf("expected id '123', got '%s'", id)
@@ -100,7 +100,7 @@ func TestRegisterRoute_BusinessError(t *testing.T) {
 	RegisterPostRoute[testCreateRequest, testResponse](
 		router.Group("/api"),
 		"/users",
-		func(req Request[testCreateRequest], res Response[testResponse]) error {
+		func(req Request[testCreateRequest], res *Response[testResponse]) error {
 			return NewBusinessError(20400, "user already exists")
 		},
 	)
@@ -132,7 +132,7 @@ func TestRegisterRoute_InvalidRequest(t *testing.T) {
 	RegisterPostRoute[requiredRequest, testResponse](
 		router.Group("/api"),
 		"/users",
-		func(req Request[requiredRequest], res Response[testResponse]) error {
+		func(req Request[requiredRequest], res *Response[testResponse]) error {
 			res.Out = testResponse{ID: 1, Name: "test"}
 			return nil
 		},
@@ -155,7 +155,7 @@ func TestRegisterPutRoute(t *testing.T) {
 	RegisterPutRoute[testCreateRequest, testResponse](
 		router.Group("/api"),
 		"/users/:id",
-		func(req Request[testCreateRequest], res Response[testResponse]) error {
+		func(req Request[testCreateRequest], res *Response[testResponse]) error {
 			id := req.Ctx.Param("id")
 			res.Out = testResponse{ID: 123, Name: req.In.Name}
 			_ = id
@@ -184,7 +184,7 @@ func TestRegisterDeleteRoute(t *testing.T) {
 	RegisterDeleteRoute[routingRequest, deleteResponse](
 		router.Group("/api"),
 		"/users/:id",
-		func(req Request[routingRequest], res Response[deleteResponse]) error {
+		func(req Request[routingRequest], res *Response[deleteResponse]) error {
 			res.Out = deleteResponse{Status: "ok"}
 			return nil
 		},
@@ -206,6 +206,32 @@ func TestRegisterDeleteRoute(t *testing.T) {
 	}
 }
 
+// TestRegisterRoute_SuccessPayloadPinsOut proves the router reads the Out
+// the handler wrote: Response is passed by reference, so a success response
+// carries the payload instead of the zero value (data was previously always
+// null / fields zeroed because Response was passed by value).
+func TestRegisterRoute_SuccessPayloadPinsOut(t *testing.T) {
+	router := gin.New()
+
+	RegisterGetRoute[routingRequest, testResponse](
+		router.Group("/api"),
+		"/users/:id",
+		func(req Request[routingRequest], res *Response[testResponse]) error {
+			res.Out = testResponse{ID: 5, Name: "x"}
+			return nil
+		},
+	)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/users/1", nil)
+	router.ServeHTTP(w, req)
+
+	want := `{"code":20000,"msg":"success","trace":"","data":{"id":5,"name":"x"}}`
+	if got := strings.TrimSpace(w.Body.String()); got != want {
+		t.Errorf("body mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestRegisterRoute_PostEmptyBody pins the pre-migration handler semantics:
 // body-carrying handlers (POST/PUT/PATCH) called ShouldBindJSON
 // unconditionally, so an empty body must surface as the same binding error
@@ -217,7 +243,7 @@ func TestRegisterRoute_PostEmptyBody(t *testing.T) {
 	RegisterPostRoute[testCreateRequest, testResponse](
 		router.Group("/api"),
 		"/users",
-		func(req Request[testCreateRequest], res Response[testResponse]) error {
+		func(req Request[testCreateRequest], res *Response[testResponse]) error {
 			res.Out = testResponse{ID: 1, Name: req.In.Name}
 			return nil
 		},
@@ -246,7 +272,7 @@ func TestRegisterRoute_PutEmptyBody(t *testing.T) {
 	RegisterPutRoute[testCreateRequest, testResponse](
 		router.Group("/api"),
 		"/users/:id",
-		func(req Request[testCreateRequest], res Response[testResponse]) error {
+		func(req Request[testCreateRequest], res *Response[testResponse]) error {
 			res.Out = testResponse{ID: 1, Name: req.In.Name}
 			return nil
 		},
@@ -273,7 +299,7 @@ func TestRegisterRoute_GetIgnoresBody(t *testing.T) {
 	RegisterGetRoute[routingRequest, testResponse](
 		router.Group("/api"),
 		"/users/:id",
-		func(req Request[routingRequest], res Response[testResponse]) error {
+		func(req Request[routingRequest], res *Response[testResponse]) error {
 			res.Out = testResponse{ID: 1, Name: "ok"}
 			return nil
 		},
@@ -313,7 +339,7 @@ func TestRequest_Fields(t *testing.T) {
 	RegisterGetRoute[routingRequest, testResponse](
 		router.Group("/api"),
 		"/test",
-		func(req Request[routingRequest], res Response[testResponse]) error {
+		func(req Request[routingRequest], res *Response[testResponse]) error {
 			if req.Ctx == nil {
 				t.Error("expected Ctx to be set")
 			}
@@ -347,7 +373,7 @@ func TestRegisterRoute_DefaultQueryParams(t *testing.T) {
 	RegisterGetRoute[listRequest, testResponse](
 		router.Group("/api"),
 		"/users",
-		func(req Request[listRequest], res Response[testResponse]) error {
+		func(req Request[listRequest], res *Response[testResponse]) error {
 			if req.In.Limit != 20 {
 				t.Errorf("expected default limit 20, got %d", req.In.Limit)
 			}

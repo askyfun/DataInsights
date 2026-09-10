@@ -24,7 +24,10 @@ type Response[Out any] struct {
 // API defines a generic API handler function type
 // In: request body type
 // Out: response body type
-type API[In, Out any] func(req Request[In], res Response[Out]) error
+// Response is passed by pointer so writes to res.Out are visible to the
+// router: a by-value Response would silently discard every handler payload
+// (the router would always respond with the zero value of Out).
+type API[In, Out any] func(req Request[In], res *Response[Out]) error
 
 // RegisterRoute registers an API handler to gin router
 // Supports binding query parameters and JSON body to In type
@@ -39,7 +42,7 @@ func RegisterRoute[In, Out any](
 		// Create request and response containers
 		var in In
 		req := Request[In]{In: in, Ctx: c}
-		res := Response[Out]{}
+		res := &Response[Out]{}
 
 		// Bind query parameters first (if In has query tags)
 		if err := c.ShouldBindQuery(&req.In); err != nil {
