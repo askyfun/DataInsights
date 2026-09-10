@@ -22,6 +22,10 @@ servers:
 tags:
   - name: health
     description: 健康检查（响应 Envelope 建模样例）
+  - name: datasources
+    description: 数据源管理（CRUD、连接测试、库表元数据、预览与字段分布）
+  - name: datasets
+    description: 数据集管理（CRUD、列定义、预览、查询）
 paths:
   /health:
     get:
@@ -37,6 +41,427 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /api/datasources:
+    get:
+      tags:
+        - datasources
+      summary: 数据源列表
+      description: |
+        分页返回数据源数组；无结果时 data 为空数组（handler 将 nil 归一化为 []）。
+      operationId: listDatasources
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: |
+            每页条数。后端 getPaginationParams（handler/helpers.go）：缺省 100；
+            值 ≤0 或 >1000 时回落为 100（实际硬上限是 1000）。
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          description: 偏移量；缺省 0，负数被后端归一化为 0。
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasourceListResponse'
+    post:
+      tags:
+        - datasources
+      summary: 创建数据源
+      description: |
+        type 为空时后端缺省填 "postgresql"。响应 data 为创建后的 Datasource，
+        不含 password（entity 的 Password 为 json:"-"）。
+      operationId: createDatasource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasourceCreateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为新建 Datasource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasourceResponse'
+  /api/datasources/test:
+    post:
+      tags:
+        - datasources
+      summary: 测试数据源连接
+      description: |
+        使用未落库的连接参数测试连通性。type 为空时后端缺省填 "postgresql"；
+        不支持的驱动类型或连接失败返回 Envelope.code = 20100（BadRequest）。
+      operationId: testDatasourceConnection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasourceTestConnectionRequest'
+      responses:
+        '200':
+          description: 'HTTP 恒 200；连接成功 data 为 {status: "ok"}'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /api/datasources/{id}:
+    get:
+      tags:
+        - datasources
+      summary: 获取数据源详情
+      operationId: getDatasource
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+      responses:
+        '200':
+          description: HTTP 恒 200；不存在或 id 非法时 Envelope.code = 20300/20100，data = {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasourceResponse'
+    put:
+      tags:
+        - datasources
+      summary: 更新数据源
+      description: |
+        password 为空字符串或缺省表示保留数据库中已存密码（service.Update 明确
+        保留原值），因此响应永远不回显密码。
+      operationId: updateDatasource
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasourceUpdateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为更新后的 Datasource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasourceResponse'
+    delete:
+      tags:
+        - datasources
+      summary: 删除数据源
+      operationId: deleteDatasource
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+      responses:
+        '200':
+          description: 'HTTP 恒 200；成功 data 为 {status: "ok"}'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /api/datasources/{id}/tables:
+    get:
+      tags:
+        - datasources
+      summary: 列出数据源下的表
+      description: 实时连接目标数据源读取表元数据；返回 TableInfo 数组。
+      operationId: listDatasourceTables
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableListResponse'
+  /api/datasources/{id}/tables/{table}/columns:
+    get:
+      tags:
+        - datasources
+      summary: 列出表的列元数据
+      description: |
+        {table} 与 gin 路由 `:table` 通配符对应；表名必须是合法标识符，
+        前端调用时做 URL 编码。handler 以 map 组装，仅含 name/data_type/comment 三个键。
+      operationId: listTableColumns
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+        - $ref: '#/components/parameters/TableName'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ColumnListResponse'
+  /api/datasources/{id}/tables/{table}/data:
+    get:
+      tags:
+        - datasources
+      summary: 分页读取表数据
+      description: |
+        {table} 与 gin 路由 `:table` 通配符对应。sort_field 缺省用第一个主键列，
+        且必须是主键列之一；sort_order 按大小写不敏感匹配 desc，其余一律归一为 ASC。
+      operationId: getTableData
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+        - $ref: '#/components/parameters/TableName'
+        - name: page
+          in: query
+          required: false
+          description: 页码，从 1 开始；≤0 被后端归一为 1。
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          description: 每页行数；≤0 归一为 20，上限 100（超出截断为 100）。
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: sort_field
+          in: query
+          required: false
+          description: 排序列；必须是该表的主键列，否则返回 Envelope.code = 50000（错误消息含 "sort field must be a primary key"）。
+          schema:
+            type: string
+        - name: sort_order
+          in: query
+          required: false
+          description: 排序方向，ASC/DESC（大小写不敏感）；缺省 ASC。
+          schema:
+            type: string
+            default: ASC
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableDataResponse'
+  /api/datasources/{id}/preview:
+    post:
+      tags:
+        - datasources
+      summary: 预览数据源表或 SQL 结果
+      description: |
+        query_type = "table" 时以 table_name（合法标识符）为源；query_type = "sql" 时以
+        query_sql 为源（包成子查询）。后端固定取前 10 行。两源字段按 query_type 二选一，
+        因此 schema 不强制 required。
+      operationId: previewDatasource
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasourcePreviewRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasourcePreviewResponse'
+  /api/datasources/{id}/field-distribution:
+    post:
+      tags:
+        - datasources
+      summary: 字段值分布统计
+      description: |
+        field_name 必填（缺失返回 Envelope.code = 20100）。limit ≤0 或 >50 时后端归一为 20。
+        数据源/查询源的解析规则与 preview 端点一致。
+      operationId: getDatasourceFieldDistribution
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FieldDistributionRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldDistributionResponse'
+  /api/datasets:
+    get:
+      tags:
+        - datasets
+      summary: 数据集列表
+      description: |
+        分页返回数据集数组；无结果时 data 为空数组。分页参数与数据源列表一致
+        （limit 缺省 100、offset 缺省 0，helpers.go 对 ≤0 或 >1000 回落 100）。
+      operationId: listDatasets
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: 每页条数；缺省 100，≤0 或 >1000 后端回落为 100。
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          description: 偏移量；缺省 0，负数被后端归一化为 0。
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetListResponse'
+    post:
+      tags:
+        - datasets
+      summary: 创建数据集
+      description: |
+        tags/columns 是 JSON 数组的字符串形态（后端以 string 存储，非数组）；
+        query_type 为空后端填 "table"，mode 为空填 "direct"，tags/columns 为空填 "[]"。
+        table_name 与 query_sql 按 query_type 二选一，未传的置为 null。
+      operationId: createDataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasetCreateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为新建 Dataset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetResponse'
+  /api/datasets/{id}:
+    get:
+      tags:
+        - datasets
+      summary: 获取数据集详情
+      operationId: getDataset
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: HTTP 恒 200；不存在或 id 非法时 Envelope.code = 20300/20100，data = {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetResponse'
+    delete:
+      tags:
+        - datasets
+      summary: 删除数据集
+      operationId: deleteDataset
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: 'HTTP 恒 200；成功 data 为 {status: "ok"}'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /api/datasets/{id}/columns:
+    get:
+      tags:
+        - datasets
+      summary: 获取数据集列定义
+      description: 返回 DatasetColumn 数组（数据集 columns JSON 字段解析后的列定义）。
+      operationId: getDatasetColumns
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetColumnListResponse'
+    post:
+      tags:
+        - datasets
+      summary: 更新数据集列定义
+      description: |
+        请求体是 DatasetColumn 裸数组（不是 {columns: [...]} 包装对象）。
+        成功 data 为更新后的 Dataset（columns 字段已写回）。
+      operationId: updateDatasetColumns
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/DatasetColumn'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetResponse'
+  /api/datasets/{id}/preview:
+    get:
+      tags:
+        - datasets
+      summary: 预览数据集数据
+      description: 按数据集的表/SQL 源实时取数（后端固定取前 10 行）；data 为 PreviewResult。
+      operationId: previewDataset
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetPreviewResponse'
+  /api/datasets/{id}/query:
+    post:
+      tags:
+        - datasets
+      summary: 按 QueryConfig 查询数据集
+      description: |
+        请求体为 entity.QueryConfig（维度组/指标组/过滤/排序/limit）；
+        data 为查询结果行数组，每行是列名到任意 JSON 值的映射。
+      operationId: queryDataset
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryConfig'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetQueryResponse'
 components:
   schemas:
     ResponseCode:
@@ -96,3 +521,671 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/HealthData'
+    OkData:
+      type: object
+      description: 删除/测试连接等无业务负载端点的成功负载。
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+    OkResponse:
+      description: 'Envelope 特化 data 为 OkData（{status: "ok"}）。'
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/OkData'
+    Datasource:
+      type: object
+      description: |
+        数据源响应实体（entity.Datasource）。password 为 json:"-" 永不外泄，
+        因此本 schema 不含 password 字段。
+      required:
+        - id
+        - name
+        - type
+        - host
+        - port
+        - database_name
+        - username
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        type:
+          type: string
+          description: >-
+            驱动类型；后端 datasource.NewDriver 支持 postgresql / mysql /
+            clickhouse / starrocks（创建时后端不做枚举强校验，落库什么返回什么）。
+        host:
+          type: string
+        port:
+          type: integer
+        database_name:
+          type: string
+        username:
+          type: string
+        created_at:
+          type: string
+          description: RFC3339 时间；数据库时间戳无效时为空字符串。
+        updated_at:
+          type: string
+          description: RFC3339 时间；数据库时间戳无效时为空字符串。
+    DatasourceCreateRequest:
+      type: object
+      description: POST /api/datasources 请求体；password 仅出现在请求侧。
+      required:
+        - name
+        - type
+        - host
+        - port
+        - database_name
+        - username
+        - password
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          description: 为空时后端缺省填 "postgresql"。
+        host:
+          type: string
+        port:
+          type: integer
+        database_name:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+          writeOnly: true
+          description: 连接密码；落库前 AES-GCM 加密（DATARAY_SECURITY_KEY）。
+    DatasourceUpdateRequest:
+      type: object
+      description: |
+        PUT /api/datasources/{id} 请求体。password 可缺省/空串：
+        后端保留已存密码，不覆盖为空。
+      required:
+        - name
+        - type
+        - host
+        - port
+        - database_name
+        - username
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+        database_name:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+          writeOnly: true
+          description: 空字符串或缺省表示保留原密码。
+    DatasourceTestConnectionRequest:
+      type: object
+      description: POST /api/datasources/test 请求体（无 name，不落库）。
+      required:
+        - type
+        - host
+        - port
+        - database_name
+        - username
+        - password
+      properties:
+        type:
+          type: string
+          description: 为空时后端缺省填 "postgresql"。
+        host:
+          type: string
+        port:
+          type: integer
+        database_name:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+          writeOnly: true
+    TableInfo:
+      type: object
+      description: 表元数据（entity.TableInfo）。
+      required:
+        - name
+        - comment
+      properties:
+        name:
+          type: string
+        comment:
+          type: string
+    ColumnInfo:
+      type: object
+      description: >-
+        列元数据；datasource handler 以 map 组装，仅含 name/data_type/comment
+        三个键（前端手写的 role/is_virtual/expression 不由该端点返回）。
+      required:
+        - name
+        - data_type
+        - comment
+      properties:
+        name:
+          type: string
+        data_type:
+          type: string
+        comment:
+          type: string
+    DataRow:
+      type: object
+      additionalProperties: true
+      description: 结果行：列名到任意 JSON 值的映射，值可能为 null。
+    PreviewResult:
+      type: object
+      description: >-
+        预览结果（entity.PreviewResult）；两字段经 response 归一化，
+        恒为数组（不会为 null）。
+      required:
+        - columns
+        - data
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataRow'
+    TableDataResult:
+      type: object
+      description: >-
+        分页表数据（entity.TableDataResult）；数组字段经归一化恒为数组，
+        无主键时 primary_keys 为空数组。
+      required:
+        - columns
+        - data
+        - total
+        - primary_keys
+        - page
+        - page_size
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataRow'
+        total:
+          type: integer
+          format: int64
+        primary_keys:
+          type: array
+          items:
+            type: string
+        page:
+          type: integer
+        page_size:
+          type: integer
+    DatasourcePreviewRequest:
+      type: object
+      description: >-
+        POST /api/datasources/{id}/preview 请求体；table_name 与 query_sql 按
+        query_type 二选一（"table" 用 table_name 且须为合法标识符，"sql" 用 query_sql），
+        后端不做强校验，故均非 required。
+      properties:
+        table_name:
+          type: string
+        query_sql:
+          type: string
+        query_type:
+          type: string
+          description: '"table" 或 "sql"；缺省/其他值按 table 分支处理。'
+    FieldDistributionRequest:
+      type: object
+      description: POST /api/datasources/{id}/field-distribution 请求体。
+      required:
+        - field_name
+      properties:
+        table_name:
+          type: string
+        query_sql:
+          type: string
+        query_type:
+          type: string
+          description: 数据源解析规则与 preview 一致。
+        field_name:
+          type: string
+          description: 统计字段名；缺失时后端返回 20100。
+        limit:
+          type: integer
+          description: 分布桶数上限；≤0 或 >50 后端归一为 20。
+    FieldDistribution:
+      type: object
+      description: 字段值分布（entity.FieldDistribution）；distribution 恒为数组。
+      required:
+        - field_name
+        - total_count
+        - unique_count
+        - distribution
+      properties:
+        field_name:
+          type: string
+        total_count:
+          type: integer
+          format: int64
+        unique_count:
+          type: integer
+        distribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldValueCount'
+    FieldValueCount:
+      type: object
+      description: 单个取值的计数与占比。
+      required:
+        - value
+        - count
+        - percentage
+      properties:
+        value: {}
+        count:
+          type: integer
+          format: int64
+        percentage:
+          type: number
+          format: double
+          description: 百分比，保留两位小数（如 12.34）。
+    Dataset:
+      type: object
+      description: >-
+        数据集响应实体（entity.Dataset）。tags/columns/quality_rules/shard_keys 是
+        JSON 文档的字符串形态；指针字段序列化时键恒在，值可为 null。
+      required:
+        - id
+        - name
+        - datasource_id
+        - table_name
+        - query_sql
+        - query_type
+        - mode
+        - accelerate_config
+        - description
+        - tags
+        - refresh_strategy
+        - preview_data
+        - quality_rules
+        - columns
+        - shard_enabled
+        - shard_keys
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        datasource_id:
+          type: integer
+        table_name:
+          type: string
+          nullable: true
+        query_sql:
+          type: string
+          nullable: true
+        query_type:
+          type: string
+          description: '"table" 或 "sql"。'
+        mode:
+          type: string
+          description: 当前后端语义为 "direct"（前端类型含 "accelerated"，后端不产出）。
+        accelerate_config:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        tags:
+          type: string
+          description: JSON 数组字符串，如 '["a","b"]'；缺省 "[]"。
+        refresh_strategy:
+          type: string
+          nullable: true
+        preview_data:
+          type: string
+          nullable: true
+        quality_rules:
+          type: string
+          description: JSON 数组字符串；缺省 "[]"。
+        columns:
+          type: string
+          description: DatasetColumn 数组的 JSON 字符串；缺省 "[]"。
+        shard_enabled:
+          type: boolean
+        shard_keys:
+          type: string
+          description: 分片键的 JSON 数组字符串。
+        created_at:
+          type: string
+          description: RFC3339 时间；数据库时间戳无效时为空字符串。
+        updated_at:
+          type: string
+          description: RFC3339 时间；数据库时间戳无效时为空字符串。
+    DatasetCreateRequest:
+      type: object
+      description: >-
+        POST /api/datasets 请求体。table_name/query_sql/description 未传或为空串时
+        后端置为 null；query_type/mode 为空缺省 "table"/"direct"；tags/columns 为空
+        缺省 "[]"。
+      required:
+        - name
+        - datasource_id
+        - query_type
+      properties:
+        name:
+          type: string
+        datasource_id:
+          type: integer
+        table_name:
+          type: string
+        query_sql:
+          type: string
+        query_type:
+          type: string
+          description: '"table" 或 "sql"。'
+        mode:
+          type: string
+          description: 为空时后端缺省 "direct"。
+        description:
+          type: string
+        tags:
+          type: string
+          description: JSON 数组字符串（非数组本体）。
+        columns:
+          type: string
+          description: DatasetColumn 数组的 JSON 字符串。
+        shard_enabled:
+          type: boolean
+        shard_keys:
+          type: string
+          description: 分片键的 JSON 数组字符串。
+    DatasetColumn:
+      type: object
+      description: 数据集列定义（entity.DatasetColumn）；JSON 字段名为 snake_case 的 type_config。
+      required:
+        - name
+        - expr
+        - type
+        - type_config
+        - comment
+        - role
+      properties:
+        name:
+          type: string
+        expr:
+          type: string
+        type:
+          type: string
+          description: 标准数据类型（int/float/decimal/string/date/datetime/array/dict/boolean 等）。
+        type_config:
+          $ref: '#/components/schemas/TypeConfig'
+        comment:
+          type: string
+        role:
+          type: string
+          description: '"dimension" 或 "metric"。'
+    TypeConfig:
+      type: object
+      description: 类型相关配置（entity.TypeConfig）。
+      required:
+        - precision
+        - scale
+      properties:
+        precision:
+          type: integer
+        scale:
+          type: integer
+    QueryConfig:
+      type: object
+      description: >-
+        POST /api/datasets/{id}/query 请求体（entity.QueryConfig）。
+        所有字段可缺省（后端绑定零值）。
+      properties:
+        dimension_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldGroup'
+        metric_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldGroup'
+        filters:
+          type: array
+          items:
+            $ref: '#/components/schemas/Filter'
+        sort:
+          $ref: '#/components/schemas/SortConfig'
+        limit:
+          type: integer
+    FieldGroup:
+      type: object
+      description: 维度/指标字段组。
+      required:
+        - id
+        - fields
+      properties:
+        id:
+          type: string
+        fields:
+          type: array
+          items:
+            type: string
+        alias:
+          type: string
+          description: omitempty：空值不会出现在请求 JSON 中。
+    Filter:
+      type: object
+      description: 过滤条件。
+      required:
+        - id
+        - field
+        - operator
+        - value
+        - logic
+      properties:
+        id:
+          type: string
+        field:
+          type: string
+        operator:
+          type: string
+        value: {}
+        value_end: {}
+          # 后端为 interface{}（带 omitempty）：区间过滤上界，任意 JSON 值
+        logic:
+          type: string
+          description: 与其他条件的连接逻辑（如 "and" / "or"）。
+    SortConfig:
+      type: object
+      required:
+        - field
+        - order
+      properties:
+        field:
+          type: string
+        order:
+          type: string
+          description: '"asc" 或 "desc"。'
+    DatasourceListResponse:
+      description: GET /api/datasources 响应：data 为 Datasource 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Datasource'
+    DatasourceResponse:
+      description: 数据源 CRUD 响应：data 为单个 Datasource。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/Datasource'
+    TableListResponse:
+      description: GET /api/datasources/{id}/tables 响应：data 为 TableInfo 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TableInfo'
+    ColumnListResponse:
+      description: GET /api/datasources/{id}/tables/{table}/columns 响应：data 为 ColumnInfo 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ColumnInfo'
+    TableDataResponse:
+      description: GET /api/datasources/{id}/tables/{table}/data 响应。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/TableDataResult'
+    DatasourcePreviewResponse:
+      description: POST /api/datasources/{id}/preview 响应。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/PreviewResult'
+    FieldDistributionResponse:
+      description: POST /api/datasources/{id}/field-distribution 响应。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/FieldDistribution'
+    DatasetListResponse:
+      description: GET /api/datasets 响应：data 为 Dataset 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Dataset'
+    DatasetResponse:
+      description: 数据集 CRUD / 列更新响应：data 为单个 Dataset。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/Dataset'
+    DatasetColumnListResponse:
+      description: GET /api/datasets/{id}/columns 响应：data 为 DatasetColumn 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DatasetColumn'
+    DatasetPreviewResponse:
+      description: GET /api/datasets/{id}/preview 响应：data 为 PreviewResult。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/PreviewResult'
+    DatasetQueryResponse:
+      description: POST /api/datasets/{id}/query 响应：data 为结果行数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DataRow'
+  parameters:
+    DatasourceId:
+      name: id
+      in: path
+      required: true
+      description: 数据源 ID（gin 通配符 :id；非法数字返回 20100）。
+      schema:
+        type: integer
+    DatasetId:
+      name: id
+      in: path
+      required: true
+      description: 数据集 ID（gin 通配符 :id；非法数字返回 20100）。
+      schema:
+        type: integer
+    TableName:
+      name: table
+      in: path
+      required: true
+      description: >-
+        表名；spec 占位符 {table} 与 gin 通配符 `:table` 对应，须为合法标识符，
+        前端以 URL 编码传输。
+      schema:
+        type: string
+

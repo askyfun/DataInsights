@@ -24,6 +24,291 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/datasources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 数据源列表
+         * @description 分页返回数据源数组；无结果时 data 为空数组（handler 将 nil 归一化为 []）。
+         */
+        get: operations["listDatasources"];
+        put?: never;
+        /**
+         * 创建数据源
+         * @description type 为空时后端缺省填 "postgresql"。响应 data 为创建后的 Datasource，
+         *     不含 password（entity 的 Password 为 json:"-"）。
+         */
+        post: operations["createDatasource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasources/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 测试数据源连接
+         * @description 使用未落库的连接参数测试连通性。type 为空时后端缺省填 "postgresql"；
+         *     不支持的驱动类型或连接失败返回 Envelope.code = 20100（BadRequest）。
+         */
+        post: operations["testDatasourceConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取数据源详情 */
+        get: operations["getDatasource"];
+        /**
+         * 更新数据源
+         * @description password 为空字符串或缺省表示保留数据库中已存密码（service.Update 明确
+         *     保留原值），因此响应永远不回显密码。
+         */
+        put: operations["updateDatasource"];
+        post?: never;
+        /** 删除数据源 */
+        delete: operations["deleteDatasource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasources/{id}/tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出数据源下的表
+         * @description 实时连接目标数据源读取表元数据；返回 TableInfo 数组。
+         */
+        get: operations["listDatasourceTables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasources/{id}/tables/{table}/columns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出表的列元数据
+         * @description {table} 与 gin 路由 `:table` 通配符对应；表名必须是合法标识符，
+         *     前端调用时做 URL 编码。handler 以 map 组装，仅含 name/data_type/comment 三个键。
+         */
+        get: operations["listTableColumns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasources/{id}/tables/{table}/data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 分页读取表数据
+         * @description {table} 与 gin 路由 `:table` 通配符对应。sort_field 缺省用第一个主键列，
+         *     且必须是主键列之一；sort_order 按大小写不敏感匹配 desc，其余一律归一为 ASC。
+         */
+        get: operations["getTableData"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasources/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 预览数据源表或 SQL 结果
+         * @description query_type = "table" 时以 table_name（合法标识符）为源；query_type = "sql" 时以
+         *     query_sql 为源（包成子查询）。后端固定取前 10 行。两源字段按 query_type 二选一，
+         *     因此 schema 不强制 required。
+         */
+        post: operations["previewDatasource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasources/{id}/field-distribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 字段值分布统计
+         * @description field_name 必填（缺失返回 Envelope.code = 20100）。limit ≤0 或 >50 时后端归一为 20。
+         *     数据源/查询源的解析规则与 preview 端点一致。
+         */
+        post: operations["getDatasourceFieldDistribution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 数据集列表
+         * @description 分页返回数据集数组；无结果时 data 为空数组。分页参数与数据源列表一致
+         *     （limit 缺省 100、offset 缺省 0，helpers.go 对 ≤0 或 >1000 回落 100）。
+         */
+        get: operations["listDatasets"];
+        put?: never;
+        /**
+         * 创建数据集
+         * @description tags/columns 是 JSON 数组的字符串形态（后端以 string 存储，非数组）；
+         *     query_type 为空后端填 "table"，mode 为空填 "direct"，tags/columns 为空填 "[]"。
+         *     table_name 与 query_sql 按 query_type 二选一，未传的置为 null。
+         */
+        post: operations["createDataset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取数据集详情 */
+        get: operations["getDataset"];
+        put?: never;
+        post?: never;
+        /** 删除数据集 */
+        delete: operations["deleteDataset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasets/{id}/columns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取数据集列定义
+         * @description 返回 DatasetColumn 数组（数据集 columns JSON 字段解析后的列定义）。
+         */
+        get: operations["getDatasetColumns"];
+        put?: never;
+        /**
+         * 更新数据集列定义
+         * @description 请求体是 DatasetColumn 裸数组（不是 {columns: [...]} 包装对象）。
+         *     成功 data 为更新后的 Dataset（columns 字段已写回）。
+         */
+        post: operations["updateDatasetColumns"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasets/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 预览数据集数据
+         * @description 按数据集的表/SQL 源实时取数（后端固定取前 10 行）；data 为 PreviewResult。
+         */
+        get: operations["previewDataset"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasets/{id}/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 按 QueryConfig 查询数据集
+         * @description 请求体为 entity.QueryConfig（维度组/指标组/过滤/排序/limit）；
+         *     data 为查询结果行数组，每行是列名到任意 JSON 值的映射。
+         */
+        post: operations["queryDataset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -51,9 +336,288 @@ export interface components {
         HealthResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["HealthData"];
         };
+        /** @description 删除/测试连接等无业务负载端点的成功负载。 */
+        OkData: {
+            /** @enum {string} */
+            status: "ok";
+        };
+        /** @description Envelope 特化 data 为 OkData（{status: "ok"}）。 */
+        OkResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["OkData"];
+        };
+        /**
+         * @description 数据源响应实体（entity.Datasource）。password 为 json:"-" 永不外泄，
+         *     因此本 schema 不含 password 字段。
+         */
+        Datasource: {
+            id: number;
+            name: string;
+            /** @description 驱动类型；后端 datasource.NewDriver 支持 postgresql / mysql / clickhouse / starrocks（创建时后端不做枚举强校验，落库什么返回什么）。 */
+            type: string;
+            host: string;
+            port: number;
+            database_name: string;
+            username: string;
+            /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
+            created_at: string;
+            /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
+            updated_at: string;
+        };
+        /** @description POST /api/datasources 请求体；password 仅出现在请求侧。 */
+        DatasourceCreateRequest: {
+            name: string;
+            /** @description 为空时后端缺省填 "postgresql"。 */
+            type: string;
+            host: string;
+            port: number;
+            database_name: string;
+            username: string;
+            /** @description 连接密码；落库前 AES-GCM 加密（DATARAY_SECURITY_KEY）。 */
+            password: string;
+        };
+        /**
+         * @description PUT /api/datasources/{id} 请求体。password 可缺省/空串：
+         *     后端保留已存密码，不覆盖为空。
+         */
+        DatasourceUpdateRequest: {
+            name: string;
+            type: string;
+            host: string;
+            port: number;
+            database_name: string;
+            username: string;
+            /** @description 空字符串或缺省表示保留原密码。 */
+            password?: string;
+        };
+        /** @description POST /api/datasources/test 请求体（无 name，不落库）。 */
+        DatasourceTestConnectionRequest: {
+            /** @description 为空时后端缺省填 "postgresql"。 */
+            type: string;
+            host: string;
+            port: number;
+            database_name: string;
+            username: string;
+            password: string;
+        };
+        /** @description 表元数据（entity.TableInfo）。 */
+        TableInfo: {
+            name: string;
+            comment: string;
+        };
+        /** @description 列元数据；datasource handler 以 map 组装，仅含 name/data_type/comment 三个键（前端手写的 role/is_virtual/expression 不由该端点返回）。 */
+        ColumnInfo: {
+            name: string;
+            data_type: string;
+            comment: string;
+        };
+        /** @description 结果行：列名到任意 JSON 值的映射，值可能为 null。 */
+        DataRow: {
+            [key: string]: unknown;
+        };
+        /** @description 预览结果（entity.PreviewResult）；两字段经 response 归一化， 恒为数组（不会为 null）。 */
+        PreviewResult: {
+            columns: string[];
+            data: components["schemas"]["DataRow"][];
+        };
+        /** @description 分页表数据（entity.TableDataResult）；数组字段经归一化恒为数组， 无主键时 primary_keys 为空数组。 */
+        TableDataResult: {
+            columns: string[];
+            data: components["schemas"]["DataRow"][];
+            /** Format: int64 */
+            total: number;
+            primary_keys: string[];
+            page: number;
+            page_size: number;
+        };
+        /** @description POST /api/datasources/{id}/preview 请求体；table_name 与 query_sql 按 query_type 二选一（"table" 用 table_name 且须为合法标识符，"sql" 用 query_sql）， 后端不做强校验，故均非 required。 */
+        DatasourcePreviewRequest: {
+            table_name?: string;
+            query_sql?: string;
+            /** @description "table" 或 "sql"；缺省/其他值按 table 分支处理。 */
+            query_type?: string;
+        };
+        /** @description POST /api/datasources/{id}/field-distribution 请求体。 */
+        FieldDistributionRequest: {
+            table_name?: string;
+            query_sql?: string;
+            /** @description 数据源解析规则与 preview 一致。 */
+            query_type?: string;
+            /** @description 统计字段名；缺失时后端返回 20100。 */
+            field_name: string;
+            /** @description 分布桶数上限；≤0 或 >50 后端归一为 20。 */
+            limit?: number;
+        };
+        /** @description 字段值分布（entity.FieldDistribution）；distribution 恒为数组。 */
+        FieldDistribution: {
+            field_name: string;
+            /** Format: int64 */
+            total_count: number;
+            unique_count: number;
+            distribution: components["schemas"]["FieldValueCount"][];
+        };
+        /** @description 单个取值的计数与占比。 */
+        FieldValueCount: {
+            value: unknown;
+            /** Format: int64 */
+            count: number;
+            /**
+             * Format: double
+             * @description 百分比，保留两位小数（如 12.34）。
+             */
+            percentage: number;
+        };
+        /** @description 数据集响应实体（entity.Dataset）。tags/columns/quality_rules/shard_keys 是 JSON 文档的字符串形态；指针字段序列化时键恒在，值可为 null。 */
+        Dataset: {
+            id: number;
+            name: string;
+            datasource_id: number;
+            table_name: string | null;
+            query_sql: string | null;
+            /** @description "table" 或 "sql"。 */
+            query_type: string;
+            /** @description 当前后端语义为 "direct"（前端类型含 "accelerated"，后端不产出）。 */
+            mode: string;
+            accelerate_config: string | null;
+            description: string | null;
+            /** @description JSON 数组字符串，如 '["a","b"]'；缺省 "[]"。 */
+            tags: string;
+            refresh_strategy: string | null;
+            preview_data: string | null;
+            /** @description JSON 数组字符串；缺省 "[]"。 */
+            quality_rules: string;
+            /** @description DatasetColumn 数组的 JSON 字符串；缺省 "[]"。 */
+            columns: string;
+            shard_enabled: boolean;
+            /** @description 分片键的 JSON 数组字符串。 */
+            shard_keys: string;
+            /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
+            created_at: string;
+            /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
+            updated_at: string;
+        };
+        /** @description POST /api/datasets 请求体。table_name/query_sql/description 未传或为空串时 后端置为 null；query_type/mode 为空缺省 "table"/"direct"；tags/columns 为空 缺省 "[]"。 */
+        DatasetCreateRequest: {
+            name: string;
+            datasource_id: number;
+            table_name?: string;
+            query_sql?: string;
+            /** @description "table" 或 "sql"。 */
+            query_type: string;
+            /** @description 为空时后端缺省 "direct"。 */
+            mode?: string;
+            description?: string;
+            /** @description JSON 数组字符串（非数组本体）。 */
+            tags?: string;
+            /** @description DatasetColumn 数组的 JSON 字符串。 */
+            columns?: string;
+            shard_enabled?: boolean;
+            /** @description 分片键的 JSON 数组字符串。 */
+            shard_keys?: string;
+        };
+        /** @description 数据集列定义（entity.DatasetColumn）；JSON 字段名为 snake_case 的 type_config。 */
+        DatasetColumn: {
+            name: string;
+            expr: string;
+            /** @description 标准数据类型（int/float/decimal/string/date/datetime/array/dict/boolean 等）。 */
+            type: string;
+            type_config: components["schemas"]["TypeConfig"];
+            comment: string;
+            /** @description "dimension" 或 "metric"。 */
+            role: string;
+        };
+        /** @description 类型相关配置（entity.TypeConfig）。 */
+        TypeConfig: {
+            precision: number;
+            scale: number;
+        };
+        /** @description POST /api/datasets/{id}/query 请求体（entity.QueryConfig）。 所有字段可缺省（后端绑定零值）。 */
+        QueryConfig: {
+            dimension_groups?: components["schemas"]["FieldGroup"][];
+            metric_groups?: components["schemas"]["FieldGroup"][];
+            filters?: components["schemas"]["Filter"][];
+            sort?: components["schemas"]["SortConfig"];
+            limit?: number;
+        };
+        /** @description 维度/指标字段组。 */
+        FieldGroup: {
+            id: string;
+            fields: string[];
+            /** @description omitempty：空值不会出现在请求 JSON 中。 */
+            alias?: string;
+        };
+        /** @description 过滤条件。 */
+        Filter: {
+            id: string;
+            field: string;
+            operator: string;
+            value: unknown;
+            value_end?: unknown;
+            /** @description 与其他条件的连接逻辑（如 "and" / "or"）。 */
+            logic: string;
+        };
+        SortConfig: {
+            field: string;
+            /** @description "asc" 或 "desc"。 */
+            order: string;
+        };
+        /** @description GET /api/datasources 响应：data 为 Datasource 数组。 */
+        DatasourceListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Datasource"][];
+        };
+        /** @description 数据源 CRUD 响应：data 为单个 Datasource。 */
+        DatasourceResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Datasource"];
+        };
+        /** @description GET /api/datasources/{id}/tables 响应：data 为 TableInfo 数组。 */
+        TableListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["TableInfo"][];
+        };
+        /** @description GET /api/datasources/{id}/tables/{table}/columns 响应：data 为 ColumnInfo 数组。 */
+        ColumnListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["ColumnInfo"][];
+        };
+        /** @description GET /api/datasources/{id}/tables/{table}/data 响应。 */
+        TableDataResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["TableDataResult"];
+        };
+        /** @description POST /api/datasources/{id}/preview 响应。 */
+        DatasourcePreviewResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["PreviewResult"];
+        };
+        /** @description POST /api/datasources/{id}/field-distribution 响应。 */
+        FieldDistributionResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["FieldDistribution"];
+        };
+        /** @description GET /api/datasets 响应：data 为 Dataset 数组。 */
+        DatasetListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Dataset"][];
+        };
+        /** @description 数据集 CRUD / 列更新响应：data 为单个 Dataset。 */
+        DatasetResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Dataset"];
+        };
+        /** @description GET /api/datasets/{id}/columns 响应：data 为 DatasetColumn 数组。 */
+        DatasetColumnListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["DatasetColumn"][];
+        };
+        /** @description GET /api/datasets/{id}/preview 响应：data 为 PreviewResult。 */
+        DatasetPreviewResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["PreviewResult"];
+        };
+        /** @description POST /api/datasets/{id}/query 响应：data 为结果行数组。 */
+        DatasetQueryResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["DataRow"][];
+        };
     };
     responses: never;
-    parameters: never;
+    parameters: {
+        /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+        DatasourceId: number;
+        /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
+        DatasetId: number;
+        /** @description 表名；spec 占位符 {table} 与 gin 通配符 `:table` 对应，须为合法标识符， 前端以 URL 编码传输。 */
+        TableName: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -76,6 +640,486 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    listDatasources: {
+        parameters: {
+            query?: {
+                /**
+                 * @description 每页条数。后端 getPaginationParams（handler/helpers.go）：缺省 100；
+                 *     值 ≤0 或 >1000 时回落为 100（实际硬上限是 1000）。
+                 */
+                limit?: number;
+                /** @description 偏移量；缺省 0，负数被后端归一化为 0。 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourceListResponse"];
+                };
+            };
+        };
+    };
+    createDatasource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasourceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为新建 Datasource */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourceResponse"];
+                };
+            };
+        };
+    };
+    testDatasourceConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasourceTestConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；连接成功 data 为 {status: "ok"} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+        };
+    };
+    getDatasource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；不存在或 id 非法时 Envelope.code = 20300/20100，data = {} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourceResponse"];
+                };
+            };
+        };
+    };
+    updateDatasource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasourceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为更新后的 Datasource */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourceResponse"];
+                };
+            };
+        };
+    };
+    deleteDatasource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为 {status: "ok"} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+        };
+    };
+    listDatasourceTables: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableListResponse"];
+                };
+            };
+        };
+    };
+    listTableColumns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+                /** @description 表名；spec 占位符 {table} 与 gin 通配符 `:table` 对应，须为合法标识符， 前端以 URL 编码传输。 */
+                table: components["parameters"]["TableName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ColumnListResponse"];
+                };
+            };
+        };
+    };
+    getTableData: {
+        parameters: {
+            query?: {
+                /** @description 页码，从 1 开始；≤0 被后端归一为 1。 */
+                page?: number;
+                /** @description 每页行数；≤0 归一为 20，上限 100（超出截断为 100）。 */
+                page_size?: number;
+                /** @description 排序列；必须是该表的主键列，否则返回 Envelope.code = 50000（错误消息含 "sort field must be a primary key"）。 */
+                sort_field?: string;
+                /** @description 排序方向，ASC/DESC（大小写不敏感）；缺省 ASC。 */
+                sort_order?: string;
+            };
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+                /** @description 表名；spec 占位符 {table} 与 gin 通配符 `:table` 对应，须为合法标识符， 前端以 URL 编码传输。 */
+                table: components["parameters"]["TableName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableDataResponse"];
+                };
+            };
+        };
+    };
+    previewDatasource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasourcePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourcePreviewResponse"];
+                };
+            };
+        };
+    };
+    getDatasourceFieldDistribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FieldDistributionRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FieldDistributionResponse"];
+                };
+            };
+        };
+    };
+    listDatasets: {
+        parameters: {
+            query?: {
+                /** @description 每页条数；缺省 100，≤0 或 >1000 后端回落为 100。 */
+                limit?: number;
+                /** @description 偏移量；缺省 0，负数被后端归一化为 0。 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetListResponse"];
+                };
+            };
+        };
+    };
+    createDataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为新建 Dataset */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetResponse"];
+                };
+            };
+        };
+    };
+    getDataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；不存在或 id 非法时 Envelope.code = 20300/20100，data = {} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetResponse"];
+                };
+            };
+        };
+    };
+    deleteDataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为 {status: "ok"} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+        };
+    };
+    getDatasetColumns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetColumnListResponse"];
+                };
+            };
+        };
+    };
+    updateDatasetColumns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetColumn"][];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetResponse"];
+                };
+            };
+        };
+    };
+    previewDataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetPreviewResponse"];
+                };
+            };
+        };
+    };
+    queryDataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueryConfig"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetQueryResponse"];
                 };
             };
         };
