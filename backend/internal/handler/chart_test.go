@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"dataray/internal/domain/entity"
+	"dataray/internal/router"
 	"dataray/internal/service/chart"
 
 	"github.com/gin-gonic/gin"
@@ -77,23 +78,23 @@ func (m *mockChartService) Query(ctx context.Context, req *entity.ChartQueryRequ
 	return entity.ChartDataResult{}, nil
 }
 
-// newChartTestRouter mirrors the chart section of cmd/routes.go exactly as it
-// is registered today. During the Batch 2 migration only this wiring helper
-// changes; every response-body assertion below must keep passing
-// byte-for-byte before and after migration — that is the zero-behavior-change
-// guard (same contract as newDatasourceTestRouter in datasource_test.go).
-// serve/assertBody and the envelope constants are shared from that file.
+// newChartTestRouter mirrors the chart section of cmd/routes.go. During the
+// Batch 2 migration only this wiring helper changes; every response-body
+// assertion below must keep passing byte-for-byte before and after migration
+// — that is the zero-behavior-change guard (same contract as
+// newDatasourceTestRouter in datasource_test.go). serve/assertBody and the
+// shared envelope constants come from that file.
 func newChartTestRouter(h *ChartHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	charts := r.Group("/api/charts")
-	charts.GET("", h.List)
-	charts.POST("", h.Create)
-	charts.GET("/:id", h.Get)
-	charts.PUT("/:id", h.Update)
-	charts.DELETE("/:id", h.Delete)
-	charts.GET("/:id/data", h.GetData)
-	charts.POST("/query", h.Query)
+	router.RegisterGetRoute(charts, "", h.List)
+	router.RegisterPostRoute(charts, "", h.Create)
+	router.RegisterGetRoute(charts, "/:id", h.Get)
+	router.RegisterPutRoute(charts, "/:id", h.Update)
+	router.RegisterDeleteRoute(charts, "/:id", h.Delete)
+	router.RegisterGetRoute(charts, "/:id/data", h.GetData)
+	router.RegisterPostRoute(charts, "/query", h.Query)
 	return r
 }
 
@@ -259,9 +260,11 @@ func TestChartCreate_EmptyBody(t *testing.T) {
 }
 
 func TestChartCreate_TypeMismatchBody(t *testing.T) {
-	// PRE-MIGRATION baseline: the handler binds entity.Chart directly, so the
-	// json error carries that type name. Migration replaces it with the named
-	// In type (accepted unavoidable diff #1 in the datasource package doc).
+	// Accepted unavoidable diff #1 (datasource package doc): the named In
+	// type leaks into the json bind-error text. Pre-migration the handler
+	// bound entity.Chart directly, so the old message was
+	// "…Go struct field Chart.dataset_id…"; the datasource baseline
+	// (datasourceCreateIn.port) pins the same class of change.
 	h := NewChartHandler(&mockChartService{
 		createFunc: func(_ context.Context, _ *entity.Chart) (*entity.Chart, error) {
 			t.Fatal("Create must not be called when the body fails to bind")
@@ -269,7 +272,7 @@ func TestChartCreate_TypeMismatchBody(t *testing.T) {
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts", `{"dataset_id":"x"}`)
-	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field Chart.dataset_id of type int","trace":"","data":{}}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field chartCreateIn.dataset_id of type int","trace":"","data":{}}`)
 }
 
 func TestChartCreate_QueryMustNotPolluteBody(t *testing.T) {
@@ -348,39 +351,42 @@ func TestChartUpdate_EmptyBody(t *testing.T) {
 	assertBody(t, w, badRequestEOF)
 }
 
-func TestChartUpdate_InvalidIDAndEmptyBody(t *testing.T) {
-	// PRE-MIGRATION baseline for a doubly-invalid path+body request: the old
-	// handler parses the id first, so "invalid id" wins over the body-bind
-	// error. After migration the generic router binds the body before the
-	// API runs and this answers "EOF" instead — accepted unavoidable diff #2
-	// (datasource package doc, Test*_InvalidIDPrefersBodyBindError).
+func TestChartUpdate_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
+	// Pinned accepted unavoidable diff #2 (datasource package doc): the
+	// generic router binds the PUT body before the handler parses the path
+	// id, so a request carrying BOTH an unparseable :id AND an empty body
+	// answers with the body-bind error ("EOF") where the pre-migration
+	// handler answered "invalid id". Same shape as the datasource
+	// Test*_InvalidIDPrefersBodyBindError baselines. Requests valid on
+	// either input are unaffected (see InvalidIDValidBody / EmptyBody above).
 	h := NewChartHandler(&mockChartService{
 		updateFunc: func(_ context.Context, _ *entity.Chart) (*entity.Chart, error) {
-			t.Fatal("Update must not run when both inputs are invalid")
+			t.Fatal("Update must not run when the body fails to bind")
 			return nil, nil
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodPut, "/api/charts/abc", "")
-	assertBody(t, w, badRequestInvalidID)
+	assertBody(t, w, badRequestEOF)
 }
 
-func TestChartUpdate_InvalidIDAndMalformedBody(t *testing.T) {
-	// PRE-MIGRATION baseline, same diff-#2 shape with a type-mismatch body:
-	// currently "invalid id" wins; post-migration the json bind error wins.
+func TestChartUpdate_InvalidIDPrefersBodyBindError_MalformedBody(t *testing.T) {
+	// Same diff #2 flip with a type-mismatch body: the json bind error
+	// (carrying the named In type, diff #1) wins over "invalid id".
 	h := NewChartHandler(&mockChartService{
 		updateFunc: func(_ context.Context, _ *entity.Chart) (*entity.Chart, error) {
-			t.Fatal("Update must not run when both inputs are invalid")
+			t.Fatal("Update must not run when the body fails to bind")
 			return nil, nil
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodPut, "/api/charts/abc", `{"dataset_id":"x"}`)
-	assertBody(t, w, badRequestInvalidID)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field chartUpdateIn.dataset_id of type int","trace":"","data":{}}`)
 }
 
 func TestChartUpdate_TypeMismatchBody(t *testing.T) {
-	// PRE-MIGRATION baseline: the old handler binds an anonymous struct, so
-	// the json error carries an empty struct name. Migration replaces it
-	// with the named In type (accepted unavoidable diff #1).
+	// Accepted unavoidable diff #1 (datasource package doc): the named In
+	// type leaks into the json bind-error text. Pre-migration the handler
+	// bound an anonymous struct, so the old message was
+	// "…Go struct field .dataset_id…".
 	h := NewChartHandler(&mockChartService{
 		updateFunc: func(_ context.Context, _ *entity.Chart) (*entity.Chart, error) {
 			t.Fatal("Update must not be called when the body fails to bind")
@@ -388,7 +394,7 @@ func TestChartUpdate_TypeMismatchBody(t *testing.T) {
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodPut, "/api/charts/3", `{"dataset_id":"x"}`)
-	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field .dataset_id of type int","trace":"","data":{}}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field chartUpdateIn.dataset_id of type int","trace":"","data":{}}`)
 }
 
 func TestChartUpdate_ServiceError(t *testing.T) {
@@ -520,9 +526,10 @@ func TestChartQuery_EmptyBody(t *testing.T) {
 }
 
 func TestChartQuery_TypeMismatchBody(t *testing.T) {
-	// PRE-MIGRATION baseline: the handler binds entity.ChartQueryRequest
-	// directly, so the json error carries that type name. Migration replaces
-	// it with the named In type (accepted unavoidable diff #1).
+	// Accepted unavoidable diff #1 (datasource package doc): the named In
+	// type leaks into the json bind-error text. Pre-migration the handler
+	// bound entity.ChartQueryRequest directly, so the old message was
+	// "…Go struct field ChartQueryRequest.dataset_id…".
 	h := NewChartHandler(&mockChartService{
 		queryFunc: func(_ context.Context, _ *entity.ChartQueryRequest) (entity.ChartDataResult, error) {
 			t.Fatal("Query must not be called when the body fails to bind")
@@ -530,11 +537,11 @@ func TestChartQuery_TypeMismatchBody(t *testing.T) {
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts/query", `{"dataset_id":"x"}`)
-	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field ChartQueryRequest.dataset_id of type int","trace":"","data":{}}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field chartQueryIn.dataset_id of type int","trace":"","data":{}}`)
 }
 
 func TestChartQuery_NestedTypeMismatchBody(t *testing.T) {
-	// PRE-MIGRATION baseline for the nested-field error text (diff #1).
+	// Same diff #1 on the nested-field error text.
 	h := NewChartHandler(&mockChartService{
 		queryFunc: func(_ context.Context, _ *entity.ChartQueryRequest) (entity.ChartDataResult, error) {
 			t.Fatal("Query must not be called when the body fails to bind")
@@ -542,7 +549,7 @@ func TestChartQuery_NestedTypeMismatchBody(t *testing.T) {
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts/query", `{"metrics":[{"agg":[1]}]}`)
-	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal array into Go struct field ChartQueryRequest.metrics.0.agg of type string","trace":"","data":{}}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal array into Go struct field chartQueryIn.metrics.0.agg of type string","trace":"","data":{}}`)
 }
 
 func TestChartQuery_QueryMustNotPolluteBody(t *testing.T) {

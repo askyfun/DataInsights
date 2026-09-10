@@ -2,7 +2,6 @@ package router
 
 import (
 	"net/http"
-	"reflect"
 
 	"dataray/internal/response"
 
@@ -127,20 +126,4 @@ func (e BusinessError) Error() string {
 // NewBusinessError creates a new business error
 func NewBusinessError(code int, msg string) BusinessError {
 	return BusinessError{Code: code, Message: msg}
-}
-
-// Helper to check if a type has query fields
-func hasQueryFields(v any) bool {
-	if v == nil {
-		return false
-	}
-	t := reflect.TypeOf(v).Elem()
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		tag := field.Tag.Get("form")
-		if tag != "" && tag != "-" {
-			return true
-		}
-	}
-	return false
 }

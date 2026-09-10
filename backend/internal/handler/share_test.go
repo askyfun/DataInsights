@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"dataray/internal/domain/entity"
+	"dataray/internal/router"
 	"dataray/internal/service/share"
 
 	"github.com/gin-gonic/gin"
@@ -63,20 +64,20 @@ func (m *mockShareService) ValidatePassword(ctx context.Context, token, password
 	return nil
 }
 
-// newShareTestRouter mirrors the /api/shares section of cmd/routes.go exactly
-// as it is registered today. During the Batch 2 migration only this wiring
-// helper changes; every response-body assertion below must keep passing
-// byte-for-byte before and after migration — that is the zero-behavior-change
-// guard (same contract as newDatasourceTestRouter in datasource_test.go).
-// serve/assertBody and the shared envelope constants come from that file.
+// newShareTestRouter mirrors the /api/shares section of cmd/routes.go. During
+// the Batch 2 migration only this wiring helper changes; every response-body
+// assertion below must keep passing byte-for-byte before and after migration
+// — that is the zero-behavior-change guard (same contract as
+// newDatasourceTestRouter in datasource_test.go). serve/assertBody and the
+// shared envelope constants come from that file.
 func newShareTestRouter(h *ShareHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	shares := r.Group("/api/shares")
-	shares.GET("", h.List)
-	shares.POST("", h.Create)
-	shares.GET("/:token", h.Get)
-	shares.POST("/:token/verify", h.Verify)
+	router.RegisterGetRoute(shares, "", h.List)
+	router.RegisterPostRoute(shares, "", h.Create)
+	router.RegisterGetRoute(shares, "/:token", h.Get)
+	router.RegisterPostRoute(shares, "/:token/verify", h.Verify)
 	return r
 }
 
@@ -175,9 +176,10 @@ func TestShareCreate_EmptyBody(t *testing.T) {
 }
 
 func TestShareCreate_TypeMismatchBody(t *testing.T) {
-	// PRE-MIGRATION baseline: the old handler binds an anonymous struct, so
-	// the json error carries an empty struct name. Migration replaces it
-	// with the named In type (accepted unavoidable diff #1).
+	// Accepted unavoidable diff #1 (datasource package doc): the named In
+	// type leaks into the json bind-error text. Pre-migration the handler
+	// bound an anonymous struct, so the old message was
+	// "…Go struct field .chart_id…".
 	h := NewShareHandler(&mockShareService{
 		createFunc: func(_ context.Context, _ int, _, _ *string) (*entity.Share, error) {
 			t.Fatal("Create must not be called when the body fails to bind")
@@ -185,7 +187,7 @@ func TestShareCreate_TypeMismatchBody(t *testing.T) {
 		},
 	})
 	w := serve(newShareTestRouter(h), http.MethodPost, "/api/shares", `{"chart_id":"x"}`)
-	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field .chart_id of type int","trace":"","data":{}}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field shareCreateIn.chart_id of type int","trace":"","data":{}}`)
 }
 
 func TestShareCreate_QueryMustNotPolluteBody(t *testing.T) {
@@ -309,12 +311,13 @@ func TestShareVerify_EmptyBody(t *testing.T) {
 }
 
 func TestShareVerify_TypeMismatchBody(t *testing.T) {
-	// PRE-MIGRATION baseline: the old handler binds an anonymous struct, so
-	// the json error carries an empty struct name. Migration replaces it
-	// with the named In type (accepted unavoidable diff #1).
+	// Accepted unavoidable diff #1 (datasource package doc): the named In
+	// type leaks into the json bind-error text. Pre-migration the handler
+	// bound an anonymous struct, so the old message was
+	// "…Go struct field .password…".
 	h := NewShareHandler(&mockShareService{})
 	w := serve(newShareTestRouter(h), http.MethodPost, "/api/shares/tok/verify", `{"password":123}`)
-	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal number into Go struct field .password of type string","trace":"","data":{}}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal number into Go struct field shareVerifyIn.password of type string","trace":"","data":{}}`)
 }
 
 func TestShareVerify_EmptyTokenValidBody(t *testing.T) {
@@ -332,21 +335,22 @@ func TestShareVerify_EmptyTokenValidBody(t *testing.T) {
 	assertBody(t, w, badRequestTokenReq)
 }
 
-func TestShareVerify_InvalidTokenAndEmptyBody(t *testing.T) {
-	// PRE-MIGRATION baseline for a doubly-invalid path+body request: the old
-	// handler checks the token first, so "token is required" wins over the
-	// body-bind error. After migration the generic router binds the body
-	// before the API runs and this answers "EOF" instead — accepted
-	// unavoidable diff #2 (datasource package doc,
-	// Test*_InvalidIDPrefersBodyBindError).
+func TestShareVerify_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
+	// Pinned accepted unavoidable diff #2 (datasource package doc): the
+	// generic router binds the POST body before the handler checks the path
+	// token, so a request carrying BOTH an empty :token AND an empty body
+	// answers with the body-bind error ("EOF") where the pre-migration
+	// handler answered "token is required". Same shape as the datasource
+	// Test*_InvalidIDPrefersBodyBindError baselines. Requests valid on
+	// either input are unaffected (see EmptyTokenValidBody / EmptyBody above).
 	h := NewShareHandler(&mockShareService{
 		validatePasswordFunc: func(_ context.Context, _, _ string) error {
-			t.Fatal("ValidatePassword must not run when both inputs are invalid")
+			t.Fatal("ValidatePassword must not run when the body fails to bind")
 			return nil
 		},
 	})
 	w := serve(newShareTestRouter(h), http.MethodPost, "/api/shares//verify", "")
-	assertBody(t, w, badRequestTokenReq)
+	assertBody(t, w, badRequestEOF)
 }
 
 // ---------------------------------------------------------------- View

@@ -57,23 +57,25 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte) {
 	router.RegisterGetRoute(datasets, "/:id/preview", datasetHandler.Preview)
 	router.RegisterPostRoute(datasets, "/:id/query", datasetHandler.Query)
 
-	// Chart routes
+	// Chart routes (generic router)
 	charts := api.Group("/charts")
-	charts.GET("", chartHandler.List)
-	charts.POST("", chartHandler.Create)
-	charts.GET("/:id", chartHandler.Get)
-	charts.PUT("/:id", chartHandler.Update)
-	charts.DELETE("/:id", chartHandler.Delete)
-	charts.GET("/:id/data", chartHandler.GetData)
-	charts.POST("/query", chartHandler.Query)
+	router.RegisterGetRoute(charts, "", chartHandler.List)
+	router.RegisterPostRoute(charts, "", chartHandler.Create)
+	router.RegisterGetRoute(charts, "/:id", chartHandler.Get)
+	router.RegisterPutRoute(charts, "/:id", chartHandler.Update)
+	router.RegisterDeleteRoute(charts, "/:id", chartHandler.Delete)
+	router.RegisterGetRoute(charts, "/:id/data", chartHandler.GetData)
+	router.RegisterPostRoute(charts, "/query", chartHandler.Query)
 
-	// Share routes
+	// Share routes (generic router)
 	shares := api.Group("/shares")
-	shares.GET("", shareHandler.List)
-	shares.POST("", shareHandler.Create)
-	shares.GET("/:token", shareHandler.Get)
-	shares.POST("/:token/verify", shareHandler.Verify)
+	router.RegisterGetRoute(shares, "", shareHandler.List)
+	router.RegisterPostRoute(shares, "", shareHandler.Create)
+	router.RegisterGetRoute(shares, "/:token", shareHandler.Get)
+	router.RegisterPostRoute(shares, "/:token/verify", shareHandler.Verify)
 
-	// Share view route (no /api prefix)
+	// Share view route (no /api prefix). Not a generic route on purpose: its
+	// success response is a 302 redirect, which the JSON-envelope router
+	// cannot emit (see the ShareHandler.View doc comment).
 	r.GET("/share/:token", shareHandler.View)
 }
