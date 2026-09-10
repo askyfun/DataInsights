@@ -381,8 +381,10 @@ func safeIdentifier(name string) string {
 }
 
 // aggExprPattern 校验聚合表达式（来自列映射的 FieldExpr，如 count(*)、SUM(amount)）：
-// 仅允许"函数名(单个标识符 token 或*)"形态，括号内的标识符同样过白名单。
-var aggExprPattern = regexp.MustCompile(`(?i)^[a-z0-9_]+\(\s*(\*|` + "`[a-z0-9_.]+`" + `|"[a-z0-9_.]+"|[a-z0-9_.]+)\s*\)$`)
+// 仅允许"聚合函数(单个标识符 token 或*)"形态，括号内的标识符同样过白名单。
+// 函数名收敛为显式聚合白名单（与 query.AggregationType / GetAggFunc 及
+// entity/chart.go 的 agg 契约一致），防止 pg_sleep 等任意函数名透传。
+var aggExprPattern = regexp.MustCompile(`(?i)^(count|sum|avg|min|max)\(\s*(\*|` + "`[a-z0-9_.]+`" + `|"[a-z0-9_.]+"|[a-z0-9_.]+)\s*\)$`)
 
 // safeExpr 处理可能为聚合表达式的字段表达式（区别于纯标识符）。
 func safeExpr(expr string) string {
