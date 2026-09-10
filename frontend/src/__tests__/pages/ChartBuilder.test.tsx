@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { chartsApi, datasetsApi } from '../../api';
 import type { ApiResponse } from '../../lib/api/client';
+import type { ChartConfigDocument } from '../../lib/chartConfigSchema';
 import ChartBuilder from '../../pages/ChartBuilder';
 import { useStore } from '../../store';
 
@@ -72,6 +73,8 @@ vi.mock('../../api', async (importOriginal) => {
       ...actual.chartsApi,
       getById: vi.fn(),
       executeChartQuery: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
     },
   };
 });
@@ -80,6 +83,7 @@ const mockGetDatasets = vi.mocked(datasetsApi.getAll);
 const mockGetColumns = vi.mocked(datasetsApi.getColumns);
 const mockGetChartById = vi.mocked(chartsApi.getById);
 const mockExecuteChartQuery = vi.mocked(chartsApi.executeChartQuery);
+const mockUpdateChart = vi.mocked(chartsApi.update);
 
 const resetChartBuilderState = () => {
   useStore.setState({
@@ -97,7 +101,7 @@ const resetChartBuilderState = () => {
     chartData: [],
     chartDataLoading: false,
     queryConfig: {
-      dimensionGroups: [{ id: 'dim-group-main', fields: ['field-0'] }],
+      dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
       metricGroups: [],
       filters: [],
       limit: 1000,
@@ -193,14 +197,16 @@ describe('ChartBuilder', () => {
           dataset_id: 1,
           chart_type: 'table',
           config: JSON.stringify({
+            version: 1,
             chartType: 'table',
             title: 'Sales Table',
-            queryConfig: {
-              dimensionGroups: [{ id: 'dim-group-main', fields: ['field-0'] }],
+            query: {
+              dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
               metricGroups: [],
               filters: [],
               limit: 1000,
             },
+            fieldMeta: {},
           }),
         },
       })
@@ -287,7 +293,7 @@ describe('ChartBuilder', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加指标' }));
 
     await waitFor(() => {
-      expect(useStore.getState().queryConfig.metricGroups[0]?.fields).toEqual(['field-1']);
+      expect(useStore.getState().queryConfig.metricGroups[0]?.fields).toEqual(['revenue']);
     });
 
     expect(mockExecuteChartQuery).toHaveBeenCalledWith(
@@ -311,19 +317,17 @@ describe('ChartBuilder', () => {
           dataset_id: 1,
           chart_type: 'table',
           config: JSON.stringify({
+            version: 1,
             chartType: 'table',
             title: 'Revenue Table',
-            queryConfig: {
-              dimensionGroups: [{ id: 'dim-group-main', fields: ['field-0'] }],
-              metricGroups: [{ id: 'metric-group-main', fields: ['field-1'] }],
+            query: {
+              dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
+              metricGroups: [{ id: 'metric-group-main', fields: ['revenue'] }],
               filters: [],
               limit: 1000,
             },
-            metricAliases: {
-              'field-1': 'gmv',
-            },
-            metricAggregations: {
-              'field-1': 'avg',
+            fieldMeta: {
+              revenue: { aggregation: 'avg', alias: 'gmv' },
             },
           }),
         },
@@ -333,10 +337,10 @@ describe('ChartBuilder', () => {
     renderChartBuilder();
 
     await waitFor(() => {
-      expect(useStore.getState().metricAliases['field-1']).toBe('gmv');
+      expect(useStore.getState().metricAliases.revenue).toBe('gmv');
     });
 
-    expect(useStore.getState().metricAggregations['field-1']).toBe('avg');
+    expect(useStore.getState().metricAggregations.revenue).toBe('avg');
   });
 
   it('restores dimension labels, metric units, formats, style and query options from saved config', async () => {
@@ -351,29 +355,25 @@ describe('ChartBuilder', () => {
           dataset_id: 1,
           chart_type: 'pie',
           config: JSON.stringify({
+            version: 1,
             chartType: 'pie',
             title: 'Styled Pie',
-            queryConfig: {
-              dimensionGroups: [{ id: 'dim-group-main', fields: ['field-0'] }],
-              metricGroups: [{ id: 'metric-group-main', fields: ['field-1'] }],
+            query: {
+              dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
+              metricGroups: [{ id: 'metric-group-main', fields: ['revenue'] }],
               filters: [],
               limit: 1000,
             },
-            dimensionLabels: {
-              'field-0': '区域',
+            fieldMeta: {
+              region: { label: '区域' },
+              revenue: { unit: '元', format: '0,0.00' },
             },
-            metricUnits: {
-              'field-1': '元',
-            },
-            metricFormats: {
-              'field-1': '0,0.00',
-            },
-            chartStyle: {
+            style: {
               colors: ['#ff4d4f'],
               smooth: true,
               tableRowSize: 'middle',
             },
-            chartQueryOptions: {
+            queryOptions: {
               pieMergeOtherBelowRatio: 5,
             },
           }),
@@ -384,11 +384,11 @@ describe('ChartBuilder', () => {
     renderChartBuilder();
 
     await waitFor(() => {
-      expect(useStore.getState().dimensionLabels['field-0']).toBe('区域');
+      expect(useStore.getState().dimensionLabels.region).toBe('区域');
     });
 
-    expect(useStore.getState().metricUnits['field-1']).toBe('元');
-    expect(useStore.getState().metricFormats['field-1']).toBe('0,0.00');
+    expect(useStore.getState().metricUnits.revenue).toBe('元');
+    expect(useStore.getState().metricFormats.revenue).toBe('0,0.00');
     expect(useStore.getState().chartStyle.colors).toEqual(['#ff4d4f']);
     expect(useStore.getState().chartStyle.smooth).toBe(true);
     expect(useStore.getState().chartStyle.tableRowSize).toBe('middle');
@@ -409,17 +409,19 @@ describe('ChartBuilder', () => {
           dataset_id: 1,
           chart_type: 'pivot',
           config: JSON.stringify({
+            version: 1,
             chartType: 'pivot',
             title: 'Pivot Chart',
-            queryConfig: {
+            query: {
               dimensionGroups: [
-                { id: 'dim-group-rows', fields: ['field-0'] },
-                { id: 'dim-group-columns', fields: ['field-0'] },
+                { id: 'dim-group-rows', fields: ['region'] },
+                { id: 'dim-group-columns', fields: ['region'] },
               ],
               metricGroups: [],
               filters: [],
               limit: 1000,
             },
+            fieldMeta: {},
           }),
         },
       })
@@ -454,17 +456,19 @@ describe('ChartBuilder', () => {
           dataset_id: 1,
           chart_type: 'pie',
           config: JSON.stringify({
+            version: 1,
             chartType: 'pie',
             title: 'Pie Chart',
-            queryConfig: {
-              dimensionGroups: [{ id: 'dim-group-main', fields: ['field-0'] }],
+            query: {
+              dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
               metricGroups: [
-                { id: 'metric-group-main', fields: ['field-1'] },
-                { id: 'metric-group-extra', fields: ['field-1'] },
+                { id: 'metric-group-main', fields: ['revenue'] },
+                { id: 'metric-group-extra', fields: ['revenue'] },
               ],
               filters: [],
               limit: 1000,
             },
+            fieldMeta: {},
           }),
         },
       })
@@ -495,7 +499,7 @@ describe('ChartBuilder', () => {
     act(() => {
       useStore.getState().addFilter({
         id: 'filter-gt-1',
-        field: 'field-0',
+        field: 'region',
         operator: 'gt',
         value: 100,
         logic: 'and',
@@ -514,7 +518,7 @@ describe('ChartBuilder', () => {
     expect(request.filters[0]).not.toHaveProperty('op');
   });
 
-  it('loads sparse saved metric groups without crashing and normalizes them for scatter charts', async () => {
+  it('loads saved metric groups with a sparse hole without crashing and normalizes them for scatter charts', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     mockGetChartById.mockResolvedValueOnce(
@@ -528,14 +532,16 @@ describe('ChartBuilder', () => {
           dataset_id: 1,
           chart_type: 'scatter',
           config: JSON.stringify({
+            version: 1,
             chartType: 'scatter',
             title: 'Scatter Chart',
-            queryConfig: {
+            query: {
               dimensionGroups: [],
-              metricGroups: [null, { id: 'metric-group-secondary', fields: ['field-1'] }],
+              metricGroups: [null, { id: 'metric-group-secondary', fields: ['revenue'] }],
               filters: [],
               limit: 1000,
             },
+            fieldMeta: {},
           }),
         },
       })
@@ -547,12 +553,132 @@ describe('ChartBuilder', () => {
       expect(useStore.getState().chartBuilderConfig.chartType).toBe('scatter');
     });
 
+    // 迁移丢弃空洞条目，图表定义规范化补齐到散点图需要的 2 个指标组
     expect(useStore.getState().queryConfig.metricGroups).toEqual([
-      { id: 'metric-group-1', fields: [] },
-      { id: 'metric-group-secondary', fields: ['field-1'] },
+      { id: 'metric-group-secondary', fields: ['revenue'] },
+      { id: 'metric-group-2', fields: [] },
     ]);
     expect(errorSpy).not.toHaveBeenCalled();
 
     errorSpy.mockRestore();
+  });
+
+  it('migrates a legacy config with positional field ids to column-name state on load', async () => {
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Legacy Sales Table',
+          dataset_id: 1,
+          chart_type: 'table',
+          config: JSON.stringify({
+            chartType: 'table',
+            xAxisField: null,
+            yAxisFields: [],
+            title: 'Legacy Sales Table',
+            queryConfig: {
+              dimensionGroups: [{ id: 'dim-group-main', fields: ['field-0'] }],
+              metricGroups: [{ id: 'metric-group-main', fields: ['field-1'] }],
+              filters: [
+                { id: 'f-0', field: 'field-0', operator: 'eq', value: 'East', logic: 'and' },
+              ],
+              limit: 1000,
+            },
+            dimensionLabels: { 'field-0': '区域' },
+            metricAggregations: { 'field-1': 'avg' },
+            metricAliases: { 'field-1': 'gmv' },
+            chartStyle: { colors: ['#1f77b4'], smooth: false, tableRowSize: 'middle' },
+            chartQueryOptions: { pieMergeOtherBelowRatio: 5 },
+          }),
+        },
+      })
+    );
+
+    renderChartBuilder();
+
+    // 旧位置 id 借助 chartBuilderFields 解析为列名
+    await waitFor(() => {
+      expect(useStore.getState().queryConfig.dimensionGroups[0]?.fields).toEqual(['region']);
+    });
+
+    expect(useStore.getState().queryConfig.metricGroups[0]?.fields).toEqual(['revenue']);
+    expect(useStore.getState().queryConfig.filters[0]?.field).toBe('region');
+    expect(useStore.getState().dimensionLabels).toEqual({ region: '区域' });
+    expect(useStore.getState().metricAggregations).toEqual({ revenue: 'avg' });
+    expect(useStore.getState().metricAliases).toEqual({ revenue: 'gmv' });
+    expect(useStore.getState().metricUnits).toEqual({});
+    expect(useStore.getState().chartStyle.tableRowSize).toBe('middle');
+    expect(useStore.getState().chartQueryOptions.pieMergeOtherBelowRatio).toBe(5);
+  });
+
+  it('saves the chart config as a v1 document with column-name fields and fieldMeta', async () => {
+    mockUpdateChart.mockResolvedValue(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Sales Table',
+          dataset_id: 1,
+          chart_type: 'table',
+          config: '',
+        },
+      })
+    );
+
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(useStore.getState().chartBuilderFields).toHaveLength(2);
+    });
+
+    act(() => {
+      const state = useStore.getState();
+      state.setDimensionLabel('region', '区域');
+      state.setMetricAlias('revenue', 'gmv');
+      state.addMetricField(state.chartBuilderFields[1], 0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /更新$/ }));
+
+    await waitFor(() => {
+      expect(mockUpdateChart).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = mockUpdateChart.mock.calls[0][1];
+    expect(payload).toEqual(
+      expect.objectContaining({
+        name: 'Sales Table',
+        dataset_id: 1,
+        chart_type: 'table',
+      })
+    );
+
+    const savedDoc = JSON.parse(payload.config ?? '') as ChartConfigDocument;
+    expect(savedDoc).toEqual({
+      version: 1,
+      chartType: 'table',
+      title: 'Sales Table',
+      query: {
+        dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
+        metricGroups: [{ id: 'metric-group-1', fields: ['revenue'] }],
+        filters: [],
+        limit: 1000,
+      },
+      fieldMeta: {
+        region: { label: '区域' },
+        revenue: { alias: 'gmv' },
+      },
+      style: { colors: [], smooth: false, tableRowSize: 'small' },
+      queryOptions: {},
+    });
+    expect(savedDoc).not.toHaveProperty('xAxisField');
+    expect(savedDoc).not.toHaveProperty('yAxisFields');
+    expect(savedDoc).not.toHaveProperty('queryConfig');
+    expect(savedDoc).not.toHaveProperty('dimensionLabels');
   });
 });

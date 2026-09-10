@@ -210,6 +210,6 @@ describe('ChartBuilder drag overlay', () => {
     });
 
     expect(useStore.getState().queryConfig.dimensionGroups[0]?.fields).toEqual([]);
-    expect(useStore.getState().queryConfig.dimensionGroups[1]?.fields).toEqual(['field-0']);
+    expect(useStore.getState().queryConfig.dimensionGroups[1]?.fields).toEqual(['region']);
   });
 });

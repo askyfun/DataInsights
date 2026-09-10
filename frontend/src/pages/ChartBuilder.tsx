@@ -41,9 +41,9 @@ import {
   Typography,
 } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ChartQueryAggregation, ChartQueryRequest } from '../api';
+import { Chart, ChartQueryAggregation, ChartQueryRequest } from '../api';
 import {
   chartDefinitions,
   normalizeQueryConfigForChartType,
@@ -53,10 +53,17 @@ import FilterBuilder from '../components/ChartBuilder/FilterBuilder';
 import QueryConfigRow from '../components/ChartBuilder/QueryConfigRow';
 import TableChart from '../components/ChartBuilder/TableChart';
 import {
+  type ChartConfigDocument,
+  type ChartMeta,
+  type ChartType,
+  migrateChartConfig,
+} from '../lib/chartConfigSchema';
+import {
   ChartConfig,
   ChartField,
   ChartQueryOptions,
   ChartStyleConfig,
+  FilterCondition,
   QueryConfig,
   useStore,
 } from '../store';
@@ -638,6 +645,8 @@ const ChartBuilder: React.FC = () => {
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
   const [activeDragField, setActiveDragField] = useState<ChartField | null>(null);
+  // 编辑态图表详情缓存（id + 请求 Promise），供配置加载 effect 重跑时复用
+  const editChartCache = useRef<{ id: number; promise: Promise<Chart> } | null>(null);
 
   const {
     datasets,
@@ -1156,64 +1165,86 @@ const ChartBuilder: React.FC = () => {
     const loadChartConfig = async () => {
       if (editingChartId && selectedDatasetId) {
         try {
-          const { chartsApi } = await import('../api');
-          const response = await chartsApi.getById(editingChartId);
-          const chart = response.data.data;
+          // 图表详情按 editingChartId 缓存：字段列表到达后本 effect 会重跑，
+          // 需要用「当前已加载的 chartBuilderFields」重新解析同一份 config，
+          // 而不是再次请求后端。
+          if (!editChartCache.current || editChartCache.current.id !== editingChartId) {
+            editChartCache.current = {
+              id: editingChartId,
+              promise: import('../api').then(({ chartsApi }) =>
+                chartsApi.getById(editingChartId).then((response) => response.data.data)
+              ),
+            };
+          }
+          const chart = await editChartCache.current.promise;
 
-          try {
-            const config = JSON.parse(chart.config);
-            setChartBuilderConfig({
-              chartType: config.chartType || 'table',
-              title: config.title || chart.name,
-            });
+          // 统一经迁移函数读取：旧结构（位置 id + 5 个平铺 Record）在解析边界
+          // 翻译为列名 + fieldMeta；损坏输入回退到 chart.chart_type / chart.name
+          // （migrateChartConfig 不抛异常）。
+          // 运行时 fieldId 已等于列名，旧位置 id 无法直接命中，故按列顺序重建
+          // field-N → 列名 的位置映射交给迁移函数；v1 文档的列名 id 解析不到时
+          // 原样保留（无损）。
+          const doc = migrateChartConfig(
+            chart.config,
+            chart.chart_type as ChartType,
+            chartBuilderFields.map((field, index) => ({
+              id: `field-${index}`,
+              name: field.name,
+            }))
+          );
 
-            if (config.queryConfig) {
-              setQueryConfig(
-                normalizeQueryConfigForChartType(config.chartType || 'table', config.queryConfig)
-              );
-            }
+          setChartBuilderConfig({
+            chartType: doc.chartType,
+            title: doc.title || chart.name,
+            xAxisField: null,
+            yAxisFields: [],
+          });
 
-            if (config.metricAliases) {
-              setMetricAliases(config.metricAliases);
-            }
+          setQueryConfig(
+            normalizeQueryConfigForChartType(doc.chartType, {
+              dimensionGroups: doc.query.dimensionGroups,
+              metricGroups: doc.query.metricGroups,
+              filters: doc.query.filters as FilterCondition[],
+              sort: doc.query.sort
+                ? {
+                    field: doc.query.sort.field,
+                    order: doc.query.sort.order === 'desc' ? 'desc' : 'asc',
+                  }
+                : undefined,
+              limit: doc.query.limit,
+            })
+          );
 
-            if (config.metricAggregations) {
-              setMetricAggregations(config.metricAggregations);
-            }
+          // v1 fieldMeta（键为列名）→ 5 个运行时 Record
+          const restoredLabels: Record<string, string> = {};
+          const restoredAggregations: Record<string, string> = {};
+          const restoredAliases: Record<string, string> = {};
+          const restoredUnits: Record<string, string> = {};
+          const restoredFormats: Record<string, string> = {};
+          for (const [name, meta] of Object.entries(doc.fieldMeta)) {
+            if (meta.label) restoredLabels[name] = meta.label;
+            if (meta.aggregation) restoredAggregations[name] = meta.aggregation;
+            if (meta.alias) restoredAliases[name] = meta.alias;
+            if (meta.unit) restoredUnits[name] = meta.unit;
+            if (meta.format) restoredFormats[name] = meta.format;
+          }
+          setDimensionLabels(restoredLabels);
+          setMetricAggregations(restoredAggregations);
+          setMetricAliases(restoredAliases);
+          setMetricUnits(restoredUnits);
+          setMetricFormats(restoredFormats);
 
-            if (config.dimensionLabels) {
-              setDimensionLabels(config.dimensionLabels);
-            }
-
-            if (config.metricUnits) {
-              setMetricUnits(config.metricUnits);
-            }
-
-            if (config.metricFormats) {
-              setMetricFormats(config.metricFormats);
-            }
-
-            if (config.chartStyle) {
-              setChartStyleState(config.chartStyle);
-            }
-
-            if (config.chartQueryOptions) {
-              setChartQueryOptionsState(config.chartQueryOptions);
-            }
-          } catch (_e) {
-            setChartBuilderConfig({
-              chartType: chart.chart_type as
-                | 'table'
-                | 'line'
-                | 'bar'
-                | 'pie'
-                | 'area'
-                | 'scatter'
-                | 'pivot',
-              title: chart.name,
-            });
+          // 仅在配置携带内容时覆盖，避免空文档抹掉默认样式
+          const restoredStyle = doc.style as ChartStyleConfig;
+          if (restoredStyle && Object.keys(restoredStyle).length > 0) {
+            setChartStyleState(restoredStyle);
+          }
+          const restoredQueryOptions = doc.queryOptions as ChartQueryOptions;
+          if (restoredQueryOptions && Object.keys(restoredQueryOptions).length > 0) {
+            setChartQueryOptionsState(restoredQueryOptions);
           }
         } catch (error) {
+          editChartCache.current = null;
           console.error('Failed to load chart config:', error);
         }
       }
@@ -1223,6 +1254,7 @@ const ChartBuilder: React.FC = () => {
   }, [
     editingChartId,
     selectedDatasetId,
+    chartBuilderFields,
     setChartBuilderConfig,
     setMetricAggregations,
     setMetricAliases,
@@ -1241,17 +1273,38 @@ const ChartBuilder: React.FC = () => {
     }
 
     try {
-      const configJson = JSON.stringify({
-        ...chartBuilderConfig,
-        queryConfig,
-        dimensionLabels,
-        metricAggregations,
-        metricAliases,
-        metricUnits,
-        metricFormats,
-        chartStyle,
-        chartQueryOptions,
-      });
+      // v1 持久化文档：字段组已是列名（fieldId === name），
+      // 5 个平铺 Record 在序列化边界收敛为 fieldMeta（键为列名），仅保留非空条目。
+      const fieldMeta: Record<string, ChartMeta> = {};
+      const assignMeta = (record: Record<string, string>, key: keyof ChartMeta) => {
+        for (const [name, value] of Object.entries(record)) {
+          if (value) {
+            fieldMeta[name] = { ...fieldMeta[name], [key]: value };
+          }
+        }
+      };
+      assignMeta(dimensionLabels, 'label');
+      assignMeta(metricAggregations, 'aggregation');
+      assignMeta(metricAliases, 'alias');
+      assignMeta(metricUnits, 'unit');
+      assignMeta(metricFormats, 'format');
+
+      const doc: ChartConfigDocument = {
+        version: 1,
+        chartType: chartBuilderConfig.chartType,
+        title: chartBuilderConfig.title,
+        query: {
+          dimensionGroups: queryConfig.dimensionGroups,
+          metricGroups: queryConfig.metricGroups,
+          filters: queryConfig.filters,
+          sort: queryConfig.sort,
+          limit: queryConfig.limit,
+        },
+        fieldMeta,
+        style: chartStyle,
+        queryOptions: chartQueryOptions,
+      };
+      const configJson = JSON.stringify(doc);
 
       if (editingChartId) {
         await updateChart(editingChartId, {

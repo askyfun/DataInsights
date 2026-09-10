@@ -7,9 +7,11 @@ import {
 } from '@ant-design/icons';
 import { Button, Card, Input, Result, Space, Spin, Tag, Typography } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Chart, chartsApi, sharesApi } from '../api';
+import TableChart from '../components/ChartBuilder/TableChart';
+import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
 
 const { Title, Text } = Typography;
 
@@ -20,13 +22,6 @@ interface ShareInfo {
   password?: string;
   expires_at?: string;
   created_at?: string;
-}
-
-interface ChartConfig {
-  chartType: 'line' | 'bar' | 'pie';
-  xAxisField: string | null;
-  yAxisFields: string[];
-  title: string;
 }
 
 const ShareView: React.FC = () => {
@@ -132,34 +127,44 @@ const ShareView: React.FC = () => {
     }
   };
 
+  // 统一经迁移函数读取 v1 文档；ShareView 没有字段列表，
+  // v1 配置的组字段本身就是稳定列名，可直接用于按列名索引的数据行。
+  const chartDoc = useMemo(
+    () => (chart ? migrateChartConfig(chart.config, chart.chart_type as ChartType) : null),
+    [chart]
+  );
+
+  // 展示名：优先 fieldMeta 的 label/alias，其次列名
+  const displayLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    if (!chartDoc) return labels;
+    for (const group of [...chartDoc.query.dimensionGroups, ...chartDoc.query.metricGroups]) {
+      for (const name of group.fields) {
+        const meta = chartDoc.fieldMeta[name];
+        labels[name] = meta?.label || meta?.alias || name;
+      }
+    }
+    return labels;
+  }, [chartDoc]);
+
   // Generate chart option
   const getChartOption = useCallback(() => {
-    if (!chart || chartData.length === 0) {
+    if (!chart || !chartDoc || chartData.length === 0) {
       return null;
     }
 
-    let config: ChartConfig;
-    try {
-      config = JSON.parse(chart.config);
-    } catch {
-      config = {
-        chartType: chart.chart_type as 'line' | 'bar' | 'pie',
-        xAxisField: null,
-        yAxisFields: [],
-        title: chart.name,
-      };
-    }
-
-    if (!config.xAxisField || config.yAxisFields.length === 0) {
+    // 表格类走 TableChart 渲染，不使用 ECharts option
+    if (chartDoc.chartType === 'table' || chartDoc.chartType === 'pivot') {
       return null;
     }
 
-    const xAxisField = config.xAxisField;
-    const xAxisData = chartData.map((item) => item[xAxisField]);
+    const dimensionNames = chartDoc.query.dimensionGroups.flatMap((g) => g.fields);
+    const metricNames = chartDoc.query.metricGroups.flatMap((g) => g.fields);
+    const labelOf = (name: string) => displayLabels[name] || name;
 
     const commonOptions = {
       title: {
-        text: config.title || chart.name,
+        text: chartDoc.title || chart.name,
         left: 'center',
       },
       tooltip: {
@@ -173,8 +178,41 @@ const ShareView: React.FC = () => {
       },
     };
 
-    switch (config.chartType) {
+    // 散点图只需两个指标，维度可选
+    if (chartDoc.chartType === 'scatter') {
+      const [xField, yField] = metricNames;
+      if (!xField || !yField) {
+        return null;
+      }
+      return {
+        ...commonOptions,
+        xAxis: {
+          type: 'value',
+          name: labelOf(xField),
+        },
+        yAxis: {
+          type: 'value',
+          name: labelOf(yField),
+        },
+        series: [
+          {
+            type: 'scatter',
+            data: chartData.map((item) => [item[xField], item[yField]]),
+          },
+        ],
+      };
+    }
+
+    const xAxisField = dimensionNames[0];
+    if (!xAxisField || metricNames.length === 0) {
+      return null;
+    }
+
+    const xAxisData = chartData.map((item) => item[xAxisField]);
+
+    switch (chartDoc.chartType) {
       case 'line':
+      case 'area':
         return {
           ...commonOptions,
           xAxis: {
@@ -184,9 +222,10 @@ const ShareView: React.FC = () => {
           yAxis: {
             type: 'value',
           },
-          series: config.yAxisFields.map((yField) => ({
-            name: yField,
+          series: metricNames.map((yField) => ({
+            name: labelOf(yField),
             type: 'line',
+            ...(chartDoc.chartType === 'area' ? { areaStyle: {} } : {}),
             data: chartData.map((item) => item[yField]),
           })),
         };
@@ -201,24 +240,25 @@ const ShareView: React.FC = () => {
           yAxis: {
             type: 'value',
           },
-          series: config.yAxisFields.map((yField) => ({
-            name: yField,
+          series: metricNames.map((yField) => ({
+            name: labelOf(yField),
             type: 'bar',
             data: chartData.map((item) => item[yField]),
           })),
         };
 
-      case 'pie':
+      case 'pie': {
+        const valueField = metricNames[0];
         return {
           ...commonOptions,
           series: [
             {
-              name: config.yAxisFields[0] || 'Value',
+              name: labelOf(valueField) || 'Value',
               type: 'pie',
               radius: '50%',
               data: chartData.map((item) => ({
                 name: item[xAxisField],
-                value: item[config.yAxisFields[0] || ''],
+                value: item[valueField],
               })),
               emphasis: {
                 itemStyle: {
@@ -230,11 +270,12 @@ const ShareView: React.FC = () => {
             },
           ],
         };
+      }
 
       default:
         return null;
     }
-  }, [chart, chartData]);
+  }, [chart, chartData, chartDoc, displayLabels]);
 
   // Get chart type icon
   const getChartTypeIcon = (type: string) => {
@@ -335,6 +376,7 @@ const ShareView: React.FC = () => {
 
   // Chart display
   const chartOption = getChartOption();
+  const isTableLike = chartDoc?.chartType === 'table' || chartDoc?.chartType === 'pivot';
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f2f5', padding: 24 }}>
@@ -369,6 +411,8 @@ const ShareView: React.FC = () => {
               <Text type="secondary">Loading chart data...</Text>
             </div>
           </div>
+        ) : isTableLike && chartData.length > 0 ? (
+          <TableChart data={chartData} loading={false} columnLabels={displayLabels} />
         ) : chartOption ? (
           <div style={{ height: 'calc(100vh - 250px)', minHeight: 400 }}>
             <ReactECharts

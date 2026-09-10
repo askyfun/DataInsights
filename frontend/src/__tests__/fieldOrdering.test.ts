@@ -12,14 +12,14 @@ import { useStore } from '@/store';
  * 保留了源数组顺序而不是 store 顺序。
  */
 
-// 模拟 chartBuilderFields，顺序故意和 store 不同
+// 模拟 chartBuilderFields，顺序故意和 store 不同（v1 契约：fieldId 即稳定列名）
 const MOCK_FIELDS: ChartField[] = [
-  { id: 'field-city', name: 'city', type: 'dimension', dataType: 'string' },
-  { id: 'field-date', name: 'date', type: 'dimension', dataType: 'date' },
-  { id: 'field-country', name: 'country', type: 'dimension', dataType: 'string' },
-  { id: 'field-revenue', name: 'revenue', type: 'metric', dataType: 'float' },
-  { id: 'field-cost', name: 'cost', type: 'metric', dataType: 'float' },
-  { id: 'field-profit', name: 'profit', type: 'metric', dataType: 'float' },
+  { id: 'city', name: 'city', type: 'dimension', dataType: 'string' },
+  { id: 'date', name: 'date', type: 'dimension', dataType: 'date' },
+  { id: 'country', name: 'country', type: 'dimension', dataType: 'string' },
+  { id: 'revenue', name: 'revenue', type: 'metric', dataType: 'float' },
+  { id: 'cost', name: 'cost', type: 'metric', dataType: 'float' },
+  { id: 'profit', name: 'profit', type: 'metric', dataType: 'float' },
 ];
 
 function setupStore() {
@@ -28,8 +28,8 @@ function setupStore() {
   useStore.setState({
     chartBuilderFields: MOCK_FIELDS,
     queryConfig: {
-      dimensionGroups: [{ id: 'dim-main', fields: ['field-date', 'field-city', 'field-country'] }],
-      metricGroups: [{ id: 'metric-main', fields: ['field-revenue', 'field-cost'] }],
+      dimensionGroups: [{ id: 'dim-main', fields: ['date', 'city', 'country'] }],
+      metricGroups: [{ id: 'metric-main', fields: ['revenue', 'cost'] }],
       filters: [],
       limit: 1000,
     },
@@ -79,7 +79,7 @@ describe('字段顺序：store 的 queryConfig 顺序优先于 chartBuilderField
 
   it('queryConfig 顺序: date, city, country', () => {
     const storeOrder = useStore.getState().queryConfig.dimensionGroups[0].fields;
-    expect(storeOrder).toEqual(['field-date', 'field-city', 'field-country']);
+    expect(storeOrder).toEqual(['date', 'city', 'country']);
   });
 
   it('正确模式 (Map+map) 返回 store 顺序: date, city, country', () => {

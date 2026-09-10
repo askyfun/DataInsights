@@ -418,8 +418,9 @@ export const useStore = create<AppState>((set) => ({
       const columns = response.data.data;
 
       // 使用后端返回的 role，如果没有则自动推断
-      const fields: ChartField[] = columns.map((col: DatasetColumn, index: number) => ({
-        id: `field-${index}`,
+      // fieldId 直接使用列名（v1 持久化契约的稳定标识），不再使用位置 id
+      const fields: ChartField[] = columns.map((col: DatasetColumn) => ({
+        id: col.name,
         name: col.name,
         type:
           col.role ||

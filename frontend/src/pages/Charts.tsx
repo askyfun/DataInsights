@@ -10,6 +10,7 @@ import { Button, Card, message, Popconfirm, Space, Table, Tag, Typography } from
 import { useEffect } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
+import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
 import { useStore } from '../store';
 
 const { Title, Text } = Typography;
@@ -57,27 +58,12 @@ const ChartsPage: React.FC = () => {
     // Reset chart builder and navigate to ChartBuilder
     resetChartBuilder();
 
-    // Parse the config to get the chart settings
-    let chartConfig = {
-      chartType: record.chart_type as 'line' | 'bar' | 'pie',
-      xAxisField: null as string | null,
-      yAxisFields: [] as string[],
-      title: record.name,
-    };
-
-    try {
-      const parsedConfig = JSON.parse(record.config);
-      chartConfig = {
-        ...chartConfig,
-        xAxisField: parsedConfig.xAxisField || null,
-        yAxisFields: parsedConfig.yAxisFields || [],
-        title: parsedConfig.title || record.name,
-      };
-    } catch (_e) {
-      // Use default values if config parse fails
-    }
-
-    setChartBuilderConfig(chartConfig);
+    // v1 契约下 xAxisField/yAxisFields 已废弃，只需迁移读取 chartType/title
+    const doc = migrateChartConfig(record.config || '', record.chart_type as ChartType);
+    setChartBuilderConfig({
+      chartType: doc.chartType,
+      title: doc.title || record.name,
+    });
 
     // Navigate to ChartBuilder page with query param to load the chart
     navigate(`/chart-builder?edit=${record.id}&datasetId=${record.dataset_id}`);
