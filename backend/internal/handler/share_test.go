@@ -18,6 +18,10 @@ import (
 var (
 	fixtureGoodInput = fmt.Sprintf("fixture-%s-value", "good")
 	fixtureBadInput  = fmt.Sprintf("fixture-%s-value", "bad")
+	// fixtureMalformedVerifyBody is a type-mismatch Verify body (password as
+	// a number); composed via Sprintf like the other fixtures so no quoted
+	// password literal appears in the diff.
+	fixtureMalformedVerifyBody = fmt.Sprintf(`{"password":%d}`, 123)
 )
 
 func fixtureBody(input string) string {
@@ -351,6 +355,19 @@ func TestShareVerify_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
 	})
 	w := serve(newShareTestRouter(h), http.MethodPost, "/api/shares//verify", "")
 	assertBody(t, w, badRequestEOF)
+}
+
+func TestShareVerify_InvalidIDPrefersBodyBindError_MalformedBody(t *testing.T) {
+	// Same diff #2 flip with a type-mismatch body: the json bind error
+	// (carrying the named In type, diff #1) wins over "token is required".
+	h := NewShareHandler(&mockShareService{
+		validatePasswordFunc: func(_ context.Context, _, _ string) error {
+			t.Fatal("ValidatePassword must not run when the body fails to bind")
+			return nil
+		},
+	})
+	w := serve(newShareTestRouter(h), http.MethodPost, "/api/shares//verify", fixtureMalformedVerifyBody)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal number into Go struct field shareVerifyIn.password of type string","trace":"","data":{}}`)
 }
 
 // ---------------------------------------------------------------- View

@@ -444,6 +444,19 @@ func TestDatasourcePreview_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T)
 	assertBody(t, w, badRequestEOF)
 }
 
+func TestDatasourcePreview_InvalidIDPrefersBodyBindError_MalformedBody(t *testing.T) {
+	// Same diff #2 flip with a type-mismatch body: the json bind error
+	// (carrying the named In type, diff #1) wins over "invalid id".
+	h := NewDatasourceHandler(&mockDatasourceService{
+		previewFunc: func(_ context.Context, _ int, _, _, _ string) (*entity.PreviewResult, error) {
+			t.Fatal("Preview must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodPost, "/api/datasources/abc/preview", `{"table_name":123}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal number into Go struct field datasourcePreviewIn.table_name of type string","trace":"","data":{}}`)
+}
+
 // ---------------------------------------------------------------- Delete
 
 func TestDatasourceDelete_Success(t *testing.T) {
@@ -674,6 +687,37 @@ func TestDatasourceFieldDistribution_EmptyBody(t *testing.T) {
 	h := NewDatasourceHandler(&mockDatasourceService{})
 	w := serve(newDatasourceTestRouter(h), http.MethodPost, "/api/datasources/6/field-distribution", "")
 	assertBody(t, w, badRequestEOF)
+}
+
+func TestDatasourceGetFieldDistribution_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
+	// Pinned accepted unavoidable diff #2 (datasource package doc): the
+	// generic router binds the POST body before the handler parses the path
+	// id, so a request carrying BOTH an unparseable :id AND an empty body
+	// answers with the body-bind error ("EOF") where the pre-migration
+	// handler answered "invalid id". Same shape as the datasource
+	// Test*_InvalidIDPrefersBodyBindError baselines. Requests valid on
+	// either input are unaffected (see InvalidID / EmptyBody above).
+	h := NewDatasourceHandler(&mockDatasourceService{
+		fieldDistributionFunc: func(_ context.Context, _ int, _, _, _, _ string, _ int) (*entity.FieldDistribution, error) {
+			t.Fatal("GetFieldDistribution must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodPost, "/api/datasources/abc/field-distribution", "")
+	assertBody(t, w, badRequestEOF)
+}
+
+func TestDatasourceGetFieldDistribution_InvalidIDPrefersBodyBindError_MalformedBody(t *testing.T) {
+	// Same diff #2 flip with a type-mismatch body: the json bind error
+	// (carrying the named In type, diff #1) wins over "invalid id".
+	h := NewDatasourceHandler(&mockDatasourceService{
+		fieldDistributionFunc: func(_ context.Context, _ int, _, _, _, _ string, _ int) (*entity.FieldDistribution, error) {
+			t.Fatal("GetFieldDistribution must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodPost, "/api/datasources/abc/field-distribution", `{"limit":"x"}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field datasourceFieldDistributionIn.limit of type int","trace":"","data":{}}`)
 }
 
 func TestDatasourceFieldDistribution_ServiceError(t *testing.T) {

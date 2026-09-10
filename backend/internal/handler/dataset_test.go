@@ -506,6 +506,21 @@ func TestDatasetUpdateColumns_TypeMismatchBody(t *testing.T) {
 	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal number into .0 of type entity.DatasetColumn","trace":"","data":{}}`)
 }
 
+func TestDatasetUpdateColumns_InvalidIDPrefersBodyBindError_MalformedBody(t *testing.T) {
+	// Same diff #2 flip with a type-mismatch body. UpdateColumns binds a bare
+	// []entity.DatasetColumn, so the json error carries no handler-struct
+	// name (unlike the datasource twins); the body-bind error still wins over
+	// "invalid id".
+	h := NewDatasetHandler(&mockDatasetService{
+		updateColumnsFunc: func(_ context.Context, _ int, _ []entity.DatasetColumn) (*entity.Dataset, error) {
+			t.Fatal("UpdateColumns must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets/abc/columns", `[1]`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal number into .0 of type entity.DatasetColumn","trace":"","data":{}}`)
+}
+
 func TestDatasetUpdateColumns_ServiceError(t *testing.T) {
 	h := NewDatasetHandler(&mockDatasetService{
 		updateColumnsFunc: func(_ context.Context, _ int, _ []entity.DatasetColumn) (*entity.Dataset, error) {
@@ -610,6 +625,19 @@ func TestDatasetQuery_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets/abc/query", "")
 	assertBody(t, w, badRequestEOF)
+}
+
+func TestDatasetQuery_InvalidIDPrefersBodyBindError_MalformedBody(t *testing.T) {
+	// Same diff #2 flip with a type-mismatch body: the json bind error
+	// (carrying the named In type, diff #1) wins over "invalid id".
+	h := NewDatasetHandler(&mockDatasetService{
+		queryFunc: func(_ context.Context, _ int, _ entity.QueryConfig) ([]map[string]any, error) {
+			t.Fatal("Query must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets/abc/query", `{"limit":"abc"}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field datasetQueryIn.limit of type int","trace":"","data":{}}`)
 }
 
 func TestDatasetQuery_TypeMismatchBody(t *testing.T) {
