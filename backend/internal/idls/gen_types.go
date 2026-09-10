@@ -70,7 +70,7 @@ type Chart struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// ChartCreateRequest POST /api/charts 请求体。后端整体绑定 entity.Chart（额外键与 id/created_at 不参与 service 落库映射）；name/dataset_id/chart_type 为规范性收紧的 required （后端零值可过，见 task-3 报告）。
+// ChartCreateRequest POST /api/charts 请求体。后端整体绑定 entity.Chart（created_at/updated_at 不参与落库映射；id 会被 toChartModel 透传进 insert——传非零值有指定主键风险， 故本 schema 不定义 id）；name/dataset_id/chart_type 为规范性收紧的 required （后端零值可过，见 task-3 报告）。
 type ChartCreateRequest struct {
 	// ChartType 已知取值见 Chart.chart_type；后端不做枚举校验。
 	ChartType string `json:"chart_type"`
@@ -81,7 +81,7 @@ type ChartCreateRequest struct {
 	Name      string  `json:"name"`
 }
 
-// ChartDataResult POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，oneOf 五形状（契约上按 chart_type 判别，见 ChartQueryRequest.chart_type 映射；oneOf 成员在 pie/scatter/table 间存在结构 重叠，消费方以 chart_type 为准，不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。
+// ChartDataResult POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，是按 chart_type 判别的五形状（契约上 oneOf 语义、 未生成 union 类型：data 为无类型 schema，成员见下方各 Chart*Response schema；pie/scatter/table 成员间存在结构重叠，消费方以 chart_type 为准， 不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。
 type ChartDataResult struct {
 	// CountSql 生成的计数 SQL；仅 chart_type=table 且携带 pagination 分支返回 （executor.Execute 的 count 查询路径），其余形状缺省。
 	CountSql *string `json:"count_sql,omitempty"`
@@ -165,7 +165,7 @@ type ChartQueryResponse struct {
 	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
 	Code ResponseCode `json:"code"`
 
-	// Data POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，oneOf 五形状（契约上按 chart_type 判别，见 ChartQueryRequest.chart_type 映射；oneOf 成员在 pie/scatter/table 间存在结构 重叠，消费方以 chart_type 为准，不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。
+	// Data POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，是按 chart_type 判别的五形状（契约上 oneOf 语义、 未生成 union 类型：data 为无类型 schema，成员见下方各 Chart*Response schema；pie/scatter/table 成员间存在结构重叠，消费方以 chart_type 为准， 不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。
 	Data ChartDataResult `json:"data"`
 
 	// Msg 提示消息；成功为 "success"，错误为可读错误描述

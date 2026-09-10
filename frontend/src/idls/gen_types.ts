@@ -374,8 +374,9 @@ export interface paths {
          * @description 非语义化图表查询：按图表绑定数据集的表/SQL 源实时取前 100 行
          *     （query.WrapPreviewSQL，service/chart.GetData）。响应 data 是裸数据行数组
          *     （DataRow[]，经归一化恒为数组），不是 POST /api/charts/query 的
-         *     ChartDataResult 形状。所有失败（含图表/数据集不存在、取数失败）统一
-         *     Envelope.code = 50000（handler.GetData 走 InternalError，不区分 404）。
+         *     ChartDataResult 形状。图表/数据集不存在、取数失败 → Envelope.code =
+         *     50000（handler.GetData 走 InternalError，不区分 404）；{id} 非法 →
+         *     20100（与 ChartId 参数口径一致）。
          */
         get: operations["getChartData"];
         put?: never;
@@ -822,7 +823,7 @@ export interface components {
             /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
             updated_at: string;
         };
-        /** @description POST /api/charts 请求体。后端整体绑定 entity.Chart（额外键与 id/created_at 不参与 service 落库映射）；name/dataset_id/chart_type 为规范性收紧的 required （后端零值可过，见 task-3 报告）。 */
+        /** @description POST /api/charts 请求体。后端整体绑定 entity.Chart（created_at/updated_at 不参与落库映射；id 会被 toChartModel 透传进 insert——传非零值有指定主键风险， 故本 schema 不定义 id）；name/dataset_id/chart_type 为规范性收紧的 required （后端零值可过，见 task-3 报告）。 */
         ChartCreateRequest: {
             name: string;
             dataset_id: number;
@@ -874,7 +875,7 @@ export interface components {
             pagination?: components["schemas"]["ChartPagination"];
             sort?: components["schemas"]["SortConfig"];
         };
-        /** @description POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，oneOf 五形状（契约上按 chart_type 判别，见 ChartQueryRequest.chart_type 映射；oneOf 成员在 pie/scatter/table 间存在结构 重叠，消费方以 chart_type 为准，不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。 */
+        /** @description POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，是按 chart_type 判别的五形状（契约上 oneOf 语义、 未生成 union 类型：data 为无类型 schema，成员见下方各 Chart*Response schema；pie/scatter/table 成员间存在结构重叠，消费方以 chart_type 为准， 不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。 */
         ChartDataResult: {
             /** @description 查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema； 为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}， 消费方按 ChartQueryRequest.chart_type 手动判别，五成员为 ChartTableResponse / ChartPieResponse / ChartAxisResponse / ChartScatterResponse / ChartPivotResponse）。 */
             data: unknown;
@@ -885,7 +886,7 @@ export interface components {
         };
         /** @description table 图表响应（query.TableResponse）。 */
         ChartTableResponse: {
-            /** @description 维度在前、指标别名在后（pagination 分支按 dims/metrics 顺序组装）。 */
+            /** @description 仅 table + pagination 分支保证"维度在前、指标别名在后"（executor 按 dims/metrics 顺序组装）；无 pagination 分支由 rows[0] 的 map 键遍历收集， 顺序不保证。 */
             columns: string[];
             data: components["schemas"]["DataRow"][];
             pagination: components["schemas"]["ChartTablePagination"];
