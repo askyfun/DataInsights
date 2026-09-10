@@ -25,13 +25,15 @@ DataRay 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构�
 | Domain | `backend/internal/domain/entity/` | 领域实体类型 |
 | Query | `backend/internal/query/` | SQL 构造唯一出口：AST + bun_builder（结构化查询）+ raw.go（原始 SQL 构造） |
 | Model | `backend/internal/model/` | 数据库模型（bun ORM） |
-| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（已设计，Batch 2 将启用，当前未接入） |
+| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：31 个 API 端点全部经此注册） |
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
 | Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `DATARAY_SECURITY_KEY`） |
 
-查询链路：handler → service → `query` 包（AST + bun_builder / raw.go）→ datasource 驱动。`Connection.Execute(ctx, sql string, args ...any)` 已支持参数化执行，bun_builder 是图表 SQL 的唯一出口，值参数一律通过 args 传递；标识符使用白名单校验（裸名 `datasource.IsValidIdentifier`，query 包 `safeIdentifier` 额外允许成对引号包裹的标识符）。
+查询链路：handler → service → `query` 包（AST + bun_builder / raw.go）→ datasource 驱动。`Connection.Execute(ctx, sql string, args ...any)` 已支持参数化执行，bun_builder 是图表 SQL 的唯一出口，值参数一律通过 args 传递；标识符使用白名单校验（裸名 `datasource.IsValidIdentifier`，query 包 `safeIdentifier` 额外允许成对引号包裹的标识符）。`dialect.go` 的手写字符串 SQL builder（`SQLBuilder`/`baseSQLBuilder`/`BuildQueryString` 及各方言 builder）已作为死代码删除，仅保留 `DialectType`/`ParseDialect`/`BuildQueryStringWithBun`；聚合表达式 `aggExprPattern` 收紧为显式函数白名单（`count|sum|avg|min|max`），杜绝 `pg_sleep(1)` 之类经列 `FieldExpr` 注入任意函数名。
 
-`backend/internal/router/router.go` 中的泛型路由函数（`RegisterGetRoute`、`RegisterPostRoute`、`RegisterPutRoute`、`RegisterDeleteRoute`）已设计完成但 Batch 1 未启用，计划 Batch 2 接入；路由器自动绑定 query 参数和 JSON body，并通过 `response.Success/Error/BadRequest` 统一包装响应。
+契约工程（Batch 2）：`api/openapi.yaml` 是前后端接口的单一事实源，`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript），当前作为契约文档与校验基线；**运行时类型尚未全量切换到生成物**（前端 `api/index.ts` 手写类型、后端 handler In/Out 仍各自定义），该"消费生成类型"迁移因存在响应类型同名不同义（生成 = 信封包装 / 手写 = 裸 payload）、`DatasetColumn.typeConfig`↔`type_config` 命名、窄联合被压成 `string` 等静默风险，规划入 Batch 3 单独谨慎处理。图表 `bi_chart.config` 已升级为带 `version:1` 的文档（`frontend/src/lib/chartConfigSchema.ts` 的 `ChartConfigDocument` + `migrateChartConfig`），旧结构在加载时自动迁移（`fieldId` 由位置 `field-N` 改为稳定列名），ShareView 据此渲染新结构图表。
+
+`backend/internal/router/router.go` 的泛型路由（`RegisterGetRoute`/`RegisterPostRoute`/`RegisterPutRoute`/`RegisterDeleteRoute`）**已启用并接入全部 31 个 API 端点**（datasource 11 + dataset 8 + chart 7 + share 4 + health）。签名 `API[In,Out] func(req Request[In], res *Response[Out]) error`——`res` 为指针，值传递会静默丢弃 handler 写入。路由器按 HTTP 方法自动绑定 JSON body（POST/PUT/PATCH 绑定，GET/DELETE 不绑定）+ query 参数，并统一包装 `response` 信封；handler 内部不再手写 `response.*`（例外：`/health` 与 share `View`——后者返回 302 重定向，无法套 JSON 信封）。迁移样板见 `handler/datasource.go` 顶部 package doc；已接受的两类"不可消除差异"（bind 错误文本含 struct 名、双非法输入时 body 绑定错误优先于 path）由 baseline 测试钉死。handler 入参用 handler-local In 镜像 struct（entity 不带 `form:"-"`，否则 query 参数会污染 body），其与 entity 的 json tag 一致性由 `internal/handler/contract_parity_test.go` 反射守卫。
 
 `datasource/` 包实现了 `Driver` 接口用于多数据库后端——新增驱动只需实现该接口。
 
@@ -47,8 +49,8 @@ frontend/src/
 ├── store/         # Zustand 状态管理
 ├── pages/         # 页面组件
 ├── components/    # 可复用组件
-├── idls/          # API 类型定义
-├── lib/           # 工具库（API 客户端在 lib/api/client.ts）
+├── idls/          # API 类型定义（现仅 gen_types.ts 生成物；Batch 2 已删除手写 chart/dataset/datasource/share.ts）
+├── lib/           # 工具库（API 客户端在 lib/api/client.ts；图表配置 schema 在 lib/chartConfigSchema.ts）
 ├── i18n/          # 国际化
 └── styles/        # 全局样式
 ```

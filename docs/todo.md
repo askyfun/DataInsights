@@ -505,3 +505,32 @@
 - [ ] 智能图表推荐
 - [ ] 自然语言查询
 - [ ] 插件架构
+
+---
+
+## 七、架构重构进度（顶层评审 → 分批落地）
+
+> 源自 2026-09 架构评审 + grilling 的 12 项决策，分三批执行。计划与逐项验收记录见 `docs/superpowers/plans/` 与 `.superpowers/sdd/`。
+
+### Batch 1：安全 + 查询收敛 ✅ 已合并 master
+
+- [x] datasource 密码 AES-GCM 可逆加密、API `password` 脱敏、share bcrypt + `has_password` 契约
+- [x] SQL 构造收敛到 `query` 包（AST + bun_builder 唯一出口 + raw.go）、`Connection.Execute` 参数化
+- [x] goose 版本化迁移、`database.WithTx`、CORS/Sentry/requestID 运维基线
+
+### Batch 2：契约工程 ✅ 本分支 `refactor/batch2-contract`（待最终评审 + E2E 后合并）
+
+- [x] `api/openapi.yaml` 单一事实源；`make api-gen` 生成 `backend/internal/idls/gen_types.go` + `frontend/src/idls/gen_types.ts`（19+ 端点契约 + ChartSpec/QuerySpec）
+- [x] 泛型 router 全面启用：31 个 API 端点（datasource 11 / dataset 8 / chart 7 / share 4 / health）经 `Register{Get,Post,Put,Delete}Route` 注册，行为保持由 baseline 测试逐端点钉死；修复 2 个 router 缺陷（`res` 值→指针、body 绑定按方法门控）
+- [x] 图表 `bi_chart.config` 升级 v1 文档（`lib/chartConfigSchema.ts` + `migrateChartConfig`），`fieldId` 位置 `field-N`→稳定列名，**修复 ShareView 对新结构图表无法渲染**（旧门控依赖恒为 null 的 `xAxisField`）
+- [x] 前端删除手写 idl 类型（chart/dataset/datasource/share.ts），错误消息读取修正为 `error.message`（信封字段是 `msg`，旧 `.response.data.message` 恒 undefined）
+- [x] filters 键 `op`→`operator` 对齐后端；后端删除死代码（`getPaginationParams`、手写字符串 SQL builder 路径）；`aggExprPattern` 收紧为聚合函数白名单堵注入面；新增镜像↔entity json tag 反射守卫测试
+
+### Batch 3 backlog（本批评估后主动延后，均有明确理由）
+
+- [ ] **消费生成类型**（前端 `api/index.ts` 运行时类型 + 后端 handler In/Out 换 `idls.*`）：非机械替换——生成 `*Response` 是信封包装、手写同名类型是裸 payload（同名不同义会静默改变 `.data.data` 深度）；`DatasetColumn.typeConfig`(camel) ↔ 生成 `type_config`(snake) 命名冲突且可能暴露后端 snake_case 真实契约 bug；生成物把窄联合（`ChartType`/`ColumnRole`/`ChartQueryAggregation`/`DatasetMode`/`FilterOperator` 等）压成 `string`，现有 `as` 断言依赖 → 需在生成类型上叠薄手写联合层，按类型谨慎迁移
+- [ ] **ghost 路由 bug**：`datasetsApi.update` 调用 `PUT /api/datasets/:id`，后端无此路由（`gen put?: never`），DatasetEdit 保存实际会 404；载荷 `tags`/`shard_keys` 数组 vs JSON 字符串也不匹配 → 补后端端点或调整前端编辑路径
+- [ ] **`ChartQueryRequest.config` 幽灵字段**：前端仍发送 `config.query_options.pie_merge_other_below_ratio`，后端 entity/handler 不解析、静默丢弃 → 决定后端接入或前端移除（pie 合并其他比例功能）
+- [ ] **`lib/api/client.ts:120` baseURL 尾部多余 `}`**：当前无调用方（仅 `ApiResponse` 类型被引用），一旦被路由调用即暴露 → 顺手修
+- [ ] ChartBuilder 三处 filters 构造点合并；`/datasets/new` 路由（React Router v6 静态段优先于动态段，经 E2E 确认无 bug，非待办）
+

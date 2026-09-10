@@ -106,7 +106,7 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 - `query` 包是 SQL 构造的唯一出口。结构化查询走 `QueryPlanner → QueryAST → bun_builder`（bun_builder 同时收集值参数与构造 SQL）；原始 SQL（表预览、字段分布等）走 `raw.go` 构造。
 - `Connection.Execute(ctx, sql string, args ...any)` 支持参数化执行，值参数一律通过 args 传递，禁止字符串拼接进 SQL。
 - 标识符一律通过白名单校验：裸名用 `datasource.IsValidIdentifier`；query 包 `safeIdentifier` 额外允许成对引号包裹的标识符。
-- 旧的 `query/builder.go` 与平铺参数兼容链路已删除。
+- 旧的 `query/builder.go` 与平铺参数兼容链路已删除；Batch 2 进一步删除 `query/dialect.go` 中手写字符串 SQL builder 死路径（`SQLBuilder`/`baseSQLBuilder`/`BuildQueryString`/各方言 builder），`dialect.go` 仅保留 `DialectType`/`ParseDialect`/`BuildQueryStringWithBun`；聚合表达式 `aggExprPattern` 收紧为显式函数白名单（`count|sum|avg|min|max`），堵截经列 `FieldExpr` 注入任意函数名。
 - 数据库 schema 由 goose 版本化迁移管理（`backend/migrations/`，embed.FS 内嵌），事务统一走 `database.WithTx`。
 
 当前落地状态：
@@ -115,6 +115,12 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 - `backend/internal/service/chart/impl.go` 将旧请求转换为内部 `QuerySpec`，再经 `QueryPlanner` 生成 `PlannedAST`，由 `query.Executor` 消费 AST 生成参数化 SQL。
 - `QueryAST` 第一阶段已支持结构化维度/指标元信息、`limit`，以及日期维度 `day` 粒度的 PostgreSQL / MySQL / ClickHouse 方言 SQL 生成。
 - 分桶、复杂过滤组、更多时间粒度仍属于后续阶段。
+
+## 契约与路由（Batch 2）
+
+- **契约单一事实源**：`api/openapi.yaml` 定义全部端点请求/响应 + `Envelope`（`code/msg/trace/data`）+ `ChartSpec`/`QuerySpec`；`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。当前生成物作为契约与校验基线；运行时类型尚未全量切换到生成物（列入 Batch 3）。
+- **泛型路由**：`backend/internal/router/router.go` 的 `API[In,Out] func(req Request[In], res *Response[Out]) error`（`res` 必须是指针，值传递会丢弃 handler 写入）已接入全部 31 个 API 端点。路由器按 HTTP 方法绑定 JSON body（POST/PUT/PATCH）+ query 参数并统一信封；`cmd/routes.go` 用 `Register{Get,Post,Put,Delete}Route` 注册，迁移样板见 `handler/datasource.go` 顶部 package doc。例外：`/health`（cmd/main.go）与 share `View`（302 重定向无法套 JSON 信封）。
+- **图表配置 v1**：`bi_chart.config` 为 `{version:1, chartType, title, query:{dimensionGroups,metricGroups,filters,sort,limit}, fieldMeta, style, queryOptions}` 文档；`frontend/src/lib/chartConfigSchema.ts` 的 `migrateChartConfig` 在加载时把旧结构（`queryConfig` + 5 个平铺 Record + 位置 `field-N` + 恒为 null 的 `xAxisField`）迁移到 v1，`fieldId` 改用稳定列名，ShareView 据此正常渲染。
 
 ### 响应层
 
