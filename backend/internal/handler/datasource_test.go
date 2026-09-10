@@ -404,6 +404,46 @@ func TestDatasourceUpdate_ServiceError(t *testing.T) {
 	assertBody(t, w, internalErrorBoom)
 }
 
+// Doubly-invalid requests pin the accepted error-priority drift: the router
+// binds the JSON body before the handler parses the path id (pre-migration
+// handlers parsed the id first), so on invalid id + empty/malformed body the
+// body-bind error wins. Requests valid on either input keep the old
+// precedence — the InvalidID tests above still expect "invalid id" because
+// their bodies are valid.
+
+func TestDatasourceUpdate_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
+	h := NewDatasourceHandler(&mockDatasourceService{
+		updateFunc: func(_ context.Context, _ *entity.Datasource) (*entity.Datasource, error) {
+			t.Fatal("Update must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodPut, "/api/datasources/abc", "")
+	assertBody(t, w, badRequestEOF)
+}
+
+func TestDatasourceUpdate_InvalidIDPrefersBodyBindError_MalformedBody(t *testing.T) {
+	h := NewDatasourceHandler(&mockDatasourceService{
+		updateFunc: func(_ context.Context, _ *entity.Datasource) (*entity.Datasource, error) {
+			t.Fatal("Update must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodPut, "/api/datasources/abc", `{"port":"x"}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field datasourceUpdateIn.port of type int","trace":"","data":{}}`)
+}
+
+func TestDatasourcePreview_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
+	h := NewDatasourceHandler(&mockDatasourceService{
+		previewFunc: func(_ context.Context, _ int, _, _, _ string) (*entity.PreviewResult, error) {
+			t.Fatal("Preview must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodPost, "/api/datasources/abc/preview", "")
+	assertBody(t, w, badRequestEOF)
+}
+
 // ---------------------------------------------------------------- Delete
 
 func TestDatasourceDelete_Success(t *testing.T) {

@@ -60,10 +60,24 @@
 // Do not "improve" existing semantics: every GetByID error currently maps
 // to 404, TestConnection failures currently map to 400 — keep both.
 //
-// Known unavoidable diff (accepted): JSON type-mismatch bind errors embed
-// the Go struct name, so "…Go struct field .port…" now reads
-// "…Go struct field datasourceCreateIn.port…". Every code/msg/data shape on
-// the normal contract paths is unchanged.
+// Known unavoidable diffs (accepted, pinned by tests):
+//
+//  1. JSON type-mismatch bind errors embed the Go struct name, so
+//     "…Go struct field .port…" now reads "…Go struct field
+//     datasourceCreateIn.port…".
+//  2. Error priority on doubly-invalid requests. The router binds the JSON
+//     body before the API runs, while the pre-migration handlers parsed the
+//     path id first. For endpoints that combine a path param with a JSON
+//     body (Update, Preview, GetFieldDistribution — and the same applies to
+//     any future endpoint migrating that shape), a request carrying BOTH an
+//     unparseable :id AND an empty/malformed body now answers with the
+//     body-binding error ("EOF" / the json unmarshal message) where the old
+//     handler answered "invalid id". Requests that are valid on either input
+//     (valid id, or valid body) are unaffected: the path id is still checked
+//     before anything else inside the handler. See the
+//     TestDatasource*_InvalidIDPrefersBodyBindError baselines.
+//
+// Every code/msg/data shape on the normal contract paths is unchanged.
 package handler
 
 import (

@@ -288,6 +288,9 @@ func TestRegisterRoute_PutEmptyBody(t *testing.T) {
 	if resp["code"] != float64(20100) {
 		t.Errorf("expected code 20100 for empty PUT body, got %v, body: %s", resp["code"], w.Body.String())
 	}
+	if resp["msg"] != "EOF" {
+		t.Errorf("expected msg 'EOF', got %v, body: %s", resp["msg"], w.Body.String())
+	}
 }
 
 // TestRegisterRoute_GetIgnoresBody pins that GET requests never bind a JSON
