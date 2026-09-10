@@ -40,3 +40,9 @@
 
 - **参数化通道断裂的根因**：`Connection.Execute` 早期接口设计成只收 SQL 字符串（没有 args），导致 bun_builder 层辛苦收集的值参数无处可传、最终被拼回 SQL 字符串——builder 层等于白做。教训：底层执行接口的签名决定了上层所有安全投入能否生效；先打通“接口能传参”，再做“上层会传参”，顺序不能反。修复时以 `Execute(ctx, sql string, args ...any)` 为锚点，从 builder 收集 args → executor 透传 → 驱动执行逐层贯通并补测试。
 - **go.mod 依赖连带升级是确定性副作用**：引入 goose / sentry-go / bcrypt 等新依赖时，`go mod tidy` 常会连带升级既有间接依赖（如 bun、gin 相关），这不是意外而是必然副作用。应在引入新依赖的提交里预期并审查这些升级，避免把“意外的依赖升级”当作回归排查。
+
+## Batch 2 泛型 router 接线经验（2026-09-09）
+
+- **“设计已就绪但从未接线”的包，其自身测试全绿 ≠ 行为正确**：`internal/router` 启用前 6 个测试全部通过，却掩盖了两个会让迁移直接破坏契约的缺陷——`Response` 按值传入 API handler 导致所有 `res.Out` 写入被丢弃（success 响应永远是零值），以及 JSON 绑定门 `ContentLength > 0` 与旧 handler 无条件 `ShouldBindJSON` 不等价（空 body POST 会从 400 EOF 变成落库脏数据）。根因：旧测试只断言 HTTP status/code，从未逐字节断言 data。教训：接线任何休眠包之前，先对被迁移端点建 httptest 逐字节响应基线（迁移前后同一断言必须全绿），并给休眠包补“断言最终输出内容”的测试。
+- **gin 绑定的两个静默陷阱**（迁移端点时必须处理，均有实测依据）：① `ShouldBindQuery` 对无 `form` tag 的字段回退用 Go 字段名做 key，router 又总是先绑 query，因此 JSON body struct 必须逐字段 `form:"-"`，否则 `?Name=evil` 会污染 body 值；② query 参数若用 int 直接绑定，`?limit=abc` 会变成 400，而旧 handler 是忽略解析错误用默认值——零行为变化要求 query 字段绑成 string、在绑定后方法里复刻 DefaultQuery+Atoi 容错+clamp。
+- **逐字节一致要盯序列化细节**：`map[string]any` 的 JSON key 按字典序、struct 按声明序，投影方式改动会改变响应字节；`response` 包 normalizer 已把 nil slice/map 归一化为 `[]`/`{}`，迁移时勿据此“顺手”删掉旧 nil 兜底以外的逻辑。命名 In struct 会让 JSON 类型错误的报错信息带上类型名（匿名 struct 时为空），属设计强制的不可消除差异，应显式裁定并记录而非默默接受。
