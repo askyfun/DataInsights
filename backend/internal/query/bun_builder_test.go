@@ -661,34 +661,6 @@ func BenchmarkBunQueryBuilder_BuildSelect(b *testing.B) {
 	}
 }
 
-func BenchmarkOldBuilder_BuildSelect(b *testing.B) {
-	qb := NewQueryBuilder()
-	qb.WithColumnMappings(`[{"name":"revenue","expr":"SUM(amount)","role":"metric","type":"bigint"}]`)
-
-	ast := qb.Build(
-		"orders",
-		SourceTypeTable,
-		[]string{"status", "category"},
-		[]MetricConfig{
-			{Field: "amount", Agg: AggSum, Alias: "total_amount"},
-			{Field: "quantity", Agg: AggAvg, Alias: "avg_quantity"},
-		},
-		[]FilterConfig{
-			{Field: "status", Op: FilterEq, Value: "active"},
-			{Field: "amount", Op: FilterGt, Value: 100},
-		},
-		&SortConfig{Field: "total_amount", Order: "desc"},
-		&Pagination{Page: 1, PageSize: 20},
-	)
-
-	builder := NewPostgreSQLBuilder()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		builder.BuildSelect(ast)
-	}
-}
-
 func init() {
 	_ = json.Marshal
 }
