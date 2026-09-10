@@ -40,9 +40,10 @@
 //
 // # Out rules
 //
-// res.Out carries the payload only; response.Success wraps it in the
-// envelope. response's normalizer turns nil slices/maps into [] / {} and
-// nil root data into {}, so a typed nil slice Out already serializes as [] —
+// res.Out carries the payload only; the router wraps it in the unified
+// success envelope. Response's normalizer turns nil slices/maps into
+// [] / {} and nil root data into {}, so a typed nil slice Out already
+// serializes as [] —
 // keep any explicit nil guards only where the old code had them. Preserve
 // map vs struct projection choices: GetColumns deliberately returns
 // []map[string]any so key order stays alphabetical byte-for-byte; switching
@@ -72,8 +73,6 @@ import (
 	"dataray/internal/response"
 	"dataray/internal/router"
 	"dataray/internal/service/datasource"
-
-	"github.com/gin-gonic/gin"
 )
 
 // DatasourceHandler handles datasource HTTP requests
@@ -90,19 +89,57 @@ func NewDatasourceHandler(svc datasource.Service) *DatasourceHandler {
 // (id / table): nothing to bind, params are read from req.Ctx.
 type datasourcePathIn struct{}
 
-// List handles GET /api/datasources
-func (h *DatasourceHandler) List(c *gin.Context) {
-	limit, offset := getPaginationParams(c)
+// datasourceStatusOut is the shared {"status":"ok"} payload for Delete and
+// TestConnection (previously gin.H{"status": "ok"}).
+type datasourceStatusOut struct {
+	Status string `json:"status"`
+}
 
-	datasources, err := h.svc.List(c.Request.Context(), limit, offset)
+// orDefault mirrors gin's DefaultQuery for a value already bound via a form
+// tag: the empty string means "param absent" and falls back to the default.
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+// datasourceListIn carries the pagination query params for List. Values are
+// bound as strings so non-numeric input keeps the pre-migration
+// fall-back-to-default behaviour instead of turning into a 400 bind error.
+type datasourceListIn struct {
+	Limit  string `form:"limit"`
+	Offset string `form:"offset"`
+}
+
+// pagination is the List binding post-processing step: it reproduces the
+// old getPaginationParams defaults and clamps exactly (limit=100 when
+// missing/garbage/out of range, offset>=0).
+func (in datasourceListIn) pagination() (limit, offset int) {
+	limit, _ = strconv.Atoi(orDefault(in.Limit, "100"))
+	offset, _ = strconv.Atoi(orDefault(in.Offset, "0"))
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return
+}
+
+// List handles GET /api/datasources
+func (h *DatasourceHandler) List(req router.Request[datasourceListIn], res *router.Response[[]entity.Datasource]) error {
+	limit, offset := req.In.pagination()
+
+	datasources, err := h.svc.List(req.Ctx.Request.Context(), limit, offset)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
 	if datasources == nil {
 		datasources = []entity.Datasource{}
 	}
-	response.Success(c, datasources)
+	res.Out = datasources
+	return nil
 }
 
 // Get handles GET /api/datasources/:id
@@ -120,263 +157,276 @@ func (h *DatasourceHandler) Get(req router.Request[datasourcePathIn], res *route
 	return nil
 }
 
-// Create handles POST /api/datasources
-func (h *DatasourceHandler) Create(c *gin.Context) {
-	var req struct {
-		Name         string `json:"name"`
-		Type         string `json:"type"`
-		Host         string `json:"host"`
-		Port         int    `json:"port"`
-		DatabaseName string `json:"database_name"`
-		Username     string `json:"username"`
-		Password     string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
+// datasourceCreateIn is the JSON body of POST /api/datasources. Every field
+// carries form:"-" so the router's ShouldBindQuery pass cannot touch the
+// body struct (see the package doc).
+type datasourceCreateIn struct {
+	Name         string `json:"name" form:"-"`
+	Type         string `json:"type" form:"-"`
+	Host         string `json:"host" form:"-"`
+	Port         int    `json:"port" form:"-"`
+	DatabaseName string `json:"database_name" form:"-"`
+	Username     string `json:"username" form:"-"`
+	Password     string `json:"password" form:"-"`
+}
 
-	if req.Type == "" {
-		req.Type = "postgresql"
+// Create handles POST /api/datasources
+func (h *DatasourceHandler) Create(req router.Request[datasourceCreateIn], res *router.Response[*entity.Datasource]) error {
+	in := req.In
+
+	if in.Type == "" {
+		in.Type = "postgresql"
 	}
 
 	ds := &entity.Datasource{
-		Name:         req.Name,
-		Type:         req.Type,
-		Host:         req.Host,
-		Port:         req.Port,
-		DatabaseName: req.DatabaseName,
-		Username:     req.Username,
-		Password:     req.Password,
+		Name:         in.Name,
+		Type:         in.Type,
+		Host:         in.Host,
+		Port:         in.Port,
+		DatabaseName: in.DatabaseName,
+		Username:     in.Username,
+		Password:     in.Password,
 	}
 
-	result, err := h.svc.Create(c.Request.Context(), ds)
+	result, err := h.svc.Create(req.Ctx.Request.Context(), ds)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
+}
+
+// datasourceUpdateIn is the JSON body of PUT /api/datasources/:id; the id
+// arrives via the path, not the In struct.
+type datasourceUpdateIn struct {
+	Name         string `json:"name" form:"-"`
+	Type         string `json:"type" form:"-"`
+	Host         string `json:"host" form:"-"`
+	Port         int    `json:"port" form:"-"`
+	DatabaseName string `json:"database_name" form:"-"`
+	Username     string `json:"username" form:"-"`
+	Password     string `json:"password" form:"-"`
 }
 
 // Update handles PUT /api/datasources/:id
-func (h *DatasourceHandler) Update(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasourceHandler) Update(req router.Request[datasourceUpdateIn], res *router.Response[*entity.Datasource]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	var req struct {
-		Name         string `json:"name"`
-		Type         string `json:"type"`
-		Host         string `json:"host"`
-		Port         int    `json:"port"`
-		DatabaseName string `json:"database_name"`
-		Username     string `json:"username"`
-		Password     string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
+	in := req.In
 
 	ds := &entity.Datasource{
 		ID:           id,
-		Name:         req.Name,
-		Type:         req.Type,
-		Host:         req.Host,
-		Port:         req.Port,
-		DatabaseName: req.DatabaseName,
-		Username:     req.Username,
-		Password:     req.Password,
+		Name:         in.Name,
+		Type:         in.Type,
+		Host:         in.Host,
+		Port:         in.Port,
+		DatabaseName: in.DatabaseName,
+		Username:     in.Username,
+		Password:     in.Password,
 	}
 
-	result, err := h.svc.Update(c.Request.Context(), ds)
+	result, err := h.svc.Update(req.Ctx.Request.Context(), ds)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
 }
 
 // Delete handles DELETE /api/datasources/:id
-func (h *DatasourceHandler) Delete(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasourceHandler) Delete(req router.Request[datasourcePathIn], res *router.Response[datasourceStatusOut]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
-		response.InternalError(c, err.Error())
-		return
+	if err := h.svc.Delete(req.Ctx.Request.Context(), id); err != nil {
+		return err
 	}
-	response.Success(c, gin.H{"status": "ok"})
+	res.Out = datasourceStatusOut{Status: "ok"}
+	return nil
+}
+
+// datasourceTestConnectionIn is the JSON body of POST /api/datasources/test.
+type datasourceTestConnectionIn struct {
+	Type         string `json:"type" form:"-"`
+	Host         string `json:"host" form:"-"`
+	Port         int    `json:"port" form:"-"`
+	DatabaseName string `json:"database_name" form:"-"`
+	Username     string `json:"username" form:"-"`
+	Password     string `json:"password" form:"-"`
 }
 
 // TestConnection handles POST /api/datasources/test
-func (h *DatasourceHandler) TestConnection(c *gin.Context) {
-	var req struct {
-		Type         string `json:"type"`
-		Host         string `json:"host"`
-		Port         int    `json:"port"`
-		DatabaseName string `json:"database_name"`
-		Username     string `json:"username"`
-		Password     string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
+func (h *DatasourceHandler) TestConnection(req router.Request[datasourceTestConnectionIn], res *router.Response[datasourceStatusOut]) error {
+	in := req.In
 
-	if req.Type == "" {
-		req.Type = "postgresql"
+	if in.Type == "" {
+		in.Type = "postgresql"
 	}
 
 	config := entity.DatasourceConnectionConfig{
-		Host:         req.Host,
-		Port:         req.Port,
-		DatabaseName: req.DatabaseName,
-		Username:     req.Username,
-		Password:     req.Password,
+		Host:         in.Host,
+		Port:         in.Port,
+		DatabaseName: in.DatabaseName,
+		Username:     in.Username,
+		Password:     in.Password,
 	}
 
-	if err := h.svc.TestConnection(c.Request.Context(), config, req.Type); err != nil {
-		response.BadRequest(c, err.Error())
-		return
+	// Connection failures keep their pre-migration 20100 mapping, they are
+	// not internal errors.
+	if err := h.svc.TestConnection(req.Ctx.Request.Context(), config, in.Type); err != nil {
+		return router.NewBusinessError(response.CodeBadRequest, err.Error())
 	}
-	response.Success(c, gin.H{"status": "ok"})
+	res.Out = datasourceStatusOut{Status: "ok"}
+	return nil
 }
 
 // GetTables handles GET /api/datasources/:id/tables
-func (h *DatasourceHandler) GetTables(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasourceHandler) GetTables(req router.Request[datasourcePathIn], res *router.Response[[]entity.TableInfo]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	tables, err := h.svc.GetTables(c.Request.Context(), id)
+	tables, err := h.svc.GetTables(req.Ctx.Request.Context(), id)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, tables)
+	res.Out = tables
+	return nil
 }
 
 // GetColumns handles GET /api/datasources/:id/tables/:table/columns
-func (h *DatasourceHandler) GetColumns(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasourceHandler) GetColumns(req router.Request[datasourcePathIn], res *router.Response[[]map[string]any]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	tableName := c.Param("table")
+	tableName := req.Ctx.Param("table")
 	if tableName == "" {
-		response.BadRequest(c, "table name is required")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "table name is required")
 	}
 
-	columns, err := h.svc.GetColumns(c.Request.Context(), id, tableName)
+	columns, err := h.svc.GetColumns(req.Ctx.Request.Context(), id, tableName)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
 
-	result := make([]map[string]interface{}, len(columns))
+	// The map projection is deliberate: it keeps the JSON key order
+	// (comment, data_type, name) byte-identical to the pre-migration
+	// response; a struct Out would emit name, data_type, comment instead.
+	result := make([]map[string]any, len(columns))
 	for i, col := range columns {
-		result[i] = map[string]interface{}{
+		result[i] = map[string]any{
 			"name":      col.Name,
 			"data_type": col.DataType,
 			"comment":   col.Comment,
 		}
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
+}
+
+// datasourcePreviewIn is the JSON body of POST /api/datasources/:id/preview.
+type datasourcePreviewIn struct {
+	TableName string `json:"table_name" form:"-"`
+	QuerySQL  string `json:"query_sql" form:"-"`
+	QueryType string `json:"query_type" form:"-"`
 }
 
 // Preview handles POST /api/datasources/:id/preview
-func (h *DatasourceHandler) Preview(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasourceHandler) Preview(req router.Request[datasourcePreviewIn], res *router.Response[*entity.PreviewResult]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	var req struct {
-		TableName string `json:"table_name"`
-		QuerySQL  string `json:"query_sql"`
-		QueryType string `json:"query_type"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
+	in := req.In
 
-	result, err := h.svc.Preview(c.Request.Context(), id, req.TableName, req.QuerySQL, req.QueryType)
+	result, err := h.svc.Preview(req.Ctx.Request.Context(), id, in.TableName, in.QuerySQL, in.QueryType)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
+}
+
+// datasourceFieldDistributionIn is the JSON body of
+// POST /api/datasources/:id/field-distribution.
+type datasourceFieldDistributionIn struct {
+	TableName string `json:"table_name" form:"-"`
+	QuerySQL  string `json:"query_sql" form:"-"`
+	QueryType string `json:"query_type" form:"-"`
+	FieldName string `json:"field_name" form:"-"`
+	Limit     int    `json:"limit" form:"-"`
 }
 
 // GetFieldDistribution handles POST /api/datasources/:id/field-distribution
-func (h *DatasourceHandler) GetFieldDistribution(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasourceHandler) GetFieldDistribution(req router.Request[datasourceFieldDistributionIn], res *router.Response[*entity.FieldDistribution]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	var req struct {
-		TableName string `json:"table_name"`
-		QuerySQL  string `json:"query_sql"`
-		QueryType string `json:"query_type"`
-		FieldName string `json:"field_name"`
-		Limit     int    `json:"limit"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
-		return
+	in := req.In
+
+	if in.FieldName == "" {
+		return router.NewBusinessError(response.CodeBadRequest, "field_name is required")
 	}
 
-	if req.FieldName == "" {
-		response.BadRequest(c, "field_name is required")
-		return
-	}
-
-	result, err := h.svc.GetFieldDistribution(c.Request.Context(), id, req.TableName, req.QuerySQL, req.QueryType, req.FieldName, req.Limit)
+	result, err := h.svc.GetFieldDistribution(req.Ctx.Request.Context(), id, in.TableName, in.QuerySQL, in.QueryType, in.FieldName, in.Limit)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
+}
+
+// datasourceTableDataIn carries the query params of
+// GET /api/datasources/:id/tables/:table/data. Like datasourceListIn the
+// values bind as strings and are parsed post-bind so malformed input keeps
+// the old fall-through-to-default behaviour.
+type datasourceTableDataIn struct {
+	Page      string `form:"page"`
+	PageSize  string `form:"page_size"`
+	SortField string `form:"sort_field"`
+	SortOrder string `form:"sort_order"`
+}
+
+// query mirrors the old DefaultQuery reads: page defaults to 1, page_size
+// to 20, sort_order to ASC; unparseable numbers fall back to 0 exactly like
+// the old strconv-error-ignoring handler (the service clamps them).
+func (in datasourceTableDataIn) query() (page, pageSize int, sortField, sortOrder string) {
+	page, _ = strconv.Atoi(orDefault(in.Page, "1"))
+	pageSize, _ = strconv.Atoi(orDefault(in.PageSize, "20"))
+	sortField = in.SortField
+	sortOrder = orDefault(in.SortOrder, "ASC")
+	return
 }
 
 // GetTableData handles GET /api/datasources/:id/tables/:table/data
-func (h *DatasourceHandler) GetTableData(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *DatasourceHandler) GetTableData(req router.Request[datasourceTableDataIn], res *router.Response[*entity.TableDataResult]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "invalid id")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
-	tableName := c.Param("table")
+	tableName := req.Ctx.Param("table")
 	if tableName == "" {
-		response.BadRequest(c, "table name is required")
-		return
+		return router.NewBusinessError(response.CodeBadRequest, "table name is required")
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	sortField := c.Query("sort_field")
-	sortOrder := c.DefaultQuery("sort_order", "ASC")
+	page, pageSize, sortField, sortOrder := req.In.query()
 
-	result, err := h.svc.GetTableData(c.Request.Context(), id, tableName, page, pageSize, sortField, sortOrder)
+	result, err := h.svc.GetTableData(req.Ctx.Request.Context(), id, tableName, page, pageSize, sortField, sortOrder)
 	if err != nil {
-		response.InternalError(c, err.Error())
-		return
+		return err
 	}
-	response.Success(c, result)
+	res.Out = result
+	return nil
 }

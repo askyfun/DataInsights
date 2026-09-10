@@ -32,19 +32,19 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte) {
 	// API routes
 	api := r.Group("/api")
 
-	// Datasource routes
+	// Datasource routes (generic router)
 	ds := api.Group("/datasources")
-	ds.GET("", datasourceHandler.List)
-	ds.POST("", datasourceHandler.Create)
+	router.RegisterGetRoute(ds, "", datasourceHandler.List)
+	router.RegisterPostRoute(ds, "", datasourceHandler.Create)
 	router.RegisterGetRoute(ds, "/:id", datasourceHandler.Get)
-	ds.PUT("/:id", datasourceHandler.Update)
-	ds.DELETE("/:id", datasourceHandler.Delete)
-	ds.POST("/test", datasourceHandler.TestConnection)
-	ds.GET("/:id/tables", datasourceHandler.GetTables)
-	ds.GET("/:id/tables/:table/columns", datasourceHandler.GetColumns)
-	ds.GET("/:id/tables/:table/data", datasourceHandler.GetTableData)
-	ds.POST("/:id/preview", datasourceHandler.Preview)
-	ds.POST("/:id/field-distribution", datasourceHandler.GetFieldDistribution)
+	router.RegisterPutRoute(ds, "/:id", datasourceHandler.Update)
+	router.RegisterDeleteRoute(ds, "/:id", datasourceHandler.Delete)
+	router.RegisterPostRoute(ds, "/test", datasourceHandler.TestConnection)
+	router.RegisterGetRoute(ds, "/:id/tables", datasourceHandler.GetTables)
+	router.RegisterGetRoute(ds, "/:id/tables/:table/columns", datasourceHandler.GetColumns)
+	router.RegisterGetRoute(ds, "/:id/tables/:table/data", datasourceHandler.GetTableData)
+	router.RegisterPostRoute(ds, "/:id/preview", datasourceHandler.Preview)
+	router.RegisterPostRoute(ds, "/:id/field-distribution", datasourceHandler.GetFieldDistribution)
 
 	// Dataset routes
 	datasets := api.Group("/datasets")

@@ -120,17 +120,17 @@ func newDatasourceTestRouter(h *DatasourceHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	ds := r.Group("/api/datasources")
-	ds.GET("", h.List)
-	ds.POST("", h.Create)
+	router.RegisterGetRoute(ds, "", h.List)
+	router.RegisterPostRoute(ds, "", h.Create)
 	router.RegisterGetRoute(ds, "/:id", h.Get)
-	ds.PUT("/:id", h.Update)
-	ds.DELETE("/:id", h.Delete)
-	ds.POST("/test", h.TestConnection)
-	ds.GET("/:id/tables", h.GetTables)
-	ds.GET("/:id/tables/:table/columns", h.GetColumns)
-	ds.GET("/:id/tables/:table/data", h.GetTableData)
-	ds.POST("/:id/preview", h.Preview)
-	ds.POST("/:id/field-distribution", h.GetFieldDistribution)
+	router.RegisterPutRoute(ds, "/:id", h.Update)
+	router.RegisterDeleteRoute(ds, "/:id", h.Delete)
+	router.RegisterPostRoute(ds, "/test", h.TestConnection)
+	router.RegisterGetRoute(ds, "/:id/tables", h.GetTables)
+	router.RegisterGetRoute(ds, "/:id/tables/:table/columns", h.GetColumns)
+	router.RegisterGetRoute(ds, "/:id/tables/:table/data", h.GetTableData)
+	router.RegisterPostRoute(ds, "/:id/preview", h.Preview)
+	router.RegisterPostRoute(ds, "/:id/field-distribution", h.GetFieldDistribution)
 	return r
 }
 
@@ -162,13 +162,13 @@ func assertBody(t *testing.T, w *httptest.ResponseRecorder, want string) {
 }
 
 const (
-	okEnvelopeEmptyArray    = `{"code":20000,"msg":"success","trace":"","data":[]}`
-	okEnvelopeStatus        = `{"code":20000,"msg":"success","trace":"","data":{"status":"ok"}}`
-	badRequestInvalidID     = `{"code":20100,"msg":"invalid id","trace":"","data":{}}`
-	badRequestEOF           = `{"code":20100,"msg":"EOF","trace":"","data":{}}`
-	internalErrorBoom       = `{"code":50000,"msg":"boom","trace":"","data":{}}`
-	notFoundEnvelope        = `{"code":20300,"msg":"datasource not found: sql: no rows in result set","trace":"","data":{}}`
-	entityGetJSON           = `{"id":7,"name":"pg","type":"postgresql","host":"localhost","port":5432,"database_name":"db","username":"user","created_at":"","updated_at":""}`
+	okEnvelopeEmptyArray = `{"code":20000,"msg":"success","trace":"","data":[]}`
+	okEnvelopeStatus     = `{"code":20000,"msg":"success","trace":"","data":{"status":"ok"}}`
+	badRequestInvalidID  = `{"code":20100,"msg":"invalid id","trace":"","data":{}}`
+	badRequestEOF        = `{"code":20100,"msg":"EOF","trace":"","data":{}}`
+	internalErrorBoom    = `{"code":50000,"msg":"boom","trace":"","data":{}}`
+	notFoundEnvelope     = `{"code":20300,"msg":"datasource not found: sql: no rows in result set","trace":"","data":{}}`
+	entityGetJSON        = `{"id":7,"name":"pg","type":"postgresql","host":"localhost","port":5432,"database_name":"db","username":"user","created_at":"","updated_at":""}`
 )
 
 func errBoom() error { return errors.New("boom") }
