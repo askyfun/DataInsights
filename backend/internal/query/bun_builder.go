@@ -432,21 +432,3 @@ func (b *BunSQLBuilder) BuildCount(ast *QueryAST) (string, []interface{}) {
 func (b *BunSQLBuilder) Dialect() DialectType {
 	return b.dialect
 }
-
-// BuildBunQuery 使用 bun QueryBuilder 构建完整查询
-// 返回主查询 SQL、计数查询 SQL 和参数
-func BuildBunQuery(dialect DialectType, ast *QueryAST) (string, string, []interface{}) {
-	qb := NewBunQueryBuilder()
-	qb.SetDialect(dialect)
-	qb.columnMappings = ast.ColumnMappings
-
-	selectSQL, selectArgs := qb.BuildSelectQuery(ast)
-	countSQL, countArgs := qb.BuildCountQuery(ast)
-
-	// 合并参数
-	var allArgs []interface{}
-	allArgs = append(allArgs, selectArgs...)
-	allArgs = append(allArgs, countArgs...)
-
-	return selectSQL, countSQL, allArgs
-}

@@ -81,14 +81,9 @@ const ShareView: React.FC = () => {
       // No password required, fetch chart directly
       await fetchChart(share.chart_id);
     } catch (error: any) {
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        // Password required
-        setNeedsPassword(true);
-        setShareInfo(error.response?.data?.share || { id: 0, token: token, chart_id: 0 });
-      } else {
-        // Other error
-        console.error('Failed to fetch share:', error);
-      }
+      // 业务错误经拦截器 reject 为裸 Error（后端全部 200 信封），不存在
+      // 401/403 状态分支；密码门由上方成功信封的 has_password 决定。
+      console.error('Failed to fetch share:', error);
     } finally {
       setLoading(false);
     }
@@ -117,11 +112,9 @@ const ShareView: React.FC = () => {
       setNeedsPassword(false);
       await fetchChart(response.data.data.chart_id);
     } catch (error: any) {
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        setPasswordError('Invalid password');
-      } else {
-        setPasswordError(error.message || 'Verification failed');
-      }
+      // 密码错误同样以 200 信封返回并被拦截器 reject 为裸 Error，
+      // error.message 即后端 msg；不存在 401/403 分支。
+      setPasswordError(error.message || 'Verification failed');
     } finally {
       setAuthLoading(false);
     }

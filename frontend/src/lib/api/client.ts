@@ -117,7 +117,7 @@ function createApiClient(baseURL: string): AxiosInstance {
   return client;
 }
 
-export const apiClient = createApiClient(`http://${window.location.hostname || 'localhost'}:8080}`);
+export const apiClient = createApiClient(`http://${window.location.hostname || 'localhost'}:8080`);
 
 export function get<T>(url: string, config?: InternalAxiosRequestConfig): Promise<ApiResponse<T>> {
   return apiClient.get<ApiResponse<T>>(url, config).then((res) => res.data);

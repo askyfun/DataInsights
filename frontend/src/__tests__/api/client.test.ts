@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_CODE, del, get, post, put } from '@/lib/api/client';
+import { API_CODE, apiClient, del, get, post, put } from '@/lib/api/client';
 
 describe('API Client', () => {
   it('should export API_CODE constants', () => {
@@ -17,5 +17,13 @@ describe('API Client', () => {
     expect(typeof post).toBe('function');
     expect(typeof put).toBe('function');
     expect(typeof del).toBe('function');
+  });
+
+  it('should build baseURL without stray characters', () => {
+    // Regression guard: the template literal once ended with a stray `}`.
+    expect(apiClient.defaults.baseURL).toBe(
+      `http://${window.location.hostname || 'localhost'}:8080`
+    );
+    expect(apiClient.defaults.baseURL).not.toContain('}');
   });
 });
