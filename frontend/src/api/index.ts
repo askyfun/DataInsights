@@ -56,13 +56,12 @@ export type DataType =
 // 列角色
 export type ColumnRole = 'dimension' | 'metric';
 
-export interface DatasetColumn {
-  name: string;
-  expr: string;
+// type_config is dropped from the TS surface (audit (b): zero reads/writes
+// frontend-side; the runtime spread still round-trips the server value).
+export type DatasetColumn = Omit<G['DatasetColumn'], 'type' | 'role' | 'type_config'> & {
   type: StandardDataType;
-  comment: string;
   role: ColumnRole;
-}
+};
 
 export interface Dataset {
   id: number;
