@@ -63,3 +63,10 @@
 - **IAB 里 AntD 交互两条实测规避**：① `getByRole('button',{name})`/combobox 的 Playwright 动作常因 antd 把 name 带上图标 aria-label、或 actionability 判定超时而失败——改用 `evaluate` 直接 `btn.click()`（触发 React handler）或坐标 `cua.click`；② `tab.screenshot()` 会偶发 `screenshot activity capture failed for guest`，验证 canvas 是否真渲染改用 `getImageData` 采样非白像素计数（本次证明柱状图确实绘制），不依赖截图。
 - **验证 mock 测试是否"偷偷"依赖本机真实服务**：把后端端口 kill 掉再跑全量测试，若通过数不变才是真·隔离测试。Task 7b 的 Promise 缓存修复正是这样被证明有效（:8080 关闭后仍 68/4）。
 - **发现即记录的既有产品 bug 不塞进重构批次**：DatasetEdit 保存调用不存在的 `PUT /api/datasets/:id`（后端无路由，实际会 404）属功能缺陷，与"泛型 router 重构"无关，正确做法是记入 Batch 3 backlog 而不是顺手补后端端点，避免重构批掺功能开发扩大爆炸半径。
+
+## Batch 3 收口经验（2026-09-12）
+
+- **把"响亮失败"修成"成功写入"时，必须重审该 API 的全部调用方**：补上 `PUT /api/datasets/:id` 前，列表页内联重命名一直在 404（响亮但无害）；端点一通，其 payload 不含 `shard_enabled`，被新 handler 以零值覆盖——静默关掉用户的分片配置。教训：ghost-route 类修复改变的是所有既有调用方的命运，落地当天就要枚举 caller 核对字段覆盖（本项由全分支评审抓出，逐任务验证不可见），修复用"调用方透传未管理的字段 + 真实渲染路径的交互测试（断言用非默认值，防歪打正着）"。
+- **守卫/parity 类测试要做反证**：json-tag parity 守卫补 subset 行时，用两个 scratch 漂移（改 tag 名→FAIL extra、改字段类型→FAIL type mismatch）证明它能抓回归，再 revert——只跑绿的守卫等于没有守卫。
+- **E2E 状态目录别放 /tmp**：macOS 清理 3 天未访问的 /tmp，PG 集群连 PG_VERSION 一起没（不可恢复）。测试数据目录用 `~` 下持久路径；重建配方已验证（initdb→seed→API 重建 fixture，约 1 分钟）。
+- **IAB webview 帧循环可整体节流至 rAF=0**（ZCode 窗口不在前台时）：ECharts 容器有实例属性但 canvas 永不 paint、screenshot capture 失败——先 evaluate 数 rAF 帧 + 多页面对照，确认是环境再下结论，别误判成渲染回归；像素级验证需用户前台窗口。
