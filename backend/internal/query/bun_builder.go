@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	bundialect "github.com/uptrace/bun/dialect"
 )
 
 // BunQueryBuilder 使用 bun ORM 的安全查询构建器
@@ -149,7 +151,7 @@ func (qb *BunQueryBuilder) BuildSelectQuery(ast *QueryAST) (string, []interface{
 	// ORDER BY 子句
 	if ast.Sort != nil {
 		sb.WriteString(" ORDER BY ")
-		sb.WriteString(safeIdentifier(ast.Sort.FieldExpr))
+		sb.WriteString(qb.renderSortRef(ast))
 		sb.WriteString(" ")
 		sb.WriteString(normalizeSortOrder(ast.Sort.Order))
 	}
@@ -228,10 +230,10 @@ func (qb *BunQueryBuilder) buildSelectParts(ast *QueryAST) []string {
 	for _, metric := range ast.Metrics {
 		var expr string
 		if metric.IsAgg {
-			expr = fmt.Sprintf("%s AS %s", safeExpr(metric.FieldExpr), safeIdentifier(metric.Alias))
+			expr = fmt.Sprintf("%s AS %s", safeExpr(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 		} else {
 			aggFunc := metric.Agg.GetAggFunc()
-			expr = fmt.Sprintf("%s(%s) AS %s", aggFunc, safeIdentifier(metric.FieldExpr), safeIdentifier(metric.Alias))
+			expr = fmt.Sprintf("%s(%s) AS %s", aggFunc, safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 		}
 		parts = append(parts, expr)
 	}
@@ -266,10 +268,10 @@ func (qb *BunQueryBuilder) buildGroupByParts(ast *QueryAST) []string {
 func (qb *BunQueryBuilder) renderDimensionSelect(dim DimensionExprAST) string {
 	groupExpr := qb.renderDimensionGroupBy(dim)
 	if dim.Alias != "" && dim.Alias != dim.Field {
-		return fmt.Sprintf("%s AS %s", groupExpr, safeIdentifier(dim.Alias))
+		return fmt.Sprintf("%s AS %s", groupExpr, qb.quoteResultAlias(dim.Alias))
 	}
 	if dim.Granularity != "" {
-		return fmt.Sprintf("%s AS %s", groupExpr, safeIdentifier(dim.Alias))
+		return fmt.Sprintf("%s AS %s", groupExpr, qb.quoteResultAlias(dim.Alias))
 	}
 	return groupExpr
 }
@@ -393,6 +395,62 @@ func safeExpr(expr string) string {
 		return expr
 	}
 	return safeIdentifier(expr)
+}
+
+// quoteResultAlias 把用户提供的结果别名渲染为方言正确的带引号标识符。
+// 不加引号时数据库会把标识符折叠为小写（Postgres 把 AS Revenue 折叠成 revenue），
+// 结果行键与处理器按别名逐字的查找对不上，图表数据全为 NULL；加引号后行键与
+// 别名逐字一致。引号字符与 bun 各方言 Dialect.IdentQuote 一致
+// （pgdialect 为双引号，MySQL/StarRocks/ClickHouse 为反引号，见 ParseDialect：
+// starrocks 归入 DialectMySQL），复用 bun 导出的 dialect.AppendIdent 做转义，
+// 不手写引号拼接。safeIdentifier 已保证入参只能是裸标识符或成对引号包裹形态，
+// 后者保持既有透传行为，避免二次包裹。
+func (qb *BunQueryBuilder) quoteResultAlias(alias string) string {
+	name := safeIdentifier(alias)
+	if strings.HasPrefix(name, `"`) || strings.HasPrefix(name, "`") {
+		return name
+	}
+	quote := byte('`')
+	if qb.dialect == DialectPostgreSQL {
+		quote = '"'
+	}
+	return string(bundialect.AppendIdent(nil, name, quote))
+}
+
+// renderSortRef 渲染 ORDER BY 引用：排序键指向 SELECT 输出别名时，必须使用与
+// SELECT 相同的引号（折叠大小写后就匹配不到带引号保留的输出列）；普通列排序
+// 保持 safeIdentifier 原样输出。
+func (qb *BunQueryBuilder) renderSortRef(ast *QueryAST) string {
+	name := ast.Sort.FieldExpr
+	if name == "" {
+		name = ast.Sort.Field
+	}
+	if qb.referencesResultAlias(ast, name) {
+		return qb.quoteResultAlias(name)
+	}
+	return safeIdentifier(name)
+}
+
+// referencesResultAlias 判断排序键是否等于某个会被引号保留的输出别名：
+// 指标别名，或实际渲染出 AS 别名的维度（改名或带时间粒度）。
+func (qb *BunQueryBuilder) referencesResultAlias(ast *QueryAST, name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, m := range ast.Metrics {
+		if m.Alias == name {
+			return true
+		}
+	}
+	for _, dim := range ast.DimensionExprs {
+		if dim.Alias != name {
+			continue
+		}
+		if dim.Alias != dim.Field || dim.Granularity != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // unmarshalJSON 解析 JSON

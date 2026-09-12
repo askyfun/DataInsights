@@ -28,7 +28,7 @@ func TestBunQueryBuilder_BasicQuery(t *testing.T) {
 		t.Error("Expected non-empty SQL")
 	}
 
-	expected := "SELECT project_id, SUM(amount) AS total_amount FROM test_table GROUP BY project_id"
+	expected := "SELECT project_id, SUM(amount) AS `total_amount` FROM test_table GROUP BY project_id"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -52,7 +52,7 @@ func TestBunQueryBuilder_WithPagination(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 	t.Logf("Args: %v", args)
 
-	expected := "SELECT status, COUNT(id) AS count FROM orders GROUP BY status LIMIT 20 OFFSET 20"
+	expected := "SELECT status, COUNT(id) AS `count` FROM orders GROUP BY status LIMIT 20 OFFSET 20"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -81,7 +81,7 @@ func TestBunQueryBuilder_WithFilters(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 	t.Logf("Args: %v", args)
 
-	expected := "SELECT city, AVG(age) AS avg_age FROM users WHERE status = ? AND age > ? GROUP BY city"
+	expected := "SELECT city, AVG(age) AS `avg_age` FROM users WHERE status = ? AND age > ? GROUP BY city"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -115,7 +115,7 @@ func TestBunQueryBuilder_WithFilterLogicOr(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 	t.Logf("Args: %v", args)
 
-	expected := "SELECT city, AVG(age) AS avg_age FROM users WHERE status = ? OR age > ? GROUP BY city"
+	expected := "SELECT city, AVG(age) AS `avg_age` FROM users WHERE status = ? OR age > ? GROUP BY city"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -147,7 +147,7 @@ func TestBunQueryBuilder_WithMixedFilterLogic(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 	t.Logf("Args: %v", args)
 
-	expected := "SELECT status, SUM(amount) AS total_amount FROM orders WHERE country = ? AND category = ? OR amount > ? GROUP BY status"
+	expected := "SELECT status, SUM(amount) AS `total_amount` FROM orders WHERE country = ? AND category = ? OR amount > ? GROUP BY status"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -174,7 +174,7 @@ func TestBunQueryBuilder_WithSort(t *testing.T) {
 
 	t.Logf("Generated SQL: %s", sql)
 
-	expected := "SELECT product, SUM(revenue) AS total_revenue FROM sales GROUP BY product ORDER BY total_revenue DESC"
+	expected := "SELECT product, SUM(revenue) AS `total_revenue` FROM sales GROUP BY product ORDER BY `total_revenue` DESC"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -198,7 +198,7 @@ func TestBunQueryBuilder_SortWithPagination(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 
 	// 分页查询必须保留 ORDER BY，否则分页结果不确定
-	expected := "SELECT status, SUM(amount) AS total_amount FROM orders GROUP BY status ORDER BY total_amount DESC LIMIT 20 OFFSET 20"
+	expected := "SELECT status, SUM(amount) AS `total_amount` FROM orders GROUP BY status ORDER BY `total_amount` DESC LIMIT 20 OFFSET 20"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -222,7 +222,7 @@ func TestBunQueryBuilder_PaginationWithoutSort(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 
 	// 无 sort 时不加 ORDER BY，结果顺序由数据库决定
-	expected := "SELECT status, COUNT(id) AS count FROM orders GROUP BY status LIMIT 10 OFFSET 0"
+	expected := "SELECT status, COUNT(id) AS `count` FROM orders GROUP BY status LIMIT 10 OFFSET 0"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -270,7 +270,7 @@ func TestBunQueryBuilder_WithAggregatedColumnMapping(t *testing.T) {
 
 	sql, _ := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
 
-	expected := "SELECT project_id, count(*) AS cnt FROM test_table GROUP BY project_id LIMIT 10 OFFSET 0"
+	expected := "SELECT project_id, count(*) AS `cnt` FROM test_table GROUP BY project_id LIMIT 10 OFFSET 0"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -293,7 +293,7 @@ func TestBunQueryBuilder_WithSQLSource(t *testing.T) {
 
 	t.Logf("Generated SQL: %s", sql)
 
-	expected := "SELECT status, SUM(amount) AS total FROM (SELECT * FROM orders WHERE created_at > '2024-01-01') AS _subq GROUP BY status"
+	expected := "SELECT status, SUM(amount) AS `total` FROM (SELECT * FROM orders WHERE created_at > '2024-01-01') AS _subq GROUP BY status"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -320,7 +320,7 @@ func TestBunSQLBuilder_BuildSelect(t *testing.T) {
 
 	t.Logf("Generated SQL: %s", sql)
 
-	expected := "SELECT project_id, count(*) AS cnt FROM test_table GROUP BY project_id LIMIT 10 OFFSET 0"
+	expected := "SELECT project_id, count(*) AS \"cnt\" FROM test_table GROUP BY project_id LIMIT 10 OFFSET 0"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -388,9 +388,125 @@ func TestBunSQLBuilder_BuildSelect_WithQuotedDatasetColumnExpr(t *testing.T) {
 
 	sql, _ := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
 
-	expected := "SELECT `project_name`, count(*) AS cnt FROM test_table GROUP BY `project_name`"
+	expected := "SELECT `project_name`, count(*) AS `cnt` FROM test_table GROUP BY `project_name`"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
+	}
+}
+
+// TestBunQueryBuilder_MixedCaseMetricAliasIsDialectQuoted 验证指标别名在 SQL 结果名
+// 位置按方言正确加引号：不加引号时 Postgres/MySQL 会把 "Revenue" 折叠成小写
+// "revenue"，行键与处理器按别名 "Revenue" 的查找对不上，图表数据全为 NULL。
+func TestBunQueryBuilder_MixedCaseMetricAliasIsDialectQuoted(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  DialectType
+		expected string
+	}{
+		{
+			name:     "postgresql double quotes",
+			dialect:  DialectPostgreSQL,
+			expected: `SELECT region, SUM(amount) AS "Revenue" FROM sales GROUP BY region`,
+		},
+		{
+			name:     "mysql backticks",
+			dialect:  DialectMySQL,
+			expected: "SELECT region, SUM(amount) AS `Revenue` FROM sales GROUP BY region",
+		},
+		{
+			name:     "clickhouse backticks",
+			dialect:  DialectClickHouse,
+			expected: "SELECT region, SUM(amount) AS `Revenue` FROM sales GROUP BY region",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			qb := NewBunQueryBuilder()
+			qb.SetDialect(tt.dialect)
+
+			ast := qb.Build(
+				"sales",
+				SourceTypeTable,
+				[]string{"region"},
+				[]MetricConfig{{Field: "amount", Agg: AggSum, Alias: "Revenue"}},
+				[]FilterConfig{},
+				nil,
+				nil,
+			)
+
+			sql, _ := qb.BuildSelectQuery(ast)
+			if sql != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, sql)
+			}
+		})
+	}
+}
+
+// TestBunQueryBuilder_MixedCaseAliasQuotedForPreAggregatedMetric 验证列映射本身已是
+// 聚合表达式（IsAgg 分支，直接 "expr AS alias"）时，别名位置同样按方言加引号。
+func TestBunQueryBuilder_MixedCaseAliasQuotedForPreAggregatedMetric(t *testing.T) {
+	qb := NewBunQueryBuilder()
+	qb.SetDialect(DialectPostgreSQL)
+	if err := qb.WithColumnMappings(`[{"name":"revenue","expr":"SUM(amount)","role":"metric","type":"numeric"}]`); err != nil {
+		t.Fatalf("unexpected column mapping error: %v", err)
+	}
+
+	ast := qb.Build(
+		"sales",
+		SourceTypeTable,
+		[]string{"region"},
+		[]MetricConfig{{Field: "revenue", Agg: AggSum, Alias: "Revenue"}},
+		[]FilterConfig{},
+		nil,
+		nil,
+	)
+
+	sql, _ := qb.BuildSelectQuery(ast)
+	expected := `SELECT region, SUM(amount) AS "Revenue" FROM sales GROUP BY region`
+	if sql != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
+	}
+}
+
+// TestBunQueryBuilder_OrderByAliasUsesSameQuoting 验证 ORDER BY 引用指标别名时使用
+// 与 SELECT 一致的引号（折叠大小写会让 "Revenue" 在输出列里找不到而报错）；
+// 同时验证按普通列排序时保持原样、不被加引号。
+func TestBunQueryBuilder_OrderByAliasUsesSameQuoting(t *testing.T) {
+	qb := NewBunQueryBuilder()
+	qb.SetDialect(DialectPostgreSQL)
+
+	ast := qb.Build(
+		"sales",
+		SourceTypeTable,
+		[]string{"region"},
+		[]MetricConfig{{Field: "amount", Agg: AggSum, Alias: "Revenue"}},
+		[]FilterConfig{},
+		&SortConfig{Field: "Revenue", Order: "desc"},
+		nil,
+	)
+
+	sql, _ := qb.BuildSelectQuery(ast)
+	expected := `SELECT region, SUM(amount) AS "Revenue" FROM sales GROUP BY region ORDER BY "Revenue" DESC`
+	if sql != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
+	}
+
+	// 普通维度列排序不加引号（行键与 DB 列名语义保持现状）
+	ast2 := qb.Build(
+		"sales",
+		SourceTypeTable,
+		[]string{"region"},
+		[]MetricConfig{{Field: "amount", Agg: AggSum, Alias: "Revenue"}},
+		[]FilterConfig{},
+		&SortConfig{Field: "region", Order: "asc"},
+		nil,
+	)
+
+	sql2, _ := qb.BuildSelectQuery(ast2)
+	expected2 := `SELECT region, SUM(amount) AS "Revenue" FROM sales GROUP BY region ORDER BY region ASC`
+	if sql2 != expected2 {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected2, sql2)
 	}
 }
 
@@ -416,7 +532,7 @@ func TestBunQueryBuilder_ColumnMappings(t *testing.T) {
 
 	t.Logf("Generated SQL: %s", sql)
 
-	expected := "SELECT product, SUM(amount) AS revenue FROM sales GROUP BY product"
+	expected := "SELECT product, SUM(amount) AS `revenue` FROM sales GROUP BY product"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -440,7 +556,7 @@ func TestBuildQueryStringWithBun(t *testing.T) {
 	t.Logf("Select SQL: %s", selectSQL)
 	t.Logf("Count SQL: %s", countSQL)
 
-	expectedSelect := "SELECT category, AVG(price) AS avg_price FROM test_table GROUP BY category"
+	expectedSelect := "SELECT category, AVG(price) AS \"avg_price\" FROM test_table GROUP BY category"
 	if selectSQL != expectedSelect {
 		t.Errorf("Expected select:\n%s\nGot:\n%s", expectedSelect, selectSQL)
 	}
@@ -467,7 +583,7 @@ func TestBuildQueryStringWithBun_PostgreSQLGranularityAndLimit(t *testing.T) {
 
 	selectSQL, countSQL, _ := BuildQueryStringWithBun(DialectPostgreSQL, ast)
 
-	expectedSelect := "SELECT DATE_TRUNC('day', created_at) AS created_at_day, region, SUM(amount) AS total_amount FROM orders GROUP BY DATE_TRUNC('day', created_at), region LIMIT 10"
+	expectedSelect := "SELECT DATE_TRUNC('day', created_at) AS \"created_at_day\", region, SUM(amount) AS \"total_amount\" FROM orders GROUP BY DATE_TRUNC('day', created_at), region LIMIT 10"
 	if selectSQL != expectedSelect {
 		t.Errorf("Expected select:\n%s\nGot:\n%s", expectedSelect, selectSQL)
 	}
@@ -491,7 +607,7 @@ func TestBuildQueryStringWithBun_MySQLDayGranularity(t *testing.T) {
 
 	selectSQL, _, _ := BuildQueryStringWithBun(DialectMySQL, ast)
 
-	expectedSelect := "SELECT DATE(created_at) AS created_at_day, SUM(amount) AS total_amount FROM orders GROUP BY DATE(created_at)"
+	expectedSelect := "SELECT DATE(created_at) AS `created_at_day`, SUM(amount) AS `total_amount` FROM orders GROUP BY DATE(created_at)"
 	if selectSQL != expectedSelect {
 		t.Errorf("Expected select:\n%s\nGot:\n%s", expectedSelect, selectSQL)
 	}
@@ -510,7 +626,7 @@ func TestBuildQueryStringWithBun_ClickHouseDayGranularity(t *testing.T) {
 
 	selectSQL, _, _ := BuildQueryStringWithBun(DialectClickHouse, ast)
 
-	expectedSelect := "SELECT toDate(created_at) AS created_at_day, SUM(amount) AS total_amount FROM orders GROUP BY toDate(created_at)"
+	expectedSelect := "SELECT toDate(created_at) AS `created_at_day`, SUM(amount) AS `total_amount` FROM orders GROUP BY toDate(created_at)"
 	if selectSQL != expectedSelect {
 		t.Errorf("Expected select:\n%s\nGot:\n%s", expectedSelect, selectSQL)
 	}
@@ -536,7 +652,7 @@ func TestBunQueryBuilder_WithFilterIn(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 	t.Logf("Args: %v", args)
 
-	expected := "SELECT category, COUNT(id) AS count FROM products WHERE status IN (?, ?, ?) GROUP BY category"
+	expected := "SELECT category, COUNT(id) AS `count` FROM products WHERE status IN (?, ?, ?) GROUP BY category"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -566,7 +682,7 @@ func TestBunQueryBuilder_WithFilterBetween(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 	t.Logf("Args: %v", args)
 
-	expected := "SELECT status, SUM(amount) AS total FROM orders WHERE created_at BETWEEN ? AND ? GROUP BY status"
+	expected := "SELECT status, SUM(amount) AS `total` FROM orders WHERE created_at BETWEEN ? AND ? GROUP BY status"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -596,7 +712,7 @@ func TestBunQueryBuilder_WithFilterLike(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 	t.Logf("Args: %v", args)
 
-	expected := "SELECT city, COUNT(id) AS count FROM users WHERE name LIKE ? GROUP BY city"
+	expected := "SELECT city, COUNT(id) AS `count` FROM users WHERE name LIKE ? GROUP BY city"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}
@@ -626,7 +742,7 @@ func TestBunQueryBuilder_WithFilterNull(t *testing.T) {
 	t.Logf("Generated SQL: %s", sql)
 	t.Logf("Args: %v", args)
 
-	expected := "SELECT status, COUNT(id) AS count FROM orders WHERE deleted_at IS NULL GROUP BY status"
+	expected := "SELECT status, COUNT(id) AS `count` FROM orders WHERE deleted_at IS NULL GROUP BY status"
 	if sql != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
 	}

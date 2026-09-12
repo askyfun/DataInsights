@@ -161,7 +161,7 @@ func TestExecutor_UsesPlannedASTWhenProvided(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedSQL := "SELECT DATE_TRUNC('day', created_at) AS created_at_day, SUM(amount) AS total_amount FROM orders GROUP BY DATE_TRUNC('day', created_at)"
+	expectedSQL := "SELECT DATE_TRUNC('day', created_at) AS \"created_at_day\", SUM(amount) AS \"total_amount\" FROM orders GROUP BY DATE_TRUNC('day', created_at)"
 	if result.Select != expectedSQL {
 		t.Fatalf("expected AST-driven SQL\nwant: %s\n got: %s", expectedSQL, result.Select)
 	}
@@ -845,5 +845,92 @@ func TestExecutor_TableBranchPassesArgsToDataAndCount(t *testing.T) {
 		if len(args) != 1 || args[0] != "completed" {
 			t.Fatalf("Execute call %d must carry filter arg, got args=%v", i, args)
 		}
+	}
+}
+
+// TestExecutor_MixedCaseMetricAliasRoundtrip 端到端钉死修复契约：生成的 SQL 必须把
+// 指标别名按方言加引号（否则 DB 把 "Revenue" 折叠成 "revenue"），MockConnection 返回
+// 与引号别名逐字一致的行键 "Revenue"，轴图表 series 必须取到真实数值而不是全 NULL；
+// 表格分支的 orderedRows 同样必须能按 "Revenue" 命中。
+func TestExecutor_MixedCaseMetricAliasRoundtrip(t *testing.T) {
+	dataset := &model.Dataset{
+		ID:        1,
+		Name:      "Test Dataset",
+		QueryType: "table",
+		TableName: sql.NullString{String: "orders", Valid: true},
+		QuerySQL:  sql.NullString{Valid: false},
+	}
+
+	ds := &model.Datasource{
+		ID:   1,
+		Name: "Test DS",
+		Type: "postgresql",
+	}
+
+	mockRows := []map[string]any{
+		{"region": "华东", "Revenue": 100.0},
+		{"region": "西南", "Revenue": 200.0},
+	}
+
+	conn := &MockConnection{rows: mockRows}
+	executor := NewExecutor(conn, dataset, ds)
+
+	req := &ChartQueryRequest{
+		DatasetID: 1,
+		ChartType: ChartTypeBar,
+		Dims:      []string{"region"},
+		Metrics:   []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "Revenue"}},
+	}
+
+	result, err := executor.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 1) 结果别名必须带方言引号，DB 才会保留大小写
+	if !strings.Contains(result.Select, `AS "Revenue"`) {
+		t.Fatalf("metric alias must be quoted in generated SQL, got: %s", result.Select)
+	}
+
+	// 2) 处理器按逐字别名查找必须命中
+	axisResp, ok := result.Data.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", result.Data)
+	}
+	if len(axisResp.Series) != 1 {
+		t.Fatalf("expected 1 series, got %d", len(axisResp.Series))
+	}
+	if axisResp.Series[0].Name != "Revenue" {
+		t.Fatalf("expected series name Revenue, got %q", axisResp.Series[0].Name)
+	}
+	if axisResp.Series[0].Data[0] != 100.0 || axisResp.Series[0].Data[1] != 200.0 {
+		t.Fatalf("series data must carry real values, got %v", axisResp.Series[0].Data)
+	}
+
+	// 3) 表格分支：columns 带混合大小写别名时 orderedRows 必须能命中行键
+	tableConn := &MockConnection{rows: mockRows}
+	tableExecutor := NewExecutor(tableConn, dataset, ds)
+
+	tableReq := &ChartQueryRequest{
+		DatasetID:  1,
+		ChartType:  ChartTypeTable,
+		Dims:       []string{"region"},
+		Metrics:    []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "Revenue"}},
+		Pagination: &Pagination{Page: 1, PageSize: 10},
+	}
+
+	tableResult, err := tableExecutor.Execute(context.Background(), tableReq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tableResp, ok := tableResult.Data.(*TableResponse)
+	if !ok {
+		t.Fatalf("expected *TableResponse, got %T", tableResult.Data)
+	}
+	if len(tableResp.Columns) != 2 || tableResp.Columns[1] != "Revenue" {
+		t.Fatalf("expected columns [region Revenue], got %v", tableResp.Columns)
+	}
+	if len(tableResp.Data) != 2 || tableResp.Data[0]["Revenue"] != 100.0 {
+		t.Fatalf("orderedRows must key on verbatim alias Revenue, got %v", tableResp.Data)
 	}
 }

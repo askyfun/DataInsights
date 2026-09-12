@@ -369,7 +369,7 @@ func TestQueryPlanner_PlanAST_MarksAggregatedColumnMappings(t *testing.T) {
 
 	sql, _ := NewBunSQLBuilder(DialectMySQL).BuildSelect(ast)
 
-	expected := "SELECT project_id, count(*) AS cnt FROM test_table GROUP BY project_id"
+	expected := "SELECT project_id, count(*) AS `cnt` FROM test_table GROUP BY project_id"
 	if sql != expected {
 		t.Fatalf("expected SQL %q, got %q", expected, sql)
 	}

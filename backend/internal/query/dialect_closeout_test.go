@@ -78,7 +78,7 @@ func TestBuildSelectQueryNormalizesSortOrder(t *testing.T) {
 		t.Fatalf("sort order was interpolated without validation: %s", sql)
 	}
 	// 非法方向回退默认 ASC
-	if !strings.HasSuffix(sql, "ORDER BY total_amount ASC") {
+	if !strings.HasSuffix(sql, "ORDER BY `total_amount` ASC") {
 		t.Fatalf("unexpected sql: %s", sql)
 	}
 }
