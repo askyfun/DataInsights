@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -292,4 +293,124 @@ func TestConnectResolvesPassword(t *testing.T) {
 			t.Fatalf("legacy password was not upgraded: %v", err)
 		}
 	})
+}
+
+// --- updated_at stamping tests (Batch 4 B4-B) ---
+
+// datasetCaptureMatcher 记录实际执行的 SQL，同时保留默认 regexp 匹配语义，
+// 便于在 UPDATE/INSERT 语句中断言 updated_at 的写入形态（对齐 datasource 服务
+// impl_test.go 的 captureMatcherFunc）。
+func datasetCaptureMatcher(record *[]string) sqlmock.QueryMatcherFunc {
+	return sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		*record = append(*record, actualSQL)
+		return sqlmock.QueryMatcherRegexp.Match(expectedSQL, actualSQL)
+	})
+}
+
+// findStmt 返回记录到的第一条以 prefix 开头的语句。
+func findStmt(executed []string, prefix string) string {
+	for _, q := range executed {
+		if strings.HasPrefix(q, prefix) {
+			return q
+		}
+	}
+	return ""
+}
+
+// timestampLitRE 匹配 bun 内联渲染的时间戳字面量主体（不受本地时区偏移影响）。
+var timestampLitRE = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`)
+
+// TestDatasetUpdateStampsUpdatedAt 先红：PUT /api/datasets/:id 的 handler 以取回
+// 行为合并基，把 existing.updated_at 原样带入 svc.Update；service.Update 走整行
+// WherePK 更新，此前不刷新 updated_at，于是把旧的 updated_at 写回（更新后时间戳
+// 不前进）。修复：Update 显式把 model 的 UpdatedAt 打成当前时间。
+//
+// 断言策略（无需解析墙钟）：喂入一个"陈旧"的 updated_at 与一个可区分的
+// created_at，执行后断言 UPDATE 语句里 (1) 不再出现陈旧值、(2) 不是 NULL、
+// (3) 是带引号的时间戳字面量、(4) created_at 透传保持不变。
+func TestDatasetUpdateStampsUpdatedAt(t *testing.T) {
+	var executed []string
+	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(datasetCaptureMatcher(&executed)))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer sqlDB.Close()
+	db := bun.NewDB(sqlDB, pgdialect.New())
+	s := &datasetService{db: db}
+
+	ds := &entity.Dataset{
+		ID:           1,
+		Name:         "n",
+		DatasourceID: 1,
+		QueryType:    "table",
+		CreatedAt:    "2024-01-02T03:04:05Z",
+		UpdatedAt:    "2020-06-07T08:09:10Z", // 合并基带入的陈旧值，必须被覆盖
+	}
+
+	reselect := sqlmock.NewRows([]string{"id", "name", "datasource_id", "query_type", "created_at", "updated_at"}).
+		AddRow(1, "n", 1, "table", nil, nil)
+	mock.ExpectExec(`UPDATE "bi_dataset"`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT .* FROM "bi_dataset"`).WillReturnRows(reselect)
+
+	if _, err := s.Update(context.Background(), ds); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+
+	upd := findStmt(executed, `UPDATE "bi_dataset"`)
+	if upd == "" {
+		t.Fatalf("no UPDATE statement captured, got: %q", executed)
+	}
+	if strings.Contains(upd, "2020-06-07 08:09:10") {
+		t.Fatalf("updated_at must not carry the stale merge value, got: %s", upd)
+	}
+	if strings.Contains(upd, `"updated_at" = NULL`) {
+		t.Fatalf("updated_at must not be written as NULL, got: %s", upd)
+	}
+	if !strings.Contains(upd, `"updated_at" = '`) {
+		t.Fatalf("updated_at must be stamped with a timestamp literal, got: %s", upd)
+	}
+	// created_at 透传语义必须保持不变（设计点：merge 负责 created_at）。
+	if !strings.Contains(upd, "2024-01-02 03:04:05") {
+		t.Fatalf("created_at passthrough must be preserved, got: %s", upd)
+	}
+}
+
+// TestDatasetCreateStampsUpdatedAt 记录 create 路径的时间戳对齐决策：
+// 修复前 dataset.Create 只打 created_at，updated_at 被 bun 写成显式 NULL
+// （bun 对零值 sql.NullTime 发 NULL，绕过列 DEFAULT CURRENT_TIMESTAMP），
+// 导致新建行 updated_at 为空。对齐后两者都在插入时打戳。
+func TestDatasetCreateStampsUpdatedAt(t *testing.T) {
+	var executed []string
+	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(datasetCaptureMatcher(&executed)))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer sqlDB.Close()
+	db := bun.NewDB(sqlDB, pgdialect.New())
+	s := &datasetService{db: db}
+
+	insertRows := sqlmock.NewRows([]string{"id", "name", "datasource_id", "query_type", "created_at", "updated_at"}).
+		AddRow(1, "n", 1, "table", nil, nil)
+	mock.ExpectQuery(`INSERT INTO "bi_dataset"`).WillReturnRows(insertRows)
+
+	if _, err := s.Create(context.Background(), &entity.Dataset{Name: "n", DatasourceID: 1, QueryType: "table"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+
+	ins := findStmt(executed, `INSERT INTO "bi_dataset"`)
+	if ins == "" {
+		t.Fatalf("no INSERT statement captured, got: %q", executed)
+	}
+	// INSERT 的值是位置化写入 VALUES 子句（不同于 UPDATE 的 "col" = value 相邻形式），
+	// 所以按"内联时间戳字面量"计数：仅 created_at 打戳 → 1 处；created_at+updated_at
+	// 都打戳 → 2 处。bi_dataset 插入只有这两个时间列，其余列不会误配该正则。
+	if got := timestampLitRE.FindAllString(ins, -1); len(got) < 2 {
+		t.Fatalf("created row must stamp BOTH created_at and updated_at (expected >=2 timestamp literals, got %d) in: %s", len(got), ins)
+	}
 }

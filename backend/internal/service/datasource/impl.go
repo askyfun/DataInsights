@@ -97,6 +97,10 @@ func (s *datasourceService) Create(ctx context.Context, ds *entity.Datasource) (
 	if err := s.encryptPassword(m); err != nil {
 		return nil, err
 	}
+	// bun 对零值 sql.NullTime 发显式 NULL（绕过列 DEFAULT CURRENT_TIMESTAMP），
+	// 此前 Create 两个时间戳都为空。对齐 dataset.Create：插入时显式打戳。
+	m.CreatedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	if _, err := s.db.NewInsert().Model(m).Returning("*").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create datasource: %w", err)
 	}
@@ -119,6 +123,9 @@ func (s *datasourceService) Update(ctx context.Context, ds *entity.Datasource) (
 		}
 		m.Password = existing.Password
 	}
+	// 整行 WherePK 更新此前不刷新 updated_at（DB 无触发器兜底）。显式打当前时间，
+	// 让 bun 的整行更新写入新值，与 dataset 服务 Update 保持一致。
+	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	if _, err := s.db.NewUpdate().Model(m).WherePK().Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update datasource: %w", err)
 	}

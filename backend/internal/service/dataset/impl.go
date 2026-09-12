@@ -88,6 +88,9 @@ func (s *datasetService) GetByID(ctx context.Context, id int) (*entity.Dataset, 
 func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
 	m := toDatasetModel(ds)
 	m.CreatedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	// bun 对零值 sql.NullTime 发显式 NULL（绕过列 DEFAULT CURRENT_TIMESTAMP），
+	// 故 updated_at 需与 created_at 一样在插入时显式打戳，否则新建行 updated_at 为空。
+	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	if _, err := s.db.NewInsert().Model(m).Returning("*").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create dataset: %w", err)
 	}
@@ -97,6 +100,10 @@ func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entit
 // Update updates an existing dataset
 func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
 	m := toDatasetModel(ds)
+	// 整行 WherePK 更新会把合并基带入的旧 updated_at 原样写回，导致更新后时间戳
+	// 不前进（DB 无触发器兜底）。显式打当前时间，让 bun 的整行更新写入新值；
+	// created_at 仍走 toDatasetModel 的透传（merge 负责保留）。
+	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	if _, err := s.db.NewUpdate().Model(m).WherePK().Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update dataset: %w", err)
 	}
