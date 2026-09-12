@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/react';
 import { message } from 'antd';
 import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import type { components } from '../../idls/gen_types';
 
 export const API_CODE = {
   SUCCESS: 20000,
@@ -14,12 +15,11 @@ export const API_CODE = {
 
 export type ApiCode = (typeof API_CODE)[keyof typeof API_CODE];
 
-export interface ApiResponse<T = unknown> {
-  code: ApiCode;
-  msg: string;
-  trace: string;
+// Envelope from the OpenAPI schema with data re-tightened per call site.
+// G['Envelope']['code'] (ResponseCode) is the same 7-literal union as ApiCode.
+export type ApiResponse<T = unknown> = Omit<components['schemas']['Envelope'], 'data'> & {
   data: T;
-}
+};
 
 export interface PageResult<T> {
   items: T[];
