@@ -456,9 +456,19 @@ export const datasetsApi = {
     return apiClient.post<ApiResponse<Dataset>>('/api/datasets', data);
   },
 
-  // Update dataset
+  // Update dataset. Wire convention matches the create contract
+  // (datasetCreateIn / DatasetCreateRequest): tags/shard_keys arrive as
+  // JSON-array strings, never array bodies. The create callers never send
+  // those fields (backend defaults them to "[]"), while the update callers
+  // (store.updateDataset, DatasetEdit submit) pass DatasetFormData with
+  // string[] fields — so the stringification lives here, at the single
+  // choke point every update request goes through (never double-encoded).
   update: (id: number, data: DatasetFormData): Promise<AxiosResponse<ApiResponse<Dataset>>> => {
-    return apiClient.put<ApiResponse<Dataset>>(`/api/datasets/${id}`, data);
+    return apiClient.put<ApiResponse<Dataset>>(`/api/datasets/${id}`, {
+      ...data,
+      ...(data.tags !== undefined ? { tags: JSON.stringify(data.tags) } : {}),
+      ...(data.shard_keys !== undefined ? { shard_keys: JSON.stringify(data.shard_keys) } : {}),
+    });
   },
 
   // Delete dataset
