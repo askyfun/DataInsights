@@ -532,7 +532,20 @@
 - [x] **饼图无效设置移除**（产品决策）：前端比例控件+三处 `config` 发送+类型删除、后端 `req.Config` 死输入链删除、openapi 注释按真相重写；`PieProcessor.MergeOtherBelowRatio` 能力保留未接线
 - [x] 死代码：`query.BuildBunQuery`、ShareView 不可达 401/403 分支（先钉行为测试再删）、`lib/api/client.ts` baseURL 尾 `}`、`ChartBuilder` `valueEnd as any`×3、前端死类型导出（`GeneratedSQL`/`TestConnectionResponse`/`typeConfig` 判死/datatypes 三胞胎）
 - [x] **前端类型消费生成物**（9 步迁移，每步 tsc 门+vitest 子集）：实体/响应/请求类型 alias 到 `components['schemas']` + 薄手写联合层；envelope 同名碰撞零出现（`ChartQueryResponse`→`ChartDataResult` wrapper）；`ApiResponse<T>` 重声明自生成 Envelope；净 -88 行
-- [ ] **Batch 4 重评**：后端 handler In/Out 消费 `idls.*`（生成 Go 类型无 gin `form:"-"` 语义，需自定义 codegen 模板，收益/风险待评）；`updated_at` 在 PUT 保留旧值不刷新（datasource 同病，无 DB trigger）；`GetChartData` 聚合语义统一（现返回原始行、图表配置不参与取数）；`Dataset`/`Chart` 等生成类型 timestamp 必填 vs 后端部分端点返回空串的语义核对；ChartBuilder 三处 filters/query 构造点 DRY 合并；`/datasets/new` 经实测非 bug（v6 静态段优先命中 DatasetEdit，new 模式重定向回列表为既有设计），销账；PUT preserve-merge 非事务读-改-写（并发下可复活旧值，接受为既有全行 PUT 语义的延伸，与 `updated_at` 不刷新同记）；`query_type` 翻转后旧 `table_name` 残留（读路径先分支 `query_type`，今日无害）；`service/dataset` `toDatasetModel` 时间戳 Parse 错误被吞（merge 路径不可达，潜在）
+### Batch 4：技术债收口 ✅ 已完成（分支 `refactor/batch4-debt`，2026-09-12，全分支评审 SHIP 无 Critical）
+
+- [x] DatasetEdit/DatasetDetail i18n 缺键补全（21 键×双语 + 动态 role 变体；新增 zh/en 键集与插值参数对称测试；浏览器实测编辑页全中文零 raw key）
+- [x] dataset/datasource Update 刷新 `updated_at`（顺带修复既有隐性 bug：bun 零值 NullTime INSERT 发显式 NULL 绕过列 DEFAULT，datasource.Create 时间戳一直为空；sqlmock 4 测试钉住）
+- [x] ChartBuilder 三处 query 构造合并为 `composeChartQueryRequest`（三副本唯一真实语义分歧 `sort` 以 `includeSort` 参数保留而非静默统一，键序字节保持；14 测试零断言改动通过）
+- [x] **GetChartData 聚合语义统一**：分享页与构建器预览同管线（v1 配置→executor 聚合；legacy/坏/空配置→原始行回退，矩阵 6 测试；契约 data 升 oneOf；live 分享页按 region 聚合）
+- [x] （D2 实测照亮的既有 bug）指标别名大小写：未引号 `AS Revenue` 被 PG 折叠小写→processor 按原 case 取值→**一切带别名图表数据全 null（预览同样坏）**；修复=query 结果别名方言引号化（PG 双引号/MySQL·CK·SR 反引号）、ORDER BY 别名感知、22 处 byte-pin 逐条审正；live `[null×4]`→`[37730,37365,36635,37000]`
+- [x] **评估收口：后端 handler In/Out 不切换到 `idls.*`，此项关闭**——生成 Go 类型无 gin `form:"-"` 语义（Batch 2 实测的 query 污染面会复活）；契约一致性已有三层保障（openapi 单一事实源 + `contract_parity_test.go` 反射守卫 5 镜像含 subset 反证 + 逐端点逐字节 baseline），自定义 codegen 模板维护成本超过收益；若未来工具链支持 tag 注入可重开
+- [x] `/datasets/new` 实测非 bug（v6 静态段优先命中 DatasetEdit，new 模式重定向回列表为既有设计），销账
+#### Batch 5 候选（Batch 4 评审组合层新发现，非阻断）
+
+- [ ] **preview/share `limit` 不对称**：store 默认把 `limit:1000` 写进所有新图表 doc；share（GetData）对任意图表类型透传 limit→SQL LIMIT，预览（`composeChartQueryRequest`）仅 table 发分页——分组 ≤1000 时一致，超出后 share 按 DB 任意序截断。二选一：非 table 忽略 doc limit，或预览同发（`service/chart/impl.go:317-320` + `store/index.ts:251,475`）
+- [ ] **`store.fetchChartData` 死码**（零调用方，ShareView 直连 api；D2 为其补的守卫保护无人走的路）+ `pagination.total` 误计（`executor.go:86` count-query 行数当总数，ledger 已记但未落文档——本条补上）+ 无分页 table 分支列序随机（Go map range `processor.go:27-56`，D2 使潜伏路径变可达）——三者一并处置
+- [ ] 接受并记录（不阻断）：PUT preserve-merge 非事务读-改-写（并发下可复活旧值，既有全行 PUT 语义延伸）；`query_type` 翻转后旧 `table_name` 残留（读路径先分支 `query_type`，今日无害）；`toDatasetModel` 时间戳 Parse 错误被吞（merge 路径不可达，潜在）；granularity-dim 别名 ORDER BY arm 缺独立 sort-pin（逻辑已覆盖）；`Dataset`/`Chart` 生成类型 timestamp 必填 vs 个别端点返回空串（fixture 按实测 wire 钉住）
 
 ### 全分支评审结论（2026-09 收口）
 
