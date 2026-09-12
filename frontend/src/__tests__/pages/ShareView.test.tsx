@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { AxiosResponse } from 'axios';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Chart, Share } from '../../api';
+import type { ApiResponse } from '../../lib/api/client';
 import ShareView from '../../pages/ShareView';
 
 // Mock the API module: ShareView reads envelope-shaped responses, i.e.
@@ -32,9 +35,32 @@ const mockVerifyPassword = vi.mocked(sharesApi.verifyPassword);
 const mockGetChartById = vi.mocked(chartsApi.getById);
 const mockGetChartData = vi.mocked(chartsApi.getChartData);
 
-const protectedShare = { id: 1, token: 'tok', chart_id: 7, has_password: true };
-const openShare = { id: 2, token: 'tok', chart_id: 7, has_password: false };
-const mockChart = {
+// Same helper as ChartBuilder.test.tsx: builds a real AxiosResponse shape so
+// mockResolvedValue needs no type suppression (config is a class AxiosResponse
+// requires in typing but no page code reads — pinned via never, not any).
+function mockAxiosResponse<T>(data: ApiResponse<T>): AxiosResponse<ApiResponse<T>> {
+  return { data, status: 200, statusText: 'OK', headers: {}, config: {} as never };
+}
+
+// Full wire shapes per the generated schemas (expires_at/created_at are
+// required keys; has_password replaces the never-exposed password).
+const protectedShare: Share = {
+  id: 1,
+  token: 'tok',
+  chart_id: 7,
+  expires_at: null,
+  created_at: '',
+  has_password: true,
+};
+const openShare: Share = {
+  id: 2,
+  token: 'tok',
+  chart_id: 7,
+  expires_at: null,
+  created_at: '',
+  has_password: false,
+};
+const mockChart: Chart = {
   id: 7,
   name: 'Monthly Sales',
   dataset_id: 3,
@@ -49,6 +75,8 @@ const mockChart = {
     },
     fieldMeta: {},
   }),
+  created_at: '',
+  updated_at: '',
 };
 
 function renderShareView() {
@@ -67,7 +95,9 @@ beforeEach(() => {
 
 describe('ShareView live password gate (has_password envelope)', () => {
   it('shows the password prompt when a protected share resolves via envelope', async () => {
-    mockGetShareByToken.mockResolvedValue({ data: { code: 20000, data: protectedShare } } as any);
+    mockGetShareByToken.mockResolvedValue(
+      mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: protectedShare })
+    );
 
     renderShareView();
 
@@ -93,7 +123,9 @@ describe('ShareView live password gate (has_password envelope)', () => {
   });
 
   it('shows the backend message when password verification rejects with a bare Error', async () => {
-    mockGetShareByToken.mockResolvedValue({ data: { code: 20000, data: protectedShare } } as any);
+    mockGetShareByToken.mockResolvedValue(
+      mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: protectedShare })
+    );
     mockVerifyPassword.mockRejectedValue(new Error('invalid password'));
 
     renderShareView();
@@ -113,11 +145,20 @@ describe('ShareView live password gate (has_password envelope)', () => {
   });
 
   it('renders the chart title for an unprotected share', async () => {
-    mockGetShareByToken.mockResolvedValue({ data: { code: 20000, data: openShare } } as any);
-    mockGetChartById.mockResolvedValue({ data: { code: 20000, data: mockChart } } as any);
-    mockGetChartData.mockResolvedValue({
-      data: { code: 20000, data: [{ month: '2026-01', total: 10 }] },
-    } as any);
+    mockGetShareByToken.mockResolvedValue(
+      mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: openShare })
+    );
+    mockGetChartById.mockResolvedValue(
+      mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: mockChart })
+    );
+    mockGetChartData.mockResolvedValue(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'success',
+        trace: '',
+        data: [{ month: '2026-01', total: 10 }],
+      })
+    );
 
     renderShareView();
 
