@@ -371,6 +371,30 @@ type DatasetResponse struct {
 	Trace string `json:"trace"`
 }
 
+// DatasetUpdateRequest PUT /api/datasets/{id} 请求体（id 走路径，不在体内）。与 DatasetCreateRequest 同构：table_name/query_sql/description 未传或为空串时 后端置为 null；query_type/mode 为空缺省 "table"/"direct"；tags/columns 为空 缺省 "[]"。
+type DatasetUpdateRequest struct {
+	// Columns DatasetColumn 数组的 JSON 字符串。
+	Columns      *string `json:"columns,omitempty"`
+	DatasourceId int     `json:"datasource_id"`
+	Description  *string `json:"description,omitempty"`
+
+	// Mode 为空时后端缺省 "direct"。
+	Mode     *string `json:"mode,omitempty"`
+	Name     string  `json:"name"`
+	QuerySql *string `json:"query_sql,omitempty"`
+
+	// QueryType "table" 或 "sql"。
+	QueryType    string `json:"query_type"`
+	ShardEnabled *bool  `json:"shard_enabled,omitempty"`
+
+	// ShardKeys 分片键的 JSON 数组字符串。
+	ShardKeys *string `json:"shard_keys,omitempty"`
+	TableName *string `json:"table_name,omitempty"`
+
+	// Tags JSON 数组字符串（非数组本体）。
+	Tags *string `json:"tags,omitempty"`
+}
+
 // Datasource 数据源响应实体（entity.Datasource）。password 为 json:"-" 永不外泄，
 // 因此本 schema 不含 password 字段。
 type Datasource struct {
@@ -819,6 +843,9 @@ type UpdateChartJSONRequestBody = ChartUpdateRequest
 
 // CreateDatasetJSONRequestBody defines body for CreateDataset for application/json ContentType.
 type CreateDatasetJSONRequestBody = DatasetCreateRequest
+
+// UpdateDatasetJSONRequestBody defines body for UpdateDataset for application/json ContentType.
+type UpdateDatasetJSONRequestBody = DatasetUpdateRequest
 
 // UpdateDatasetColumnsJSONRequestBody defines body for UpdateDatasetColumns for application/json ContentType.
 type UpdateDatasetColumnsJSONRequestBody = UpdateDatasetColumnsJSONBody

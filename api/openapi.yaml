@@ -371,6 +371,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DatasetResponse'
+    put:
+      tags:
+        - datasets
+      summary: 更新数据集
+      description: |
+        PUT /api/datasets/:id：id 走路径，请求体与 DatasetCreateRequest 同构
+        （tags/columns/shard_keys 为 JSON 数组的字符串形态，非数组本体）。
+        整行更新：query_type/mode 为空缺省 "table"/"direct"，tags/quality_rules/
+        columns 为空缺省 "[]"；table_name/query_sql/description 为空时后端置 null。
+        未知 id 返回与 GET 相同的 20300 信封（handler 先 GetByID 门控，避免
+        service.Update 全行更新对缺失行报出误导性的内部错误）。
+      operationId: updateDataset
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasetUpdateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为更新后的 Dataset；不存在或 id 非法时 Envelope.code = 20300/20100，data = {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetResponse'
     delete:
       tags:
         - datasets
@@ -1161,6 +1188,45 @@ components:
       type: object
       description: >-
         POST /api/datasets 请求体。table_name/query_sql/description 未传或为空串时
+        后端置为 null；query_type/mode 为空缺省 "table"/"direct"；tags/columns 为空
+        缺省 "[]"。
+      required:
+        - name
+        - datasource_id
+        - query_type
+      properties:
+        name:
+          type: string
+        datasource_id:
+          type: integer
+        table_name:
+          type: string
+        query_sql:
+          type: string
+        query_type:
+          type: string
+          description: '"table" 或 "sql"。'
+        mode:
+          type: string
+          description: 为空时后端缺省 "direct"。
+        description:
+          type: string
+        tags:
+          type: string
+          description: JSON 数组字符串（非数组本体）。
+        columns:
+          type: string
+          description: DatasetColumn 数组的 JSON 字符串。
+        shard_enabled:
+          type: boolean
+        shard_keys:
+          type: string
+          description: 分片键的 JSON 数组字符串。
+    DatasetUpdateRequest:
+      type: object
+      description: >-
+        PUT /api/datasets/{id} 请求体（id 走路径，不在体内）。与
+        DatasetCreateRequest 同构：table_name/query_sql/description 未传或为空串时
         后端置为 null；query_type/mode 为空缺省 "table"/"direct"；tags/columns 为空
         缺省 "[]"。
       required:

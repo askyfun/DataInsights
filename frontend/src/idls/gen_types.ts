@@ -234,7 +234,16 @@ export interface paths {
         };
         /** 获取数据集详情 */
         get: operations["getDataset"];
-        put?: never;
+        /**
+         * 更新数据集
+         * @description PUT /api/datasets/:id：id 走路径，请求体与 DatasetCreateRequest 同构
+         *     （tags/columns/shard_keys 为 JSON 数组的字符串形态，非数组本体）。
+         *     整行更新：query_type/mode 为空缺省 "table"/"direct"，tags/quality_rules/
+         *     columns 为空缺省 "[]"；table_name/query_sql/description 为空时后端置 null。
+         *     未知 id 返回与 GET 相同的 20300 信封（handler 先 GetByID 门控，避免
+         *     service.Update 全行更新对缺失行报出误导性的内部错误）。
+         */
+        put: operations["updateDataset"];
         post?: never;
         /** 删除数据集 */
         delete: operations["deleteDataset"];
@@ -695,6 +704,25 @@ export interface components {
         };
         /** @description POST /api/datasets 请求体。table_name/query_sql/description 未传或为空串时 后端置为 null；query_type/mode 为空缺省 "table"/"direct"；tags/columns 为空 缺省 "[]"。 */
         DatasetCreateRequest: {
+            name: string;
+            datasource_id: number;
+            table_name?: string;
+            query_sql?: string;
+            /** @description "table" 或 "sql"。 */
+            query_type: string;
+            /** @description 为空时后端缺省 "direct"。 */
+            mode?: string;
+            description?: string;
+            /** @description JSON 数组字符串（非数组本体）。 */
+            tags?: string;
+            /** @description DatasetColumn 数组的 JSON 字符串。 */
+            columns?: string;
+            shard_enabled?: boolean;
+            /** @description 分片键的 JSON 数组字符串。 */
+            shard_keys?: string;
+        };
+        /** @description PUT /api/datasets/{id} 请求体（id 走路径，不在体内）。与 DatasetCreateRequest 同构：table_name/query_sql/description 未传或为空串时 后端置为 null；query_type/mode 为空缺省 "table"/"direct"；tags/columns 为空 缺省 "[]"。 */
+        DatasetUpdateRequest: {
             name: string;
             datasource_id: number;
             table_name?: string;
@@ -1459,6 +1487,33 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description HTTP 恒 200；不存在或 id 非法时 Envelope.code = 20300/20100，data = {} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetResponse"];
+                };
+            };
+        };
+    };
+    updateDataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为更新后的 Dataset；不存在或 id 非法时 Envelope.code = 20300/20100，data = {} */
             200: {
                 headers: {
                     [name: string]: unknown;
