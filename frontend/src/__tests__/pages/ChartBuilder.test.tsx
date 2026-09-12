@@ -489,6 +489,61 @@ describe('ChartBuilder', () => {
     );
   });
 
+  it('sends no config payload and renders no ratio control for pie charts', async () => {
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Pie Chart',
+          dataset_id: 1,
+          chart_type: 'pie',
+          config: JSON.stringify({
+            version: 1,
+            chartType: 'pie',
+            title: 'Pie Chart',
+            query: {
+              dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
+              metricGroups: [{ id: 'metric-group-main', fields: ['revenue'] }],
+              filters: [],
+              limit: 1000,
+            },
+            fieldMeta: {},
+            queryOptions: { pieMergeOtherBelowRatio: 5 },
+          }),
+        },
+      })
+    );
+
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+    });
+
+    // 文档兼容性：保存的 queryOptions 仍会恢复到 store（但不再参与请求）。
+    expect(useStore.getState().chartQueryOptions).toEqual({ pieMergeOtherBelowRatio: 5 });
+
+    const request = mockExecuteChartQuery.mock.calls[0][0];
+    // 请求体不得携带 config / query_options（断链控件已移除）。
+    expect(request).not.toHaveProperty('config');
+    expect(request).not.toHaveProperty('query_options');
+    // 钉死其余请求形状不变。
+    expect(Object.keys(request).sort()).toEqual([
+      'chart_type',
+      'dataset_id',
+      'dims',
+      'filters',
+      'metrics',
+      'pagination',
+    ]);
+
+    // UI 不再有「合并其他比例」输入控件。
+    expect(screen.queryByText('饼图“其他”阈值 (%)')).not.toBeInTheDocument();
+  });
+
   it('sends filters with the operator key to match the backend entity.Filter contract', async () => {
     renderChartBuilder();
 

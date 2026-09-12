@@ -30,7 +30,6 @@ import {
   Drawer,
   Empty,
   Input,
-  InputNumber,
   Layout,
   Modal,
   message,
@@ -455,14 +454,12 @@ interface ConfigPanelProps {
   metricUnits: Record<string, string>;
   metricFormats: Record<string, string>;
   chartStyle: ChartStyleConfig;
-  chartQueryOptions: ChartQueryOptions;
   dimensionFields: ChartField[];
   metricFields: ChartField[];
   onDimensionLabelChange: (fieldId: string, label: string) => void;
   onMetricUnitChange: (fieldId: string, unit: string) => void;
   onMetricFormatChange: (fieldId: string, format: string) => void;
   onChartStyleChange: (style: Partial<ChartStyleConfig>) => void;
-  onChartQueryOptionsChange: (options: Partial<ChartQueryOptions>) => void;
 }
 
 const chartTypeOptions = [
@@ -482,14 +479,12 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   metricUnits,
   metricFormats,
   chartStyle,
-  chartQueryOptions,
   dimensionFields,
   metricFields,
   onDimensionLabelChange,
   onMetricUnitChange,
   onMetricFormatChange,
   onChartStyleChange,
-  onChartQueryOptionsChange,
 }) => {
   return (
     <div>
@@ -555,21 +550,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               ]}
             />
           </div>
-
-          {config.chartType === 'pie' && (
-            <div>
-              <Text strong>饼图“其他”阈值 (%)</Text>
-              <InputNumber
-                min={0}
-                max={100}
-                style={{ width: '100%', marginTop: 4 }}
-                value={chartQueryOptions.pieMergeOtherBelowRatio ?? 0}
-                onChange={(value) =>
-                  onChartQueryOptionsChange({ pieMergeOtherBelowRatio: Number(value ?? 0) })
-                }
-              />
-            </div>
-          )}
         </Space>
       </Card>
 
@@ -684,7 +664,6 @@ const ChartBuilder: React.FC = () => {
     setMetricFormats,
     setChartStyle,
     setChartStyleState,
-    setChartQueryOptions,
     setChartQueryOptionsState,
     autoQuery,
     toggleAutoQuery,
@@ -938,7 +917,7 @@ const ChartBuilder: React.FC = () => {
         field: field?.name || f.field,
         operator: f.operator,
         value: f.value,
-        value_end: (f as any).valueEnd,
+        value_end: f.valueEnd,
         logic: f.logic,
       };
     });
@@ -949,14 +928,6 @@ const ChartBuilder: React.FC = () => {
       dims,
       metrics,
       filters,
-      config:
-        chartBuilderConfig.chartType === 'pie'
-          ? {
-              query_options: {
-                pie_merge_other_below_ratio: chartQueryOptions.pieMergeOtherBelowRatio,
-              },
-            }
-          : undefined,
       sort: queryConfig.sort
         ? { field: queryConfig.sort.field, order: queryConfig.sort.order }
         : undefined,
@@ -972,7 +943,6 @@ const ChartBuilder: React.FC = () => {
     selectedDatasetId,
     metricAggregations,
     metricAliases,
-    chartQueryOptions.pieMergeOtherBelowRatio,
     queryConfig,
     chartBuilderConfig.chartType,
     tablePagination.page,
@@ -1069,21 +1039,13 @@ const ChartBuilder: React.FC = () => {
         agg: (state.metricAggregations[f.id] || 'sum') as ChartQueryAggregation,
         alias: state.metricAliases[f.id] || f.name,
       })),
-      config:
-        state.chartBuilderConfig.chartType === 'pie'
-          ? {
-              query_options: {
-                pie_merge_other_below_ratio: state.chartQueryOptions.pieMergeOtherBelowRatio,
-              },
-            }
-          : undefined,
       filters: state.queryConfig.filters.map((f) => {
         const field = state.chartBuilderFields.find((field) => field.id === f.field);
         return {
           field: field?.name || f.field,
           operator: f.operator,
           value: f.value,
-          value_end: (f as any).valueEnd,
+          value_end: f.valueEnd,
           logic: f.logic,
         };
       }),
@@ -1123,21 +1085,13 @@ const ChartBuilder: React.FC = () => {
         agg: (metricAggregations[f.id] || 'sum') as ChartQueryAggregation,
         alias: metricAliases[f.id] || f.name,
       })),
-      config:
-        chartBuilderConfig.chartType === 'pie'
-          ? {
-              query_options: {
-                pie_merge_other_below_ratio: chartQueryOptions.pieMergeOtherBelowRatio,
-              },
-            }
-          : undefined,
       filters: queryConfig.filters.map((f) => {
         const field = chartBuilderFields.find((field) => field.id === f.field);
         return {
           field: field?.name || f.field,
           operator: f.operator,
           value: f.value,
-          value_end: (f as any).valueEnd,
+          value_end: f.valueEnd,
           logic: f.logic,
         };
       }),
@@ -1155,7 +1109,6 @@ const ChartBuilder: React.FC = () => {
     queryConfig,
     metricAggregations,
     metricAliases,
-    chartQueryOptions.pieMergeOtherBelowRatio,
     chartBuilderFields,
     tablePagination.page,
     tablePagination.pageSize,
@@ -1596,14 +1549,12 @@ const ChartBuilder: React.FC = () => {
             metricUnits={metricUnits}
             metricFormats={metricFormats}
             chartStyle={chartStyle}
-            chartQueryOptions={chartQueryOptions}
             dimensionFields={dedupeFieldsById(getDimensionFields())}
             metricFields={dedupeFieldsById(getMetricFields())}
             onDimensionLabelChange={setDimensionLabel}
             onMetricUnitChange={setMetricUnit}
             onMetricFormatChange={setMetricFormat}
             onChartStyleChange={setChartStyle}
-            onChartQueryOptionsChange={setChartQueryOptions}
             onConfigChange={(config) => {
               if (config.chartType) {
                 handleChartTypeChange(config.chartType);
@@ -1654,14 +1605,12 @@ const ChartBuilder: React.FC = () => {
             metricUnits={metricUnits}
             metricFormats={metricFormats}
             chartStyle={chartStyle}
-            chartQueryOptions={chartQueryOptions}
             dimensionFields={dedupeFieldsById(getDimensionFields())}
             metricFields={dedupeFieldsById(getMetricFields())}
             onDimensionLabelChange={setDimensionLabel}
             onMetricUnitChange={setMetricUnit}
             onMetricFormatChange={setMetricFormat}
             onChartStyleChange={setChartStyle}
-            onChartQueryOptionsChange={setChartQueryOptions}
             onConfigChange={(config) => {
               if (config.chartType) {
                 handleChartTypeChange(config.chartType);

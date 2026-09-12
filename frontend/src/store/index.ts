@@ -204,7 +204,6 @@ export interface AppState {
   setMetricFormats: (formats: Record<string, string>) => void;
   setChartStyle: (style: Partial<ChartStyleConfig>) => void;
   setChartStyleState: (style: ChartStyleConfig) => void;
-  setChartQueryOptions: (options: Partial<ChartQueryOptions>) => void;
   setChartQueryOptionsState: (options: ChartQueryOptions) => void;
   toggleAutoQuery: () => void;
   executeChartQuery: (request: ChartQueryRequest) => Promise<void>;
@@ -750,12 +749,6 @@ export const useStore = create<AppState>((set) => ({
 
   setChartStyleState: (style: ChartStyleConfig) => {
     set({ chartStyle: style });
-  },
-
-  setChartQueryOptions: (options: Partial<ChartQueryOptions>) => {
-    set((state) => ({
-      chartQueryOptions: { ...state.chartQueryOptions, ...options },
-    }));
   },
 
   setChartQueryOptionsState: (options: ChartQueryOptions) => {
