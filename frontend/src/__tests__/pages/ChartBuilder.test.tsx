@@ -154,9 +154,17 @@ describe('ChartBuilder', () => {
             query_sql: null,
             query_type: 'table',
             mode: 'direct',
+            accelerate_config: null,
+            description: null,
+            tags: '[]',
+            refresh_strategy: null,
+            preview_data: null,
+            quality_rules: '[]',
             columns: '[]',
             shard_enabled: false,
             shard_keys: '[]',
+            created_at: '2026-01-01T00:00:00Z',
+            updated_at: '2026-01-01T00:00:00Z',
           },
         ],
       })
@@ -208,6 +216,8 @@ describe('ChartBuilder', () => {
             },
             fieldMeta: {},
           }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );
@@ -330,6 +340,8 @@ describe('ChartBuilder', () => {
               revenue: { aggregation: 'avg', alias: 'gmv' },
             },
           }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );
@@ -377,6 +389,8 @@ describe('ChartBuilder', () => {
               pieMergeOtherBelowRatio: 5,
             },
           }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );
@@ -423,6 +437,8 @@ describe('ChartBuilder', () => {
             },
             fieldMeta: {},
           }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );
@@ -470,6 +486,8 @@ describe('ChartBuilder', () => {
             },
             fieldMeta: {},
           }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );
@@ -513,6 +531,8 @@ describe('ChartBuilder', () => {
             fieldMeta: {},
             queryOptions: { pieMergeOtherBelowRatio: 5 },
           }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );
@@ -598,6 +618,8 @@ describe('ChartBuilder', () => {
             },
             fieldMeta: {},
           }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );
@@ -648,6 +670,8 @@ describe('ChartBuilder', () => {
             chartStyle: { colors: ['#1f77b4'], smooth: false, tableRowSize: 'middle' },
             chartQueryOptions: { pieMergeOtherBelowRatio: 5 },
           }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );
@@ -681,6 +705,8 @@ describe('ChartBuilder', () => {
           dataset_id: 1,
           chart_type: 'table',
           config: '',
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
       })
     );

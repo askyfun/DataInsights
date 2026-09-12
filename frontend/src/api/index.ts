@@ -56,26 +56,9 @@ export type DatasetColumn = Omit<G['DatasetColumn'], 'type' | 'role' | 'type_con
   role: ColumnRole;
 };
 
-export interface Dataset {
-  id: number;
-  name: string;
-  datasource_id: number;
-  table_name: string | null;
-  query_sql: string | null;
-  query_type: string;
-  mode: DatasetMode;
-  accelerate_config?: string;
-  description?: string;
-  tags?: string;
-  refresh_strategy?: string;
-  preview_data?: string;
-  quality_rules?: string;
-  columns: string;
-  shard_enabled: boolean;
-  shard_keys: string;
-  created_at?: string;
-  updated_at?: string;
-}
+// Wire truth per generated schema: metadata keys are required (null when
+// unset), mode/query_type collapse to string (union collapse, audit trap 2).
+export type Dataset = G['Dataset'];
 
 export interface DatasetFormData {
   name: string;
@@ -90,15 +73,9 @@ export interface DatasetFormData {
   shard_keys?: string[];
 }
 
-export interface Chart {
-  id: number;
-  name: string;
-  dataset_id: number;
-  chart_type: string;
-  config: string;
-  created_at?: string;
-  updated_at?: string;
-}
+// created_at/updated_at are required on the wire (empty string when the DB
+// timestamp is invalid).
+export type Chart = G['Chart'];
 
 export interface ChartFormData {
   name: string;
@@ -107,15 +84,9 @@ export interface ChartFormData {
   config: string;
 }
 
-export interface Share {
-  id: number;
-  token: string;
-  chart_id: number;
-  // 后端已脱敏：password 不再返回，has_password 是唯一的"是否受保护"信号
-  has_password: boolean;
-  expires_at?: string;
-  created_at?: string;
-}
+// expires_at is null (never absent) on the wire; password is json:"-" and
+// has_password is the only protection signal (same as before).
+export type Share = G['Share'];
 
 export type ShareFormData = G['ShareCreateRequest'];
 

@@ -34,9 +34,17 @@ const saved: Dataset = {
   query_sql: null,
   query_type: 'table',
   mode: 'direct',
+  accelerate_config: null,
+  description: null,
+  tags: '[]',
+  refresh_strategy: null,
+  preview_data: null,
+  quality_rules: '[]',
   columns: '[]',
   shard_enabled: true,
   shard_keys: '["id"]',
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
 };
 
 beforeEach(() => {

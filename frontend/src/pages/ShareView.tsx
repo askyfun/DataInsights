@@ -20,8 +20,10 @@ interface ShareInfo {
   token: string;
   chart_id: number;
   password?: string;
-  expires_at?: string;
-  created_at?: string;
+  // The wire sends null (not absent) for an unset expires_at; created_at
+  // mirrors the optional shape for locally built ShareInfo values.
+  expires_at?: string | null;
+  created_at?: string | null;
 }
 
 const ShareView: React.FC = () => {

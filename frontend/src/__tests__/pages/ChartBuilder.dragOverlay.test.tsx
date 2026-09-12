@@ -135,7 +135,15 @@ describe('ChartBuilder drag overlay', () => {
         code: 20000,
         msg: 'ok',
         trace: '',
-        data: { id: 1, name: 'Sales', dataset_id: 1, chart_type: 'table', config: '{}' },
+        data: {
+          id: 1,
+          name: 'Sales',
+          dataset_id: 1,
+          chart_type: 'table',
+          config: '{}',
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
       })
     );
     mockExecuteChartQuery.mockResolvedValue(
