@@ -152,11 +152,9 @@ export type FieldDistribution = G['FieldDistribution'];
 // Charts API types
 export type ChartQueryAggregation = 'sum' | 'avg' | 'count' | 'max' | 'min';
 
-export interface ChartQueryMetric {
-  field: string;
+export type ChartQueryMetric = Omit<G['ChartMetricConfig'], 'agg'> & {
   agg: ChartQueryAggregation;
-  alias?: string;
-}
+};
 
 export interface ChartQueryFilter {
   field: string;
@@ -179,20 +177,19 @@ export interface ChartQueryFilter {
 
 export type ChartQueryPagination = G['ChartPagination'];
 
-export interface ChartQuerySort {
-  field: string;
+export type ChartQuerySort = Omit<G['SortConfig'], 'order'> & {
   order: 'asc' | 'desc';
-}
+};
 
-export interface ChartQueryRequest {
-  dataset_id: number;
-  chart_type: string;
+// dims stays required (store executeChartQuery reads request.dims[0]); the
+// generated schema optionally widens it and collapses metrics/filters to the
+// generated element types — re-tightened here onto the handwritten unions.
+// No `config` field: the pie-merge chain was removed in Task 2.
+export type ChartQueryRequest = Omit<G['ChartQueryRequest'], 'dims' | 'metrics' | 'filters'> & {
   dims: string[];
   metrics: ChartQueryMetric[];
   filters: ChartQueryFilter[];
-  pagination?: ChartQueryPagination;
-  sort?: ChartQuerySort;
-}
+};
 
 export type TableResponse = G['ChartTableResponse'];
 
