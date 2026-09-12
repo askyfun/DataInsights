@@ -2,6 +2,9 @@ package chart
 
 import (
 	"context"
+	"database/sql"
+	"reflect"
+	"strings"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -16,9 +19,12 @@ import (
 	"dataray/internal/query"
 )
 
-// stubConnection 测试连接替身，仅用于占位和验证 close 被调用。
+// stubConnection 测试连接替身，用于占位、验证 close，以及在 GetData 的
+// 原始行回退路径中记录/应答 SQL 执行（executeFn + lastSQL）。
 type stubConnection struct {
-	closed bool
+	closed    bool
+	lastSQL   string
+	executeFn func(ctx context.Context, sql string, args ...any) (*datasource.QueryResult, error)
 }
 
 // Close 关闭测试连接。
@@ -47,8 +53,13 @@ func (c *stubConnection) GetPrimaryKeys(ctx context.Context, tableName string) (
 	return nil, nil
 }
 
-// Execute service 层测试通过 executor stub 断言，不应直接调用连接执行 SQL。
+// Execute 记录 SQL；配置了 executeFn 时（GetData 回退路径）以其应答，
+// 否则保持旧行为：返回 nil 结果（Query 主链路由 executor stub 应答）。
 func (c *stubConnection) Execute(ctx context.Context, sql string, args ...any) (*datasource.QueryResult, error) {
+	c.lastSQL = sql
+	if c.executeFn != nil {
+		return c.executeFn(ctx, sql, args...)
+	}
 	return nil, nil
 }
 
@@ -56,11 +67,13 @@ func (c *stubConnection) Execute(ctx context.Context, sql string, args ...any) (
 type stubExecutor struct {
 	result  query.ExecutorResult
 	err     error
+	called  bool
 	lastReq *query.ChartQueryRequest
 }
 
 // Execute 记录调用参数并返回预设结果。
 func (e *stubExecutor) Execute(ctx context.Context, req *query.ChartQueryRequest) (query.ExecutorResult, error) {
+	e.called = true
 	e.lastReq = req
 	return e.result, e.err
 }
@@ -384,4 +397,173 @@ func TestConnectResolvesPassword(t *testing.T) {
 			t.Fatalf("legacy password was not upgraded: %v", err)
 		}
 	})
+}
+
+// --- GetData: v1 config 与交互查询共用聚合管道（B4-D2）---
+
+// newGetDataTestService 构造 GetData 路径的全部外部依赖替身：
+// 图表/数据集/数据源模型读取、连接与 executor，供聚合与回退测试共用。
+func newGetDataTestService(config string) (*chartService, *stubConnection, *stubExecutor) {
+	conn := &stubConnection{}
+	executor := &stubExecutor{
+		result: query.ExecutorResult{
+			Data: &query.AxisResponse{
+				XAxis:  []string{"华北"},
+				Series: []query.AxisSeries{{Name: "Revenue", Data: []any{1234.0}}},
+			},
+			GeneratedSQL: query.GeneratedSQL{Select: `SELECT region, SUM(amount) AS revenue FROM sales_orders GROUP BY region`},
+		},
+	}
+	service := NewService(nil).(*chartService)
+	service.getChartModelFn = func(ctx context.Context, id int) (*model.Chart, error) {
+		return &model.Chart{ID: id, Name: "c", DatasetID: 10, ChartType: "bar", Config: config}, nil
+	}
+	service.getDatasetModelFn = func(ctx context.Context, id int) (*model.Dataset, error) {
+		return &model.Dataset{ID: id, DatasourceID: 1, QueryType: "table", TableName: sql.NullString{String: "sales_orders", Valid: true}}, nil
+	}
+	service.getDatasourceModelFn = func(ctx context.Context, id int) (*model.Datasource, error) {
+		return &model.Datasource{ID: id, Type: "postgresql"}, nil
+	}
+	service.connectFn = func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
+		return conn, nil
+	}
+	service.executorFactory = func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor {
+		return executor
+	}
+	return service, conn, executor
+}
+
+// TestChartServiceGetData_V1ConfigRunsAggregationPipeline 验证 v1 配置的分享
+// 取数走与 POST /api/charts/query 相同的聚合管道，dims/metrics/filters/sort/limit
+// 的映射与前端 buildChartQueryRequest 一致。
+func TestChartServiceGetData_V1ConfigRunsAggregationPipeline(t *testing.T) {
+	config := `{"version":1,"chartType":"bar","query":{"dimensionGroups":[{"id":"dim-1","fields":["region"]}],"metricGroups":[{"id":"met-1","fields":["amount"]}],"filters":[{"field":"region","operator":"eq","value":"华北","logic":"and"}],"sort":{"field":"amount","order":"desc"},"limit":5},"fieldMeta":{"amount":{"aggregation":"sum","alias":"Revenue"}}}`
+	service, conn, executor := newGetDataTestService(config)
+
+	result, err := service.GetData(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !executor.called {
+		t.Fatal("expected v1 config to run the aggregation pipeline")
+	}
+	req := executor.lastReq
+	if req == nil {
+		t.Fatal("expected executor request to be recorded")
+	}
+	if req.DatasetID != 10 {
+		t.Fatalf("expected dataset id 10 from chart, got %d", req.DatasetID)
+	}
+	if req.ChartType != query.ChartTypeBar {
+		t.Fatalf("expected chart type bar, got %q", req.ChartType)
+	}
+	if len(req.Dims) != 1 || req.Dims[0] != "region" {
+		t.Fatalf("expected dims [region], got %v", req.Dims)
+	}
+	// 指标映射对齐 builder：agg 取 fieldMeta.aggregation（默认 sum），
+	// alias 取 fieldMeta.alias（builder 的 fallback 是列名，见 ChartBuilder 注释）。
+	if len(req.Metrics) != 1 || req.Metrics[0].Field != "amount" ||
+		req.Metrics[0].Agg != query.AggSum || req.Metrics[0].Alias != "Revenue" {
+		t.Fatalf("expected metric amount/sum/Revenue, got %+v", req.Metrics)
+	}
+	if len(req.Filters) != 1 || req.Filters[0].Op != query.FilterEq || req.Filters[0].Value != "华北" {
+		t.Fatalf("expected eq filter on 华北, got %+v", req.Filters)
+	}
+	if req.Sort == nil || req.Sort.Field != "amount" || req.Sort.Order != "desc" {
+		t.Fatalf("expected sort amount desc, got %+v", req.Sort)
+	}
+	if req.Pagination == nil || req.Pagination.Page != 1 || req.Pagination.PageSize != 5 {
+		t.Fatalf("expected pagination {1,5} from config limit, got %+v", req.Pagination)
+	}
+	if req.PlannedAST == nil {
+		t.Fatal("expected planned AST")
+	}
+	if !conn.closed {
+		t.Fatal("expected connection closed")
+	}
+
+	axis, ok := result.Data.(*query.AxisResponse)
+	if !ok {
+		t.Fatalf("expected AxisResponse, got %T", result.Data)
+	}
+	if len(axis.Series) != 1 || axis.Series[0].Name != "Revenue" {
+		t.Fatalf("expected processed series passthrough, got %+v", axis.Series)
+	}
+	if result.SelectSQL == "" {
+		t.Fatal("expected select sql forwarded from pipeline")
+	}
+}
+
+// TestChartServiceGetData_V1ConfigMetricDefaults 验证 fieldMeta 缺省时指标
+// 回落到 sum + 列名别名（与 builder 的 `|| 'sum'` / `|| f.name` 对齐），
+// 无 limit 时不带 pagination，chartType 缺省时回落到 chart.ChartType。
+func TestChartServiceGetData_V1ConfigMetricDefaults(t *testing.T) {
+	config := `{"version":1,"query":{"dimensionGroups":[],"metricGroups":[{"id":"met-1","fields":["amount","qty"]}]}}`
+	service, _, executor := newGetDataTestService(config)
+
+	if _, err := service.GetData(context.Background(), 7); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req := executor.lastReq
+	if req.ChartType != query.ChartTypeBar {
+		t.Fatalf("expected fallback chart type bar, got %q", req.ChartType)
+	}
+	if len(req.Metrics) != 2 ||
+		req.Metrics[0].Field != "amount" || req.Metrics[0].Agg != query.AggSum || req.Metrics[0].Alias != "amount" ||
+		req.Metrics[1].Field != "qty" || req.Metrics[1].Alias != "qty" {
+		t.Fatalf("expected default sum + name aliases, got %+v", req.Metrics)
+	}
+	if req.Pagination != nil {
+		t.Fatalf("expected no pagination without limit, got %+v", req.Pagination)
+	}
+}
+
+// assertRawRowsFallback 钉死"非 v1 可用配置 → 保持原始行回退"：不触发
+// executor，走 WrapPreviewSQL(…, 100) 并原样返回行。
+func assertRawRowsFallback(t *testing.T, config string) {
+	t.Helper()
+	rows := []map[string]any{{"field-0": "x", "field-1": 1.0}}
+	service, conn, executor := newGetDataTestService(config)
+	conn.executeFn = func(ctx context.Context, sql string, args ...any) (*datasource.QueryResult, error) {
+		return &datasource.QueryResult{Rows: rows}, nil
+	}
+
+	result, err := service.GetData(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if executor.called {
+		t.Fatal("fallback config must not run the aggregation pipeline")
+	}
+	if !strings.Contains(conn.lastSQL, "LIMIT 100") {
+		t.Fatalf("expected raw preview SQL, got %q", conn.lastSQL)
+	}
+	if !reflect.DeepEqual(result.Data, rows) {
+		t.Fatalf("expected raw rows verbatim, got %#v", result.Data)
+	}
+}
+
+// TestChartServiceGetData_LegacyConfigFallsBackToRawRows 钉死旧结构
+// （queryConfig + 位置 field-N，列名不可恢复）保持原始行回退。
+func TestChartServiceGetData_LegacyConfigFallsBackToRawRows(t *testing.T) {
+	legacy := `{"chartType":"bar","queryConfig":{"dimensionGroups":[{"id":"dim","fields":["field-0"]}],"metricGroups":[{"id":"met","fields":["field-1"]}]}}`
+	assertRawRowsFallback(t, legacy)
+}
+
+// TestChartServiceGetData_MalformedConfigFallsBackToRawRows 钉死损坏 JSON
+// 配置的原始行回退。
+func TestChartServiceGetData_MalformedConfigFallsBackToRawRows(t *testing.T) {
+	assertRawRowsFallback(t, `{not valid json`)
+}
+
+// TestChartServiceGetData_EmptyConfigFallsBackToRawRows 钉死空配置 "{}"
+// （toChartModel 的默认值）的原始行回退。
+func TestChartServiceGetData_EmptyConfigFallsBackToRawRows(t *testing.T) {
+	assertRawRowsFallback(t, `{}`)
+}
+
+// TestChartServiceGetData_V1EmptyGroupsFallsBackToRawRows 钉死 v1 文档但
+// 维度/指标组皆空（无可执行查询）时的原始行回退。
+func TestChartServiceGetData_V1EmptyGroupsFallsBackToRawRows(t *testing.T) {
+	assertRawRowsFallback(t, `{"version":1,"chartType":"bar","query":{"dimensionGroups":[],"metricGroups":[]}}`)
 }

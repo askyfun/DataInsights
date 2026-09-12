@@ -2,6 +2,7 @@ package chart
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -39,6 +40,7 @@ type chartService struct {
 	connectFn            func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error)
 	dialFn               func(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error)
 	executorFactory      func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor
+	getChartModelFn      func(ctx context.Context, id int) (*model.Chart, error)
 	getDatasetModelFn    func(ctx context.Context, id int) (*model.Dataset, error)
 	getDatasourceModelFn func(ctx context.Context, id int) (*model.Datasource, error)
 }
@@ -58,6 +60,7 @@ func NewService(db *bun.DB) Service {
 	service.executorFactory = func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor {
 		return query.NewExecutor(conn, dataset, ds)
 	}
+	service.getChartModelFn = service.getChartModel
 	service.getDatasetModelFn = service.getDatasetModel
 	service.getDatasourceModelFn = service.getDatasourceModel
 	return service
@@ -118,30 +121,40 @@ func (s *chartService) Delete(ctx context.Context, id int) error {
 	return nil
 }
 
-// GetData returns data for a chart
+// GetData returns data for a chart. A persisted v1 config is executed through
+// the same aggregation pipeline as POST /api/charts/query, so a shared chart
+// renders the same result as the builder preview. Parse failure / legacy
+// config / empty groups keep the historical raw-rows fallback (top 100 rows
+// of the bound dataset): those configs carry positional field ids whose column
+// names are not recoverable server-side, and the share view renders them.
 func (s *chartService) GetData(ctx context.Context, id int) (entity.ChartDataResult, error) {
-	chart, err := s.getChartModel(ctx, id)
+	chart, err := s.getChartModelFn(ctx, id)
 	if err != nil {
 		return entity.ChartDataResult{}, err
 	}
 
-	dataset, err := s.getDatasetModel(ctx, chart.DatasetID)
+	dataset, err := s.getDatasetModelFn(ctx, chart.DatasetID)
 	if err != nil {
 		return entity.ChartDataResult{}, err
 	}
 
-	dsModel, err := s.getDatasourceModel(ctx, dataset.DatasourceID)
+	dsModel, err := s.getDatasourceModelFn(ctx, dataset.DatasourceID)
 	if err != nil {
 		return entity.ChartDataResult{}, err
 	}
 
-	conn, err := s.connect(ctx, dsModel)
+	conn, err := s.connectFn(ctx, dsModel)
 	if err != nil {
 		return entity.ChartDataResult{}, err
 	}
 	defer conn.Close()
 
-	// Build query based on dataset type via the query package
+	if req, ok := chartDataQueryFromConfig(chart); ok {
+		return s.executeQueryOnConn(ctx, conn, dataset, dsModel, req)
+	}
+
+	// Fallback path (documented above): build query based on dataset type via
+	// the query package.
 	source := getPlannerSource(dataset)
 	if source == "" {
 		return entity.ChartDataResult{}, fmt.Errorf("dataset has no valid query_sql or table_name")
@@ -173,6 +186,19 @@ func (s *chartService) Query(ctx context.Context, req *entity.ChartQueryRequest)
 	}
 	defer conn.Close()
 
+	return s.executeQueryOnConn(ctx, conn, dataset, dsModel, req)
+}
+
+// executeQueryOnConn runs the shared entity request → QuerySpec → planner →
+// executor pipeline on an already-dialled connection.
+// 调用场景：Query（builder 预览）与 GetData（v1 配置分享页）共用，保证两端结果一致。
+func (s *chartService) executeQueryOnConn(
+	ctx context.Context,
+	conn datasource.Connection,
+	dataset *model.Dataset,
+	dsModel *model.Datasource,
+	req *entity.ChartQueryRequest,
+) (entity.ChartDataResult, error) {
 	executor := s.executorFactory(conn, dataset, dsModel)
 	querySpec := buildQuerySpecFromEntityRequest(req)
 	plannedQuery := query.NewQueryPlanner().Plan(querySpec)
@@ -199,6 +225,105 @@ func (s *chartService) Query(ctx context.Context, req *entity.ChartQueryRequest)
 		SelectSQL: result.Select,
 		CountSQL:  result.Count,
 	}, nil
+}
+
+// chartConfigV1 是 bi_chart.config 持久化 v1 文档中重建查询所需的最小子集，
+// 键名与 frontend/src/lib/chartConfigSchema.ts 的 ChartConfigDocument 对齐。
+// 判别走 "query 键存在且组非空"（旧结构用 queryConfig 键，天然落空），
+// 因此不读 version。
+type chartConfigV1 struct {
+	ChartType string `json:"chartType"`
+	Query     *struct {
+		DimensionGroups []entity.FieldGroup `json:"dimensionGroups"`
+		MetricGroups    []entity.FieldGroup `json:"metricGroups"`
+		Filters         []chartConfigFilter `json:"filters"`
+		Sort            *entity.SortConfig  `json:"sort"`
+		Limit           int                 `json:"limit"`
+	} `json:"query"`
+	FieldMeta map[string]struct {
+		Aggregation string `json:"aggregation"`
+		Alias       string `json:"alias"`
+	} `json:"fieldMeta"`
+}
+
+// chartConfigFilter 兼容文档内的两种 value 区间键：保存自运行时 FilterCondition
+// 时为 camelCase（valueEnd），wire 风格 JSON 为 snake_case（value_end）。
+type chartConfigFilter struct {
+	Field      string `json:"field"`
+	Operator   string `json:"operator"`
+	Value      any    `json:"value"`
+	ValueEnd   any    `json:"value_end"`
+	ValueEndCC any    `json:"valueEnd"`
+	Logic      string `json:"logic"`
+}
+
+// chartDataQueryFromConfig parses a persisted chart config into the same
+// entity request the interactive builder sends (see ChartBuilder's
+// composeChartQueryRequest): dims flatten all dimension-group fields, metrics
+// flatten all metric-group fields with agg from fieldMeta (default "sum") and
+// alias from fieldMeta (default = column name). Returns ok=false for legacy
+// (queryConfig + positional ids), malformed, or empty-group configs.
+func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bool) {
+	var doc chartConfigV1
+	if err := json.Unmarshal([]byte(chart.Config), &doc); err != nil || doc.Query == nil {
+		return nil, false
+	}
+
+	var dims []string
+	for _, group := range doc.Query.DimensionGroups {
+		dims = append(dims, group.Fields...)
+	}
+	var metrics []entity.MetricConfig
+	for _, group := range doc.Query.MetricGroups {
+		for _, name := range group.Fields {
+			meta := doc.FieldMeta[name]
+			agg := meta.Aggregation
+			if agg == "" {
+				agg = "sum"
+			}
+			alias := meta.Alias
+			if alias == "" {
+				alias = name
+			}
+			metrics = append(metrics, entity.MetricConfig{Field: name, Agg: agg, Alias: alias})
+		}
+	}
+	if len(dims) == 0 && len(metrics) == 0 {
+		return nil, false
+	}
+
+	filters := make([]entity.Filter, 0, len(doc.Query.Filters))
+	for _, f := range doc.Query.Filters {
+		valueEnd := f.ValueEnd
+		if valueEnd == nil {
+			valueEnd = f.ValueEndCC
+		}
+		filters = append(filters, entity.Filter{
+			Field:    f.Field,
+			Operator: f.Operator,
+			Value:    f.Value,
+			ValueEnd: valueEnd,
+			Logic:    f.Logic,
+		})
+	}
+
+	chartType := doc.ChartType
+	if chartType == "" {
+		chartType = chart.ChartType
+	}
+
+	req := &entity.ChartQueryRequest{
+		DatasetID: chart.DatasetID,
+		ChartType: chartType,
+		Dims:      dims,
+		Metrics:   metrics,
+		Filters:   filters,
+		Sort:      doc.Query.Sort,
+	}
+	if doc.Query.Limit > 0 {
+		req.Pagination = &entity.Pagination{Page: 1, PageSize: doc.Query.Limit}
+	}
+	return req, true
 }
 
 // getPlannerSource 获取 QueryPlanner 生成 AST 所需的数据源。
