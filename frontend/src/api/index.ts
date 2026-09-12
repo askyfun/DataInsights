@@ -14,19 +14,12 @@ type G = components['schemas'];
 // Types
 export type DatasourceType = 'postgresql' | 'clickhouse' | 'mysql' | 'starrocks';
 
-export interface Datasource {
-  id?: number;
-  name: string;
+// Backend masks password (json:"-"), so the generated schema has no password
+// key; id/created_at/updated_at are required on the wire (no typed-literal
+// construction sites exist frontend-side).
+export type Datasource = Omit<G['Datasource'], 'type'> & {
   type: DatasourceType;
-  host: string;
-  port: number;
-  database_name: string;
-  username: string;
-  // 后端已脱敏：响应不再包含 password（Update 传空则后端保留原值）
-  password?: string;
-  created_at?: string;
-  updated_at?: string;
-}
+};
 
 export interface DatasourceFormData {
   name: string;
@@ -126,14 +119,9 @@ export interface Share {
 
 export type ShareFormData = G['ShareCreateRequest'];
 
-export interface TestConnectionRequest {
+export type TestConnectionRequest = Omit<G['DatasourceTestConnectionRequest'], 'type'> & {
   type: DatasourceType;
-  host: string;
-  port: number;
-  database_name: string;
-  username: string;
-  password: string;
-}
+};
 
 export type TableInfo = G['TableInfo'];
 
