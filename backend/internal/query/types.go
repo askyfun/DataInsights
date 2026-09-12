@@ -69,14 +69,6 @@ type SortConfig struct {
 	Order string `json:"order"` // asc | desc
 }
 
-type PieChartOptions struct {
-	MergeOtherBelowRatio *float64 `json:"pie_merge_other_below_ratio,omitempty"`
-}
-
-type ChartRequestConfig struct {
-	QueryOptions *PieChartOptions `json:"query_options,omitempty"`
-}
-
 // ChartQueryRequest 图表查询请求
 type ChartQueryRequest struct {
 	DatasetID  int            `json:"dataset_id"`
@@ -86,7 +78,6 @@ type ChartQueryRequest struct {
 	Filters    []FilterConfig `json:"filters"`
 	Pagination *Pagination    `json:"pagination,omitempty"`
 	Sort       *SortConfig    `json:"sort,omitempty"`
-	Config     *ChartRequestConfig `json:"config,omitempty"`
 	PlannedAST *QueryAST      `json:"-"`
 }
 
