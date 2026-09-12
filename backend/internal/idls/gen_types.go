@@ -81,6 +81,21 @@ type ChartCreateRequest struct {
 	Name      string  `json:"name"`
 }
 
+// ChartDataResponse GET /api/charts/{id}/data 响应：v1 配置时 data 为与 ChartDataResult.data 相同的判别形状（契约上 oneOf 语义，成员为 ChartTableResponse / ChartPieResponse / ChartAxisResponse / ChartScatterResponse / ChartPivotResponse，按图表 chart_type 判别，不投影 select_sql/count_sql）； 旧结构/损坏/空配置回退为裸 DataRow[]。生成物与 ChartDataResult.data 同理 采用无类型 schema（Go interface{} / TS unknown），消费方判别。
+type ChartDataResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data v1 配置为查询处理器输出（五形状之一，见上），legacy 回退为 DataRow[]（经归一化恒为数组）。
+	Data interface{} `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
 // ChartDataResult POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，是按 chart_type 判别的五形状（契约上 oneOf 语义、 未生成 union 类型：data 为无类型 schema，成员见下方各 Chart*Response schema；pie/scatter/table 成员间存在结构重叠，消费方以 chart_type 为准， 不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。
 type ChartDataResult struct {
 	// CountSql 生成的计数 SQL；仅 chart_type=table 且携带 pagination 分支返回 （executor.Execute 的 count 查询路径），其余形状缺省。
@@ -91,19 +106,6 @@ type ChartDataResult struct {
 
 	// SelectSql 生成的取数 SQL（entity omitempty；成功路径恒非空）。
 	SelectSql *string `json:"select_sql,omitempty"`
-}
-
-// ChartDataRowsResponse GET /api/charts/{id}/data 响应：data 为裸数据行数组（非 ChartDataResult）。
-type ChartDataRowsResponse struct {
-	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
-	Code ResponseCode `json:"code"`
-	Data []DataRow    `json:"data"`
-
-	// Msg 提示消息；成功为 "success"，错误为可读错误描述
-	Msg string `json:"msg"`
-
-	// Trace 请求追踪 ID（X-Request-ID）
-	Trace string `json:"trace"`
 }
 
 // ChartListResponse GET /api/charts 响应：data 为 Chart 数组。

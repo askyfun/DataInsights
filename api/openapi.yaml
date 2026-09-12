@@ -611,12 +611,17 @@ paths:
         - charts
       summary: 图表数据预览取数
       description: |
-        非语义化图表查询：按图表绑定数据集的表/SQL 源实时取前 100 行
-        （query.WrapPreviewSQL，service/chart.GetData）。响应 data 是裸数据行数组
-        （DataRow[]，经归一化恒为数组），不是 POST /api/charts/query 的
-        ChartDataResult 形状。图表/数据集不存在、取数失败 → Envelope.code =
-        50000（handler.GetData 走 InternalError，不区分 404）；{id} 非法 →
-        20100（与 ChartId 参数口径一致）。
+        按图表持久化 config 实时取数（service/chart.GetData）。v1 文档（query 键 +
+        非空维度/指标组）复用 POST /api/charts/query 的同一聚合管道：dims 平铺
+        dimensionGroups.fields、metrics 平铺 metricGroups.fields（agg/alias 取
+        fieldMeta，默认 sum/列名），filters/sort/limit 透传，响应 data 为与
+        ChartDataResult.data 相同的判别形状（ChartTableResponse / ChartPieResponse /
+        ChartAxisResponse / ChartScatterResponse / ChartPivotResponse；不投影
+        select_sql/count_sql）。旧结构（queryConfig + 位置 field-N）、损坏 JSON、
+        空配置或组全空时回退为按数据集源取前 100 行的裸数据行数组（DataRow[]，
+        query.WrapPreviewSQL，列名不可恢复）。图表/数据集不存在、取数失败 →
+        Envelope.code = 50000（handler.GetData 走 InternalError，不区分 404）；
+        {id} 非法 → 20100（与 ChartId 参数口径一致）。
       operationId: getChartData
       parameters:
         - $ref: '#/components/parameters/ChartId'
@@ -626,7 +631,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChartDataRowsResponse'
+                $ref: '#/components/schemas/ChartDataResponse'
   /api/charts/query:
     post:
       tags:
@@ -1906,9 +1911,14 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/Chart'
-    ChartDataRowsResponse:
+    ChartDataResponse:
       description: >-
-        GET /api/charts/{id}/data 响应：data 为裸数据行数组（非 ChartDataResult）。
+        GET /api/charts/{id}/data 响应：v1 配置时 data 为与 ChartDataResult.data
+        相同的判别形状（契约上 oneOf 语义，成员为 ChartTableResponse /
+        ChartPieResponse / ChartAxisResponse / ChartScatterResponse /
+        ChartPivotResponse，按图表 chart_type 判别，不投影 select_sql/count_sql）；
+        旧结构/损坏/空配置回退为裸 DataRow[]。生成物与 ChartDataResult.data 同理
+        采用无类型 schema（Go interface{} / TS unknown），消费方判别。
       allOf:
         - $ref: '#/components/schemas/Envelope'
         - type: object
@@ -1916,9 +1926,9 @@ components:
             - data
           properties:
             data:
-              type: array
-              items:
-                $ref: '#/components/schemas/DataRow'
+              description: >-
+                v1 配置为查询处理器输出（五形状之一，见上），legacy 回退为
+                DataRow[]（经归一化恒为数组）。
     ChartQueryResponse:
       description: POST /api/charts/query 响应：data 为 ChartDataResult。
       allOf:
