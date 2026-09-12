@@ -19,10 +19,17 @@ vi.mock('../../api', () => ({
   },
 }));
 
-// Keep the chart renderers out of the test surface; the assertions below
-// target the auth gate (password prompt vs. chart header), not ECharts.
+// Keep the chart renderers out of the test surface except for the option
+// payload; the assertions below target the auth gate (password prompt vs.
+// chart header) and the shape-aware consumption of the aggregated data
+// envelope. Capturing `option` lets the axis test prove the payload is fed
+// to ECharts verbatim.
+const renderedOptions: unknown[] = [];
 vi.mock('echarts-for-react', () => ({
-  default: () => <div data-testid="echarts" />,
+  default: ({ option }: { option?: unknown }) => {
+    renderedOptions.push(option);
+    return <div data-testid="echarts" />;
+  },
 }));
 vi.mock('../../components/ChartBuilder/TableChart', () => ({
   default: () => <div data-testid="table-chart" />,
@@ -91,6 +98,7 @@ function renderShareView() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  renderedOptions.length = 0;
 });
 
 describe('ShareView live password gate (has_password envelope)', () => {
@@ -151,12 +159,13 @@ describe('ShareView live password gate (has_password envelope)', () => {
     mockGetChartById.mockResolvedValue(
       mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: mockChart })
     );
+    // v1 bar 图表：后端经聚合管道返回与 builder 预览同形的 AxisResponse。
     mockGetChartData.mockResolvedValue(
       mockAxiosResponse({
         code: 20000,
         msg: 'success',
         trace: '',
-        data: [{ month: '2026-01', total: 10 }],
+        data: { x_axis: ['2026-01', '2026-02'], series: [{ name: 'total', data: [10, 20] }] },
       })
     );
 
@@ -164,5 +173,37 @@ describe('ShareView live password gate (has_password envelope)', () => {
 
     await waitFor(() => expect(screen.getByText('Monthly Sales')).toBeInTheDocument());
     expect(screen.queryByText('Password Required')).not.toBeInTheDocument();
+  });
+
+  it('feeds an axis payload (builder preview shape) to ECharts without row indexing', async () => {
+    mockGetShareByToken.mockResolvedValue(
+      mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: openShare })
+    );
+    mockGetChartById.mockResolvedValue(
+      mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: mockChart })
+    );
+    mockGetChartData.mockResolvedValue(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'success',
+        trace: '',
+        data: { x_axis: ['华北', '华东'], series: [{ name: 'Revenue', data: [36635, 37730] }] },
+      })
+    );
+
+    renderShareView();
+
+    await waitFor(() => expect(screen.getByTestId('echarts')).toBeInTheDocument());
+    expect(screen.queryByText('Unable to display chart')).not.toBeInTheDocument();
+
+    // The processed AxisResponse must reach ECharts verbatim: x categories
+    // from x_axis, one series per payload series (alias kept as the series
+    // name), values not re-derived from raw rows.
+    const option = renderedOptions[renderedOptions.length - 1] as {
+      xAxis: { data: string[] };
+      series: { name: string; type: string; data: unknown[] }[];
+    };
+    expect(option.xAxis.data).toEqual(['华北', '华东']);
+    expect(option.series).toEqual([{ name: 'Revenue', type: 'bar', data: [36635, 37730] }]);
   });
 });

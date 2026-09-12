@@ -448,7 +448,11 @@ export const useStore = create<AppState>((set) => ({
     set({ chartDataLoading: true });
     try {
       const response = await chartsApi.getChartData(chartId);
-      set({ chartData: response.data.data, chartDataLoading: false });
+      // chartData 状态约定是行数组（builder 的旧消费面）。v1 配置下
+      // getChartData 现在返回聚合对象（分享页 ShareView 直接消费该联合类型），
+      // 这里仅保留 legacy 的裸行回退，聚合负载不强行塞进行数组状态。
+      const payload = response.data.data;
+      set({ chartData: Array.isArray(payload) ? payload : [], chartDataLoading: false });
     } catch (_error: any) {
       set({ chartData: [], chartDataLoading: false });
     }

@@ -412,9 +412,12 @@ export const chartsApi = {
     return apiClient.delete<ApiResponse<{ status: string }>>(`/api/charts/${id}`);
   },
 
-  // Get chart data
-  getChartData: (id: number): Promise<AxiosResponse<ApiResponse<unknown[]>>> => {
-    return apiClient.get<ApiResponse<unknown[]>>(`/api/charts/${id}/data`);
+  // Get chart data. v1-configured charts return the same aggregated payload
+  // as POST /charts/query's ChartDataResult.data (shape discriminated by
+  // chart_type); legacy/malformed/empty configs fall back to the bare
+  // DataRow[] raw preview — ChartDataResponse covers both arms.
+  getChartData: (id: number): Promise<AxiosResponse<ApiResponse<ChartDataResponse>>> => {
+    return apiClient.get<ApiResponse<ChartDataResponse>>(`/api/charts/${id}/data`);
   },
 
   // Execute query with config
