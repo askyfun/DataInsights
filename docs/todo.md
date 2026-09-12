@@ -532,7 +532,7 @@
 - [x] **饼图无效设置移除**（产品决策）：前端比例控件+三处 `config` 发送+类型删除、后端 `req.Config` 死输入链删除、openapi 注释按真相重写；`PieProcessor.MergeOtherBelowRatio` 能力保留未接线
 - [x] 死代码：`query.BuildBunQuery`、ShareView 不可达 401/403 分支（先钉行为测试再删）、`lib/api/client.ts` baseURL 尾 `}`、`ChartBuilder` `valueEnd as any`×3、前端死类型导出（`GeneratedSQL`/`TestConnectionResponse`/`typeConfig` 判死/datatypes 三胞胎）
 - [x] **前端类型消费生成物**（9 步迁移，每步 tsc 门+vitest 子集）：实体/响应/请求类型 alias 到 `components['schemas']` + 薄手写联合层；envelope 同名碰撞零出现（`ChartQueryResponse`→`ChartDataResult` wrapper）；`ApiResponse<T>` 重声明自生成 Envelope；净 -88 行
-- [ ] **Batch 4 重评**：后端 handler In/Out 消费 `idls.*`（生成 Go 类型无 gin `form:"-"` 语义，需自定义 codegen 模板，收益/风险待评）；`updated_at` 在 PUT 保留旧值不刷新（datasource 同病，无 DB trigger）；`GetChartData` 聚合语义统一（现返回原始行、图表配置不参与取数）；`Dataset`/`Chart` 等生成类型 timestamp 必填 vs 后端部分端点返回空串的语义核对；ChartBuilder 三处 filters/query 构造点 DRY 合并；`/datasets/new` 经实测非 bug（v6 静态段优先命中 DatasetEdit，new 模式重定向回列表为既有设计），销账
+- [ ] **Batch 4 重评**：后端 handler In/Out 消费 `idls.*`（生成 Go 类型无 gin `form:"-"` 语义，需自定义 codegen 模板，收益/风险待评）；`updated_at` 在 PUT 保留旧值不刷新（datasource 同病，无 DB trigger）；`GetChartData` 聚合语义统一（现返回原始行、图表配置不参与取数）；`Dataset`/`Chart` 等生成类型 timestamp 必填 vs 后端部分端点返回空串的语义核对；ChartBuilder 三处 filters/query 构造点 DRY 合并；`/datasets/new` 经实测非 bug（v6 静态段优先命中 DatasetEdit，new 模式重定向回列表为既有设计），销账；PUT preserve-merge 非事务读-改-写（并发下可复活旧值，接受为既有全行 PUT 语义的延伸，与 `updated_at` 不刷新同记）；`query_type` 翻转后旧 `table_name` 残留（读路径先分支 `query_type`，今日无害）；`service/dataset` `toDatasetModel` 时间戳 Parse 错误被吞（merge 路径不可达，潜在）
 
 ### 全分支评审结论（2026-09 收口）
 

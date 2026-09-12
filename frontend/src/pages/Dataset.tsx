@@ -553,6 +553,13 @@ const DatasetPage: React.FC = () => {
         query_type: values.query_type,
         table_name: values.query_type === 'table' ? values.table_name : undefined,
         query_sql: values.query_type === 'sql' ? values.query_sql : undefined,
+        // The modal does not manage these two, but the PUT handler overlays
+        // every scalar it receives (an omitted bool defaults to false, an
+        // omitted mode to "direct") — pass the stored row's values through so
+        // renaming here never silently disables sharding configured in
+        // DatasetEdit.
+        mode: editingDataset.mode,
+        shard_enabled: editingDataset.shard_enabled,
       };
       await updateDataset(editingDataset.id, data);
       message.success(intl.formatMessage({ id: 'common.success' }));
