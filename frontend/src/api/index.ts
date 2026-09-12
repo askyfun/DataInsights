@@ -194,49 +194,27 @@ export interface ChartQueryRequest {
   sort?: ChartQuerySort;
 }
 
-export interface TableResponse {
-  columns: string[];
-  data: Record<string, unknown>[];
-  pagination: {
-    page: number;
-    page_size: number;
-    total: number;
-    total_pages: number;
-  };
-}
+export type TableResponse = G['ChartTableResponse'];
 
-export interface PieResponse {
-  data: Array<{
-    name: string;
-    value: number;
-    percentage: number;
-  }>;
-}
+export type PieResponse = G['ChartPieResponse'];
 
-export interface AxisResponse {
-  x_axis: string[];
-  series: Array<{
-    name: string;
-    data: unknown[];
-  }>;
-}
+export type AxisResponse = G['ChartAxisResponse'];
 
-export interface ScatterResponse {
-  data: Array<[number, number]>;
-}
+export type ScatterResponse = G['ChartScatterResponse'];
 
 export type ChartDataResponse =
-  | TableResponse
-  | PieResponse
-  | AxisResponse
-  | ScatterResponse
+  | G['ChartTableResponse']
+  | G['ChartPieResponse']
+  | G['ChartAxisResponse']
+  | G['ChartScatterResponse']
+  | G['ChartPivotResponse']
   | unknown[];
 
-export interface ChartQueryResponse {
+// NOT G['ChartQueryResponse'] (that is the Envelope wrapper): the bare wire
+// payload is G['ChartDataResult'], with data narrowed from unknown to the union.
+export type ChartQueryResponse = Omit<G['ChartDataResult'], 'data'> & {
   data: ChartDataResponse;
-  select_sql?: string;
-  count_sql?: string;
-}
+};
 
 // Create single axios instance with proper interceptors
 const apiClient: AxiosInstance = axios.create({
