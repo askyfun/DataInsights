@@ -153,6 +153,86 @@ const getFieldGroupKindIndex = (
   );
 };
 
+interface ChartQueryRequestInput {
+  datasetId: number;
+  chartType: ChartConfig['chartType'];
+  queryConfig: QueryConfig;
+  fields: ChartField[];
+  metricAggregations: Record<string, string>;
+  metricAliases: Record<string, string>;
+  tablePagination: { page: number; pageSize: number };
+  /** 返回对象是否携带 sort 键。两个自动查询 effect 历史上从不发送 sort， 请求键集合测试也钉死了这一点，统一会让 sort 生效并改变 wire 语义。 */
+  includeSort: boolean;
+}
+
+/**
+ * 图表查询请求的唯一构造出口（纯函数，所有输入经参数传入）。
+ * 调用场景：手动执行查询（含排序/翻页覆盖）与两个自动查询 effect 共用。
+ * 主要逻辑：按图表定义裁剪字段组、字段 id 映射回列名、组装 dims/metrics/filters/pagination； 维度与指标同时为空时返回 null 表示不发起查询。
+ */
+const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequest | null => {
+  const {
+    datasetId,
+    chartType,
+    queryConfig,
+    fields,
+    metricAggregations,
+    metricAliases,
+    tablePagination,
+    includeSort,
+  } = input;
+
+  const activeGroups = getActiveFieldGroups(chartType, queryConfig);
+  const fieldMap = new Map(fields.map((f) => [f.id, f]));
+  const dimensionFields = activeGroups.dimensionGroups
+    .flatMap((group) => group.fields)
+    .map((id) => fieldMap.get(id))
+    .filter((f): f is ChartField => f !== undefined);
+  const metricFields = activeGroups.metricGroups
+    .flatMap((group) => group.fields)
+    .map((id) => fieldMap.get(id))
+    .filter((f): f is ChartField => f !== undefined);
+
+  if (dimensionFields.length === 0 && metricFields.length === 0) {
+    return null;
+  }
+
+  return {
+    dataset_id: datasetId,
+    chart_type: chartType,
+    dims: dimensionFields.map((f) => f.name),
+    metrics: metricFields.map((f) => ({
+      field: f.name,
+      agg: (metricAggregations[f.id] || 'sum') as ChartQueryAggregation,
+      alias: metricAliases[f.id] || f.name,
+    })),
+    filters: queryConfig.filters.map((f) => {
+      const field = fields.find((candidate) => candidate.id === f.field);
+      return {
+        field: field?.name || f.field,
+        operator: f.operator,
+        value: f.value,
+        value_end: f.valueEnd,
+        logic: f.logic,
+      };
+    }),
+    ...(includeSort
+      ? {
+          sort: queryConfig.sort
+            ? { field: queryConfig.sort.field, order: queryConfig.sort.order }
+            : undefined,
+        }
+      : {}),
+    pagination:
+      chartType === 'table'
+        ? {
+            page: tablePagination.page,
+            page_size: tablePagination.pageSize,
+          }
+        : undefined,
+  };
+};
+
 interface ChartCanvasProps {
   config: ChartConfig;
   data: any[];
@@ -889,56 +969,16 @@ const ChartBuilder: React.FC = () => {
   const buildChartQueryRequest = useCallback((): ChartQueryRequest | null => {
     if (!selectedDatasetId) return null;
 
-    const activeGroups = getActiveFieldGroups(chartBuilderConfig.chartType, queryConfig);
-    const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
-    const dimensionFields = activeGroups.dimensionGroups
-      .flatMap((group) => group.fields)
-      .map((id) => fieldMap.get(id))
-      .filter((f): f is ChartField => f !== undefined);
-    const metricFields = activeGroups.metricGroups
-      .flatMap((group) => group.fields)
-      .map((id) => fieldMap.get(id))
-      .filter((f): f is ChartField => f !== undefined);
-
-    if (dimensionFields.length === 0 && metricFields.length === 0) {
-      return null;
-    }
-
-    const dims = dimensionFields.map((f) => f.name);
-    const metrics = metricFields.map((f) => ({
-      field: f.name,
-      agg: (metricAggregations[f.id] || 'sum') as ChartQueryAggregation,
-      alias: metricAliases[f.id] || f.name,
-    }));
-
-    const filters = queryConfig.filters.map((f) => {
-      const field = chartBuilderFields.find((field) => field.id === f.field);
-      return {
-        field: field?.name || f.field,
-        operator: f.operator,
-        value: f.value,
-        value_end: f.valueEnd,
-        logic: f.logic,
-      };
+    return composeChartQueryRequest({
+      datasetId: selectedDatasetId,
+      chartType: chartBuilderConfig.chartType,
+      queryConfig,
+      fields: chartBuilderFields,
+      metricAggregations,
+      metricAliases,
+      tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
+      includeSort: true,
     });
-
-    return {
-      dataset_id: selectedDatasetId,
-      chart_type: chartBuilderConfig.chartType,
-      dims,
-      metrics,
-      filters,
-      sort: queryConfig.sort
-        ? { field: queryConfig.sort.field, order: queryConfig.sort.order }
-        : undefined,
-      pagination:
-        chartBuilderConfig.chartType === 'table'
-          ? {
-              page: tablePagination.page,
-              page_size: tablePagination.pageSize,
-            }
-          : undefined,
-    };
   }, [
     selectedDatasetId,
     metricAggregations,
@@ -1012,95 +1052,38 @@ const ChartBuilder: React.FC = () => {
     if (!selectedDatasetId) return;
 
     const state = useStore.getState();
-    const fieldMap = new Map(state.chartBuilderFields.map((f) => [f.id, f]));
-    const activeGroups = getActiveFieldGroups(
-      state.chartBuilderConfig.chartType,
-      state.queryConfig
-    );
-
-    const dimIds = activeGroups.dimensionGroups.flatMap((g) => g.fields);
-    const dimFields = dimIds
-      .map((id) => fieldMap.get(id))
-      .filter((f): f is ChartField => f !== undefined);
-
-    const metIds = activeGroups.metricGroups.flatMap((g) => g.fields);
-    const metFields = metIds
-      .map((id) => fieldMap.get(id))
-      .filter((f): f is ChartField => f !== undefined);
-
-    if (dimFields.length === 0 && metFields.length === 0) return;
-
-    const request: ChartQueryRequest = {
-      dataset_id: selectedDatasetId,
-      chart_type: state.chartBuilderConfig.chartType,
-      dims: dimFields.map((f) => f.name),
-      metrics: metFields.map((f) => ({
-        field: f.name,
-        agg: (state.metricAggregations[f.id] || 'sum') as ChartQueryAggregation,
-        alias: state.metricAliases[f.id] || f.name,
-      })),
-      filters: state.queryConfig.filters.map((f) => {
-        const field = state.chartBuilderFields.find((field) => field.id === f.field);
-        return {
-          field: field?.name || f.field,
-          operator: f.operator,
-          value: f.value,
-          value_end: f.valueEnd,
-          logic: f.logic,
-        };
-      }),
-      pagination:
-        state.chartBuilderConfig.chartType === 'table'
-          ? { page: state.tablePagination.page, page_size: state.tablePagination.pageSize }
-          : undefined,
-    };
-    executeChartQuery(request);
+    const request = composeChartQueryRequest({
+      datasetId: selectedDatasetId,
+      chartType: state.chartBuilderConfig.chartType,
+      queryConfig: state.queryConfig,
+      fields: state.chartBuilderFields,
+      metricAggregations: state.metricAggregations,
+      metricAliases: state.metricAliases,
+      tablePagination: state.tablePagination,
+      includeSort: false,
+    });
+    if (request) {
+      executeChartQuery(request);
+    }
   }, [selectedDatasetId, executeChartQuery]);
 
   useEffect(() => {
     if (!autoQuery) return;
     if (!selectedDatasetId) return;
 
-    const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
-    const activeGroups = getActiveFieldGroups(chartBuilderConfig.chartType, queryConfig);
-
-    const dimIds = activeGroups.dimensionGroups.flatMap((g) => g.fields);
-    const dimFields = dimIds
-      .map((id) => fieldMap.get(id))
-      .filter((f): f is ChartField => f !== undefined);
-
-    const metIds = activeGroups.metricGroups.flatMap((g) => g.fields);
-    const metFields = metIds
-      .map((id) => fieldMap.get(id))
-      .filter((f): f is ChartField => f !== undefined);
-
-    if (dimFields.length === 0 && metFields.length === 0) return;
-
-    const request: ChartQueryRequest = {
-      dataset_id: selectedDatasetId,
-      chart_type: chartBuilderConfig.chartType,
-      dims: dimFields.map((f) => f.name),
-      metrics: metFields.map((f) => ({
-        field: f.name,
-        agg: (metricAggregations[f.id] || 'sum') as ChartQueryAggregation,
-        alias: metricAliases[f.id] || f.name,
-      })),
-      filters: queryConfig.filters.map((f) => {
-        const field = chartBuilderFields.find((field) => field.id === f.field);
-        return {
-          field: field?.name || f.field,
-          operator: f.operator,
-          value: f.value,
-          value_end: f.valueEnd,
-          logic: f.logic,
-        };
-      }),
-      pagination:
-        chartBuilderConfig.chartType === 'table'
-          ? { page: tablePagination.page, page_size: tablePagination.pageSize }
-          : undefined,
-    };
-    executeChartQuery(request);
+    const request = composeChartQueryRequest({
+      datasetId: selectedDatasetId,
+      chartType: chartBuilderConfig.chartType,
+      queryConfig,
+      fields: chartBuilderFields,
+      metricAggregations,
+      metricAliases,
+      tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
+      includeSort: false,
+    });
+    if (request) {
+      executeChartQuery(request);
+    }
   }, [
     autoQuery,
     chartBuilderConfig.chartType,
