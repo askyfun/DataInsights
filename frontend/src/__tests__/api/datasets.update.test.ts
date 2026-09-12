@@ -60,7 +60,7 @@ describe('datasetsApi.update wire payload', () => {
     });
   });
 
-  it('omits tags/shard_keys keys entirely when absent (backend defaults)', async () => {
+  it('omits tags/shard_keys keys entirely when absent (backend preserves stored)', async () => {
     await datasetsApi.update(4, {
       name: 'x',
       datasource_id: 1,

@@ -137,6 +137,32 @@ func testDataset() *entity.Dataset {
 	}
 }
 
+// storedDataset is the Update-path fixture: a fully populated stored row
+// (non-empty tags/columns/quality_rules, description, timestamps) used as
+// the GetByID gate result, so tests can prove the fetch-and-preserve merge
+// never lets a sparse PUT body silently destroy stored metadata. Field
+// values are fixture placeholders, not credentials.
+func storedDataset() *entity.Dataset {
+	tableName := "orders"
+	description := "old desc"
+	return &entity.Dataset{
+		ID:           4,
+		Name:         "sales",
+		DatasourceID: 2,
+		TableName:    &tableName,
+		QueryType:    "table",
+		Mode:         "direct",
+		Description:  &description,
+		Tags:         `["beta"]`,
+		QualityRules: `[{"rule":"not_null"}]`,
+		Columns:      `[{"name":"id","expr":"id","type":"int","type_config":{"precision":0,"scale":0},"comment":"","role":"metric"}]`,
+		ShardEnabled: true,
+		ShardKeys:    `["id"]`,
+		CreatedAt:    "2024-01-02T03:04:05Z",
+		UpdatedAt:    "2024-06-07T08:09:10Z",
+	}
+}
+
 // ---------------------------------------------------------------- List
 
 func TestDatasetList_Defaults(t *testing.T) {
@@ -365,7 +391,12 @@ func TestDatasetCreate_ServiceError(t *testing.T) {
 // migrated contract: path id + create-style JSON body (tags/shard_keys/
 // columns as JSON strings), unknown ids mapped to the standard 404 envelope
 // via a GetByID gate (service.Update's WherePK re-select surfaces a
-// confusing internal error for missing rows otherwise).
+// confusing internal error for missing rows otherwise). The gate result is
+// also the merge base: service.Update is a full-row update, so anything the
+// body does not explicitly carry is PRESERVED from the stored row (same
+// fetch-and-preserve convention as datasource.Update keeping an omitted
+// password) — a sparse edit-save must never wipe stored columns,
+// quality_rules or timestamps.
 
 func TestDatasetUpdate_Success(t *testing.T) {
 	var gotIDForGet int
@@ -374,7 +405,7 @@ func TestDatasetUpdate_Success(t *testing.T) {
 	h := NewDatasetHandler(&mockDatasetService{
 		getByIDFunc: func(_ context.Context, id int) (*entity.Dataset, error) {
 			gotIDForGet = id
-			return testDataset(), nil
+			return storedDataset(), nil
 		},
 		updateFunc: func(_ context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
 			updateRan = true
@@ -382,36 +413,108 @@ func TestDatasetUpdate_Success(t *testing.T) {
 				t.Errorf("Update ran before the GetByID gate resolved id=4 (gate saw %d)", gotIDForGet)
 			}
 			got = ds
-			return testDataset(), nil
+			return ds, nil
 		},
 	})
 	body := `{"name":"upd","datasource_id":2,"table_name":"orders","query_type":"table","description":"d","tags":"[\"x\"]","shard_enabled":true,"shard_keys":"[\"id\"]"}`
 	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4", body)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":`+datasetGetJSON+`}`)
-	// Entity build: ID from the path, create-style empty-value normalization
-	// (mode/tags/quality_rules/columns defaults), pointer fields only when
-	// non-empty, JSON-string array fields forwarded verbatim.
+	// Response echoes the merged entity: provided fields overlaid on the
+	// stored row, unprovided metadata (quality_rules/columns) and the
+	// timestamps carried through — byte-level proof of no data loss.
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":4,"name":"upd","datasource_id":2,"table_name":"orders","query_sql":null,"query_type":"table","mode":"direct","accelerate_config":null,"description":"d","tags":"[\"x\"]","refresh_strategy":null,"preview_data":null,"quality_rules":"[{\"rule\":\"not_null\"}]","columns":"[{\"name\":\"id\",\"expr\":\"id\",\"type\":\"int\",\"type_config\":{\"precision\":0,\"scale\":0},\"comment\":\"\",\"role\":\"metric\"}]","shard_enabled":true,"shard_keys":"[\"id\"]","created_at":"2024-01-02T03:04:05Z","updated_at":"2024-06-07T08:09:10Z"}}`)
 	if got == nil || !updateRan {
 		t.Fatalf("service.Update not called")
 	}
+	// Entity build: ID from the path; PUT-owned fields overlaid; pointer
+	// fields taken when non-empty, JSON-string array fields forwarded
+	// verbatim; stored quality_rules/columns/timestamps carried through.
 	if got.ID != 4 || got.Name != "upd" || got.DatasourceID != 2 ||
 		got.TableName == nil || *got.TableName != "orders" ||
 		got.Description == nil || *got.Description != "d" ||
 		got.QueryType != "table" || got.Mode != "direct" ||
-		got.Tags != `["x"]` || got.QualityRules != "[]" || got.Columns != "[]" ||
-		!got.ShardEnabled || got.ShardKeys != `["id"]` {
+		got.Tags != `["x"]` ||
+		got.QualityRules != `[{"rule":"not_null"}]` ||
+		got.Columns != storedDataset().Columns ||
+		!got.ShardEnabled || got.ShardKeys != `["id"]` ||
+		got.CreatedAt != "2024-01-02T03:04:05Z" || got.UpdatedAt != "2024-06-07T08:09:10Z" {
 		t.Fatalf("service received unexpected entity: %+v", got)
 	}
 }
 
-func TestDatasetUpdate_SQLModeDefaults(t *testing.T) {
-	// Same normalization contract as the Create twin: omitted table_name /
-	// mode / tags / columns land as the create defaults; query_sql non-empty
-	// sets the pointer.
+func TestDatasetUpdate_PreservesOptionalMetadataWhenOmitted(t *testing.T) {
+	// Minimal body: only the always-owned fields. Everything else keeps the
+	// STORED values — the create-style "[]" defaults must not fire here, and
+	// absent pointer fields must not NULL the row.
 	var got *entity.Dataset
 	h := NewDatasetHandler(&mockDatasetService{
 		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
-			return testDataset(), nil
+			return storedDataset(), nil
+		},
+		updateFunc: func(_ context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
+			got = ds
+			return ds, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4",
+		`{"name":"upd","datasource_id":2,"query_type":"table","shard_enabled":true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d: %s", w.Code, w.Body.String())
+	}
+	stored := storedDataset()
+	if got == nil || got.ID != 4 || got.Name != "upd" || got.DatasourceID != 2 ||
+		got.QueryType != "table" || got.Mode != "direct" {
+		t.Fatalf("owned-field overlay wrong: %+v", got)
+	}
+	if got.Tags != `["beta"]` || got.Columns != stored.Columns ||
+		got.QualityRules != `[{"rule":"not_null"}]` || got.ShardKeys != `["id"]` {
+		t.Fatalf("optional string metadata must be preserved: %+v", got)
+	}
+	if got.TableName == nil || *got.TableName != "orders" ||
+		got.Description == nil || *got.Description != "old desc" ||
+		got.QuerySQL != nil || got.AccelerateConfig != nil ||
+		got.RefreshStrategy != nil || got.PreviewData != nil {
+		t.Fatalf("pointer fields must preserve stored values when body omits them: %+v", got)
+	}
+	if got.CreatedAt != "2024-01-02T03:04:05Z" || got.UpdatedAt != "2024-06-07T08:09:10Z" {
+		t.Fatalf("timestamps must reach svc.Update unchanged: %+v", got)
+	}
+}
+
+func TestDatasetUpdate_ExplicitEmptyJSONArrayClears(t *testing.T) {
+	// Preserve is not a one-way door: an explicit "[]" (what the frontend's
+	// JSON.stringify([]) produces, e.g. after clearing the tag picker) still
+	// clears the stored value.
+	var got *entity.Dataset
+	h := NewDatasetHandler(&mockDatasetService{
+		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
+			return storedDataset(), nil
+		},
+		updateFunc: func(_ context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
+			got = ds
+			return ds, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4",
+		`{"name":"upd","datasource_id":2,"query_type":"table","columns":"[]","tags":"[]","shard_keys":"[]"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got == nil || got.Columns != "[]" || got.Tags != "[]" || got.ShardKeys != "[]" {
+		t.Fatalf(`explicit "[]" must overwrite the stored value: %+v`, got)
+	}
+}
+
+func TestDatasetUpdate_SQLModeDefaults(t *testing.T) {
+	// query_sql provided, table_name omitted: the pointer fields preserve the
+	// stored value when absent (the stored row here carries no table_name,
+	// mirroring a sql-dataset edit), query_type from the body, mode keeps its
+	// create-style default, tags/quality_rules/columns preserve "[]".
+	var got *entity.Dataset
+	h := NewDatasetHandler(&mockDatasetService{
+		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
+			stored := testDataset()
+			stored.TableName = nil
+			return stored, nil
 		},
 		updateFunc: func(_ context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
 			got = ds

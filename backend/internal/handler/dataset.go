@@ -177,24 +177,37 @@ func (h *DatasetHandler) Update(req router.Request[datasetUpdateIn], res *router
 	// Gate on existence first: service.Update is a full-row WherePK update
 	// whose re-select surfaces a confusing "failed to get updated dataset"
 	// internal error for missing rows; the 404 mapping here keeps unknown ids
-	// on the same envelope the Get handler produces.
-	if _, err := h.svc.GetByID(req.Ctx.Request.Context(), id); err != nil {
+	// on the same envelope the Get handler produces. The fetched row is also
+	// the merge base below.
+	existing, err := h.svc.GetByID(req.Ctx.Request.Context(), id)
+	if err != nil {
 		return router.NewBusinessError(response.CodeNotFound, err.Error())
 	}
 
 	in := req.In
 
-	// Entity build mirrors Create (same defaults), with the ID from the path.
-	ds := &entity.Dataset{
-		ID:           id,
-		Name:         in.Name,
-		DatasourceID: in.DatasourceID,
-		QueryType:    in.QueryType,
-		Mode:         in.Mode,
-		Tags:         in.Tags,
-		Columns:      in.Columns,
-		ShardEnabled: in.ShardEnabled,
-		ShardKeys:    in.ShardKeys,
+	// Fetch-and-preserve merge (same convention as datasource.Update keeping
+	// an omitted password): service.Update rewrites every column, so the PUT
+	// body overlays the stored row and whatever it does not explicitly carry
+	// is preserved — a sparse edit-save must never wipe stored columns,
+	// quality_rules or timestamps. This is a deliberate "unprovided optional
+	// metadata is preserved" rule, NOT generic partial-update magic: the
+	// required fields (name/datasource_id/query_type) and the always-owned
+	// mode/shard_enabled are still taken from the body. An explicit "[]" or
+	// "" (the frontend serializes cleared pickers to []) still overwrites.
+	merged := *existing
+	ds := &merged
+	ds.ID = id
+	ds.Name = in.Name
+	ds.DatasourceID = in.DatasourceID
+	ds.QueryType = in.QueryType
+	ds.Mode = in.Mode
+	ds.ShardEnabled = in.ShardEnabled
+	if in.QueryType == "" {
+		ds.QueryType = "table"
+	}
+	if in.Mode == "" {
+		ds.Mode = "direct"
 	}
 	if in.TableName != "" {
 		ds.TableName = &in.TableName
@@ -205,20 +218,14 @@ func (h *DatasetHandler) Update(req router.Request[datasetUpdateIn], res *router
 	if in.Description != "" {
 		ds.Description = &in.Description
 	}
-	if ds.QueryType == "" {
-		ds.QueryType = "table"
+	if in.Tags != "" {
+		ds.Tags = in.Tags
 	}
-	if ds.Mode == "" {
-		ds.Mode = "direct"
+	if in.Columns != "" {
+		ds.Columns = in.Columns
 	}
-	if ds.Tags == "" {
-		ds.Tags = "[]"
-	}
-	if ds.QualityRules == "" {
-		ds.QualityRules = "[]"
-	}
-	if ds.Columns == "" {
-		ds.Columns = "[]"
+	if in.ShardKeys != "" {
+		ds.ShardKeys = in.ShardKeys
 	}
 
 	result, err := h.svc.Update(req.Ctx.Request.Context(), ds)

@@ -107,7 +107,8 @@ describe('DatasetEdit submit', () => {
     const [url, body] = instance.put.mock.calls[0];
     expect(url).toBe('/api/datasets/4');
     // Array in, JSON string out — exactly one encode. description is the
-    // empty form value, passed through as-is (the handler normalizes it).
+    // empty form value, passed through as-is (the handler preserves the
+    // stored value for empty optional metadata; cleared pickers send "[]").
     expect(body).toEqual({
       name: 'sales',
       datasource_id: 2,
