@@ -1,8 +1,15 @@
 import * as Sentry from '@sentry/react';
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import type { components } from '../idls/gen_types';
 import type { ApiResponse } from '../lib/api/client';
 import type { QueryConfig } from '../store';
 import type { StandardDataType } from './datatypes';
+
+// G = generated OpenAPI schema types (src/idls/gen_types.ts). Migration rule:
+// handwritten *Response wire-payload types correspond to the bare generated
+// schema (e.g. ChartQueryResponse ↔ G['ChartDataResult']), never to the
+// same-named generated Envelope wrapper (G['ChartQueryResponse'] is Envelope).
+type G = components['schemas'];
 
 // Types
 export type DatasourceType = 'postgresql' | 'clickhouse' | 'mysql' | 'starrocks';
@@ -118,11 +125,7 @@ export interface Share {
   created_at?: string;
 }
 
-export interface ShareFormData {
-  chart_id: number;
-  password?: string;
-  expires_at?: string;
-}
+export type ShareFormData = G['ShareCreateRequest'];
 
 export interface TestConnectionRequest {
   type: DatasourceType;
@@ -133,47 +136,18 @@ export interface TestConnectionRequest {
   password: string;
 }
 
-export interface TableInfo {
-  name: string;
-  comment: string;
-}
+export type TableInfo = G['TableInfo'];
 
-export interface ColumnInfo {
-  name: string;
-  data_type: string;
-  comment: string;
-  role: ColumnRole;
-  is_virtual: boolean;
-  expression: string;
-}
+export type ColumnInfo = G['ColumnInfo'];
 
 // 数据预览
-export interface DatasetPreview {
-  columns: string[];
-  data: Record<string, unknown>[];
-}
+export type DatasetPreview = G['PreviewResult'];
 
 // 表数据预览（带分页和主键信息）
-export interface TableDataResult {
-  columns: string[];
-  data: Record<string, unknown>[];
-  total: number;
-  primary_keys: string[];
-  page: number;
-  page_size: number;
-}
+export type TableDataResult = G['TableDataResult'];
 
 // 字段分布
-export interface FieldDistribution {
-  field_name: string;
-  total_count: number;
-  unique_count: number;
-  distribution: Array<{
-    value: unknown;
-    count: number;
-    percentage: number;
-  }>;
-}
+export type FieldDistribution = G['FieldDistribution'];
 
 // Charts API types
 export type ChartQueryAggregation = 'sum' | 'avg' | 'count' | 'max' | 'min';
@@ -203,10 +177,7 @@ export interface ChartQueryFilter {
   logic: 'and' | 'or';
 }
 
-export interface ChartQueryPagination {
-  page: number;
-  page_size: number;
-}
+export type ChartQueryPagination = G['ChartPagination'];
 
 export interface ChartQuerySort {
   field: string;
