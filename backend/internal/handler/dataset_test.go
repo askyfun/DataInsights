@@ -106,6 +106,7 @@ func newDatasetTestRouter(h *DatasetHandler) *gin.Engine {
 	router.RegisterGetRoute(datasets, "", h.List)
 	router.RegisterPostRoute(datasets, "", h.Create)
 	router.RegisterGetRoute(datasets, "/:id", h.Get)
+	router.RegisterPutRoute(datasets, "/:id", h.Update)
 	router.RegisterDeleteRoute(datasets, "/:id", h.Delete)
 	router.RegisterGetRoute(datasets, "/:id/columns", h.GetColumns)
 	router.RegisterPostRoute(datasets, "/:id/columns", h.UpdateColumns)

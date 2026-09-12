@@ -147,6 +147,88 @@ func (h *DatasetHandler) Create(req router.Request[datasetCreateIn], res *router
 	return nil
 }
 
+// datasetUpdateIn is the JSON body of PUT /api/datasets/:id; the id arrives
+// via the path, not the In struct. The fields mirror datasetCreateIn (same
+// editable surface as entity.Dataset): tags/shard_keys/columns carry the
+// JSON-string form per the create convention, and every field carries
+// form:"-" so the router's ShouldBindQuery pass cannot touch the body
+// struct (see the datasource package doc).
+type datasetUpdateIn struct {
+	Name         string `json:"name" form:"-"`
+	DatasourceID int    `json:"datasource_id" form:"-"`
+	TableName    string `json:"table_name" form:"-"`
+	QuerySQL     string `json:"query_sql" form:"-"`
+	QueryType    string `json:"query_type" form:"-"`
+	Mode         string `json:"mode" form:"-"`
+	Description  string `json:"description" form:"-"`
+	Tags         string `json:"tags" form:"-"`
+	Columns      string `json:"columns" form:"-"`
+	ShardEnabled bool   `json:"shard_enabled" form:"-"`
+	ShardKeys    string `json:"shard_keys" form:"-"`
+}
+
+// Update handles PUT /api/datasets/:id
+func (h *DatasetHandler) Update(req router.Request[datasetUpdateIn], res *router.Response[*entity.Dataset]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
+	if err != nil {
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
+	}
+
+	// Gate on existence first: service.Update is a full-row WherePK update
+	// whose re-select surfaces a confusing "failed to get updated dataset"
+	// internal error for missing rows; the 404 mapping here keeps unknown ids
+	// on the same envelope the Get handler produces.
+	if _, err := h.svc.GetByID(req.Ctx.Request.Context(), id); err != nil {
+		return router.NewBusinessError(response.CodeNotFound, err.Error())
+	}
+
+	in := req.In
+
+	// Entity build mirrors Create (same defaults), with the ID from the path.
+	ds := &entity.Dataset{
+		ID:           id,
+		Name:         in.Name,
+		DatasourceID: in.DatasourceID,
+		QueryType:    in.QueryType,
+		Mode:         in.Mode,
+		Tags:         in.Tags,
+		Columns:      in.Columns,
+		ShardEnabled: in.ShardEnabled,
+		ShardKeys:    in.ShardKeys,
+	}
+	if in.TableName != "" {
+		ds.TableName = &in.TableName
+	}
+	if in.QuerySQL != "" {
+		ds.QuerySQL = &in.QuerySQL
+	}
+	if in.Description != "" {
+		ds.Description = &in.Description
+	}
+	if ds.QueryType == "" {
+		ds.QueryType = "table"
+	}
+	if ds.Mode == "" {
+		ds.Mode = "direct"
+	}
+	if ds.Tags == "" {
+		ds.Tags = "[]"
+	}
+	if ds.QualityRules == "" {
+		ds.QualityRules = "[]"
+	}
+	if ds.Columns == "" {
+		ds.Columns = "[]"
+	}
+
+	result, err := h.svc.Update(req.Ctx.Request.Context(), ds)
+	if err != nil {
+		return err
+	}
+	res.Out = result
+	return nil
+}
+
 // Delete handles DELETE /api/datasets/:id
 func (h *DatasetHandler) Delete(req router.Request[datasetPathIn], res *router.Response[datasetStatusOut]) error {
 	id, err := strconv.Atoi(req.Ctx.Param("id"))

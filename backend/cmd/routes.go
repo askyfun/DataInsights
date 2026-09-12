@@ -51,6 +51,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte) {
 	router.RegisterGetRoute(datasets, "", datasetHandler.List)
 	router.RegisterPostRoute(datasets, "", datasetHandler.Create)
 	router.RegisterGetRoute(datasets, "/:id", datasetHandler.Get)
+	router.RegisterPutRoute(datasets, "/:id", datasetHandler.Update)
 	router.RegisterDeleteRoute(datasets, "/:id", datasetHandler.Delete)
 	router.RegisterGetRoute(datasets, "/:id/columns", datasetHandler.GetColumns)
 	router.RegisterPostRoute(datasets, "/:id/columns", datasetHandler.UpdateColumns)
