@@ -1627,9 +1627,12 @@ components:
     #                                  value / value_end(omitempty) / logic；注意键是 operator）
     #     pagination  *Pagination    -> json "pagination"（chart.go:33-36: page / page_size）
     #     sort        *SortConfig    -> json "sort"（dataset.go:67-71: field / order）
-    #   差异记录：查询层 query.ChartQueryRequest（internal/query/types.go:81-91）另有
-    #   config.query_options.pie_merge_other_below_ratio（饼图长尾合并阈值），但 entity 层
-    #   不含 config 字段、handler 也不解析，当前该请求字段整体被静默忽略（Batch 3 契约化）。
+    #   历史断链已消除（Batch 3 Task 2）：查询层 query.ChartQueryRequest 曾有
+    #   Config 字段（config.query_options.pie_merge_other_below_ratio，饼图长尾合并阈值），
+    #   但本端点绑定的 entity.ChartQueryRequest 自始不含 config，该查询层字段从未被任何
+    #   HTTP 路径赋值，executor 的读取分支为死代码，已随请求结构一并删除；前端亦不再
+    #   发送 config。饼图合并能力保留为 query 层内部特性（PieProcessor.MergeOtherBelowRatio，
+    #   仅程序内可达），按产品决策暂不接线到任何请求协议。
     ChartQueryRequest:
       type: object
       description: POST /api/charts/query 请求体（entity.ChartQueryRequest，旧协议）。
