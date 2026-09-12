@@ -437,6 +437,16 @@ func toDatasetModel(e *entity.Dataset) *model.Dataset {
 	if e.PreviewData != nil {
 		m.PreviewData = sql.NullString{String: *e.PreviewData, Valid: strings.TrimSpace(*e.PreviewData) != ""}
 	}
+	// 时间戳随实体透传（与 datasource 服务 toModel 同一映射）：Update 的
+	// 合并基带入取回行的 created_at/updated_at，整行更新才能原样写回。
+	if e.CreatedAt != "" {
+		t, _ := time.Parse(time.RFC3339, e.CreatedAt)
+		m.CreatedAt = sql.NullTime{Time: t, Valid: true}
+	}
+	if e.UpdatedAt != "" {
+		t, _ := time.Parse(time.RFC3339, e.UpdatedAt)
+		m.UpdatedAt = sql.NullTime{Time: t, Valid: true}
+	}
 	return m
 }
 

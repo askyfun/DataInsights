@@ -242,7 +242,8 @@ export interface paths {
          *     现有行为合并基——query_type/mode 为空缺省 "table"/"direct"，name/datasource_id/
          *     shard_enabled 恒取自请求体；未传或为空的 tags/columns/shard_keys 与指针字段
          *     table_name/query_sql/description 保留库中现值，显式 "[]" 仍可清空；
-         *     quality_rules/accelerate_config/refresh_strategy/preview_data 不在体内、恒保留。
+         *     quality_rules/accelerate_config/refresh_strategy/preview_data/
+         *     created_at/updated_at 不在体内、恒保留。
          *     未知 id 返回与 GET 相同的 20300 信封（handler 先 GetByID 门控，避免
          *     service.Update 全行更新对缺失行报出误导性的内部错误）。
          */
@@ -724,7 +725,7 @@ export interface components {
             /** @description 分片键的 JSON 数组字符串。 */
             shard_keys?: string;
         };
-        /** @description PUT /api/datasets/{id} 请求体（id 走路径，不在体内）。与 DatasetCreateRequest 同构，但为取回并保留语义：name/datasource_id/query_type 必填恒覆盖（query_type/mode 为空缺省 "table"/"direct"）；可选字符串元数据 tags/columns/shard_keys 及 table_name/query_sql/description 未传或为空串时 保留库中现值（与 datasource.Update 省略 password 即保留同一约定），显式 "[]" 仍可清空；quality_rules 等体外的列恒保留不被覆盖。 */
+        /** @description PUT /api/datasets/{id} 请求体（id 走路径，不在体内）。与 DatasetCreateRequest 同构，但为取回并保留语义：name/datasource_id/query_type 必填恒覆盖（query_type/mode 为空缺省 "table"/"direct"）；可选字符串元数据 tags/columns/shard_keys 及 table_name/query_sql/description 未传或为空串时 保留库中现值（与 datasource.Update 省略 password 即保留同一约定），显式 "[]" 仍可清空；quality_rules/created_at/updated_at 等体外的列恒保留不被覆盖。 */
         DatasetUpdateRequest: {
             name: string;
             datasource_id: number;

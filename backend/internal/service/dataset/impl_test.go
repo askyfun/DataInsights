@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"dataray/internal/crypto"
 	"dataray/internal/datasource"
@@ -29,7 +30,7 @@ type stubConnection struct {
 	getColumnsErr        error
 }
 
-func (s *stubConnection) Close() error { return nil }
+func (s *stubConnection) Close() error                   { return nil }
 func (s *stubConnection) Ping(ctx context.Context) error { return nil }
 func (s *stubConnection) GetTables(ctx context.Context) ([]datasource.TableInfo, error) {
 	return nil, errors.New("not implemented")
@@ -83,6 +84,38 @@ func TestToDatasetModelNormalizesEmptyJSONFields(t *testing.T) {
 	// 空 JSON 指针字段置 NULL，让列默认值生效，而不是把 "" 写进 JSONB
 	if m.AccelerateConfig.Valid || m.RefreshStrategy.Valid || m.PreviewData.Valid {
 		t.Fatalf("empty json pointer fields must be stored as NULL, got %+v", m)
+	}
+}
+
+// TestToDatasetModelMapsTimestamps 先红：PUT /api/datasets/:id 的 handler 以
+// 取回行为合并基、把 existing 的 created_at/updated_at 原样带入 svc.Update
+// （Batch 3 Task 1 防数据丢失），但 toDatasetModel 此前丢弃这两个字段，
+// 整行更新会把时间戳写成 NULL。对齐 datasource 服务 toModel 的既有映射。
+func TestToDatasetModelMapsTimestamps(t *testing.T) {
+	created, err := time.Parse(time.RFC3339, "2024-01-02T03:04:05Z")
+	if err != nil {
+		t.Fatalf("fixture time: %v", err)
+	}
+	updated, err := time.Parse(time.RFC3339, "2024-06-07T08:09:10Z")
+	if err != nil {
+		t.Fatalf("fixture time: %v", err)
+	}
+	m := toDatasetModel(&entity.Dataset{
+		Name:      "fixture",
+		CreatedAt: "2024-01-02T03:04:05Z",
+		UpdatedAt: "2024-06-07T08:09:10Z",
+	})
+	if !m.CreatedAt.Valid || !m.CreatedAt.Time.Equal(created) {
+		t.Fatalf("created_at must round-trip through the converter, got %+v", m.CreatedAt)
+	}
+	if !m.UpdatedAt.Valid || !m.UpdatedAt.Time.Equal(updated) {
+		t.Fatalf("updated_at must round-trip through the converter, got %+v", m.UpdatedAt)
+	}
+	// 空串保持 NULL：与 datasource toModel 一致，Create 路径不受影响
+	// （Create 在转换后显式设置 CreatedAt）。
+	m2 := toDatasetModel(&entity.Dataset{Name: "fixture"})
+	if m2.CreatedAt.Valid || m2.UpdatedAt.Valid {
+		t.Fatalf("empty timestamps must stay NULL, got %+v / %+v", m2.CreatedAt, m2.UpdatedAt)
 	}
 }
 
