@@ -564,13 +564,33 @@ POST /api/datasets
 | query_type | string | 是 | 查询类型: direct, accelerated |
 | mode | string | 否 | 模式: direct, accelerated |
 | description | string | 否 | 描述 |
-| tags | string[] | 否 | 标签 |
+| tags | string | 否 | 标签，JSON 字符串（如 `"[\"用户\",\"基础数据\"]"`）；后端按 JSON 串存储 |
 
 **响应**: 返回创建的数据集
 
 ---
 
-#### 2.2.4 删除数据集
+#### 2.2.4 更新数据集
+
+```
+PUT /api/datasets/:id
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | int | 是 | 数据集 ID |
+
+**请求体**: 与创建相同的字段集（`name`、`datasource_id`、`table_name`、`query_sql`、`query_type`、`mode`、`description`、`tags`、`columns`、`shard_enabled`、`shard_keys`），其中 `tags`/`columns`/`shard_keys` 为 JSON 字符串（前端在 api 层统一 stringify 数组）。
+
+**语义（项目约定）**：遵循与数据源更新一致的 **"未提供则保留"** 规则——payload 省略或为空的可选字段（description/table_name/query_sql/tags/columns/shard_keys）保留存量值，不会被静默清空；显式发送 `"[]"` 可清空对应字段。`name`/`datasource_id` 为必填，缺失按 20100 参数错误。数据集不存在返回 20300。
+
+**响应**: 返回更新后的数据集（信封 `data` 为完整 Dataset）
+
+---
+
+#### 2.2.5 删除数据集
 
 ```
 DELETE /api/datasets/:id
@@ -597,7 +617,7 @@ DELETE /api/datasets/:id
 
 ---
 
-#### 2.2.5 获取数据集字段列表
+#### 2.2.6 获取数据集字段列表
 
 ```
 GET /api/datasets/:id/columns
@@ -637,7 +657,7 @@ GET /api/datasets/:id/columns
 
 ---
 
-#### 2.2.6 更新数据集字段
+#### 2.2.7 更新数据集字段
 
 ```
 POST /api/datasets/:id/columns
@@ -686,7 +706,7 @@ POST /api/datasets/:id/columns
 
 ---
 
-#### 2.2.7 获取数据集预览
+#### 2.2.8 获取数据集预览
 
 ```
 GET /api/datasets/:id/preview
@@ -717,7 +737,7 @@ GET /api/datasets/:id/preview
 
 ---
 
-#### 2.2.8 执行数据集查询
+#### 2.2.9 执行数据集查询
 
 ```
 POST /api/datasets/:id/query

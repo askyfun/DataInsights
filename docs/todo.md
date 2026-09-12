@@ -526,16 +526,13 @@
 - [x] 前端删除手写 idl 类型（chart/dataset/datasource/share.ts），错误消息读取修正为 `error.message`（信封字段是 `msg`，旧 `.response.data.message` 恒 undefined）
 - [x] filters 键 `op`→`operator` 对齐后端；后端删除死代码（`getPaginationParams`、手写字符串 SQL builder 路径）；`aggExprPattern` 收紧为聚合函数白名单堵注入面；新增镜像↔entity json tag 反射守卫测试
 
-### Batch 3 backlog（本批评估后主动延后，均有明确理由）
+### Batch 3：backlog 收口 + 类型消费 ✅ 分支 `refactor/batch3-backlog`（待评审+E2E 后合入）
 
-- [ ] **消费生成类型**（前端 `api/index.ts` 运行时类型 + 后端 handler In/Out 换 `idls.*`）：非机械替换——生成 `*Response` 是信封包装、手写同名类型是裸 payload（同名不同义会静默改变 `.data.data` 深度）；`DatasetColumn.typeConfig`(camel) ↔ 生成 `type_config`(snake) 命名冲突且可能暴露后端 snake_case 真实契约 bug；生成物把窄联合（`ChartType`/`ColumnRole`/`ChartQueryAggregation`/`DatasetMode`/`FilterOperator` 等）压成 `string`，现有 `as` 断言依赖 → 需在生成类型上叠薄手写联合层，按类型谨慎迁移
-- [ ] **ghost 路由 bug**：`datasetsApi.update` 调用 `PUT /api/datasets/:id`，后端无此路由（`gen put?: never`），DatasetEdit 保存实际会 404；载荷 `tags`/`shard_keys` 数组 vs JSON 字符串也不匹配 → 补后端端点或调整前端编辑路径
-- [ ] **`ChartQueryRequest.config` 幽灵字段**：前端仍发送 `config.query_options.pie_merge_other_below_ratio`，后端 entity/handler 不解析、静默丢弃 → 决定后端接入或前端移除（pie 合并其他比例功能）
-- [ ] **`lib/api/client.ts:120` baseURL 尾部多余 `}`**：当前无调用方（仅 `ApiResponse` 类型被引用），一旦被路由调用即暴露 → 顺手修
-- [ ] ChartBuilder 三处 filters 构造点合并；`/datasets/new` 路由（React Router v6 静态段优先于动态段，经 E2E 确认非 bug——实际命中 DatasetEdit 后其 new 模式重定向回列表，属既有产品设计，App.tsx 本批未改）
-- [ ] **漂移 #2（body 优先于 path）pin 不均衡**：`GetFieldDistribution` 缺"双非法"（unparseable :id + 空/坏 body）pin（现仅分别覆盖 id 非法+body 合法、id 合法+body 空），`Preview`/dataset `Query`/`UpdateColumns`/share `Verify` 仅 EmptyBody 变体、缺 MalformedBody 孪生（各任务评审时已记为 minor 并显式延后）—— Batch 3 统一补齐 baseline
-- [ ] **`query.BuildBunQuery`（bun_builder.go:438）零调用者**：master 上即存在的死导出符号（AGENTS.md 禁止顺手删既有死代码），并入 Batch 3 死代码清单
-- [ ] **ShareView.tsx 不可达分支**（:84/:87/:120 的 `error.response?.status===401/403` 与 `error.response?.data?.share`）：全 200 信封下拦截器 reject 裸 `new Error(msg)` 无 `.response`，这些分支永不触发（master 即如此；live 门控是 `has_password`）—— Batch 3 清理
+- [x] **ghost route 修复**：新增 `PUT /api/datasets/:id`（handler+路由+契约+api-gen，复用既有 `service.Update`），前端 `datasetsApi.update` 单点 stringify；并修复全行更新会清空编辑表单未发送字段的数据丢失问题（"未提供则保留"约定，对齐 datasource 密码先例，显式 `"[]"` 仍可清空）
+- [x] **饼图无效设置移除**（产品决策）：前端比例控件+三处 `config` 发送+类型删除、后端 `req.Config` 死输入链删除、openapi 注释按真相重写；`PieProcessor.MergeOtherBelowRatio` 能力保留未接线
+- [x] 死代码：`query.BuildBunQuery`、ShareView 不可达 401/403 分支（先钉行为测试再删）、`lib/api/client.ts` baseURL 尾 `}`、`ChartBuilder` `valueEnd as any`×3、前端死类型导出（`GeneratedSQL`/`TestConnectionResponse`/`typeConfig` 判死/datatypes 三胞胎）
+- [x] **前端类型消费生成物**（9 步迁移，每步 tsc 门+vitest 子集）：实体/响应/请求类型 alias 到 `components['schemas']` + 薄手写联合层；envelope 同名碰撞零出现（`ChartQueryResponse`→`ChartDataResult` wrapper）；`ApiResponse<T>` 重声明自生成 Envelope；净 -88 行
+- [ ] **Batch 4 重评**：后端 handler In/Out 消费 `idls.*`（生成 Go 类型无 gin `form:"-"` 语义，需自定义 codegen 模板，收益/风险待评）；`updated_at` 在 PUT 保留旧值不刷新（datasource 同病，无 DB trigger）；`GetChartData` 聚合语义统一（现返回原始行、图表配置不参与取数）；`Dataset`/`Chart` 等生成类型 timestamp 必填 vs 后端部分端点返回空串的语义核对；ChartBuilder 三处 filters/query 构造点 DRY 合并；`/datasets/new` 经实测非 bug（v6 静态段优先命中 DatasetEdit，new 模式重定向回列表为既有设计），销账
 
 ### 全分支评审结论（2026-09 收口）
 
