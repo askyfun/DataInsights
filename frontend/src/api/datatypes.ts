@@ -22,32 +22,6 @@ export interface TypeConfig {
   valueType?: StandardDataType;
 }
 
-export interface DatasetColumn {
-  name: string;
-  expr?: string;
-  type: StandardDataType;
-  typeConfig?: TypeConfig;
-  comment?: string;
-  role: 'dimension' | 'metric';
-  isVirtual?: boolean;
-}
-
-export interface VirtualField {
-  name: string;
-  expression: string;
-  exprType: ExpressionType;
-  resultType: StandardDataType;
-  config?: TypeConfig;
-}
-
-export type ExpressionType =
-  | 'arithmetic'
-  | 'string'
-  | 'datetime'
-  | 'conditional'
-  | 'aggregate'
-  | 'custom';
-
 // ============================================================
 // 类型映射配置
 // ============================================================

@@ -2,7 +2,7 @@ import * as Sentry from '@sentry/react';
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import type { ApiResponse } from '../lib/api/client';
 import type { QueryConfig } from '../store';
-import type { StandardDataType, TypeConfig } from './datatypes';
+import type { StandardDataType } from './datatypes';
 
 // Types
 export type DatasourceType = 'postgresql' | 'clickhouse' | 'mysql' | 'starrocks';
@@ -53,7 +53,6 @@ export interface DatasetColumn {
   name: string;
   expr: string;
   type: StandardDataType;
-  typeConfig?: TypeConfig;
   comment: string;
   role: ColumnRole;
 }
@@ -132,10 +131,6 @@ export interface TestConnectionRequest {
   database_name: string;
   username: string;
   password: string;
-}
-
-export interface TestConnectionResponse {
-  status: string;
 }
 
 export interface TableInfo {
@@ -257,11 +252,6 @@ export interface AxisResponse {
 
 export interface ScatterResponse {
   data: Array<[number, number]>;
-}
-
-export interface GeneratedSQL {
-  select_sql?: string;
-  count_sql?: string;
 }
 
 export type ChartDataResponse =
