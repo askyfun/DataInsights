@@ -23,6 +23,7 @@ type mockDatasetService struct {
 	listFunc          func(ctx context.Context, limit, offset int) ([]entity.Dataset, error)
 	getByIDFunc       func(ctx context.Context, id int) (*entity.Dataset, error)
 	createFunc        func(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error)
+	updateFunc        func(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error)
 	deleteFunc        func(ctx context.Context, id int) error
 	getColumnsFunc    func(ctx context.Context, id int) ([]entity.DatasetColumn, error)
 	updateColumnsFunc func(ctx context.Context, id int, columns []entity.DatasetColumn) (*entity.Dataset, error)
@@ -47,6 +48,13 @@ func (m *mockDatasetService) GetByID(ctx context.Context, id int) (*entity.Datas
 func (m *mockDatasetService) Create(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
 	if m.createFunc != nil {
 		return m.createFunc(ctx, ds)
+	}
+	return nil, nil
+}
+
+func (m *mockDatasetService) Update(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
+	if m.updateFunc != nil {
+		return m.updateFunc(ctx, ds)
 	}
 	return nil, nil
 }
@@ -347,6 +355,200 @@ func TestDatasetCreate_ServiceError(t *testing.T) {
 		},
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets", `{"name":"x"}`)
+	assertBody(t, w, internalErrorBoom)
+}
+
+// ---------------------------------------------------------------- Update
+// Repro (ghost route): PUT /api/datasets/:id was never registered, so the
+// frontend's dataset-edit save hit a raw 404. The pins below define the
+// migrated contract: path id + create-style JSON body (tags/shard_keys/
+// columns as JSON strings), unknown ids mapped to the standard 404 envelope
+// via a GetByID gate (service.Update's WherePK re-select surfaces a
+// confusing internal error for missing rows otherwise).
+
+func TestDatasetUpdate_Success(t *testing.T) {
+	var gotIDForGet int
+	var got *entity.Dataset
+	var updateRan bool
+	h := NewDatasetHandler(&mockDatasetService{
+		getByIDFunc: func(_ context.Context, id int) (*entity.Dataset, error) {
+			gotIDForGet = id
+			return testDataset(), nil
+		},
+		updateFunc: func(_ context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
+			updateRan = true
+			if gotIDForGet != 4 {
+				t.Errorf("Update ran before the GetByID gate resolved id=4 (gate saw %d)", gotIDForGet)
+			}
+			got = ds
+			return testDataset(), nil
+		},
+	})
+	body := `{"name":"upd","datasource_id":2,"table_name":"orders","query_type":"table","description":"d","tags":"[\"x\"]","shard_enabled":true,"shard_keys":"[\"id\"]"}`
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4", body)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":`+datasetGetJSON+`}`)
+	// Entity build: ID from the path, create-style empty-value normalization
+	// (mode/tags/quality_rules/columns defaults), pointer fields only when
+	// non-empty, JSON-string array fields forwarded verbatim.
+	if got == nil || !updateRan {
+		t.Fatalf("service.Update not called")
+	}
+	if got.ID != 4 || got.Name != "upd" || got.DatasourceID != 2 ||
+		got.TableName == nil || *got.TableName != "orders" ||
+		got.Description == nil || *got.Description != "d" ||
+		got.QueryType != "table" || got.Mode != "direct" ||
+		got.Tags != `["x"]` || got.QualityRules != "[]" || got.Columns != "[]" ||
+		!got.ShardEnabled || got.ShardKeys != `["id"]` {
+		t.Fatalf("service received unexpected entity: %+v", got)
+	}
+}
+
+func TestDatasetUpdate_SQLModeDefaults(t *testing.T) {
+	// Same normalization contract as the Create twin: omitted table_name /
+	// mode / tags / columns land as the create defaults; query_sql non-empty
+	// sets the pointer.
+	var got *entity.Dataset
+	h := NewDatasetHandler(&mockDatasetService{
+		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
+			return testDataset(), nil
+		},
+		updateFunc: func(_ context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
+			got = ds
+			return ds, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4",
+		`{"name":"q","datasource_id":1,"query_sql":"SELECT 1","query_type":"sql"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got == nil || got.ID != 4 || got.TableName != nil ||
+		got.QuerySQL == nil || *got.QuerySQL != "SELECT 1" ||
+		got.QueryType != "sql" || got.Mode != "direct" ||
+		got.Tags != "[]" || got.QualityRules != "[]" || got.Columns != "[]" {
+		t.Fatalf("unexpected entity: %+v", got)
+	}
+}
+
+func TestDatasetUpdate_NotFound(t *testing.T) {
+	// Unknown id keeps the project-standard 404 envelope, byte-identical to
+	// the Get mapping (gate via GetByID before service.Update).
+	h := NewDatasetHandler(&mockDatasetService{
+		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
+			return nil, errors.New("dataset not found: sql: no rows in result set")
+		},
+		updateFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
+			t.Fatal("Update must not run for an unknown id")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/999", `{"name":"x"}`)
+	assertBody(t, w, notFoundDS)
+}
+
+func TestDatasetUpdate_InvalidIDValidBody(t *testing.T) {
+	// Invalid id with a VALID body answers "invalid id": the path id is still
+	// checked before anything else inside the handler (only doubly-invalid
+	// requests drift, see the pair below).
+	h := NewDatasetHandler(&mockDatasetService{
+		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
+			t.Fatal("handler must not run for an invalid id")
+			return nil, nil
+		},
+		updateFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
+			t.Fatal("Update must not run for an invalid id")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/abc", `{"name":"x"}`)
+	assertBody(t, w, badRequestInvalidID)
+}
+
+func TestDatasetUpdate_EmptyBody(t *testing.T) {
+	// PUT binds the JSON body unconditionally: an empty body answers
+	// 20100/"EOF" and never reaches the handler.
+	h := NewDatasetHandler(&mockDatasetService{
+		updateFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
+			t.Fatal("Update must not be called for an empty body")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4", "")
+	assertBody(t, w, badRequestEOF)
+}
+
+func TestDatasetUpdate_TypeMismatchBody(t *testing.T) {
+	// Accepted unavoidable diff #1 (datasource package doc): the handler-local
+	// mirror type name leaks into the json bind-error text.
+	h := NewDatasetHandler(&mockDatasetService{
+		updateFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
+			t.Fatal("Update must not be called when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4", `{"datasource_id":"abc"}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field datasetUpdateIn.datasource_id of type int","trace":"","data":{}}`)
+}
+
+func TestDatasetUpdate_InvalidIDPrefersBodyBindError_EmptyBody(t *testing.T) {
+	// Pinned accepted unavoidable diff #2 (datasource package doc): invalid
+	// :id + empty body answers the body-bind error ("EOF") where a
+	// path-parsing-first handler would answer "invalid id".
+	h := NewDatasetHandler(&mockDatasetService{
+		updateFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
+			t.Fatal("Update must not run when both inputs are invalid")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/abc", "")
+	assertBody(t, w, badRequestEOF)
+}
+
+func TestDatasetUpdate_InvalidIDPrefersBodyBindError_MalformedBody(t *testing.T) {
+	// Same diff #2 flip with a type-mismatch body: the json bind error
+	// (carrying the named In type, diff #1) wins over "invalid id".
+	h := NewDatasetHandler(&mockDatasetService{
+		updateFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
+			t.Fatal("Update must not run when the body fails to bind")
+			return nil, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/abc", `{"datasource_id":"abc"}`)
+	assertBody(t, w, `{"code":20100,"msg":"json: cannot unmarshal string into Go struct field datasetUpdateIn.datasource_id of type int","trace":"","data":{}}`)
+}
+
+func TestDatasetUpdate_QueryMustNotPolluteBody(t *testing.T) {
+	// Body structs are bound from JSON only; a stray query param must not
+	// leak into any In field (form:"-" on every field).
+	var got *entity.Dataset
+	h := NewDatasetHandler(&mockDatasetService{
+		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
+			return testDataset(), nil
+		},
+		updateFunc: func(_ context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
+			got = ds
+			return ds, nil
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4?Name=evil", `{"datasource_id":3}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got == nil || got.Name != "" {
+		t.Fatalf("query param leaked into body struct: %+v", got)
+	}
+}
+
+func TestDatasetUpdate_ServiceError(t *testing.T) {
+	h := NewDatasetHandler(&mockDatasetService{
+		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
+			return testDataset(), nil
+		},
+		updateFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
+			return nil, errBoom()
+		},
+	})
+	w := serve(newDatasetTestRouter(h), http.MethodPut, "/api/datasets/4", `{"name":"x"}`)
 	assertBody(t, w, internalErrorBoom)
 }
 
