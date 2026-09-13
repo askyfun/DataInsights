@@ -3,7 +3,10 @@ package query
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Processor 接口定义
@@ -90,15 +93,10 @@ func (p *PieProcessor) Process(rows []map[string]any, dims []string, metrics []M
 		metricValue := row[metricField]
 
 		var value float64
-		switch v := metricValue.(type) {
-		case float64:
-			value = v
-		case int64:
-			value = float64(v)
-		case int:
-			value = float64(v)
-		default:
-			value = 0
+		// SUM(numeric) 经 pgx 返回 pgtype.Numeric，走共享转换避免归零
+		// （与散点图数值转换同一缺陷，见 toFloat64）。
+		if f, ok := toFloat64(metricValue); ok {
+			value = f
 		}
 
 		total += value
@@ -413,6 +411,20 @@ func toFloat64(val any) (float64, bool) {
 		return float64(v), true
 	case int32:
 		return float64(v), true
+	case string:
+		// PG numeric 列经 pgx 解码为字符串（如 "148730.0"）
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return f, err == nil
+	case []byte:
+		f, err := strconv.ParseFloat(strings.TrimSpace(string(v)), 64)
+		return f, err == nil
+	case pgtype.Numeric:
+		// pgx 对 numeric 列（如 SUM(numeric)）返回 pgtype.Numeric 结构体
+		f, err := v.Float64Value()
+		if err != nil || !f.Valid {
+			return 0, false
+		}
+		return f.Float64, true
 	default:
 		return 0, false
 	}

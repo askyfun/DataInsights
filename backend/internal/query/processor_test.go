@@ -1,7 +1,10 @@
 package query
 
 import (
+	"math/big"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TestAxisProcessor_EmptyData 验证空行数据返回空响应
@@ -325,6 +328,36 @@ func TestPieProcessor_WithMergeOtherBelowRatio(t *testing.T) {
 	}
 }
 
+// TestPieProcessor_PgNumericValues 先红：SUM(numeric) 经 pgx 返回
+// pgtype.Numeric 结构体，此前内联 switch 不识别导致饼图 value 全部归零。
+func TestPieProcessor_PgNumericValues(t *testing.T) {
+	p := NewPieProcessor()
+	rows := []map[string]any{
+		{"category": "城镇", "value": pgtype.Numeric{Int: big.NewInt(95380), Exp: 0, Valid: true}},
+		{"category": "乡村", "value": pgtype.Numeric{Int: big.NewInt(45109), Exp: 0, Valid: true}},
+	}
+	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
+
+	resp, err := p.Process(rows, []string{"category"}, metrics)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pieResp, ok := resp.(*PieResponse)
+	if !ok {
+		t.Fatalf("expected *PieResponse, got %T", resp)
+	}
+	if len(pieResp.Data) != 2 {
+		t.Fatalf("expected 2 pie items, got %d", len(pieResp.Data))
+	}
+	if pieResp.Data[0].Value != 95380 || pieResp.Data[1].Value != 45109 {
+		t.Fatalf("expected values 95380/45109, got %v/%v", pieResp.Data[0].Value, pieResp.Data[1].Value)
+	}
+	if pieResp.Data[0].Percentage == 0 {
+		t.Fatalf("percentage must be non-zero, got %v", pieResp.Data[0].Percentage)
+	}
+}
+
 // TestAxisProcessor_MultiDims_ThreeDims 验证三个维度：后续维度值用 " - " 拼接
 func TestAxisProcessor_MultiDims_ThreeDims(t *testing.T) {
 	p := &AxisProcessor{}
@@ -481,6 +514,60 @@ func TestScatterProcessor_EmptyRows(t *testing.T) {
 	scatterResp := resp.(*ScatterResponse)
 	if len(scatterResp.Data) != 0 {
 		t.Errorf("expected empty data, got %v", scatterResp.Data)
+	}
+}
+
+// TestScatterProcessor_NumericStringValues PG numeric 列经 pgx 解码为字符串，
+// toFloat64 必须能解析，否则散点图对 numeric 列永远返回空。
+func TestScatterProcessor_NumericStringValues(t *testing.T) {
+	p := &ScatterProcessor{}
+	rows := []map[string]any{
+		{"x_value": "100.5", "y_value": "50.25"},
+		{"x_value": "200", "y_value": "80"},
+	}
+	metrics := []MetricConfig{
+		{Field: "revenue", Agg: AggSum, Alias: "x_value"},
+		{Field: "cost", Agg: AggSum, Alias: "y_value"},
+	}
+	resp, err := p.Process(rows, []string{}, metrics)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	scatterResp := resp.(*ScatterResponse)
+	if len(scatterResp.Data) != 2 {
+		t.Fatalf("expected 2 data points, got %d", len(scatterResp.Data))
+	}
+	if scatterResp.Data[0][0] != 100.5 || scatterResp.Data[0][1] != 50.25 {
+		t.Errorf("point 0: expected [100.5 50.25], got %v", scatterResp.Data[0])
+	}
+	if scatterResp.Data[1][0] != 200 || scatterResp.Data[1][1] != 80 {
+		t.Errorf("point 1: expected [200 80], got %v", scatterResp.Data[1])
+	}
+}
+
+// TestScatterProcessor_PgNumericValues pgx 对 numeric 列返回 pgtype.Numeric
+// 结构体（如 SUM(numeric)），toFloat64 必须支持，否则聚合散点永远为空。
+func TestScatterProcessor_PgNumericValues(t *testing.T) {
+	p := &ScatterProcessor{}
+	x := pgtype.Numeric{Int: big.NewInt(3773000), Exp: -2, Valid: true} // 37730.00
+	y := pgtype.Numeric{Int: big.NewInt(250), Exp: 0, Valid: true}     // 250
+	rows := []map[string]any{
+		{"amount": x, "quantity": y},
+	}
+	metrics := []MetricConfig{
+		{Field: "amount", Agg: AggSum, Alias: "amount"},
+		{Field: "quantity", Agg: AggSum, Alias: "quantity"},
+	}
+	resp, err := p.Process(rows, []string{"region"}, metrics)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	scatterResp := resp.(*ScatterResponse)
+	if len(scatterResp.Data) != 1 {
+		t.Fatalf("expected 1 data point, got %d", len(scatterResp.Data))
+	}
+	if scatterResp.Data[0][0] != 37730 || scatterResp.Data[0][1] != 250 {
+		t.Errorf("expected [37730 250], got %v", scatterResp.Data[0])
 	}
 }
 
