@@ -40,7 +40,7 @@ import {
   Typography,
 } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Chart, ChartQueryAggregation, ChartQueryRequest } from '../api';
 import {
@@ -243,6 +243,31 @@ interface ChartCanvasProps {
   chartStyle: ChartStyleConfig;
 }
 
+/** 图表渲染错误兜底：阻止 ECharts 抛错清空整棵 React 树（白屏丢工作）。 */
+class ChartErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Empty
+          description="图表渲染失败，请调整配置"
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          style={{ padding: '100px 0' }}
+        />
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const ChartCanvas: React.FC<ChartCanvasProps> = ({
   config,
   data,
@@ -274,12 +299,15 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
       })
     );
 
-    // scatter only needs 2 metrics, dims are optional
+    // scatter needs 2 metrics (x/y) and no dimensions; other types need a
+    // dimension. Anything less renders the empty state instead of building a
+    // broken ECharts option (missing xAxis would throw and blank the page).
     const isScatter = config.chartType === 'scatter';
     if (
-      (!isScatter && dimensionFields.length === 0) ||
       metricFields.length === 0 ||
-      data.length === 0
+      data.length === 0 ||
+      (!isScatter && dimensionFields.length === 0) ||
+      (isScatter && metricFields.length < 2)
     ) {
       return null;
     }
@@ -424,6 +452,12 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
       case 'scatter':
         return {
           ...commonOptions,
+          xAxis: {
+            type: 'value',
+          },
+          yAxis: {
+            type: 'value',
+          },
           series: [
             {
               type: 'scatter',
@@ -1302,15 +1336,17 @@ const ChartBuilder: React.FC = () => {
       );
     }
     return (
-      <ChartCanvas
-        config={chartBuilderConfig}
-        data={chartData}
-        loading={chartDataLoading}
-        dimensionLabels={dimensionLabels}
-        metricAliases={metricAliases}
-        metricUnits={metricUnits}
-        chartStyle={chartStyle}
-      />
+      <ChartErrorBoundary>
+        <ChartCanvas
+          config={chartBuilderConfig}
+          data={chartData}
+          loading={chartDataLoading}
+          dimensionLabels={dimensionLabels}
+          metricAliases={metricAliases}
+          metricUnits={metricUnits}
+          chartStyle={chartStyle}
+        />
+      </ChartErrorBoundary>
     );
   };
 

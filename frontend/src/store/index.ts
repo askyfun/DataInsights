@@ -1,4 +1,5 @@
 import { arrayMove } from '@dnd-kit/sortable';
+import { message } from 'antd';
 import { create } from 'zustand';
 import {
   AxisResponse,
@@ -15,6 +16,7 @@ import {
   datasetsApi,
   datasourcesApi,
   PieResponse,
+  ScatterResponse,
   ShareFormData,
   sharesApi,
   TableResponse,
@@ -823,6 +825,28 @@ export const useStore = create<AppState>((set) => ({
           chartQueryResponse: queryResponse,
           chartDataLoading: false,
         });
+      } else if (request.chart_type === 'scatter' && chartData && 'data' in chartData) {
+        // ScatterResponse.data 是 [x, y] 二元组数组，ChartCanvas 按下标消费
+        const scatterData = chartData as ScatterResponse;
+        set({
+          chartData: scatterData.data,
+          chartQueryResponse: queryResponse,
+          chartDataLoading: false,
+        });
+      } else if (
+        request.chart_type === 'pivot' &&
+        chartData &&
+        'columns' in chartData &&
+        Array.isArray((chartData as TableResponse).data)
+      ) {
+        // PivotResponse 与 TableResponse 同构（columns + data，无分页）
+        const pivotData = chartData as TableResponse;
+        set({
+          chartData: pivotData.data,
+          tableColumns: pivotData.columns || [],
+          chartQueryResponse: queryResponse,
+          chartDataLoading: false,
+        });
       } else {
         set({
           chartData: Array.isArray(chartData) ? chartData : [],
@@ -832,6 +856,9 @@ export const useStore = create<AppState>((set) => ({
       }
     } catch (error: any) {
       console.error('Chart query failed:', error);
+      // 查询失败必须对用户可见：后端 400（如空筛选字段）此前被静默吞掉，
+      // 预览直接变空而没有任何提示。
+      message.error(error.message || '图表查询失败');
       set({ chartData: [], chartQueryResponse: null, chartDataLoading: false });
     }
   },
