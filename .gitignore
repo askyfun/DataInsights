@@ -17,6 +17,7 @@ frontend/dist/
 
 # Sensitive config files
 backend/etc/config.toml
+backend/etc/config-local.toml
 
 # Dependencies
 node_modules/
@@ -26,6 +27,10 @@ node_modules/
 .kilo/
 .minimax
 console-errors.txt
+
+# ZCode / Mimosa plugin runtime state
+.zcode/
+.mimosa/
 
 # Debug/trace files
 chrome-perf-trace.json
