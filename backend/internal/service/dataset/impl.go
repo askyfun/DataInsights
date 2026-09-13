@@ -171,15 +171,20 @@ func (s *datasetService) GetColumns(ctx context.Context, id int) ([]entity.Datas
 		return nil, fmt.Errorf("no table or query defined")
 	}
 
-	return mapDatasetColumns(dbColumns), nil
+	return mapDatasetColumns(dbColumns, dsModel.Type), nil
 }
 
 // mapDatasetColumns converts driver columns to entity columns with inferred
-// roles. Unknown (empty) types map to the standard "unknown" type via the
-// existing mapper.
-func mapDatasetColumns(dbColumns []datasource.ColumnInfo) []entity.DatasetColumn {
-	// Convert to entity columns with inferred roles
-	mapper, _ := model.NewDataTypeMapper("starrocks")
+// roles. The type mapper is chosen from the datasource's own driver type so
+// PG/MySQL information_schema type names (integer/numeric/text) map to
+// standard types instead of falling through to "unknown"; a driver type the
+// factory does not know falls back to the StarRocks mapper (previous
+// behavior).
+func mapDatasetColumns(dbColumns []datasource.ColumnInfo, dsType string) []entity.DatasetColumn {
+	mapper, err := model.NewDataTypeMapper(dsType)
+	if err != nil {
+		mapper, _ = model.NewDataTypeMapper("starrocks")
+	}
 	result := make([]entity.DatasetColumn, len(dbColumns))
 	for i, col := range dbColumns {
 		stdType, typeConfig, _ := mapper.ToStandard(col.Type)

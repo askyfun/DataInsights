@@ -220,13 +220,38 @@ func TestMapDatasetColumnsBareIdentifier(t *testing.T) {
 	cols := mapDatasetColumns([]datasource.ColumnInfo{
 		{Name: "region", Type: "varchar"},
 		{Name: "amount", Type: "numeric"},
-	})
+	}, "postgresql")
 	for _, col := range cols {
 		if strings.ContainsAny(col.Expr, "`\"") {
 			t.Fatalf("column expr must be a bare identifier, got %q", col.Expr)
 		}
 		if col.Expr != col.Name {
 			t.Fatalf("expr should equal column name, got expr %q for %q", col.Expr, col.Name)
+		}
+	}
+}
+
+// TestMapDatasetColumnsUsesDatasourceMapper 先红：列类型探测按数据源驱动选择
+// 映射器，而不是硬编码 starrocks。PG 的 information_schema 类型名
+// (integer/numeric/text/date) 此前被 starrocks 映射表拒之门外，全部折叠成
+// "unknown"，导致指标字段无法识别。
+func TestMapDatasetColumnsUsesDatasourceMapper(t *testing.T) {
+	cols := mapDatasetColumns([]datasource.ColumnInfo{
+		{Name: "year", Type: "integer"},
+		{Name: "gdp_total", Type: "numeric"},
+		{Name: "region", Type: "text"},
+		{Name: "created_at", Type: "date"},
+	}, "postgresql")
+
+	wantTypes := map[string]string{
+		"year":       "integer",
+		"gdp_total":  "number",
+		"region":     "string",
+		"created_at": "date",
+	}
+	for _, col := range cols {
+		if wantTypes[col.Name] != col.Type {
+			t.Fatalf("column %s: type %q, want %q", col.Name, col.Type, wantTypes[col.Name])
 		}
 	}
 }
