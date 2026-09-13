@@ -17,6 +17,8 @@ import (
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
 	"dataray/internal/query"
+	"dataray/internal/response"
+	"dataray/internal/router"
 )
 
 // stubConnection 测试连接替身，用于占位、验证 close，以及在 GetData 的
@@ -285,6 +287,50 @@ func TestChartServiceQuery_ScatterRequestCompatibility(t *testing.T) {
 	}
 	if len(scatterResp.Data) != 2 {
 		t.Fatalf("expected 2 scatter points, got %d", len(scatterResp.Data))
+	}
+}
+
+// TestChartServiceQuery_EmptyFilterFieldRejected 空筛选字段必须在查询前被拒为
+// 400（而非落到 SQL 生成 _invalid_identifier 变成静默 500）。
+func TestChartServiceQuery_EmptyFilterFieldRejected(t *testing.T) {
+	executor := &stubExecutor{}
+	service := NewService(nil).(*chartService)
+	service.getDatasetModelFn = func(ctx context.Context, id int) (*model.Dataset, error) {
+		return &model.Dataset{ID: id, DatasourceID: 1, QueryType: "table"}, nil
+	}
+	service.getDatasourceModelFn = func(ctx context.Context, id int) (*model.Datasource, error) {
+		return &model.Datasource{ID: id, Type: "postgresql"}, nil
+	}
+	service.connectFn = func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
+		return &stubConnection{}, nil
+	}
+	service.executorFactory = func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor {
+		return executor
+	}
+
+	_, err := service.Query(context.Background(), &entity.ChartQueryRequest{
+		DatasetID: 1,
+		ChartType: "table",
+		Dims:      []string{"region"},
+		Metrics: []entity.MetricConfig{
+			{Field: "amount", Agg: "sum", Alias: "amount"},
+		},
+		Filters: []entity.Filter{
+			{Field: "", Operator: "eq", Value: ""},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty filter field")
+	}
+	bizErr, ok := err.(router.BusinessError)
+	if !ok {
+		t.Fatalf("expected router.BusinessError, got %T: %v", err, err)
+	}
+	if bizErr.Code != response.CodeBadRequest {
+		t.Fatalf("expected CodeBadRequest %d, got %d", response.CodeBadRequest, bizErr.Code)
+	}
+	if executor.lastReq != nil {
+		t.Fatal("executor must not run for a rejected request")
 	}
 }
 

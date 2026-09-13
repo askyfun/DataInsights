@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"dataray/internal/datasource"
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
 	"dataray/internal/query"
+	"dataray/internal/response"
+	"dataray/internal/router"
 	dsservice "dataray/internal/service/datasource"
 
 	"github.com/uptrace/bun"
@@ -199,6 +202,10 @@ func (s *chartService) executeQueryOnConn(
 	dsModel *model.Datasource,
 	req *entity.ChartQueryRequest,
 ) (entity.ChartDataResult, error) {
+	if err := validateFilterFields(req.Filters); err != nil {
+		return entity.ChartDataResult{}, err
+	}
+
 	executor := s.executorFactory(conn, dataset, dsModel)
 	querySpec := buildQuerySpecFromEntityRequest(req)
 	plannedQuery := query.NewQueryPlanner().Plan(querySpec)
@@ -481,6 +488,17 @@ func convertMetrics(metrics []entity.MetricConfig) []query.MetricConfig {
 		}
 	}
 	return result
+}
+
+// validateFilterFields 拒绝字段为空的过滤条件：空字段会生成 _invalid_identifier
+// 占位符导致 SQL 执行失败（静默 500），这里在查询前提前转为 400。
+func validateFilterFields(filters []entity.Filter) error {
+	for _, f := range filters {
+		if strings.TrimSpace(f.Field) == "" {
+			return router.NewBusinessError(response.CodeBadRequest, "filter field is required")
+		}
+	}
+	return nil
 }
 
 // convertFilters converts entity filters to query filters
