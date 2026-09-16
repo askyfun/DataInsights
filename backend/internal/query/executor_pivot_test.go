@@ -139,17 +139,16 @@ func TestExecutor_Pivot_GroupingSetsPath(t *testing.T) {
 	}
 }
 
-// TestExecutor_Pivot_FallbackWhenGroupingSetsUnsupported 验证 controller 裁定的过渡兜底：
-// SupportsGroupingSets=false（MySQL/StarRocks stub）时行为与改动前完全一致——
-// 通用 SQL（无 GROUPING SETS）+ 旧 PivotProcessor（*PivotResponse 平铺透传）。
-func TestExecutor_Pivot_FallbackWhenGroupingSetsUnsupported(t *testing.T) {
+// TestExecutor_Pivot_UnionAllPathWhenGroupingSetsUnsupported 验证 UNION ALL 回退路径
+// （Task 2-2）：SupportsGroupingSets=false（MySQL/StarRocks）+ v2 可解析槽位请求时，
+// 走 UNION ALL SQL（无 GROUPING SETS）+ PivotProcessorV2（*PivotResponseV2 交叉表），
+// 不再平铺透传。
+func TestExecutor_Pivot_UnionAllPathWhenGroupingSetsUnsupported(t *testing.T) {
 	dataset, ds := pivotFixture()
-	flatRows := []map[string]any{
-		{"region": "E", "product": "A", "total": 100.0},
-		{"region": "W", "product": "B", "total": 40.0},
-	}
 	conn := &pivotMockConnection{
-		rows: flatRows,
+		// UNION ALL 与 GROUPING SETS 路径产出行形状完全一致（同标记列/输出键），
+		// processor 复用同一套分类逻辑。
+		rows: pivotGroupingSetsRows(),
 		caps: &datasource.DialectCapabilities{SupportsGroupingSets: false},
 	}
 	executor := NewExecutor(conn, dataset, ds)
@@ -159,15 +158,63 @@ func TestExecutor_Pivot_FallbackWhenGroupingSetsUnsupported(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if strings.Contains(result.Select, "GROUPING") {
-		t.Errorf("fallback path must not use GROUPING SETS SQL, got: %s", result.Select)
+	if !strings.Contains(result.Select, "UNION ALL") {
+		t.Errorf("expected UNION ALL SQL, got: %s", result.Select)
+	}
+	if strings.Contains(result.Select, "GROUPING SETS") {
+		t.Errorf("UNION ALL fallback must not use GROUPING SETS SQL, got: %s", result.Select)
+	}
+
+	pv, ok := result.Data.(*PivotResponseV2)
+	if !ok {
+		t.Fatalf("expected *PivotResponseV2, got %T", result.Data)
+	}
+	if len(pv.Cells) != 2 {
+		t.Fatalf("expected 2 cells (detail + subtotal), got %d", len(pv.Cells))
+	}
+	if pv.Cells[0].Values[PivotValueKey("A", "total")] != 100 {
+		t.Errorf("expected detail value A|total=100, got %v", pv.Cells[0].Values)
+	}
+	if !pv.Cells[1].IsSubtotal || pv.Cells[1].Values[PivotValueKey(PivotSubtotalColKey, "total")] != 100 {
+		t.Errorf("expected subtotal cell with sentinel key, got %+v", pv.Cells[1])
+	}
+	if pv.GrandTotal == nil || pv.GrandTotal.Values[PivotValueKey(PivotSubtotalColKey, "total")] != 100 {
+		t.Errorf("expected grand total 100, got %+v", pv.GrandTotal)
+	}
+}
+
+// TestExecutor_Pivot_V1UnaffectedWhenGroupingSetsUnsupported 锁定"caps=false 不改变
+// v1 行为"的边界：v1 平铺请求（PlannedAST 为 nil，槽位不可解析）即使
+// SupportsGroupingSets=false 也仍走通用 SQL + 旧 PivotProcessor 平铺透传。
+func TestExecutor_Pivot_V1UnaffectedWhenGroupingSetsUnsupported(t *testing.T) {
+	dataset, ds := pivotFixture()
+	conn := &pivotMockConnection{
+		rows: []map[string]any{{"region": "E", "product": "A", "total": 100.0}},
+		caps: &datasource.DialectCapabilities{SupportsGroupingSets: false},
+	}
+	executor := NewExecutor(conn, dataset, ds)
+
+	req := &ChartQueryRequest{
+		DatasetID: 1,
+		ChartType: ChartTypePivot,
+		Dims:      []string{"region", "product"},
+		Metrics:   []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "total"}},
+		// PlannedAST 为 nil：executor 内部走 qb.Build（无槽位信息）
+	}
+
+	result, err := executor.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result.Select, "UNION ALL") {
+		t.Errorf("v1 request must not use UNION ALL pivot SQL, got: %s", result.Select)
 	}
 	pr, ok := result.Data.(*PivotResponse)
 	if !ok {
-		t.Fatalf("expected legacy *PivotResponse, got %T", result.Data)
+		t.Fatalf("expected legacy *PivotResponse for v1 request, got %T", result.Data)
 	}
-	if len(pr.Data) != 2 {
-		t.Errorf("expected passthrough of 2 rows, got %d", len(pr.Data))
+	if len(pr.Data) != 1 {
+		t.Errorf("expected passthrough of 1 row, got %d", len(pr.Data))
 	}
 }
 

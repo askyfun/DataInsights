@@ -71,40 +71,47 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		return ExecutorResult{}, err
 	}
 
-	// pivot v2 分支（R-53）：数据源支持 GROUPING SETS 且请求携带显式 rows/columns
-	// 槽位（v2 协议）时，走交叉表查询 + PivotProcessorV2；否则（MySQL/StarRocks 的
-	// SupportsGroupingSets=false stub、v1 平铺请求、槽位不可解析）落到下方既有通用
-	// 路径（旧 PivotProcessor 行透传），行为与改动前完全一致——UNION ALL 回退是
-	// Task 2-2 的范围，本分支暂不实现。GetProcessor 是按 chartType 静态选择的，
-	// 感知不到运行时 Capabilities，因此 v1/v2 处理器选择必须发生在这里。
+	// pivot v2 分支（R-53）：请求携带显式 rows/columns 槽位（v2 协议，resolvePivotSlots
+	// 成功）时走交叉表查询 + PivotProcessorV2；caps 只用于选择 builder——支持
+	// GROUPING SETS 时生成单条分组查询，否则（MySQL/StarRocks 的
+	// SupportsGroupingSets=false）走 UNION ALL 回退（三分支各自 GROUP BY，聚合值同样
+	// 由数据库在每个层级重算）。两条路径产出行形状一致，共享同一份 execute/process
+	// 下游。resolvePivotSlots 失败（v1 平铺请求、PlannedAST 为 nil、槽位不可解析）时
+	// 落到下方既有通用路径（旧 PivotProcessor 行透传），行为与改动前完全一致。
+	// GetProcessor 是按 chartType 静态选择的，感知不到运行时 Capabilities，
+	// 因此 v1/v2 处理器选择必须发生在这里。
 	if req.ChartType == ChartTypePivot {
 		caps, err := e.conn.Capabilities(ctx)
 		if err != nil {
 			slog.Error("pivot: capabilities probe failed", "error", err)
 			return ExecutorResult{}, fmt.Errorf("capabilities probe failed: %v", err)
 		}
-		if caps != nil && caps.SupportsGroupingSets {
-			if rowDims, colDims, ok := resolvePivotSlots(req.Dims, ast); ok {
-				pivotSQL, pivotArgs := BuildPivotGroupingSetsQuery(dialect, ast, rowDims, colDims)
-				slog.Debug("executing pivot grouping sets query", "sql", pivotSQL, "args", pivotArgs)
-
-				result, err := e.conn.Execute(ctx, pivotSQL, pivotArgs...)
-				if err != nil {
-					return ExecutorResult{}, fmt.Errorf("query failed: %v", err)
-				}
-
-				data, err := (&PivotProcessorV2{}).Process(result.Rows, req.Dims, req.Metrics, ast)
-				if err != nil {
-					return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
-				}
-
-				return ExecutorResult{
-					Data: data,
-					GeneratedSQL: GeneratedSQL{
-						Select: pivotSQL,
-					},
-				}, nil
+		if rowDims, colDims, ok := resolvePivotSlots(req.Dims, ast); ok {
+			var pivotSQL string
+			var pivotArgs []any
+			if caps != nil && caps.SupportsGroupingSets {
+				pivotSQL, pivotArgs = BuildPivotGroupingSetsQuery(dialect, ast, rowDims, colDims)
+			} else {
+				pivotSQL, pivotArgs = BuildPivotUnionAllQuery(dialect, ast, rowDims, colDims)
 			}
+			slog.Debug("executing pivot query", "sql", pivotSQL, "args", pivotArgs)
+
+			result, err := e.conn.Execute(ctx, pivotSQL, pivotArgs...)
+			if err != nil {
+				return ExecutorResult{}, fmt.Errorf("query failed: %v", err)
+			}
+
+			data, err := (&PivotProcessorV2{}).Process(result.Rows, req.Dims, req.Metrics, ast)
+			if err != nil {
+				return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
+			}
+
+			return ExecutorResult{
+				Data: data,
+				GeneratedSQL: GeneratedSQL{
+					Select: pivotSQL,
+				},
+			}, nil
 		}
 	}
 
