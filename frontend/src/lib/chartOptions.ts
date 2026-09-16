@@ -53,6 +53,7 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
   const raw = style as Record<string, unknown>;
   const tableRowSize = raw.tableRowSize;
   const stack = raw.stack;
+  const orientation = raw.orientation;
   return {
     colors: Array.isArray(raw.colors)
       ? raw.colors.filter((color): color is string => typeof color === 'string')
@@ -61,6 +62,9 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
     tableRowSize: tableRowSize === 'middle' || tableRowSize === 'large' ? tableRowSize : 'small',
     // 非法/缺失的 stack 直接不带该键（与 DEFAULT_CHART_STYLE 的形状保持一致），等价于 'none'。
     ...(stack === 'none' || stack === 'normal' || stack === 'percent' ? { stack } : {}),
+    // orientation/donut 同例：非法/缺失不带键，分别等价于 'vertical'/false。
+    ...(orientation === 'vertical' || orientation === 'horizontal' ? { orientation } : {}),
+    ...(raw.donut === true ? { donut: true } : {}),
   };
 }
 
@@ -228,6 +232,12 @@ export function buildChartOption(
     formatter: truncateUtcSuffix,
   });
 
+  // 环形图（R-52）：donut=true 时用内外双半径，否则保持实心饼图
+  const pieRadius: string | string[] = style.donut === true ? ['40%', '70%'] : '50%';
+
+  // 横向条形图：仅 bar 消费 orientation，'horizontal' 时交换类目轴/值轴
+  const horizontalBar = chartType === 'bar' && style.orientation === 'horizontal';
+
   if (!Array.isArray(data)) {
     // ---- 正常路径：结构化聚合响应 ----
     switch (chartType) {
@@ -260,7 +270,7 @@ export function buildChartOption(
             {
               name: labelOf(valueField),
               type: 'pie' as const,
-              radius: '50%',
+              radius: pieRadius,
               data: pie.data.map((item) => ({ name: item.name, value: item.value })),
               emphasis: pieEmphasis,
               label: { formatter: '{b}: {d}%' },
@@ -282,15 +292,17 @@ export function buildChartOption(
         }
         // 'x_axis' 判别已将该臂收窄为 ChartAxisResponse。
         const axis: AxisResponse = data;
+        const categoryAxis = {
+          type: 'category' as const,
+          data: axis.x_axis,
+          name: labelOf(context.dimensions[0]),
+          axisLabel: categoryAxisLabel(axis.x_axis.length),
+        };
+        const valueAxis = { type: 'value' as const };
         return {
           ...commonOptions,
-          xAxis: {
-            type: 'category' as const,
-            data: axis.x_axis,
-            name: labelOf(context.dimensions[0]),
-            axisLabel: categoryAxisLabel(axis.x_axis.length),
-          },
-          yAxis: { type: 'value' as const },
+          xAxis: horizontalBar ? valueAxis : categoryAxis,
+          yAxis: horizontalBar ? categoryAxis : valueAxis,
           series: applyStack(
             axis.series.map((s) => ({
               name: labelOf(s.name),
@@ -337,6 +349,13 @@ export function buildChartOption(
     return null;
   }
   const xAxisData = rows.map((item) => toCategoryValue(item[xAxisField]));
+  const categoryAxis = {
+    type: 'category' as const,
+    data: xAxisData,
+    name: labelOf(xAxisField),
+    axisLabel: categoryAxisLabel(xAxisData.length),
+  };
+  const valueAxis = { type: 'value' as const };
 
   switch (chartType) {
     case 'line':
@@ -344,13 +363,8 @@ export function buildChartOption(
     case 'bar':
       return {
         ...commonOptions,
-        xAxis: {
-          type: 'category' as const,
-          data: xAxisData,
-          name: labelOf(xAxisField),
-          axisLabel: categoryAxisLabel(xAxisData.length),
-        },
-        yAxis: { type: 'value' as const },
+        xAxis: horizontalBar ? valueAxis : categoryAxis,
+        yAxis: horizontalBar ? categoryAxis : valueAxis,
         series: applyStack(
           context.metrics.map((yField) => ({
             name: labelOf(yField),
@@ -374,7 +388,7 @@ export function buildChartOption(
           {
             name: labelOf(valueField),
             type: 'pie' as const,
-            radius: '50%',
+            radius: pieRadius,
             data: rows.map((item) => ({
               name: pieSliceName(item[xAxisField] ?? item.name),
               value: toPieValue(item[valueField] ?? item.value),

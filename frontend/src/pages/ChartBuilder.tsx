@@ -601,6 +601,33 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
             </div>
           )}
 
+          {showStyleControl('orientation') && (
+            <div>
+              <Text strong>方向</Text>
+              <Select
+                style={{ width: '100%', marginTop: 4 }}
+                value={chartStyle.orientation ?? 'vertical'}
+                onChange={(value) => onChartStyleChange({ orientation: value })}
+                options={[
+                  { value: 'vertical', label: '纵向' },
+                  { value: 'horizontal', label: '横向' },
+                ]}
+              />
+            </div>
+          )}
+
+          {showStyleControl('donut') && (
+            <div>
+              <Text strong>环形图</Text>
+              <div style={{ marginTop: 4 }}>
+                <Switch
+                  checked={chartStyle.donut ?? false}
+                  onChange={(checked) => onChartStyleChange({ donut: checked })}
+                />
+              </div>
+            </div>
+          )}
+
           {showStyleControl('tableRowSize') && (
             <div>
               <Text strong>表格行尺寸</Text>

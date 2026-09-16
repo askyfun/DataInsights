@@ -13,11 +13,16 @@ interface AxisOptionView {
   title: { text: string };
   xAxis: {
     type: string;
-    data: (string | number)[];
+    data?: (string | number)[];
     name?: string;
     axisLabel?: { rotate?: number; formatter?: (val: string) => string };
   };
-  yAxis: { type: string; name?: string };
+  yAxis: {
+    type: string;
+    name?: string;
+    data?: (string | number)[];
+    axisLabel?: { rotate?: number; formatter?: (val: string) => string };
+  };
   series: {
     name?: string;
     type: string;
@@ -36,7 +41,7 @@ interface PieOptionView {
   series: {
     name?: string;
     type: string;
-    radius?: string;
+    radius?: string | string[];
     data: { name: string; value: unknown }[];
     label?: { formatter: string };
   }[];
@@ -650,5 +655,157 @@ describe('buildChartOption：style.stack 堆叠渲染（bar/line/area）', () =>
       expect(option.series[0]).toMatchObject({ stack: 'total' });
       expect(option.series[1]).toMatchObject({ stack: 'total' });
     }
+  });
+});
+
+describe('buildChartOption：style.orientation 横向条形（仅 bar）', () => {
+  const context = { title: '', dimensions: ['product'], metrics: ['revenue'] };
+
+  it("orientation 缺省/'vertical'：轴布局不变（回归钉死纵向柱状图）", () => {
+    for (const style of [baseStyle, { ...baseStyle, orientation: 'vertical' as const }]) {
+      const option = view<AxisOptionView>(buildChartOption('bar', axisPayload, style, {}, context));
+      expect(option.xAxis.type).toBe('category');
+      expect(option.xAxis.data).toEqual(['Apple', 'Banana']);
+      expect(option.yAxis.type).toBe('value');
+      expect(option.series[0]).toMatchObject({ type: 'bar', data: [1000, 2000] });
+    }
+  });
+
+  it("orientation='horizontal'：xAxis/yAxis 类型与类目数据交换，series 数据不变", () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        axisPayload,
+        { ...baseStyle, orientation: 'horizontal' },
+        { product: '产品' },
+        context
+      )
+    );
+    expect(option.xAxis.type).toBe('value');
+    expect(option.xAxis).not.toHaveProperty('data');
+    expect(option.yAxis.type).toBe('category');
+    expect(option.yAxis.data).toEqual(['Apple', 'Banana']);
+    expect(option.yAxis.name).toBe('产品');
+    expect(option.series[0]).toMatchObject({ type: 'bar', data: [1000, 2000] });
+  });
+
+  it("orientation='horizontal' + stack='normal' 共存：轴交换且每条 series 仍打 stack:'total'", () => {
+    const stackedPayload = {
+      x_axis: ['Apple', 'Banana'],
+      series: [
+        { name: 'revenue', data: [1000, 2000] },
+        { name: 'cost', data: [3000, 2000] },
+      ],
+    };
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        stackedPayload,
+        { ...baseStyle, orientation: 'horizontal', stack: 'normal' },
+        {},
+        { title: '', dimensions: ['product'], metrics: ['revenue', 'cost'] }
+      )
+    );
+    expect(option.xAxis.type).toBe('value');
+    expect(option.yAxis.type).toBe('category');
+    expect(option.yAxis.data).toEqual(['Apple', 'Banana']);
+    expect(option.series[0]).toMatchObject({ stack: 'total', data: [1000, 2000] });
+    expect(option.series[1]).toMatchObject({ stack: 'total', data: [3000, 2000] });
+  });
+
+  it("orientation='horizontal' 对 line/area 无效（仅 bar 消费，轴不交换）", () => {
+    for (const chartType of ['line', 'area'] as const) {
+      const option = view<AxisOptionView>(
+        buildChartOption(
+          chartType,
+          axisPayload,
+          { ...baseStyle, orientation: 'horizontal' },
+          {},
+          context
+        )
+      );
+      expect(option.xAxis.type).toBe('category');
+      expect(option.xAxis.data).toEqual(['Apple', 'Banana']);
+      expect(option.yAxis.type).toBe('value');
+    }
+  });
+
+  it('legacy 裸行路径同样支持横向交换', () => {
+    const rows = [
+      { product: 'Apple', revenue: 1000 },
+      { product: 'Banana', revenue: 2000 },
+    ];
+    const option = view<AxisOptionView>(
+      buildChartOption('bar', rows, { ...baseStyle, orientation: 'horizontal' }, {}, context)
+    );
+    expect(option.xAxis.type).toBe('value');
+    expect(option.yAxis.type).toBe('category');
+    expect(option.yAxis.data).toEqual(['Apple', 'Banana']);
+    expect(option.series[0]).toMatchObject({ type: 'bar', data: [1000, 2000] });
+  });
+});
+
+describe('buildChartOption：style.donut 环形图（仅 pie）', () => {
+  const context = { title: '', dimensions: ['product'], metrics: ['revenue'] };
+
+  it("donut=true：series radius 变为 ['40%', '70%']，其余饼图约定不变", () => {
+    const option = view<PieOptionView>(
+      buildChartOption('pie', piePayload, { ...baseStyle, donut: true }, {}, context)
+    );
+    expect(option.series[0]).toMatchObject({
+      type: 'pie',
+      radius: ['40%', '70%'],
+      data: [
+        { name: 'Apple', value: 30 },
+        { name: 'Banana', value: 50 },
+      ],
+    });
+    expect(option.tooltip).toEqual({ trigger: 'item', formatter: '{b}: {c} ({d}%)' });
+  });
+
+  it("donut=false/缺省：radius 保持 '50%'（回归钉死实心饼图）", () => {
+    for (const style of [baseStyle, { ...baseStyle, donut: false }]) {
+      const option = view<PieOptionView>(buildChartOption('pie', piePayload, style, {}, context));
+      expect(option.series[0]?.radius).toBe('50%');
+    }
+  });
+
+  it('legacy 裸行路径同样支持 donut', () => {
+    const rows = [{ product: 'Apple', revenue: 1000 }];
+    const option = view<PieOptionView>(
+      buildChartOption('pie', rows, { ...baseStyle, donut: true }, {}, context)
+    );
+    expect(option.series[0]?.radius).toEqual(['40%', '70%']);
+  });
+});
+
+describe('normalizeChartStyle：orientation/donut 安全窄化', () => {
+  it('合法值原样保留', () => {
+    expect(normalizeChartStyle({ orientation: 'horizontal', donut: true })).toEqual({
+      colors: [],
+      smooth: false,
+      tableRowSize: 'small',
+      orientation: 'horizontal',
+      donut: true,
+    });
+    expect(normalizeChartStyle({ orientation: 'vertical' })).toEqual({
+      colors: [],
+      smooth: false,
+      tableRowSize: 'small',
+      orientation: 'vertical',
+    });
+  });
+
+  it('非法/缺失值不带键（分别等价于 vertical/false）', () => {
+    expect(normalizeChartStyle({ orientation: 'diagonal', donut: 'yes' })).toEqual({
+      colors: [],
+      smooth: false,
+      tableRowSize: 'small',
+    });
+    expect(normalizeChartStyle({ donut: false })).toEqual({
+      colors: [],
+      smooth: false,
+      tableRowSize: 'small',
+    });
   });
 });

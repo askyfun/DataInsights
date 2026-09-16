@@ -83,7 +83,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     icon: BarChartOutlined,
     // bar 分支不消费 smooth（buildChartOption 里 bar 恒为 {}），故不列入 styleKeys，
     // 避免渲染一个不起作用的开关（裁定见 task-1-1-brief.md D 部分）。
-    styleKeys: ['colors', 'stack'],
+    styleKeys: ['colors', 'stack', 'orientation'],
     fieldGroups: [
       {
         id: 'x_axis',
@@ -147,8 +147,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '饼图',
     resultShape: 'pie',
     icon: PieChartOutlined,
-    // donut 是 Task 1-3 的工作，本任务只填当前真实消费的 colors。
-    styleKeys: ['colors'],
+    styleKeys: ['colors', 'donut'],
     fieldGroups: [
       {
         id: 'category',

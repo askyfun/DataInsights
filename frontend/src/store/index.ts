@@ -217,6 +217,10 @@ export interface ChartStyleConfig {
   tableRowSize: 'small' | 'middle' | 'large';
   /** 堆叠模式（bar/line/area）；undefined 等价于 'none'，不在默认值里显式设置。 */
   stack?: 'none' | 'normal' | 'percent';
+  /** 条形方向（仅 bar）；undefined 等价于 'vertical'。 */
+  orientation?: 'vertical' | 'horizontal';
+  /** 环形图开关（仅 pie）；undefined 等价于 false（实心饼图）。 */
+  donut?: boolean;
 }
 
 export interface ChartQueryOptions {
