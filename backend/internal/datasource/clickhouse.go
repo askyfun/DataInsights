@@ -154,3 +154,12 @@ func (c *clickhouseConnection) Execute(ctx context.Context, sql string, args ...
 		Rows:    results,
 	}, nil
 }
+
+func (c *clickhouseConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
+	return &DialectCapabilities{
+		SupportsGroupingSets:    true,
+		SupportsPercentileCont:  false,
+		SupportsWindowFunctions: true,
+		PercentileStrategy:      "quantilesExactInclusive",
+	}, nil
+}

@@ -170,3 +170,14 @@ func (c *starRocksConnection) Execute(ctx context.Context, sql string, args ...a
 		Rows:    results,
 	}, nil
 }
+
+func (c *starRocksConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
+	// TODO(Task 3-0): 未经真实实例探针验证，当前返回保守默认值（不支持），
+	// StarRocks 不继承 MySQL 的探针结果，待有可用实例时独立实测。
+	return &DialectCapabilities{
+		SupportsGroupingSets:    false,
+		SupportsPercentileCont:  false,
+		SupportsWindowFunctions: false,
+		PercentileStrategy:      "unsupported",
+	}, nil
+}

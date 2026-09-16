@@ -75,6 +75,10 @@ type Connection interface {
 
 	// Execute executes a query with positional args (? placeholders).
 	Execute(ctx context.Context, sql string, args ...any) (*QueryResult, error)
+
+	// Capabilities 返回该连接的方言查询能力。当前（Task 0-7）各驱动返回静态 stub 值，
+	// 真实探针逻辑在 Task 3-0 补充。
+	Capabilities(ctx context.Context) (*DialectCapabilities, error)
 }
 
 // NewDriver creates a new driver instance based on the driver type

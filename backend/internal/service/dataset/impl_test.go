@@ -49,6 +49,10 @@ func (s *stubConnection) GetPrimaryKeys(ctx context.Context, tableName string) (
 	return nil, nil
 }
 
+func (s *stubConnection) Capabilities(ctx context.Context) (*datasource.DialectCapabilities, error) {
+	return &datasource.DialectCapabilities{}, nil
+}
+
 func (s *stubConnection) Execute(ctx context.Context, query string, args ...any) (*datasource.QueryResult, error) {
 	s.executeSQL = query
 	if s.executeErr != nil {

@@ -47,6 +47,10 @@ func (m *MockConnection) GetPrimaryKeys(ctx context.Context, tableName string) (
 	return nil, nil
 }
 
+func (m *MockConnection) Capabilities(ctx context.Context) (*datasource.DialectCapabilities, error) {
+	return &datasource.DialectCapabilities{}, nil
+}
+
 func TestExecutor_EmptyBaseQuery(t *testing.T) {
 	dataset := &model.Dataset{
 		ID:        1,

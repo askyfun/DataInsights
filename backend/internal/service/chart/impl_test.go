@@ -55,6 +55,11 @@ func (c *stubConnection) GetPrimaryKeys(ctx context.Context, tableName string) (
 	return nil, nil
 }
 
+// Capabilities service 层测试不依赖该方法。
+func (c *stubConnection) Capabilities(ctx context.Context) (*datasource.DialectCapabilities, error) {
+	return &datasource.DialectCapabilities{}, nil
+}
+
 // Execute 记录 SQL；配置了 executeFn 时（GetData 回退路径）以其应答，
 // 否则保持旧行为：返回 nil 结果（Query 主链路由 executor stub 应答）。
 func (c *stubConnection) Execute(ctx context.Context, sql string, args ...any) (*datasource.QueryResult, error) {

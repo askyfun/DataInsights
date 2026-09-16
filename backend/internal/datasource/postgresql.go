@@ -184,3 +184,12 @@ func (c *postgresqlConnection) Execute(ctx context.Context, sql string, args ...
 		Rows:    results,
 	}, nil
 }
+
+func (c *postgresqlConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
+	return &DialectCapabilities{
+		SupportsGroupingSets:    true,
+		SupportsPercentileCont:  true,
+		SupportsWindowFunctions: true,
+		PercentileStrategy:      "percentile_cont",
+	}, nil
+}
