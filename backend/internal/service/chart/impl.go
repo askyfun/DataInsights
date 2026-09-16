@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"dataray/internal/database"
 	"dataray/internal/datasource"
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
@@ -72,7 +73,7 @@ func NewService(db *bun.DB) Service {
 // List returns all charts with pagination
 func (s *chartService) List(ctx context.Context, limit, offset int) ([]entity.Chart, error) {
 	var charts []model.Chart
-	q := s.db.NewSelect().Model(&charts)
+	q := s.db.NewSelect().Model(&charts).Where("deleted_at IS NULL")
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
@@ -88,7 +89,7 @@ func (s *chartService) List(ctx context.Context, limit, offset int) ([]entity.Ch
 // GetByID returns a chart by ID
 func (s *chartService) GetByID(ctx context.Context, id int) (*entity.Chart, error) {
 	chart := &model.Chart{ID: id}
-	if err := s.db.NewSelect().Model(chart).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(chart).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("chart not found: %w", err)
 	}
 	return toChartEntity(chart), nil
@@ -106,22 +107,41 @@ func (s *chartService) Create(ctx context.Context, chart *entity.Chart) (*entity
 // Update updates an existing chart
 func (s *chartService) Update(ctx context.Context, chart *entity.Chart) (*entity.Chart, error) {
 	m := toChartModel(chart)
-	if _, err := s.db.NewUpdate().Model(m).WherePK().Exec(ctx); err != nil {
+	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update chart: %w", err)
 	}
 	updated := &model.Chart{ID: chart.ID}
-	if err := s.db.NewSelect().Model(updated).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(updated).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("failed to get updated chart: %w", err)
 	}
 	return toChartEntity(updated), nil
 }
 
-// Delete deletes a chart by ID
+// Delete soft-deletes a chart by ID and cascades the soft delete to all of its
+// shares, within a single transaction. The row is never physically removed
+// (deleted_at is stamped instead).
 func (s *chartService) Delete(ctx context.Context, id int) error {
-	if _, err := s.db.NewDelete().Model(&model.Chart{}).Where("id = ?", id).Exec(ctx); err != nil {
-		return fmt.Errorf("failed to delete chart: %w", err)
-	}
-	return nil
+	return database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
+		// 软删图表自身（幂等：已删除/不存在影响 0 行不报错）。
+		if _, err := tx.NewUpdate().
+			Model((*model.Chart)(nil)).
+			Set("deleted_at = now()").
+			Where("id = ?", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to delete chart: %w", err)
+		}
+		// 级联软删其下分享。
+		if _, err := tx.NewUpdate().
+			Model((*model.Share)(nil)).
+			Set("deleted_at = now()").
+			Where("chart_id = ?", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to cascade delete shares: %w", err)
+		}
+		return nil
+	})
 }
 
 // GetData returns data for a chart. A persisted v1 config is executed through
@@ -374,7 +394,7 @@ func buildQuerySpecFromEntityRequest(req *entity.ChartQueryRequest) *query.Query
 
 func (s *chartService) getChartModel(ctx context.Context, id int) (*model.Chart, error) {
 	chart := &model.Chart{ID: id}
-	if err := s.db.NewSelect().Model(chart).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(chart).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("chart not found: %w", err)
 	}
 	return chart, nil
@@ -382,7 +402,7 @@ func (s *chartService) getChartModel(ctx context.Context, id int) (*model.Chart,
 
 func (s *chartService) getDatasetModel(ctx context.Context, id int) (*model.Dataset, error) {
 	ds := &model.Dataset{ID: id}
-	if err := s.db.NewSelect().Model(ds).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("dataset not found: %w", err)
 	}
 	return ds, nil
@@ -390,7 +410,7 @@ func (s *chartService) getDatasetModel(ctx context.Context, id int) (*model.Data
 
 func (s *chartService) getDatasourceModel(ctx context.Context, id int) (*model.Datasource, error) {
 	ds := &model.Datasource{ID: id}
-	if err := s.db.NewSelect().Model(ds).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("datasource not found: %w", err)
 	}
 	return ds, nil

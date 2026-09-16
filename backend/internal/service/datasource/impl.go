@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dataray/internal/crypto"
+	"dataray/internal/database"
 	"dataray/internal/datasource"
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
@@ -69,7 +70,7 @@ func (s *datasourceService) SetSecurityKey(key []byte) {
 // List returns all datasources with pagination
 func (s *datasourceService) List(ctx context.Context, limit, offset int) ([]entity.Datasource, error) {
 	var datasources []model.Datasource
-	q := s.db.NewSelect().Model(&datasources)
+	q := s.db.NewSelect().Model(&datasources).Where("deleted_at IS NULL")
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
@@ -85,7 +86,7 @@ func (s *datasourceService) List(ctx context.Context, limit, offset int) ([]enti
 // GetByID returns a datasource by ID
 func (s *datasourceService) GetByID(ctx context.Context, id int) (*entity.Datasource, error) {
 	ds := &model.Datasource{ID: id}
-	if err := s.db.NewSelect().Model(ds).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("datasource not found: %w", err)
 	}
 	return toEntity(ds), nil
@@ -126,22 +127,61 @@ func (s *datasourceService) Update(ctx context.Context, ds *entity.Datasource) (
 	// 整行 WherePK 更新此前不刷新 updated_at（DB 无触发器兜底）。显式打当前时间，
 	// 让 bun 的整行更新写入新值，与 dataset 服务 Update 保持一致。
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
-	if _, err := s.db.NewUpdate().Model(m).WherePK().Exec(ctx); err != nil {
+	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update datasource: %w", err)
 	}
 	updated := &model.Datasource{ID: ds.ID}
-	if err := s.db.NewSelect().Model(updated).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(updated).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("failed to get updated datasource: %w", err)
 	}
 	return toEntity(updated), nil
 }
 
-// Delete deletes a datasource by ID
+// Delete soft-deletes a datasource by ID and cascades the soft delete to all of
+// its datasets, then to every chart under those datasets, then to every share
+// under those charts — all within a single transaction. The row stays in the
+// table (deleted_at is stamped, never physically removed), matching the
+// product requirement that nothing is ever hard-deleted.
 func (s *datasourceService) Delete(ctx context.Context, id int) error {
-	if _, err := s.db.NewDelete().Model(&model.Datasource{}).Where("id = ?", id).Exec(ctx); err != nil {
-		return fmt.Errorf("failed to delete datasource: %w", err)
-	}
-	return nil
+	return database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
+		// 软删数据源自身（幂等：已删除/不存在影响 0 行不报错）。
+		if _, err := tx.NewUpdate().
+			Model((*model.Datasource)(nil)).
+			Set("deleted_at = now()").
+			Where("id = ?", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to delete datasource: %w", err)
+		}
+		// 级联软删其下数据集。
+		if _, err := tx.NewUpdate().
+			Model((*model.Dataset)(nil)).
+			Set("deleted_at = now()").
+			Where("datasource_id = ?", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to cascade delete datasets: %w", err)
+		}
+		// 级联软删这些数据集下图表。
+		if _, err := tx.NewUpdate().
+			Model((*model.Chart)(nil)).
+			Set("deleted_at = now()").
+			Where("dataset_id IN (SELECT id FROM bi_dataset WHERE datasource_id = ?)", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to cascade delete charts: %w", err)
+		}
+		// 级联软删这些图表下分享。
+		if _, err := tx.NewUpdate().
+			Model((*model.Share)(nil)).
+			Set("deleted_at = now()").
+			Where("chart_id IN (SELECT id FROM bi_chart WHERE dataset_id IN (SELECT id FROM bi_dataset WHERE datasource_id = ?))", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to cascade delete shares: %w", err)
+		}
+		return nil
+	})
 }
 
 // TestConnection tests the connection to a datasource
@@ -345,7 +385,7 @@ func (s *datasourceService) GetFieldDistribution(ctx context.Context, id int, ta
 
 func (s *datasourceService) getDatasourceModel(ctx context.Context, id int) (*model.Datasource, error) {
 	ds := &model.Datasource{ID: id}
-	if err := s.db.NewSelect().Model(ds).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("datasource not found: %w", err)
 	}
 	return ds, nil

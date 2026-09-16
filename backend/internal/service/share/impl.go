@@ -77,7 +77,7 @@ func (s *shareService) Create(ctx context.Context, chartID int, password *string
 // List returns all shares
 func (s *shareService) List(ctx context.Context) ([]entity.Share, error) {
 	var shares []model.Share
-	if err := s.db.NewSelect().Model(&shares).Order("id DESC").Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(&shares).Where("deleted_at IS NULL").Order("id DESC").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("failed to list shares: %w", err)
 	}
 	result := make([]entity.Share, len(shares))
@@ -90,7 +90,7 @@ func (s *shareService) List(ctx context.Context) ([]entity.Share, error) {
 // GetByToken returns a share by token
 func (s *shareService) GetByToken(ctx context.Context, token string) (*entity.Share, error) {
 	share := &model.Share{}
-	if err := s.db.NewSelect().Model(share).Where("token = ?", token).Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(share).Where("token = ?", token).Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("share not found: %w", err)
 	}
 	return toShareEntity(share), nil
@@ -101,7 +101,7 @@ func (s *shareService) GetByToken(ctx context.Context, token string) (*entity.Sh
 // compared directly and transparently upgraded to a bcrypt hash on success.
 func (s *shareService) ValidatePassword(ctx context.Context, token, password string) error {
 	m := &model.Share{}
-	if err := s.db.NewSelect().Model(m).Where("token = ?", token).Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(m).Where("token = ?", token).Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return fmt.Errorf("share not found: %w", err)
 	}
 
@@ -132,7 +132,7 @@ func (s *shareService) upgradeLegacyPassword(ctx context.Context, id int, plaint
 		return fmt.Errorf("upgrade legacy share password: %w", err)
 	}
 	m := &model.Share{ID: id, Password: sql.NullString{String: string(hash), Valid: true}}
-	if _, err := s.db.NewUpdate().Model(m).Column("password").WherePK().Exec(ctx); err != nil {
+	if _, err := s.db.NewUpdate().Model(m).Column("password").WherePK().Where("deleted_at IS NULL").Exec(ctx); err != nil {
 		return fmt.Errorf("upgrade legacy share password: %w", err)
 	}
 	slog.Info("upgraded legacy plaintext share password", "share_id", id)

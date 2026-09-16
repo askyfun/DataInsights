@@ -20,6 +20,7 @@ type Datasource struct {
 	Password     string       `bun:"password" json:"password"`
 	CreatedAt    sql.NullTime `bun:"created_at" json:"created_at"`
 	UpdatedAt    sql.NullTime `bun:"updated_at" json:"updated_at"`
+	DeletedAt    sql.NullTime `bun:"deleted_at,nullzero" json:"-"`
 }
 
 // Dataset represents a data set
@@ -44,6 +45,7 @@ type Dataset struct {
 	ShardKeys        string         `bun:"shard_keys" json:"shard_keys"`
 	CreatedAt        sql.NullTime   `bun:"created_at" json:"created_at"`
 	UpdatedAt        sql.NullTime   `bun:"updated_at" json:"updated_at"`
+	DeletedAt        sql.NullTime   `bun:"deleted_at,nullzero" json:"-"`
 }
 
 // MarshalJSON implements custom JSON marshaling for Dataset
@@ -124,6 +126,7 @@ type DatasetLineage struct {
 	UpstreamDatasetID   int          `bun:"upstream_dataset_id" json:"upstream_dataset_id"`
 	DownstreamDatasetID int          `bun:"downstream_dataset_id" json:"downstream_dataset_id"`
 	CreatedAt           sql.NullTime `bun:"created_at" json:"created_at"`
+	DeletedAt           sql.NullTime `bun:"deleted_at,nullzero" json:"-"`
 }
 
 // Chart represents a chart configuration
@@ -137,6 +140,7 @@ type Chart struct {
 	Config    string       `bun:"config" json:"config"`
 	CreatedAt sql.NullTime `bun:"created_at" json:"created_at"`
 	UpdatedAt sql.NullTime `bun:"updated_at" json:"updated_at"`
+	DeletedAt sql.NullTime `bun:"deleted_at,nullzero" json:"-"`
 }
 
 // Share represents a shared chart
@@ -149,4 +153,5 @@ type Share struct {
 	Password  sql.NullString `bun:"password" json:"password"`
 	ExpiresAt sql.NullTime   `bun:"expires_at" json:"expires_at"`
 	CreatedAt sql.NullTime   `bun:"created_at" json:"created_at"`
+	DeletedAt sql.NullTime   `bun:"deleted_at,nullzero" json:"-"`
 }

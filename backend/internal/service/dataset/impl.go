@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"dataray/internal/database"
 	"dataray/internal/datasource"
 	"dataray/internal/domain/entity"
 	"dataray/internal/model"
@@ -62,7 +63,7 @@ func NewService(db *bun.DB) Service {
 // List returns all datasets with pagination
 func (s *datasetService) List(ctx context.Context, limit, offset int) ([]entity.Dataset, error) {
 	var datasets []model.Dataset
-	q := s.db.NewSelect().Model(&datasets)
+	q := s.db.NewSelect().Model(&datasets).Where("deleted_at IS NULL")
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
@@ -78,7 +79,7 @@ func (s *datasetService) List(ctx context.Context, limit, offset int) ([]entity.
 // GetByID returns a dataset by ID
 func (s *datasetService) GetByID(ctx context.Context, id int) (*entity.Dataset, error) {
 	ds := &model.Dataset{ID: id}
-	if err := s.db.NewSelect().Model(ds).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("dataset not found: %w", err)
 	}
 	return toDatasetEntity(ds), nil
@@ -104,22 +105,50 @@ func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entit
 	// 不前进（DB 无触发器兜底）。显式打当前时间，让 bun 的整行更新写入新值；
 	// created_at 仍走 toDatasetModel 的透传（merge 负责保留）。
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
-	if _, err := s.db.NewUpdate().Model(m).WherePK().Exec(ctx); err != nil {
+	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update dataset: %w", err)
 	}
 	updated := &model.Dataset{ID: ds.ID}
-	if err := s.db.NewSelect().Model(updated).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(updated).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("failed to get updated dataset: %w", err)
 	}
 	return toDatasetEntity(updated), nil
 }
 
-// Delete deletes a dataset by ID
+// Delete soft-deletes a dataset by ID and cascades the soft delete to all of its
+// charts, then to every share under those charts — within a single transaction.
+// The row is never physically removed (deleted_at is stamped instead).
 func (s *datasetService) Delete(ctx context.Context, id int) error {
-	if _, err := s.db.NewDelete().Model(&model.Dataset{}).Where("id = ?", id).Exec(ctx); err != nil {
-		return fmt.Errorf("failed to delete dataset: %w", err)
-	}
-	return nil
+	return database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
+		// 软删数据集自身（幂等：已删除/不存在影响 0 行不报错）。
+		if _, err := tx.NewUpdate().
+			Model((*model.Dataset)(nil)).
+			Set("deleted_at = now()").
+			Where("id = ?", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to delete dataset: %w", err)
+		}
+		// 级联软删其下图表。
+		if _, err := tx.NewUpdate().
+			Model((*model.Chart)(nil)).
+			Set("deleted_at = now()").
+			Where("dataset_id = ?", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to cascade delete charts: %w", err)
+		}
+		// 级联软删这些图表下分享。
+		if _, err := tx.NewUpdate().
+			Model((*model.Share)(nil)).
+			Set("deleted_at = now()").
+			Where("chart_id IN (SELECT id FROM bi_chart WHERE dataset_id = ?)", id).
+			Where("deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("failed to cascade delete shares: %w", err)
+		}
+		return nil
+	})
 }
 
 // GetColumns returns columns for a dataset
@@ -215,7 +244,7 @@ func (s *datasetService) UpdateColumns(ctx context.Context, id int, columns []en
 	}
 	ds.Columns = string(columnsJSON)
 
-	if _, err := s.db.NewUpdate().Model(ds).WherePK().Exec(ctx); err != nil {
+	if _, err := s.db.NewUpdate().Model(ds).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update columns: %w", err)
 	}
 
@@ -307,7 +336,7 @@ func (s *datasetService) Query(ctx context.Context, id int, config entity.QueryC
 
 func (s *datasetService) getDatasetModel(ctx context.Context, id int) (*model.Dataset, error) {
 	ds := &model.Dataset{ID: id}
-	if err := s.db.NewSelect().Model(ds).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("dataset not found: %w", err)
 	}
 	return ds, nil
@@ -315,7 +344,7 @@ func (s *datasetService) getDatasetModel(ctx context.Context, id int) (*model.Da
 
 func (s *datasetService) getDatasourceModel(ctx context.Context, id int) (*model.Datasource, error) {
 	ds := &model.Datasource{ID: id}
-	if err := s.db.NewSelect().Model(ds).WherePK().Scan(ctx); err != nil {
+	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("datasource not found: %w", err)
 	}
 	return ds, nil
