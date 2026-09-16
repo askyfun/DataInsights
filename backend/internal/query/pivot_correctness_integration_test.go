@@ -87,8 +87,8 @@ func userOrEmpty(u *url.URL) string {
 //	E      A       20    u2
 //	E      A       30    u3
 //	E      B       110   u3
-//	W      A       40    u4
-//	W      B       60    u4
+//	W      A       40    u3
+//	W      B       60    u3
 //
 // PG 推断 region/product/user_id 为 text、price 为 integer；AVG(integer)→numeric、
 // COUNT(DISTINCT text)→bigint、GROUPING()→bigint，均被 toFloat64/toString 覆盖。
@@ -96,8 +96,8 @@ func pivotCorrectnessSeedSQL() string {
 	return `SELECT * FROM (VALUES
   ('E','A',10,'u1'), ('E','A',20,'u2'), ('E','A',30,'u3'),
   ('E','B',110,'u3'),
-  ('W','A',40,'u4'),
-  ('W','B',60,'u4')
+  ('W','A',40,'u3'),
+  ('W','B',60,'u3')
 ) AS t(region, product, price, user_id)`
 }
 
@@ -169,7 +169,7 @@ func assertPivotCorrectness(t *testing.T, pv *PivotResponseV2) {
 	assertNotGoReaggregated(t, "subtotal E avg_price", eSubAvg, 65, "avg 是子分组平均的平均，说明 Go 端二次聚合了")
 	assertNotGoReaggregated(t, "subtotal E uniq_users", eSubUniq, 4, "count_distinct 是子分组 COUNT DISTINCT 之和，说明 Go 端二次聚合了")
 
-	// 行小计 W：avg=(40+60)/2=50；uniq={u4}=1（不是 sum-of-cds=1+1=2）。
+	// 行小计 W：avg=(40+60)/2=50；uniq={u3}=1（不是 sum-of-cds=1+1=2）。
 	wSub := findCell(t, pv, "W", true)
 	wSubAvg := cellValue(t, wSub, PivotValueKey(PivotSubtotalColKey, "avg_price"))
 	wSubUniq := cellValue(t, wSub, PivotValueKey(PivotSubtotalColKey, "uniq_users"))
@@ -178,16 +178,17 @@ func assertPivotCorrectness(t *testing.T, pv *PivotResponseV2) {
 	assertNotGoReaggregated(t, "subtotal W uniq_users", wSubUniq, 2, "count_distinct 是子分组 COUNT DISTINCT 之和，说明 Go 端二次聚合了")
 
 	// 合计：avg=(10+20+30+110+40+60)/6=45（不是 avg-of-avgs=(20+110+40+60)/4=57.5）；
-	//       uniq={u1,u2,u3,u4}=4（不是 sum-of-cds=3+1+1+1=6）。
+	//       uniq={u1,u2,u3}=3（不是 sum-of-cds=3+1+1+1=6，也不是行小计之和=3+1=4）。
 	if pv.GrandTotal == nil {
 		t.Fatalf("expected non-nil GrandTotal, got nil; cells=%+v", pv.Cells)
 	}
 	gAvg := cellValue(t, *pv.GrandTotal, PivotValueKey(PivotSubtotalColKey, "avg_price"))
 	gUniq := cellValue(t, *pv.GrandTotal, PivotValueKey(PivotSubtotalColKey, "uniq_users"))
 	assertPivotValue(t, "grand avg_price", gAvg, 45)
-	assertPivotValue(t, "grand uniq_users", gUniq, 4)
+	assertPivotValue(t, "grand uniq_users", gUniq, 3)
 	assertNotGoReaggregated(t, "grand avg_price", gAvg, 57.5, "avg 是子分组平均的平均，说明 Go 端二次聚合了")
 	assertNotGoReaggregated(t, "grand uniq_users", gUniq, 6, "count_distinct 是子分组 COUNT DISTINCT 之和，说明 Go 端二次聚合了")
+	assertNotGoReaggregated(t, "grand uniq_users", gUniq, 4, "grand uniq_users 等于行小计之和(3+1=4)，说明 Go 端用行小计二次聚合了合计")
 }
 
 // findCell 按 RowKey（单行维度值）+ IsSubtotal 定位一个 PivotRow；找不到即 Fatal。
