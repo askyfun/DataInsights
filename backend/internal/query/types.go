@@ -90,6 +90,12 @@ type ChartQueryRequest struct {
 	Pagination *Pagination    `json:"pagination,omitempty"`
 	Sort       *SortConfig    `json:"sort,omitempty"`
 	PlannedAST *QueryAST      `json:"-"`
+
+	// QueryOptions 查询选项扩展袋（R-57）：histogram 的 bin_count（默认 20）/
+	// bin_width（可选覆盖）经此下传，executor 的 histogram 分支直接读取——
+	// 不贯穿 QuerySpec/QueryAST/planner（最小 churn 路径，与 pivot 分支从 req
+	// 直读 ChartType/Dims/Metrics 同款）。
+	QueryOptions map[string]any `json:"query_options,omitempty"`
 }
 
 // ChartQueryResponse 图表查询响应
@@ -148,8 +154,9 @@ type PivotResponse struct {
 
 // PivotResponseV2 透视表 v2 响应（R-53，plan §3.2）：交叉表头 + 含小计的数据行 + 合计行。
 // 字段与 api/openapi.yaml 的 ChartPivotResponseV2 schema 逐一对应。
-// 仅在数据源 Capabilities().SupportsGroupingSets == true 时由 PivotProcessorV2 返回；
-// 否则仍走旧的 PivotResponse 平铺形状（Task 2-2 的 UNION ALL 回退路径替换该兜底）。
+// 由 PivotProcessorV2 返回：GROUPING SETS 与 UNION ALL 两条 builder 路径都产此形状
+// （executor 按数据源 Capabilities().SupportsGroupingSets 选择 builder）；
+// v1 平铺请求 / PlannedAST 为 nil / 槽位不可解析时仍走旧 PivotResponse 平铺形状。
 type PivotResponseV2 struct {
 	RowHeaders  []string   `json:"row_headers"`  // 行维度列名
 	ColHeaders  []string   `json:"col_headers"`  // 列维度值（交叉后的列，多列维度时用 " - " 连接）
@@ -175,6 +182,22 @@ type KpiResponse struct {
 	Label  string  `json:"label"`
 	Unit   string  `json:"unit,omitempty"`
 	Format string  `json:"format,omitempty"`
+}
+
+// HistogramResponse 直方图响应（R-57，plan §3.3）：Bins 为补全后的完整分箱序列
+// （空 bin 以 Count=0 占位，x 轴连续），sum(Bins[i].Count) == 参与分箱的数值行数。
+// 字段与 api/openapi.yaml 的 ChartHistogramResponse schema 逐一对应。
+type HistogramResponse struct {
+	Bins []HistogramBin `json:"bins"`
+}
+
+// HistogramBin 直方图分箱：[BinStart, BinEnd) 半开区间（最后一个 bin 的 BinEnd
+// 因浮点边界值归箱钳制而实际闭区间），Count 为落入该箱的行数。
+// 与 openapi ChartHistogramBin schema 对应。
+type HistogramBin struct {
+	BinStart float64 `json:"bin_start"`
+	BinEnd   float64 `json:"bin_end"`
+	Count    int64   `json:"count"`
 }
 
 // ResolveAlias 解析字段别名

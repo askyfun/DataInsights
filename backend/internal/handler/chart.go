@@ -210,6 +210,8 @@ type chartQueryIn struct {
 	SpecVersion     *int                      `json:"spec_version" form:"-"`
 	DimensionGroups []entity.DimensionGroupIn `json:"dimension_groups" form:"-"`
 	MetricGroups    []entity.MetricGroupIn    `json:"metric_groups" form:"-"`
+
+	QueryOptions map[string]any `json:"query_options,omitempty" form:"-"`
 }
 
 func (in chartQueryIn) toRequest() entity.ChartQueryRequest {
@@ -225,6 +227,8 @@ func (in chartQueryIn) toRequest() entity.ChartQueryRequest {
 		SpecVersion:     in.SpecVersion,
 		DimensionGroups: in.DimensionGroups,
 		MetricGroups:    in.MetricGroups,
+
+		QueryOptions: in.QueryOptions,
 	}
 }
 

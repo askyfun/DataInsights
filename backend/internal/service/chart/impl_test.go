@@ -943,3 +943,86 @@ func TestChartServiceGetData_V2ConfigRunsAggregationPipeline(t *testing.T) {
 func TestChartServiceGetData_V2EmptyGroupsFallsBackToRawRows(t *testing.T) {
 	assertRawRowsFallback(t, `{"version":2,"chartType":"bar","query":{"dimensionGroups":[],"metricGroups":[]},"fieldMeta":{}}`)
 }
+
+// --- histogram query_options plumbing + 持久化 round-trip（R-57，Task 3-1a）---
+
+// TestChartServiceQuery_QueryOptionsPassedToExecutor 验证 entity 请求的
+// QueryOptions（histogram bin_count）经 executeQueryOnConn 原样流到 executor
+// 收到的 query.ChartQueryRequest（plumbing 中段；末端 executor 消费见
+// query 包 executor_histogram_test.go）。
+func TestChartServiceQuery_QueryOptionsPassedToExecutor(t *testing.T) {
+	service, _, executor := newQueryTestService()
+
+	_, err := service.Query(context.Background(), &entity.ChartQueryRequest{
+		DatasetID:    1,
+		ChartType:    "histogram",
+		Metrics:      []entity.MetricConfig{{Field: "amount", Agg: "count"}},
+		QueryOptions: map[string]any{"bin_count": float64(10)},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req := executor.lastReq
+	if req == nil {
+		t.Fatal("expected executor to receive request")
+	}
+	if req.QueryOptions == nil || req.QueryOptions["bin_count"] != float64(10) {
+		t.Fatalf("expected query_options bin_count=10 to reach executor, got %+v", req.QueryOptions)
+	}
+}
+
+// TestChartDataQueryFromConfig_QueryOptionsRoundTrip 验证已保存 histogram 的
+// bin_count/bin_width 经持久化 config 文档 round-trip 不丢失：queryOptions 小节
+// 的 camelCase 键（前端文档惯例）归一为 wire snake_case，snake_case 原样透传，
+// v1/v2 文档同款，空小节回落 nil（executor 用默认 bin_count=20）。
+func TestChartDataQueryFromConfig_QueryOptionsRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		config   string
+		wantOpts map[string]any
+	}{
+		{
+			"v2 camelCase normalized",
+			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","field":"amount"}]}]},"fieldMeta":{},"queryOptions":{"binCount":10,"binWidth":2.5}}`,
+			map[string]any{"bin_count": float64(10), "bin_width": 2.5},
+		},
+		{
+			"v2 snake_case passthrough",
+			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","field":"amount"}]}]},"fieldMeta":{},"queryOptions":{"bin_count":7}}`,
+			map[string]any{"bin_count": float64(7)},
+		},
+		{
+			"v1 doc camelCase normalized",
+			`{"version":1,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","fields":["amount"]}]},"queryOptions":{"binCount":4}}`,
+			map[string]any{"bin_count": float64(4)},
+		},
+		{
+			"empty section yields nil",
+			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","field":"amount"}]}]},"fieldMeta":{},"queryOptions":{}}`,
+			nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "histogram", Config: tc.config}
+
+			req, ok := chartDataQueryFromConfig(chart)
+			if !ok {
+				t.Fatal("expected config to parse (ok=true)")
+			}
+			if tc.wantOpts == nil {
+				if req.QueryOptions != nil {
+					t.Fatalf("expected nil QueryOptions, got %+v", req.QueryOptions)
+				}
+				return
+			}
+			if len(req.QueryOptions) != len(tc.wantOpts) {
+				t.Fatalf("expected QueryOptions %+v, got %+v", tc.wantOpts, req.QueryOptions)
+			}
+			for k, want := range tc.wantOpts {
+				if req.QueryOptions[k] != want {
+					t.Fatalf("QueryOptions[%q]: expected %v, got %v", k, want, req.QueryOptions[k])
+				}
+			}
+		})
+	}
+}

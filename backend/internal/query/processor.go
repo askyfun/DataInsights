@@ -571,6 +571,10 @@ func GetProcessor(chartType ChartType) Processor {
 		return &PivotProcessor{}
 	case ChartTypeKpi:
 		return &KpiProcessor{}
+	case ChartTypeHistogram:
+		// histogram 的真实路径是 executor 的两阶段分支（executeHistogram →
+		// HistogramProcessor.ProcessBins）；显式 case 避免误落 AxisProcessor 兜底。
+		return &HistogramProcessor{}
 	default:
 		return &AxisProcessor{}
 	}

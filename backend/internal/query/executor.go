@@ -115,6 +115,16 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		}
 	}
 
+	// histogram 分支（R-57）：两阶段分箱查询——阶段1 MIN/MAX/COUNT(*)，Go 端算
+	// bin 宽，阶段2 FLOOR((field-min)/width) 分箱计数。bins 组装需要阶段1 的
+	// min/binWidth，这些只在 executor 内可得（通用 GetProcessor.Process 只见
+	// 单阶段 rows），故与 pivot v2 分支同款走专门分支 + 专门 processor 方法。
+	// bin_count/bin_width 从 req.QueryOptions 直读（最小 churn 路径，见
+	// ChartQueryRequest.QueryOptions 注释），非 histogram 图型不进此分支。
+	if req.ChartType == ChartTypeHistogram {
+		return e.executeHistogram(ctx, dialect, ast, req)
+	}
+
 	sql, countSQL, args := BuildQueryStringWithBun(dialect, ast)
 	slog.Debug("generated SQL", "select", sql, "count", countSQL, "args", args)
 
@@ -206,6 +216,91 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		Data: data,
 		GeneratedSQL: GeneratedSQL{
 			Select: sql,
+		},
+	}, nil
+}
+
+// executeHistogram 执行直方图两阶段查询（R-57）：
+//  1. 阶段1 统计：MIN/MAX/COUNT(*)（过滤后全量），toFloat64 解析（覆盖 PG
+//     numeric/bigint 形态）；
+//  2. Go 端算 bin 宽/箱数，边界显式处理：
+//     - total==0（空数据）→ 直接返回空 Bins（不报错，不跑阶段2）；
+//     - 有行但 MIN/MAX 为 NULL（值列全 NULL）→ 显式报错，不静默；
+//     - 用户 query_options.bin_width（>0）→ 覆盖 bin_count 推算的宽度，
+//     箱数 = ceil((mx-mn)/bin_width)（至少 1）；
+//     - mx==mn（所有值相同）→ 宽度会算出 0，兜底 bin_width=1、单箱
+//     [mn, mn+1)，杜绝除 0 / NaN；
+//     - 否则 bin_width = (mx-mn)/bin_count（bin_count 缺省 20）。
+//  3. 阶段2 分箱：FLOOR((field-?)/?)，min/bin_width 为参数化 float args；
+//  4. HistogramProcessor.ProcessBins 组装（补全空 bin + 浮点边界钳制）。
+//
+// GeneratedSQL 只有一个 Select 字段：放阶段2 的分箱 SQL（最终塑形查询）；
+// 阶段1 统计 SQL 不外显（仅 Debug 日志）。
+func (e *Executor) executeHistogram(ctx context.Context, dialect DialectType, ast *QueryAST, req *ChartQueryRequest) (ExecutorResult, error) {
+	if len(req.Metrics) == 0 || req.Metrics[0].Field == "" {
+		return ExecutorResult{}, fmt.Errorf("histogram requires a value field (metrics[0])")
+	}
+	valueField := req.Metrics[0].Field
+	binCount, userBinWidth := histogramBinOptions(req.QueryOptions)
+
+	statsSQL, statsArgs := BuildHistogramStatsQuery(dialect, ast, valueField)
+	slog.Debug("executing histogram stats query", "sql", statsSQL, "args", statsArgs)
+	statsResult, err := e.conn.Execute(ctx, statsSQL, statsArgs...)
+	if err != nil {
+		return ExecutorResult{}, fmt.Errorf("histogram stats query failed: %v", err)
+	}
+
+	// 聚合查询恒返一行；防御性地把 0 行按空数据处理（与 total==0 同口径）。
+	var total, mn, mx float64
+	if len(statsResult.Rows) > 0 {
+		row := statsResult.Rows[0]
+		var totalOK, mnOK, mxOK bool
+		total, totalOK = toFloat64(row[histogramCountAlias])
+		if !totalOK {
+			return ExecutorResult{}, fmt.Errorf("histogram stats: count is not numeric: %v", row[histogramCountAlias])
+		}
+		mn, mnOK = toFloat64(row[histogramMinAlias])
+		mx, mxOK = toFloat64(row[histogramMaxAlias])
+		if total > 0 && (!mnOK || !mxOK) {
+			return ExecutorResult{}, fmt.Errorf("histogram value field %q has no numeric values", valueField)
+		}
+	}
+	if total == 0 {
+		return ExecutorResult{
+			Data:         &HistogramResponse{Bins: []HistogramBin{}},
+			GeneratedSQL: GeneratedSQL{Select: statsSQL},
+		}, nil
+	}
+
+	binWidth, numBins := userBinWidth, binCount
+	switch {
+	case userBinWidth > 0:
+		numBins = int(math.Ceil((mx - mn) / userBinWidth))
+		if numBins < 1 {
+			numBins = 1 // mx==mn（或宽度大于值域）：单箱
+		}
+	case mx == mn:
+		binWidth, numBins = 1, 1 // 全同值：兜底宽 1，单箱 [mn, mn+1)，不除 0
+	default:
+		binWidth = (mx - mn) / float64(binCount)
+	}
+
+	binSQL, binArgs := BuildHistogramBinQuery(dialect, ast, valueField, mn, binWidth)
+	slog.Debug("executing histogram bin query", "sql", binSQL, "args", binArgs)
+	binResult, err := e.conn.Execute(ctx, binSQL, binArgs...)
+	if err != nil {
+		return ExecutorResult{}, fmt.Errorf("histogram bin query failed: %v", err)
+	}
+
+	resp, err := (&HistogramProcessor{}).ProcessBins(binResult.Rows, mn, binWidth, numBins)
+	if err != nil {
+		return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
+	}
+
+	return ExecutorResult{
+		Data: resp,
+		GeneratedSQL: GeneratedSQL{
+			Select: binSQL,
 		},
 	}, nil
 }

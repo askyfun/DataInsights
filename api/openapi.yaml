@@ -1702,7 +1702,7 @@ components:
           description: >-
             决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse；
             bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse；
-            pivot -> ChartPivotResponse。
+            pivot -> ChartPivotResponse；histogram -> ChartHistogramResponse。
         spec_version:
           type: integer
           description: 协议版本判别键；v2 路径必填且值为 2，缺失或其他值按 v1 平铺协议处理。
@@ -1735,6 +1735,15 @@ components:
           $ref: '#/components/schemas/ChartPagination'
         sort:
           $ref: '#/components/schemas/SortConfig'
+        query_options:
+          type: object
+          additionalProperties: true
+          description: >-
+            查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go
+            map[string]any omitempty，Task 3-1a 接线）：histogram 读取 bin_count
+            （数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的
+            宽度）。executor 从请求结构体直接消费，不进入 QuerySpec/AST；其他
+            chart_type 忽略本节。
     ChartDataResult:
       type: object
       description: >-
@@ -1751,9 +1760,10 @@ components:
           description: >-
             查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema；
             为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}，
-            消费方按 ChartQueryRequest.chart_type 手动判别，五成员为
+            消费方按 ChartQueryRequest.chart_type 手动判别，成员为
             ChartTableResponse / ChartPieResponse / ChartAxisResponse /
-            ChartScatterResponse / ChartPivotResponse）。
+            ChartScatterResponse / ChartPivotResponse / ChartHistogramResponse
+            （histogram，Task 3-1a））。
         select_sql:
           type: string
           description: 生成的取数 SQL（entity omitempty；成功路径恒非空）。
@@ -1960,8 +1970,13 @@ components:
     ChartHistogramResponse:
       type: object
       description: >-
-        直方图响应（plan §3.3 Go struct HistogramResponse，Task 3-1 实现）。
-        当前仅声明，无 processor 返回。
+        直方图响应（query.HistogramResponse，Task 3-1a 实现，R-57）。chart_type=histogram
+        时 ChartDataResult.data 的形状：两阶段分箱查询（阶段1 MIN/MAX/COUNT →
+        阶段2 FLOOR((field-min)/bin_width) 分组计数）产出。bins 为补全后的完整
+        连续分箱序列（无行的 bin 以 count=0 占位），sum(bins[].count) == 参与分箱的
+        数值行数；空数据集返回 bins=[]。被分箱字段为 metrics[0].field（对该列的
+        原始数值分箱计数，不做 SUM/AVG 聚合）；bin_count（默认 20）/bin_width
+        经请求的 query_options 传入。
       required:
         - bins
       properties:
@@ -1971,7 +1986,11 @@ components:
             $ref: '#/components/schemas/ChartHistogramBin'
     ChartHistogramBin:
       type: object
-      description: 直方图分箱（plan §3.3 Go struct HistogramBin）。
+      description: >-
+        直方图分箱（query.HistogramBin）。区间为 [bin_start, bin_end) 半开、
+        相邻 bin 首尾相接（bin_end[i] == bin_start[i+1]）；等于最大值的边界行
+        归入最后一个 bin（浮点边界钳制，末 bin 实际闭区间）。所有值相同的
+        单值数据集产出单个 bin（宽度兜底 1，或用户 bin_width）。
       required:
         - bin_start
         - bin_end

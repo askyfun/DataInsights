@@ -27,6 +27,10 @@ type ChartQueryRequest struct {
 	SpecVersion     *int               `json:"spec_version,omitempty"`
 	DimensionGroups []DimensionGroupIn `json:"dimension_groups,omitempty"`
 	MetricGroups    []MetricGroupIn    `json:"metric_groups,omitempty"`
+
+	// QueryOptions 查询选项扩展袋（R-57）：histogram 的 bin_count/bin_width 经此
+	// 传递，由 executor 直接从请求结构体读取（不进入 QuerySpec/QueryAST/planner）。
+	QueryOptions map[string]any `json:"query_options,omitempty"`
 }
 
 // DimensionGroupIn v2 协议的维度槽位组（json tag 与 query.DimensionGroup 一致）。

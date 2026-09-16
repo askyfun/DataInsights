@@ -569,6 +569,33 @@ func TestChartQuery_QueryMustNotPolluteBody(t *testing.T) {
 	}
 }
 
+func TestChartQuery_QueryOptionsBindsFromBodyOnly(t *testing.T) {
+	// query_options（histogram bin_count/bin_width，R-57）只从 JSON body 绑定；
+	// chartQueryIn 的 form:"-" 必须挡住同名 query 参数污染。
+	var got *entity.ChartQueryRequest
+	h := NewChartHandler(&mockChartService{
+		queryFunc: func(_ context.Context, req *entity.ChartQueryRequest) (entity.ChartDataResult, error) {
+			got = req
+			return entity.ChartDataResult{}, nil
+		},
+	})
+	w := serve(newChartTestRouter(h), http.MethodPost,
+		"/api/charts/query?query_options=%7B%22bin_count%22%3A99%7D&bin_count=99",
+		`{"chart_type":"histogram","query_options":{"bin_count":10}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if got == nil || got.QueryOptions == nil {
+		t.Fatalf("query_options not bound from body: %+v", got)
+	}
+	if got.QueryOptions["bin_count"] != float64(10) {
+		t.Fatalf("expected body bin_count=10, got %v (query param pollution?)", got.QueryOptions["bin_count"])
+	}
+	if len(got.QueryOptions) != 1 {
+		t.Fatalf("expected exactly the body options, got %+v", got.QueryOptions)
+	}
+}
+
 func TestChartQuery_ServiceError(t *testing.T) {
 	h := NewChartHandler(&mockChartService{
 		queryFunc: func(_ context.Context, _ *entity.ChartQueryRequest) (entity.ChartDataResult, error) {

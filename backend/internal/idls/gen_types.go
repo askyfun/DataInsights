@@ -101,7 +101,7 @@ type ChartDataResult struct {
 	// CountSql 生成的计数 SQL；仅 chart_type=table 且携带 pagination 分支返回 （executor.Execute 的 count 查询路径），其余形状缺省。
 	CountSql *string `json:"count_sql,omitempty"`
 
-	// Data 查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema； 为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}， 消费方按 ChartQueryRequest.chart_type 手动判别，五成员为 ChartTableResponse / ChartPieResponse / ChartAxisResponse / ChartScatterResponse / ChartPivotResponse）。
+	// Data 查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema； 为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}， 消费方按 ChartQueryRequest.chart_type 手动判别，成员为 ChartTableResponse / ChartPieResponse / ChartAxisResponse / ChartScatterResponse / ChartPivotResponse / ChartHistogramResponse （histogram，Task 3-1a））。
 	Data interface{} `json:"data"`
 
 	// SelectSql 生成的取数 SQL（entity omitempty；成功路径恒非空）。
@@ -218,7 +218,7 @@ type ChartResponse struct {
 
 // ChartSpecQueryRequest POST /api/charts/query 请求体（entity.ChartQueryRequest 超集，同一 schema 描述 v1/v2 两种协议，按 spec_version 判别）。spec_version 缺失或 !=2： v1 平铺协议，消费 dims/metrics（形状同 ChartQueryRequest）；spec_version=2： v2 槽位协议，消费 dimension_groups/metric_groups（槽位名与 binding_id 经 ChartSpecFromRequestV2 保留进 QuerySpec/QueryAST）。filters/pagination/sort 两协议共用。
 type ChartSpecQueryRequest struct {
-	// ChartType 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse。
+	// ChartType 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse；histogram -> ChartHistogramResponse。
 	ChartType string `json:"chart_type"`
 	DatasetId int    `json:"dataset_id"`
 
@@ -239,7 +239,10 @@ type ChartSpecQueryRequest struct {
 
 	// Pagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
 	Pagination *ChartPagination `json:"pagination,omitempty"`
-	Sort       *SortConfig      `json:"sort,omitempty"`
+
+	// QueryOptions 查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go map[string]any omitempty，Task 3-1a 接线）：histogram 读取 bin_count （数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的 宽度）。executor 从请求结构体直接消费，不进入 QuerySpec/AST；其他 chart_type 忽略本节。
+	QueryOptions *map[string]interface{} `json:"query_options,omitempty"`
+	Sort         *SortConfig             `json:"sort,omitempty"`
 
 	// SpecVersion 协议版本判别键；v2 路径必填且值为 2，缺失或其他值按 v1 平铺协议处理。
 	SpecVersion *int `json:"spec_version,omitempty"`

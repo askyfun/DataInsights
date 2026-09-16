@@ -248,6 +248,10 @@ func (s *chartService) executeQueryOnConn(
 		Pagination: plannedQuery.Pagination,
 		Sort:       plannedQuery.Sort,
 		PlannedAST: plannedAST,
+		// histogram 的 bin_count/bin_width 走请求结构体直传 executor（R-57，
+		// 不进入 QuerySpec/planner）。buildQuerySpecFromEntityRequest 的中间
+		// request 只喂 QuerySpecFromRequest（planner），无需携带。
+		QueryOptions: req.QueryOptions,
 	}
 
 	result, err := executor.Execute(ctx, queryReq)
@@ -279,6 +283,9 @@ type chartConfigV1 struct {
 		Aggregation string `json:"aggregation"`
 		Alias       string `json:"alias"`
 	} `json:"fieldMeta"`
+	// QueryOptions 顶层透传小节（frontend chartConfigSchema.ts 的 queryOptions）：
+	// histogram 持久化的 bin_count/bin_width 存这里（R-57 持久化 round-trip）。
+	QueryOptions map[string]any `json:"queryOptions"`
 }
 
 // chartConfigFilter 兼容文档内的两种 value 区间键：保存自运行时 FilterCondition
@@ -308,6 +315,9 @@ type chartConfigV2 struct {
 		Aggregation string `json:"aggregation"`
 		Alias       string `json:"alias"`
 	} `json:"fieldMeta"`
+	// QueryOptions 顶层透传小节（与 v1 同款，v2 文档"queryOptions 小节形状不变"，
+	// 见 frontend chartConfigSchema.ts）：histogram 的 bin_count/bin_width 持久化处。
+	QueryOptions map[string]any `json:"queryOptions"`
 }
 
 // chartConfigSort v2 持久化文档的 sort 小节，兼容两种键形态：Task 1-7 起前端保存
@@ -376,7 +386,9 @@ func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bo
 		return nil, false
 	}
 
-	return buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, doc.Query.Sort, doc.Query.Limit), true
+	req := buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, doc.Query.Sort, doc.Query.Limit)
+	req.QueryOptions = normalizePersistedQueryOptions(doc.QueryOptions)
+	return req, true
 }
 
 // chartDataQueryFromConfigV2 解析 v2 持久化文档（Task 0-3 起前端保存的形状）并
@@ -416,7 +428,32 @@ func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, 
 		return nil, false
 	}
 
-	return buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, resolveV2DocSort(doc.Query.Sort, &doc), doc.Query.Limit), true
+	req := buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, resolveV2DocSort(doc.Query.Sort, &doc), doc.Query.Limit)
+	req.QueryOptions = normalizePersistedQueryOptions(doc.QueryOptions)
+	return req, true
+}
+
+// normalizePersistedQueryOptions 把持久化 config 文档 queryOptions 小节的键归一为
+// wire snake_case（bin_count/bin_width），供 executor 的 histogramBinOptions 统一
+// 读取：前端 store/文档惯例是 camelCase（binCount/binWidth，见 chartConfigSchema.ts
+// 的 camelCase 文档键），3-1b 无论按哪种风格保存都能 round-trip；已是 snake_case
+// 的键原样透传，未知键保留（扩展袋语义）。空/缺失小节返回 nil（请求不带
+// query_options，executor 回落 bin_count=20 默认）。
+func normalizePersistedQueryOptions(opts map[string]any) map[string]any {
+	if len(opts) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(opts))
+	for k, v := range opts {
+		switch k {
+		case "binCount":
+			k = "bin_count"
+		case "binWidth":
+			k = "bin_width"
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // resolveV2DocSort 把 v2 持久化文档的 sort 小节翻译为平铺请求可用的 entity.SortConfig：
