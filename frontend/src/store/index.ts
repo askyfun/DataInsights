@@ -215,6 +215,8 @@ export interface ChartStyleConfig {
   colors: string[];
   smooth: boolean;
   tableRowSize: 'small' | 'middle' | 'large';
+  /** 堆叠模式（bar/line/area）；undefined 等价于 'none'，不在默认值里显式设置。 */
+  stack?: 'none' | 'normal' | 'percent';
 }
 
 export interface ChartQueryOptions {

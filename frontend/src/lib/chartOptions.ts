@@ -52,12 +52,15 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
   }
   const raw = style as Record<string, unknown>;
   const tableRowSize = raw.tableRowSize;
+  const stack = raw.stack;
   return {
     colors: Array.isArray(raw.colors)
       ? raw.colors.filter((color): color is string => typeof color === 'string')
       : [],
     smooth: raw.smooth === true,
     tableRowSize: tableRowSize === 'middle' || tableRowSize === 'large' ? tableRowSize : 'small',
+    // 非法/缺失的 stack 直接不带该键（与 DEFAULT_CHART_STYLE 的形状保持一致），等价于 'none'。
+    ...(stack === 'none' || stack === 'normal' || stack === 'percent' ? { stack } : {}),
   };
 }
 
@@ -112,6 +115,53 @@ function toPieValue(value: unknown): number | undefined {
 
 /** 截断 "+0000 UTC" 后缀，保留日期+时间（模块级常量：保证同输入产出引用相等的 option） */
 const truncateUtcSuffix = (val: string) => String(val).replace(/\s*\+\d{4}\s*UTC$/, '');
+
+/**
+ * bar/line/area 的堆叠渲染：stack='normal' 时每条 series 打 stack:'total'；
+ * stack='percent' 时在此基础上把每个 x 位置上所有 series 的数值归一化为百分比
+ * （该位置数值之和为 100，非数值/null 原样保留，全 0 位置输出 0 而不是 NaN）。
+ * 归一化在前端计算（buildChartOption 内部），后端 processor 仍返回原始值。
+ * stack='none'/undefined 时原样返回，不加 stack 字段。
+ */
+type StackableSeries = { data: (string | number | null)[] };
+
+function applyStack<T extends StackableSeries>(
+  series: T[],
+  stack: ChartStyleConfig['stack']
+): (T & { stack?: string })[] {
+  if (stack !== 'normal' && stack !== 'percent') {
+    return series;
+  }
+  if (stack === 'normal') {
+    return series.map((s) => ({ ...s, stack: 'total' }));
+  }
+
+  // percent：先按 x 位置累加所有 series 的数值和，再逐项归一化为百分比
+  let positionCount = 0;
+  for (const s of series) {
+    positionCount = Math.max(positionCount, s.data.length);
+  }
+  const sums = new Array<number>(positionCount).fill(0);
+  for (const s of series) {
+    for (let i = 0; i < s.data.length; i++) {
+      const v = s.data[i];
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        sums[i] += v;
+      }
+    }
+  }
+  return series.map((s) => ({
+    ...s,
+    stack: 'total',
+    data: s.data.map((v, i) => {
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        return v;
+      }
+      const total = sums[i];
+      return total > 0 ? (v / total) * 100 : 0;
+    }),
+  }));
+}
 
 /**
  * 唯一的 ECharts option 构造出口。
@@ -241,13 +291,16 @@ export function buildChartOption(
             axisLabel: categoryAxisLabel(axis.x_axis.length),
           },
           yAxis: { type: 'value' as const },
-          series: axis.series.map((s) => ({
-            name: labelOf(s.name),
-            type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
-            ...(chartType === 'area' ? { areaStyle: {} } : {}),
-            ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
-            data: s.data.map(toOptionValue),
-          })),
+          series: applyStack(
+            axis.series.map((s) => ({
+              name: labelOf(s.name),
+              type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
+              ...(chartType === 'area' ? { areaStyle: {} } : {}),
+              ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
+              data: s.data.map(toOptionValue),
+            })),
+            style.stack
+          ),
           color: palette,
         };
       }
@@ -298,13 +351,16 @@ export function buildChartOption(
           axisLabel: categoryAxisLabel(xAxisData.length),
         },
         yAxis: { type: 'value' as const },
-        series: context.metrics.map((yField) => ({
-          name: labelOf(yField),
-          type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
-          ...(chartType === 'area' ? { areaStyle: {} } : {}),
-          ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
-          data: rows.map((item) => toOptionValue(item[yField])),
-        })),
+        series: applyStack(
+          context.metrics.map((yField) => ({
+            name: labelOf(yField),
+            type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
+            ...(chartType === 'area' ? { areaStyle: {} } : {}),
+            ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
+            data: rows.map((item) => toOptionValue(item[yField])),
+          })),
+          style.stack
+        ),
         color: palette,
       };
 

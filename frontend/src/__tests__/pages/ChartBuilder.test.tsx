@@ -779,4 +779,144 @@ describe('ChartBuilder', () => {
     expect(savedDoc).not.toHaveProperty('queryConfig');
     expect(savedDoc).not.toHaveProperty('dimensionLabels');
   });
+
+  it('emits a v2 slot-protocol request when color_group is non-empty (裁定B)', async () => {
+    mockGetColumns.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: [
+          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
+          { name: 'city', expr: 'city', type: 'string', comment: '', role: 'dimension' },
+          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+        ],
+      })
+    );
+
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Stacked Bar',
+          dataset_id: 1,
+          chart_type: 'bar',
+          config: JSON.stringify({
+            version: 2,
+            chartType: 'bar',
+            title: 'Stacked Bar',
+            query: {
+              dimensionGroups: [
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+                { id: 'dim-group-2', bindings: [{ bindingId: 'b-1', field: 'city' }] },
+              ],
+              metricGroups: [
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-2', field: 'revenue' }] },
+              ],
+              filters: [],
+              limit: 1000,
+            },
+            fieldMeta: {},
+          }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      })
+    );
+
+    renderChartBuilder();
+
+    // 等待配置加载完成后触发的那一次查询（chart_type 已从初始 table 切到 bar）
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.chart_type).toBe('bar');
+      expect(lastRequest?.spec_version).toBe(2);
+    });
+
+    const request =
+      mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+    expect(request).not.toHaveProperty('dims');
+    expect(request).not.toHaveProperty('metrics');
+    expect(request?.dimension_groups).toEqual([
+      { name: 'x_axis', label: 'X 轴维度', fields: [{ field: 'region', binding_id: 'b-0' }] },
+      { name: 'color_group', label: '颜色分组', fields: [{ field: 'city', binding_id: 'b-1' }] },
+    ]);
+    expect(request?.metric_groups).toEqual([
+      {
+        name: 'values',
+        label: '数值',
+        fields: [{ field: 'revenue', agg: 'sum', alias: 'revenue', binding_id: 'b-2' }],
+      },
+    ]);
+  });
+
+  it('keeps emitting the v1 flat request when color_group is empty (裁定B, 向后兼容)', async () => {
+    mockGetColumns.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: [
+          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
+          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+        ],
+      })
+    );
+
+    // 模拟本任务之前保存的 bar 图表：只有 x_axis 一个维度组，没有 color_group 组
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Plain Bar',
+          dataset_id: 1,
+          chart_type: 'bar',
+          config: JSON.stringify({
+            version: 2,
+            chartType: 'bar',
+            title: 'Plain Bar',
+            query: {
+              dimensionGroups: [
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+              ],
+              metricGroups: [
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+              ],
+              filters: [],
+              limit: 1000,
+            },
+            fieldMeta: {},
+          }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      })
+    );
+
+    renderChartBuilder();
+
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.chart_type).toBe('bar');
+    });
+
+    const request =
+      mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+    expect(request?.spec_version).toBeUndefined();
+    expect(request).not.toHaveProperty('dimension_groups');
+    expect(request).not.toHaveProperty('metric_groups');
+    expect(request).toMatchObject({
+      chart_type: 'bar',
+      dims: ['region'],
+      metrics: [{ field: 'revenue', agg: 'sum', alias: 'revenue' }],
+    });
+  });
 });

@@ -10,7 +10,7 @@ import (
 // TestAxisProcessor_EmptyData 验证空行数据返回空响应
 func TestAxisProcessor_EmptyData(t *testing.T) {
 	p := &AxisProcessor{}
-	resp, err := p.Process([]map[string]any{}, []string{"category"}, []MetricConfig{{Field: "value", Agg: AggSum}})
+	resp, err := p.Process([]map[string]any{}, []string{"category"}, []MetricConfig{{Field: "value", Agg: AggSum}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestAxisProcessor_EmptyData(t *testing.T) {
 func TestAxisProcessor_EmptyDims(t *testing.T) {
 	p := &AxisProcessor{}
 	rows := []map[string]any{{"category": "A", "value": 100}}
-	resp, err := p.Process(rows, []string{}, []MetricConfig{{Field: "value", Agg: AggSum}})
+	resp, err := p.Process(rows, []string{}, []MetricConfig{{Field: "value", Agg: AggSum}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestAxisProcessor_EmptyDims(t *testing.T) {
 func TestAxisProcessor_EmptyMetrics(t *testing.T) {
 	p := &AxisProcessor{}
 	rows := []map[string]any{{"category": "A", "value": 100}}
-	resp, err := p.Process(rows, []string{"category"}, []MetricConfig{})
+	resp, err := p.Process(rows, []string{"category"}, []MetricConfig{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestAxisProcessor_SingleDim_SingleMetric(t *testing.T) {
 		{"category": "B", "value": 200},
 	}
 	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
-	resp, err := p.Process(rows, []string{"category"}, metrics)
+	resp, err := p.Process(rows, []string{"category"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestAxisProcessor_SingleDim_MultipleMetrics(t *testing.T) {
 		{Field: "revenue", Agg: AggSum, Alias: "total_revenue"},
 		{Field: "cost", Agg: AggSum, Alias: "total_cost"},
 	}
-	resp, err := p.Process(rows, []string{"category"}, metrics)
+	resp, err := p.Process(rows, []string{"category"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestAxisProcessor_TypeConversion(t *testing.T) {
 		{"category": "C", "value": int(300)},
 	}
 	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
-	resp, err := p.Process(rows, []string{"category"}, metrics)
+	resp, err := p.Process(rows, []string{"category"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestAxisProcessor_WithAlias(t *testing.T) {
 		{"category": "A", "total_revenue": 500},
 	}
 	metrics := []MetricConfig{{Field: "revenue", Agg: AggSum, Alias: "total_revenue"}}
-	resp, err := p.Process(rows, []string{"category"}, metrics)
+	resp, err := p.Process(rows, []string{"category"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestAxisProcessor_NullDimension(t *testing.T) {
 		{"category": "B", "value": 200},
 	}
 	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
-	resp, err := p.Process(rows, []string{"category"}, metrics)
+	resp, err := p.Process(rows, []string{"category"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestAxisProcessor_MultiDims_TwoDims(t *testing.T) {
 		{"date": "2024-02", "city": "Shanghai", "sales": 250},
 	}
 	metrics := []MetricConfig{{Field: "sales", Agg: AggSum}}
-	resp, err := p.Process(rows, []string{"date", "city"}, metrics)
+	resp, err := p.Process(rows, []string{"date", "city"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestPieProcessor_WithMergeOtherBelowRatio(t *testing.T) {
 	}
 	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
 
-	resp, err := p.Process(rows, []string{"category"}, metrics)
+	resp, err := p.Process(rows, []string{"category"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestPieProcessor_PgNumericValues(t *testing.T) {
 	}
 	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
 
-	resp, err := p.Process(rows, []string{"category"}, metrics)
+	resp, err := p.Process(rows, []string{"category"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestAxisProcessor_MultiDims_ThreeDims(t *testing.T) {
 		{"date": "2024-01", "country": "US", "city": "NY", "sales": 150},
 	}
 	metrics := []MetricConfig{{Field: "sales", Agg: AggSum}}
-	resp, err := p.Process(rows, []string{"date", "country", "city"}, metrics)
+	resp, err := p.Process(rows, []string{"date", "country", "city"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestAxisProcessor_MultiDims_MultipleMetrics(t *testing.T) {
 		{Field: "revenue", Agg: AggSum},
 		{Field: "cost", Agg: AggSum},
 	}
-	resp, err := p.Process(rows, []string{"date", "city"}, metrics)
+	resp, err := p.Process(rows, []string{"date", "city"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestScatterProcessor_TwoMetrics(t *testing.T) {
 		{Field: "revenue", Agg: AggSum, Alias: "total_revenue"},
 		{Field: "cost", Agg: AggSum, Alias: "total_cost"},
 	}
-	resp, err := p.Process(rows, []string{}, metrics)
+	resp, err := p.Process(rows, []string{}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestScatterProcessor_EmptyRows(t *testing.T) {
 		{Field: "revenue", Agg: AggSum},
 		{Field: "cost", Agg: AggSum},
 	}
-	resp, err := p.Process([]map[string]any{}, []string{}, metrics)
+	resp, err := p.Process([]map[string]any{}, []string{}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -529,7 +529,7 @@ func TestScatterProcessor_NumericStringValues(t *testing.T) {
 		{Field: "revenue", Agg: AggSum, Alias: "x_value"},
 		{Field: "cost", Agg: AggSum, Alias: "y_value"},
 	}
-	resp, err := p.Process(rows, []string{}, metrics)
+	resp, err := p.Process(rows, []string{}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -558,7 +558,7 @@ func TestScatterProcessor_PgNumericValues(t *testing.T) {
 		{Field: "amount", Agg: AggSum, Alias: "amount"},
 		{Field: "quantity", Agg: AggSum, Alias: "quantity"},
 	}
-	resp, err := p.Process(rows, []string{"region"}, metrics)
+	resp, err := p.Process(rows, []string{"region"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestScatterProcessor_LessThanTwoMetrics(t *testing.T) {
 	p := &ScatterProcessor{}
 	rows := []map[string]any{{"value": 100}}
 	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
-	resp, err := p.Process(rows, []string{}, metrics)
+	resp, err := p.Process(rows, []string{}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -596,7 +596,7 @@ func TestScatterProcessor_DimsIgnored(t *testing.T) {
 		{Field: "revenue", Agg: AggSum},
 		{Field: "cost", Agg: AggSum},
 	}
-	resp, err := p.Process(rows, []string{"city"}, metrics)
+	resp, err := p.Process(rows, []string{"city"}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -621,12 +621,248 @@ func TestScatterProcessor_NonNumericSkipped(t *testing.T) {
 		{Field: "x", Agg: AggSum},
 		{Field: "y", Agg: AggSum},
 	}
-	resp, err := p.Process(rows, []string{}, metrics)
+	resp, err := p.Process(rows, []string{}, metrics, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	scatterResp := resp.(*ScatterResponse)
 	if len(scatterResp.Data) != 2 {
 		t.Fatalf("expected 2 data points, got %d", len(scatterResp.Data))
+	}
+}
+
+// slotAST 构造只带槽位信息的 DimensionExprs（Field/GroupName），供 AxisProcessor 槽位感知测试使用。
+func slotAST(dims []string, groupNames []string) *QueryAST {
+	exprs := make([]DimensionExprAST, len(dims))
+	for i, d := range dims {
+		exprs[i] = DimensionExprAST{Field: d, GroupName: groupNames[i]}
+	}
+	return &QueryAST{DimensionExprs: exprs}
+}
+
+// TestAxisProcessor_SlotAware_ColorGroupBasic 验证 x_axis/color_group 槽位名驱动的基础分组，
+// 结果应与等价的位置推断（dims=[date,city]，无槽位信息）完全一致。
+func TestAxisProcessor_SlotAware_ColorGroupBasic(t *testing.T) {
+	p := &AxisProcessor{}
+	rows := []map[string]any{
+		{"date": "2024-01", "city": "Beijing", "sales": 100},
+		{"date": "2024-01", "city": "Shanghai", "sales": 200},
+		{"date": "2024-02", "city": "Beijing", "sales": 150},
+		{"date": "2024-02", "city": "Shanghai", "sales": 250},
+	}
+	metrics := []MetricConfig{{Field: "sales", Agg: AggSum}}
+	dims := []string{"date", "city"}
+	ast := slotAST(dims, []string{SlotXAxis, SlotColorGroup})
+
+	resp, err := p.Process(rows, dims, metrics, ast)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	axisResp, ok := resp.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", resp)
+	}
+
+	if len(axisResp.XAxis) != 2 || axisResp.XAxis[0] != "2024-01" || axisResp.XAxis[1] != "2024-02" {
+		t.Fatalf("expected XAxis=['2024-01','2024-02'], got %v", axisResp.XAxis)
+	}
+	seriesMap := map[string][]any{}
+	for _, s := range axisResp.Series {
+		seriesMap[s.Name] = s.Data
+	}
+	if len(seriesMap) != 2 {
+		t.Fatalf("expected 2 series, got %d: %v", len(seriesMap), getSeriesNames(axisResp.Series))
+	}
+	if seriesMap["Beijing"][0] != 100 || seriesMap["Beijing"][1] != 150 {
+		t.Errorf("expected Beijing data=[100,150], got %v", seriesMap["Beijing"])
+	}
+	if seriesMap["Shanghai"][0] != 200 || seriesMap["Shanghai"][1] != 250 {
+		t.Errorf("expected Shanghai data=[200,250], got %v", seriesMap["Shanghai"])
+	}
+}
+
+// TestAxisProcessor_SlotAware_NotPositional 证明槽位感知路径按 GroupName 而非 dims 的位置切分：
+// 故意把 dims 顺序颠倒（city 在前、date 在后），但槽位名标注 city=color_group、date=x_axis，
+// 输出仍应与 TestAxisProcessor_SlotAware_ColorGroupBasic 一致（X 轴是 date，series 按 city 拆分）。
+func TestAxisProcessor_SlotAware_NotPositional(t *testing.T) {
+	p := &AxisProcessor{}
+	rows := []map[string]any{
+		{"date": "2024-01", "city": "Beijing", "sales": 100},
+		{"date": "2024-01", "city": "Shanghai", "sales": 200},
+		{"date": "2024-02", "city": "Beijing", "sales": 150},
+		{"date": "2024-02", "city": "Shanghai", "sales": 250},
+	}
+	metrics := []MetricConfig{{Field: "sales", Agg: AggSum}}
+	// dims 顺序与槽位名"错位"：若实现仍按 dims[0] 猜 X 轴，这里会错误地把 city 当作 X 轴
+	dims := []string{"city", "date"}
+	ast := slotAST(dims, []string{SlotColorGroup, SlotXAxis})
+
+	resp, err := p.Process(rows, dims, metrics, ast)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	axisResp, ok := resp.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", resp)
+	}
+
+	if len(axisResp.XAxis) != 2 || axisResp.XAxis[0] != "2024-01" || axisResp.XAxis[1] != "2024-02" {
+		t.Fatalf("X 轴应按槽位名取 date（而非 dims[0]=city），expected ['2024-01','2024-02'], got %v", axisResp.XAxis)
+	}
+	names := getSeriesNames(axisResp.Series)
+	if len(names) != 2 {
+		t.Fatalf("expected 2 series, got %d: %v", len(names), names)
+	}
+	seriesMap := map[string][]any{}
+	for _, s := range axisResp.Series {
+		seriesMap[s.Name] = s.Data
+	}
+	if _, ok := seriesMap["Beijing"]; !ok {
+		t.Fatalf("series 应按槽位名 color_group=city 拆分，expected 'Beijing' in %v", names)
+	}
+	if _, ok := seriesMap["Shanghai"]; !ok {
+		t.Fatalf("series 应按槽位名 color_group=city 拆分，expected 'Shanghai' in %v", names)
+	}
+}
+
+// TestAxisProcessor_SlotAware_MultipleMetrics 验证槽位感知 + 多指标：series 名沿用
+// "指标别名 - 颜色值"的既有约定（与位置推断的多指标多维度命名一致）。
+func TestAxisProcessor_SlotAware_MultipleMetrics(t *testing.T) {
+	p := &AxisProcessor{}
+	rows := []map[string]any{
+		{"date": "2024-01", "city": "Beijing", "revenue": 100, "cost": 50},
+		{"date": "2024-01", "city": "Shanghai", "revenue": 200, "cost": 80},
+	}
+	metrics := []MetricConfig{
+		{Field: "revenue", Agg: AggSum},
+		{Field: "cost", Agg: AggSum},
+	}
+	dims := []string{"date", "city"}
+	ast := slotAST(dims, []string{SlotXAxis, SlotColorGroup})
+
+	resp, err := p.Process(rows, dims, metrics, ast)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	axisResp, ok := resp.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", resp)
+	}
+
+	if len(axisResp.Series) != 4 {
+		t.Fatalf("expected 4 series (2 metrics × 2 cities), got %d: %v", len(axisResp.Series), getSeriesNames(axisResp.Series))
+	}
+	names := getSeriesNames(axisResp.Series)
+	expected := []string{"revenue - Beijing", "revenue - Shanghai", "cost - Beijing", "cost - Shanghai"}
+	for i, name := range names {
+		if name != expected[i] {
+			t.Errorf("expected series[%d] name=%q, got %q", i, expected[i], name)
+		}
+	}
+}
+
+// TestAxisProcessor_SlotAware_XAxisOnly 验证只有 x_axis 槽位、没有 color_group 时，
+// 退化为"每个指标一条 series"（与单维度旧逻辑一致）。
+func TestAxisProcessor_SlotAware_XAxisOnly(t *testing.T) {
+	p := &AxisProcessor{}
+	rows := []map[string]any{
+		{"category": "A", "value": 100},
+		{"category": "B", "value": 200},
+	}
+	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
+	dims := []string{"category"}
+	ast := slotAST(dims, []string{SlotXAxis})
+
+	resp, err := p.Process(rows, dims, metrics, ast)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	axisResp, ok := resp.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", resp)
+	}
+
+	if len(axisResp.XAxis) != 2 || axisResp.XAxis[0] != "A" || axisResp.XAxis[1] != "B" {
+		t.Fatalf("expected XAxis=['A','B'], got %v", axisResp.XAxis)
+	}
+	if len(axisResp.Series) != 1 || axisResp.Series[0].Name != "value" {
+		t.Fatalf("expected 1 series named 'value', got %v", getSeriesNames(axisResp.Series))
+	}
+}
+
+// TestAxisProcessor_SlotAware_EmptyGroupNameFallback 验证 AST 存在但 GroupName 全为空
+// （模拟 v1 平铺协议经 PlanAST 产出的 AST，GroupName 不会被填充）时，回退到位置推断逻辑。
+func TestAxisProcessor_SlotAware_EmptyGroupNameFallback(t *testing.T) {
+	p := &AxisProcessor{}
+	rows := []map[string]any{
+		{"date": "2024-01", "city": "Beijing", "sales": 100},
+		{"date": "2024-01", "city": "Shanghai", "sales": 200},
+		{"date": "2024-02", "city": "Beijing", "sales": 150},
+		{"date": "2024-02", "city": "Shanghai", "sales": 250},
+	}
+	metrics := []MetricConfig{{Field: "sales", Agg: AggSum}}
+	dims := []string{"date", "city"}
+	ast := slotAST(dims, []string{"", ""})
+
+	resp, err := p.Process(rows, dims, metrics, ast)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	axisResp, ok := resp.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", resp)
+	}
+
+	// 应与 TestAxisProcessor_MultiDims_TwoDims（无槽位信息的位置推断）结果完全一致
+	if len(axisResp.XAxis) != 2 || axisResp.XAxis[0] != "2024-01" || axisResp.XAxis[1] != "2024-02" {
+		t.Fatalf("expected XAxis=['2024-01','2024-02'], got %v", axisResp.XAxis)
+	}
+	names := getSeriesNames(axisResp.Series)
+	expected := []string{"Beijing", "Shanghai"}
+	if len(names) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, names)
+	}
+	for i := range expected {
+		if names[i] != expected[i] {
+			t.Errorf("expected series[%d]=%q, got %q", i, expected[i], names[i])
+		}
+	}
+}
+
+// TestAxisProcessor_SlotAware_FieldMismatchFallback 验证 AST 的 DimensionExprs 与 dims
+// 字段名对不上（防御性检查）时，回退到位置推断逻辑而不是用错槽位名切分。
+func TestAxisProcessor_SlotAware_FieldMismatchFallback(t *testing.T) {
+	p := &AxisProcessor{}
+	rows := []map[string]any{
+		{"date": "2024-01", "city": "Beijing", "sales": 100},
+		{"date": "2024-01", "city": "Shanghai", "sales": 200},
+	}
+	metrics := []MetricConfig{{Field: "sales", Agg: AggSum}}
+	dims := []string{"date", "city"}
+	// AST 里的 Field 与 dims 不匹配（第二个维度写成了 country），应触发防御性回退
+	ast := slotAST([]string{"date", "country"}, []string{SlotXAxis, SlotColorGroup})
+
+	resp, err := p.Process(rows, dims, metrics, ast)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	axisResp, ok := resp.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", resp)
+	}
+
+	// 回退到位置推断：dims[0]=date 作 X 轴，dims[1]=city 作 series（与 ast 里错误的 country 无关）
+	if len(axisResp.XAxis) != 1 || axisResp.XAxis[0] != "2024-01" {
+		t.Fatalf("expected XAxis=['2024-01'], got %v", axisResp.XAxis)
+	}
+	names := getSeriesNames(axisResp.Series)
+	expected := []string{"Beijing", "Shanghai"}
+	if len(names) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, names)
+	}
+	for i := range expected {
+		if names[i] != expected[i] {
+			t.Errorf("expected series[%d]=%q, got %q", i, expected[i], names[i])
+		}
 	}
 }

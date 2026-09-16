@@ -35,7 +35,16 @@ import {
 import ReactECharts from 'echarts-for-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Chart, type ChartDataResponse, ChartQueryAggregation, ChartQueryRequest } from '../api';
+import {
+  Chart,
+  type ChartDataResponse,
+  ChartDimensionField,
+  ChartDimensionGroup,
+  ChartMetricField,
+  ChartMetricGroup,
+  ChartQueryAggregation,
+  ChartQueryRequest,
+} from '../api';
 import {
   chartDefinitions,
   normalizeQueryConfigForChartType,
@@ -147,7 +156,14 @@ interface ChartQueryRequestInput {
 /**
  * 图表查询请求的唯一构造出口（纯函数，所有输入经参数传入）。
  * 调用场景：手动执行查询（含排序/翻页覆盖）与两个自动查询 effect 共用。
- * 主要逻辑：按图表定义裁剪字段组、字段 id 映射回列名、组装 dims/metrics/filters/pagination； 维度与指标同时为空时返回 null 表示不发起查询。
+ * 主要逻辑：按图表定义裁剪字段组、字段 id 映射回列名、组装 filters/pagination；
+ * 维度与指标同时为空时返回 null 表示不发起查询。
+ *
+ * v1/v2 判别（裁定B）：仅当当前图型定义了 color_group 槽位（bar/line/area）且该槽位
+ * 非空时，才发出 v2 格式请求（spec_version:2 + dimension_groups/metric_groups，携带真实
+ * 槽位名 x_axis/color_group/values 与每个字段的 binding_id）；color_group 为空（或
+ * table/pie/scatter/pivot 根本没有该槽位）时继续发出 v1 平铺格式（dims/metrics），
+ * 请求形状与本任务改动前完全一致。
  */
 const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequest | null => {
   const {
@@ -163,6 +179,110 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
 
   const activeGroups = getActiveFieldGroups(chartType, queryConfig);
   const fieldMap = new Map(fields.map((f) => [f.id, f]));
+
+  const filtersPayload = queryConfig.filters.map((f) => {
+    const field = fields.find((candidate) => candidate.id === f.field);
+    return {
+      field: field?.name || f.field,
+      operator: f.operator,
+      value: f.value,
+      value_end: f.valueEnd,
+      logic: f.logic,
+    };
+  });
+  const sortPayload = includeSort
+    ? {
+        sort: queryConfig.sort
+          ? { field: queryConfig.sort.field, order: queryConfig.sort.order }
+          : undefined,
+      }
+    : {};
+  const paginationPayload =
+    chartType === 'table'
+      ? {
+          page: tablePagination.page,
+          page_size: tablePagination.pageSize,
+        }
+      : undefined;
+
+  // color_group 槽位判定：只有 bar/line/area 的 fieldGroups 里定义了 id==='color_group'
+  // 的维度槽位；找到它在"仅维度槽位"序列里的序号，映射到 activeGroups.dimensionGroups
+  // 的同序号（kind-local index，与 getFieldGroupKindIndex 的既有约定一致）。
+  const definition = chartDefinitions[chartType];
+  const dimensionDefs = definition.fieldGroups.filter((group) => group.kind === 'dimension');
+  const colorGroupDefIndex = dimensionDefs.findIndex((group) => group.id === 'color_group');
+  const colorGroupBindings =
+    colorGroupDefIndex >= 0
+      ? (activeGroups.dimensionGroups[colorGroupDefIndex]?.bindings ?? [])
+      : [];
+
+  if (colorGroupBindings.length > 0) {
+    // v2 槽位协议：dimension_groups/metric_groups 携带真实槽位名与 binding_id
+    const dimensionGroupsPayload: ChartDimensionGroup[] = [];
+    dimensionDefs.forEach((def, index) => {
+      const group = activeGroups.dimensionGroups[index];
+      if (!group) {
+        return;
+      }
+      const groupFields: ChartDimensionField[] = group.bindings.flatMap((binding) => {
+        const chartField = fieldMap.get(binding.field);
+        if (!chartField) {
+          return [];
+        }
+        return [{ field: chartField.name, binding_id: binding.bindingId }];
+      });
+      dimensionGroupsPayload.push({ name: def.id, label: def.label, fields: groupFields });
+    });
+
+    const metricDefs = definition.fieldGroups.filter((group) => group.kind === 'metric');
+    const metricGroupsPayload: ChartMetricGroup[] = [];
+    metricDefs.forEach((def, index) => {
+      const group = activeGroups.metricGroups[index];
+      if (!group) {
+        return;
+      }
+      const groupFields: ChartMetricField[] = group.bindings.flatMap((binding) => {
+        const chartField = fieldMap.get(binding.field);
+        if (!chartField) {
+          return [];
+        }
+        return [
+          {
+            field: chartField.name,
+            agg: (metricAggregations[binding.bindingId] || 'sum') as ChartQueryAggregation,
+            alias: metricAliases[binding.bindingId] || chartField.name,
+            binding_id: binding.bindingId,
+          },
+        ];
+      });
+      metricGroupsPayload.push({ name: def.id, label: def.label, fields: groupFields });
+    });
+
+    const totalDimensionFields = dimensionGroupsPayload.reduce(
+      (sum, group) => sum + group.fields.length,
+      0
+    );
+    const totalMetricFields = metricGroupsPayload.reduce(
+      (sum, group) => sum + group.fields.length,
+      0
+    );
+    if (totalDimensionFields === 0 && totalMetricFields === 0) {
+      return null;
+    }
+
+    return {
+      dataset_id: datasetId,
+      chart_type: chartType,
+      spec_version: 2,
+      dimension_groups: dimensionGroupsPayload,
+      metric_groups: metricGroupsPayload,
+      filters: filtersPayload,
+      ...sortPayload,
+      pagination: paginationPayload,
+    };
+  }
+
+  // v1 平铺协议（color_group 为空，或该图型没有 color_group 槽位）：逻辑与改动前完全一致
   const dimensionFields = activeGroups.dimensionGroups
     .flatMap((group) => group.bindings.map((b) => b.field))
     .map((name) => fieldMap.get(name))
@@ -196,30 +316,9 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
     chart_type: chartType,
     dims: dimensionFields.map((f) => f.name),
     metrics,
-    filters: queryConfig.filters.map((f) => {
-      const field = fields.find((candidate) => candidate.id === f.field);
-      return {
-        field: field?.name || f.field,
-        operator: f.operator,
-        value: f.value,
-        value_end: f.valueEnd,
-        logic: f.logic,
-      };
-    }),
-    ...(includeSort
-      ? {
-          sort: queryConfig.sort
-            ? { field: queryConfig.sort.field, order: queryConfig.sort.order }
-            : undefined,
-        }
-      : {}),
-    pagination:
-      chartType === 'table'
-        ? {
-            page: tablePagination.page,
-            page_size: tablePagination.pageSize,
-          }
-        : undefined,
+    filters: filtersPayload,
+    ...sortPayload,
+    pagination: paginationPayload,
   };
 };
 
@@ -426,6 +525,12 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onMetricFormatChange,
   onChartStyleChange,
 }) => {
+  // styleKeys 决定当前图型显示哪些样式控件（Task 0-4 声明、本任务首次真正接线）。
+  // 7 种图型现在都应显式声明 styleKeys（见 chartDefinitions.ts），undefined 理论上
+  // 不应再出现；防御性地按"不显示任何样式控件"处理，避免误渲染出该图型不消费的开关。
+  const styleKeys = chartDefinitions[config.chartType].styleKeys;
+  const showStyleControl = (key: keyof ChartStyleConfig) => styleKeys?.includes(key) ?? false;
+
   return (
     <div>
       <Card title="可视化类型" size="small" style={{ marginBottom: 12 }}>
@@ -456,40 +561,61 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
             />
           </div>
 
-          <div>
-            <Text strong>平滑曲线</Text>
-            <div style={{ marginTop: 4 }}>
-              <Switch
-                checked={chartStyle.smooth}
-                onChange={(checked) => onChartStyleChange({ smooth: checked })}
-                disabled={config.chartType !== 'line' && config.chartType !== 'area'}
+          {showStyleControl('smooth') && (
+            <div>
+              <Text strong>平滑曲线</Text>
+              <div style={{ marginTop: 4 }}>
+                <Switch
+                  checked={chartStyle.smooth}
+                  onChange={(checked) => onChartStyleChange({ smooth: checked })}
+                />
+              </div>
+            </div>
+          )}
+
+          {showStyleControl('colors') && (
+            <div>
+              <Text strong>主色</Text>
+              <div style={{ marginTop: 4 }}>
+                <ColorPicker
+                  value={chartStyle.colors[0] || '#1677ff'}
+                  onChange={(color) => onChartStyleChange({ colors: [color.toHexString()] })}
+                />
+              </div>
+            </div>
+          )}
+
+          {showStyleControl('stack') && (
+            <div>
+              <Text strong>堆叠模式</Text>
+              <Select
+                style={{ width: '100%', marginTop: 4 }}
+                value={chartStyle.stack ?? 'none'}
+                onChange={(value) => onChartStyleChange({ stack: value })}
+                options={[
+                  { value: 'none', label: '不堆叠' },
+                  { value: 'normal', label: '堆叠' },
+                  { value: 'percent', label: '百分比堆叠' },
+                ]}
               />
             </div>
-          </div>
+          )}
 
-          <div>
-            <Text strong>主色</Text>
-            <div style={{ marginTop: 4 }}>
-              <ColorPicker
-                value={chartStyle.colors[0] || '#1677ff'}
-                onChange={(color) => onChartStyleChange({ colors: [color.toHexString()] })}
+          {showStyleControl('tableRowSize') && (
+            <div>
+              <Text strong>表格行尺寸</Text>
+              <Select
+                style={{ width: '100%', marginTop: 4 }}
+                value={chartStyle.tableRowSize}
+                onChange={(value) => onChartStyleChange({ tableRowSize: value })}
+                options={[
+                  { value: 'small', label: '紧凑' },
+                  { value: 'middle', label: '默认' },
+                  { value: 'large', label: '宽松' },
+                ]}
               />
             </div>
-          </div>
-
-          <div>
-            <Text strong>表格行尺寸</Text>
-            <Select
-              style={{ width: '100%', marginTop: 4 }}
-              value={chartStyle.tableRowSize}
-              onChange={(value) => onChartStyleChange({ tableRowSize: value })}
-              options={[
-                { value: 'small', label: '紧凑' },
-                { value: 'middle', label: '默认' },
-                { value: 'large', label: '宽松' },
-              ]}
-            />
-          </div>
+          )}
         </Space>
       </Card>
 

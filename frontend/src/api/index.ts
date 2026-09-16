@@ -139,15 +139,23 @@ export type ChartQuerySort = Omit<G['SortConfig'], 'order'> & {
   order: 'asc' | 'desc';
 };
 
-// dims stays required (store executeChartQuery reads request.dims[0]); the
-// generated schema optionally widens it and collapses metrics/filters to the
-// generated element types — re-tightened here onto the handwritten unions.
-// No `config` field: the pie-merge chain was removed in Task 2.
-export type ChartQueryRequest = Omit<G['ChartQueryRequest'], 'dims' | 'metrics' | 'filters'> & {
-  dims: string[];
-  metrics: ChartQueryMetric[];
+// Wire truth: POST /api/charts/query binds ChartSpecQueryRequest (v1+v2 superset,
+// see openapi.yaml). dims/metrics stay narrowed onto the handwritten element types
+// but are optional now: the v2 slot protocol (spec_version=2, emitted only when
+// bar/line/area's color_group slot is non-empty, see composeChartQueryRequest) omits
+// them entirely in favor of dimension_groups/metric_groups. filters stays required —
+// both branches always send it. spec_version/dimension_groups/metric_groups come
+// straight from the generated schema (no union-narrowing needed for those fields).
+export type ChartQueryRequest = Omit<G['ChartSpecQueryRequest'], 'dims' | 'metrics' | 'filters'> & {
+  dims?: string[];
+  metrics?: ChartQueryMetric[];
   filters: ChartQueryFilter[];
 };
+
+export type ChartDimensionGroup = G['ChartDimensionGroup'];
+export type ChartDimensionField = G['ChartDimensionField'];
+export type ChartMetricGroup = G['ChartMetricGroup'];
+export type ChartMetricField = G['ChartMetricField'];
 
 export type TableResponse = G['ChartTableResponse'];
 

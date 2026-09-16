@@ -58,6 +58,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '表格',
     resultShape: 'table',
     icon: TableOutlined,
+    styleKeys: ['tableRowSize'],
     fieldGroups: [
       {
         id: 'dimensions',
@@ -80,6 +81,9 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '柱状图',
     resultShape: 'axis',
     icon: BarChartOutlined,
+    // bar 分支不消费 smooth（buildChartOption 里 bar 恒为 {}），故不列入 styleKeys，
+    // 避免渲染一个不起作用的开关（裁定见 task-1-1-brief.md D 部分）。
+    styleKeys: ['colors', 'stack'],
     fieldGroups: [
       {
         id: 'x_axis',
@@ -87,6 +91,15 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         label: 'X 轴维度',
         emptyText: '拖拽 X 轴维度到此，或点击+添加',
         minGroups: 1,
+      },
+      {
+        id: 'color_group',
+        kind: 'dimension',
+        label: '颜色分组',
+        emptyText: '拖拽颜色分组维度到此（可选）',
+        minGroups: 0,
+        maxFields: 1,
+        optional: true,
       },
       {
         id: 'values',
@@ -102,6 +115,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '折线图',
     resultShape: 'axis',
     icon: LineChartOutlined,
+    styleKeys: ['colors', 'smooth', 'stack'],
     fieldGroups: [
       {
         id: 'x_axis',
@@ -109,6 +123,15 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         label: 'X 轴维度',
         emptyText: '拖拽 X 轴维度到此，或点击+添加',
         minGroups: 1,
+      },
+      {
+        id: 'color_group',
+        kind: 'dimension',
+        label: '颜色分组',
+        emptyText: '拖拽颜色分组维度到此（可选）',
+        minGroups: 0,
+        maxFields: 1,
+        optional: true,
       },
       {
         id: 'values',
@@ -124,6 +147,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '饼图',
     resultShape: 'pie',
     icon: PieChartOutlined,
+    // donut 是 Task 1-3 的工作，本任务只填当前真实消费的 colors。
+    styleKeys: ['colors'],
     fieldGroups: [
       {
         id: 'category',
@@ -146,6 +171,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '面积图',
     resultShape: 'axis',
     icon: AreaChartOutlined,
+    styleKeys: ['colors', 'smooth', 'stack'],
     fieldGroups: [
       {
         id: 'x_axis',
@@ -153,6 +179,15 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         label: 'X 轴维度',
         emptyText: '拖拽 X 轴维度到此，或点击+添加',
         minGroups: 1,
+      },
+      {
+        id: 'color_group',
+        kind: 'dimension',
+        label: '颜色分组',
+        emptyText: '拖拽颜色分组维度到此（可选）',
+        minGroups: 0,
+        maxFields: 1,
+        optional: true,
       },
       {
         id: 'values',
@@ -168,6 +203,9 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '散点图',
     resultShape: 'scatter',
     icon: DotChartOutlined,
+    // buildChartOption 的 scatter 分支当前不消费 colors（未写入 color 调色板），
+    // 故 styleKeys 显式留空数组，避免渲染一个不起作用的色板控件。
+    styleKeys: [],
     fieldGroups: [
       {
         id: 'x_metric',
@@ -190,6 +228,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '透视表',
     resultShape: 'pivot',
     icon: AppstoreOutlined,
+    styleKeys: ['tableRowSize'],
     fieldGroups: [
       {
         id: 'rows',

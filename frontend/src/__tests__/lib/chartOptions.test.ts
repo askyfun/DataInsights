@@ -25,6 +25,7 @@ interface AxisOptionView {
     smooth?: boolean;
     connectNulls?: boolean;
     areaStyle?: unknown;
+    stack?: string;
   }[];
   color?: string[];
 }
@@ -559,5 +560,95 @@ describe('normalizeChartStyle：持久化 style（unknown）安全窄化', () =>
       smooth: false,
       tableRowSize: 'small',
     });
+  });
+});
+
+describe('buildChartOption：style.stack 堆叠渲染（bar/line/area）', () => {
+  const stackedPayload = {
+    x_axis: ['Apple', 'Banana'],
+    series: [
+      { name: 'revenue', data: [1000, 2000] },
+      { name: 'cost', data: [3000, 2000] },
+    ],
+  };
+  const context = { title: '', dimensions: ['product'], metrics: ['revenue', 'cost'] };
+
+  it('stack 缺省（undefined）：series 不带 stack 字段（回归钉死改动前行为）', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption('bar', stackedPayload, baseStyle, {}, context)
+    );
+    expect(option.series[0]).not.toHaveProperty('stack');
+    expect(option.series[1]).not.toHaveProperty('stack');
+    expect(option.series[0]?.data).toEqual([1000, 2000]);
+    expect(option.series[1]?.data).toEqual([3000, 2000]);
+  });
+
+  it("stack='none'：与缺省一致，不加 stack 字段", () => {
+    const option = view<AxisOptionView>(
+      buildChartOption('bar', stackedPayload, { ...baseStyle, stack: 'none' }, {}, context)
+    );
+    expect(option.series[0]).not.toHaveProperty('stack');
+    expect(option.series[1]).not.toHaveProperty('stack');
+  });
+
+  it("stack='normal'：每条 series 打 stack:'total'，原始数值不变", () => {
+    const option = view<AxisOptionView>(
+      buildChartOption('bar', stackedPayload, { ...baseStyle, stack: 'normal' }, {}, context)
+    );
+    expect(option.series[0]).toMatchObject({ stack: 'total', data: [1000, 2000] });
+    expect(option.series[1]).toMatchObject({ stack: 'total', data: [3000, 2000] });
+  });
+
+  it("stack='percent'：每个 x 位置所有 series 归一化后之和约等于 100（误差 < 0.01）", () => {
+    const option = view<AxisOptionView>(
+      buildChartOption('bar', stackedPayload, { ...baseStyle, stack: 'percent' }, {}, context)
+    );
+    expect(option.series[0]).toMatchObject({ stack: 'total' });
+    expect(option.series[1]).toMatchObject({ stack: 'total' });
+
+    const data0 = option.series[0]?.data as number[];
+    const data1 = option.series[1]?.data as number[];
+    // Apple: 1000/(1000+3000)*100=25, 3000/4000*100=75
+    expect(data0[0]).toBeCloseTo(25, 2);
+    expect(data1[0]).toBeCloseTo(75, 2);
+    // Banana: 2000/(2000+2000)*100=50, 50
+    expect(data0[1]).toBeCloseTo(50, 2);
+    expect(data1[1]).toBeCloseTo(50, 2);
+
+    for (let i = 0; i < stackedPayload.x_axis.length; i++) {
+      const sum = data0[i] + data1[i];
+      expect(Math.abs(sum - 100)).toBeLessThan(0.01);
+    }
+  });
+
+  it("stack='percent'：全 0 位置归一化为 0（不产生 NaN/Infinity）", () => {
+    const zeroPayload = {
+      x_axis: ['Apple'],
+      series: [
+        { name: 'revenue', data: [0] },
+        { name: 'cost', data: [0] },
+      ],
+    };
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        zeroPayload,
+        { ...baseStyle, stack: 'percent' },
+        {},
+        { title: '', dimensions: ['product'], metrics: ['revenue', 'cost'] }
+      )
+    );
+    expect(option.series[0]?.data).toEqual([0]);
+    expect(option.series[1]?.data).toEqual([0]);
+  });
+
+  it('line/area 同样支持 stack（不限于 bar）', () => {
+    for (const chartType of ['line', 'area'] as const) {
+      const option = view<AxisOptionView>(
+        buildChartOption(chartType, stackedPayload, { ...baseStyle, stack: 'normal' }, {}, context)
+      );
+      expect(option.series[0]).toMatchObject({ stack: 'total' });
+      expect(option.series[1]).toMatchObject({ stack: 'total' });
+    }
   });
 });

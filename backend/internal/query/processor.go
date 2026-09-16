@@ -11,16 +11,27 @@ import (
 
 // Processor 接口定义
 type Processor interface {
-	Process(rows []map[string]any, dims []string, metrics []MetricConfig) (ChartQueryResponse, error)
+	// Process 处理查询结果行。ast 携带 v2 协议的槽位信息
+	// （DimensionExprs/MetricExprs 的 GroupName/BindingID，与 dims/metrics 按索引一一对应）；
+	// v1 平铺协议下 ast 可能为 nil、无 DimensionExprs，或所有 GroupName 均为空/未知槽位名，
+	// 此时实现方必须回退到位置推断逻辑，保证 v1 请求行为完全不变（裁定A）。
+	Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error)
 }
+
+// bar/line/area 的维度槽位名（v2 协议 dimension_groups[].name，
+// 与 frontend/src/components/ChartBuilder/chartDefinitions.ts 的 fieldGroups[].id 对齐）。
+const (
+	SlotXAxis      = "x_axis"
+	SlotColorGroup = "color_group"
+)
 
 // TableProcessor Table 图表处理器
 type TableProcessor struct {
 	Pagination *Pagination
 }
 
-// Process 处理 Table 数据
-func (p *TableProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig) (ChartQueryResponse, error) {
+// Process 处理 Table 数据。ast 参数在本任务里不消费（裁定A：只有 AxisProcessor 需要槽位感知）。
+func (p *TableProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error) {
 	if len(rows) == 0 {
 		return &TableResponse{
 			Columns:    []string{},
@@ -73,8 +84,8 @@ func NewPieProcessor() *PieProcessor {
 	}
 }
 
-// Process 处理 Pie 数据
-func (p *PieProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig) (ChartQueryResponse, error) {
+// Process 处理 Pie 数据。ast 参数在本任务里不消费（裁定A：只有 AxisProcessor 需要槽位感知）。
+func (p *PieProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error) {
 	if len(rows) == 0 || len(dims) == 0 || len(metrics) == 0 {
 		return &PieResponse{
 			Data: []PieDataItem{},
@@ -195,13 +206,21 @@ func (p *PieProcessor) Process(rows []map[string]any, dims []string, metrics []M
 // AxisProcessor 坐标轴图表处理器 (Bar, Line, Area)
 type AxisProcessor struct{}
 
-// Process 处理坐标轴图表数据
-func (p *AxisProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig) (ChartQueryResponse, error) {
+// Process 处理坐标轴图表数据。
+// 槽位感知（裁定A）：若 ast 携带 v2 协议的 x_axis/color_group 槽位名，按槽位名明确区分
+// X 轴维度与颜色分组维度，不依赖 dims[0]/dims[1:] 的位置顺序；否则（v1 平铺协议，
+// ast 为 nil / 无 DimensionExprs / GroupName 全为空或未知）回退到下面的位置推断逻辑，
+// 保证 v1 请求行为完全不变。
+func (p *AxisProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error) {
 	if len(rows) == 0 || len(dims) == 0 || len(metrics) == 0 {
 		return &AxisResponse{
 			XAxis:  []string{},
 			Series: []AxisSeries{},
 		}, nil
+	}
+
+	if xAxisDims, colorGroupDims, ok := resolveAxisSlots(dims, ast); ok {
+		return processAxisWithSlots(rows, xAxisDims, colorGroupDims, metrics), nil
 	}
 
 	dimField := dims[0]
@@ -311,11 +330,137 @@ func (p *AxisProcessor) Process(rows []map[string]any, dims []string, metrics []
 	return &AxisResponse{XAxis: xAxisOrder, Series: series}, nil
 }
 
+// resolveAxisSlots 尝试从 AST 里按索引解析 bar/line/area 的 x_axis/color_group 槽位。
+// dims 与 ast.DimensionExprs 由 service 层同源的 QuerySpec 分别平铺而来（plannedQuery.Dims
+// 与 PlanAST 都按 spec.Dimensions 顺序遍历），因此按索引一一对应；额外校验 Field 名对齐，
+// 一旦发现数量或字段名不匹配（理论上不会发生，防御性兜底），返回 ok=false 让调用方回退到
+// 位置推断，避免用错槽位名切分数据。返回 ok=false 也覆盖 v1 平铺协议的正常情况
+// （ast 为 nil、无 DimensionExprs，或所有 GroupName 均为空/未知槽位名）。
+func resolveAxisSlots(dims []string, ast *QueryAST) (xAxisDims []string, colorGroupDims []string, ok bool) {
+	if ast == nil || len(ast.DimensionExprs) != len(dims) {
+		return nil, nil, false
+	}
+	for i, d := range dims {
+		expr := ast.DimensionExprs[i]
+		if expr.Field != d {
+			return nil, nil, false
+		}
+		switch expr.GroupName {
+		case SlotXAxis:
+			xAxisDims = append(xAxisDims, d)
+		case SlotColorGroup:
+			colorGroupDims = append(colorGroupDims, d)
+		}
+	}
+	if len(xAxisDims) == 0 && len(colorGroupDims) == 0 {
+		return nil, nil, false
+	}
+	return xAxisDims, colorGroupDims, true
+}
+
+// processAxisWithSlots 按显式槽位名切分 X 轴与 series（不依赖 dims 的位置顺序）：
+// xAxisDims 的值组合成类目轴（多于一个字段时用 " - " 连接，与旧多维度逻辑的连接符一致），
+// colorGroupDims 的值组合成 series 名（同样用 " - " 连接）。colorGroupDims 为空时退化为
+// "每个指标一条 series"，与旧的单维度逻辑一致；命名规则（单指标只用颜色值、多指标用
+// "指标别名 - 颜色值"）也与旧多维度逻辑保持一致，便于 v1/v2 两条路径产出可对比的结果。
+func processAxisWithSlots(rows []map[string]any, xAxisDims []string, colorGroupDims []string, metrics []MetricConfig) *AxisResponse {
+	joinSlotValues := func(row map[string]any, slotDims []string) string {
+		parts := make([]string, len(slotDims))
+		for i, d := range slotDims {
+			parts[i] = toString(row[d])
+		}
+		return strings.Join(parts, " - ")
+	}
+
+	// 1. 收集去重的 X 轴值（保持出现顺序）
+	xAxisSeen := make(map[string]bool)
+	var xAxisOrder []string
+	for _, row := range rows {
+		xVal := joinSlotValues(row, xAxisDims)
+		if !xAxisSeen[xVal] {
+			xAxisSeen[xVal] = true
+			xAxisOrder = append(xAxisOrder, xVal)
+		}
+	}
+
+	if len(colorGroupDims) == 0 {
+		series := make([]AxisSeries, len(metrics))
+		for j, metric := range metrics {
+			alias := metric.ResolveAlias()
+			data := make([]any, len(xAxisOrder))
+			for _, row := range rows {
+				xVal := joinSlotValues(row, xAxisDims)
+				for xi, xv := range xAxisOrder {
+					if xv == xVal {
+						data[xi] = row[alias]
+						break
+					}
+				}
+			}
+			series[j] = AxisSeries{Name: alias, Data: data}
+		}
+		return &AxisResponse{XAxis: xAxisOrder, Series: series}
+	}
+
+	// 2. 有颜色分组：series = 指标 × 颜色值组合
+	type seriesKey struct {
+		metricAlias string
+		colorCombo  string
+	}
+	seriesData := make(map[seriesKey][]any)
+	seriesOrder := make([]seriesKey, 0)
+
+	colorComboOrder := make([]string, 0)
+	colorComboSeen := make(map[string]bool)
+	for _, row := range rows {
+		colorCombo := joinSlotValues(row, colorGroupDims)
+		if !colorComboSeen[colorCombo] {
+			colorComboSeen[colorCombo] = true
+			colorComboOrder = append(colorComboOrder, colorCombo)
+		}
+	}
+
+	for _, metric := range metrics {
+		alias := metric.ResolveAlias()
+		for _, colorCombo := range colorComboOrder {
+			key := seriesKey{metricAlias: alias, colorCombo: colorCombo}
+			seriesOrder = append(seriesOrder, key)
+			seriesData[key] = make([]any, len(xAxisOrder))
+		}
+	}
+
+	for _, row := range rows {
+		xVal := joinSlotValues(row, xAxisDims)
+		colorCombo := joinSlotValues(row, colorGroupDims)
+		for _, metric := range metrics {
+			alias := metric.ResolveAlias()
+			key := seriesKey{metricAlias: alias, colorCombo: colorCombo}
+			for xi, xv := range xAxisOrder {
+				if xv == xVal {
+					seriesData[key][xi] = row[alias]
+					break
+				}
+			}
+		}
+	}
+
+	series := make([]AxisSeries, len(seriesOrder))
+	for i, key := range seriesOrder {
+		name := key.colorCombo
+		if len(metrics) > 1 {
+			name = key.metricAlias + " - " + key.colorCombo
+		}
+		series[i] = AxisSeries{Name: name, Data: seriesData[key]}
+	}
+
+	return &AxisResponse{XAxis: xAxisOrder, Series: series}
+}
+
 // ScatterProcessor Scatter 图表处理器
 type ScatterProcessor struct{}
 
-// Process 处理 Scatter 数据
-func (p *ScatterProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig) (ChartQueryResponse, error) {
+// Process 处理 Scatter 数据。ast 参数在本任务里不消费（裁定A：只有 AxisProcessor 需要槽位感知）。
+func (p *ScatterProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error) {
 	if len(rows) == 0 || len(metrics) < 2 {
 		return &ScatterResponse{
 			Data: [][]float64{},
@@ -347,8 +492,8 @@ func (p *ScatterProcessor) Process(rows []map[string]any, dims []string, metrics
 // PivotProcessor 透视表处理器
 type PivotProcessor struct{}
 
-// Process 处理 Pivot 数据
-func (p *PivotProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig) (ChartQueryResponse, error) {
+// Process 处理 Pivot 数据。ast 参数在本任务里不消费（裁定A：只有 AxisProcessor 需要槽位感知）。
+func (p *PivotProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error) {
 	if len(rows) == 0 {
 		return &PivotResponse{
 			Columns: []string{},

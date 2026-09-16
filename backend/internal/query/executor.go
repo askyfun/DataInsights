@@ -152,7 +152,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		return ExecutorResult{}, fmt.Errorf("query failed: %v", err)
 	}
 
-	data, err := processor.Process(result.Rows, req.Dims, req.Metrics)
+	data, err := processor.Process(result.Rows, req.Dims, req.Metrics, ast)
 	if err != nil {
 		return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
 	}
