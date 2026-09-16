@@ -1,7 +1,32 @@
-import type { ChartConfig, QueryConfig } from '@/store';
+import {
+  AppstoreOutlined,
+  AreaChartOutlined,
+  BarChartOutlined,
+  DotChartOutlined,
+  LineChartOutlined,
+  PieChartOutlined,
+  TableOutlined,
+} from '@ant-design/icons';
+import type { ComponentType } from 'react';
+import type { ChartConfig, ChartStyleConfig, QueryConfig } from '@/store';
 
 export type BuilderChartType = ChartConfig['chartType'];
 export type FieldGroupKind = 'dimension' | 'metric';
+
+/**
+ * 图表结果形状：后端 processor 返回结构 + 前端渲染器的组合语义。
+ * 联合里同时包含已实现与尚未实现的形状，后续任务加新图型时无需再改这个类型定义。
+ */
+export type ResultShape =
+  | 'axis'
+  | 'pie'
+  | 'table'
+  | 'pivot'
+  | 'scatter'
+  | 'histogram'
+  | 'boxplot'
+  | 'radar'
+  | 'kpi';
 
 export interface ChartFieldGroupDefinition {
   id: string;
@@ -9,11 +34,21 @@ export interface ChartFieldGroupDefinition {
   label: string;
   emptyText: string;
   minGroups: number;
+  /** 该槽位最多接受几个字段（undefined = 无限）。 */
+  maxFields?: number;
+  /** 是否可选槽位（minGroups=0 时自动为 true）。 */
+  optional?: boolean;
 }
 
 export interface ChartDefinition {
   type: BuilderChartType;
   label: string;
+  /** 结果形状：决定后端 processor 与前端渲染器的选择。 */
+  resultShape: ResultShape;
+  /** 图表类型图标。存组件引用（非 JSX 元素），由调用方实例化。 */
+  icon: ComponentType;
+  /** 该图型支持的样式子集，供 ConfigPanel 条件渲染（未填 = 暂无专属样式）。 */
+  styleSchema?: Partial<ChartStyleConfig>;
   fieldGroups: ChartFieldGroupDefinition[];
 }
 
@@ -21,6 +56,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
   table: {
     type: 'table',
     label: '表格',
+    resultShape: 'table',
+    icon: TableOutlined,
     fieldGroups: [
       {
         id: 'dimensions',
@@ -41,6 +78,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
   bar: {
     type: 'bar',
     label: '柱状图',
+    resultShape: 'axis',
+    icon: BarChartOutlined,
     fieldGroups: [
       {
         id: 'x_axis',
@@ -61,6 +100,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
   line: {
     type: 'line',
     label: '折线图',
+    resultShape: 'axis',
+    icon: LineChartOutlined,
     fieldGroups: [
       {
         id: 'x_axis',
@@ -81,6 +122,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
   pie: {
     type: 'pie',
     label: '饼图',
+    resultShape: 'pie',
+    icon: PieChartOutlined,
     fieldGroups: [
       {
         id: 'category',
@@ -101,6 +144,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
   area: {
     type: 'area',
     label: '面积图',
+    resultShape: 'axis',
+    icon: AreaChartOutlined,
     fieldGroups: [
       {
         id: 'x_axis',
@@ -121,6 +166,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
   scatter: {
     type: 'scatter',
     label: '散点图',
+    resultShape: 'scatter',
+    icon: DotChartOutlined,
     fieldGroups: [
       {
         id: 'x_metric',
@@ -141,6 +188,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
   pivot: {
     type: 'pivot',
     label: '透视表',
+    resultShape: 'pivot',
+    icon: AppstoreOutlined,
     fieldGroups: [
       {
         id: 'rows',

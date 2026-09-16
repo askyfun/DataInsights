@@ -1,17 +1,10 @@
 import {
-  AppstoreOutlined,
-  AreaChartOutlined,
-  BarChartOutlined,
   CodeOutlined,
-  DotChartOutlined,
   FieldBinaryOutlined,
   FunctionOutlined,
-  LineChartOutlined,
-  PieChartOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
-  TableOutlined,
 } from '@ant-design/icons';
 import {
   DndContext,
@@ -413,15 +406,11 @@ interface ConfigPanelProps {
   onChartStyleChange: (style: Partial<ChartStyleConfig>) => void;
 }
 
-const chartTypeOptions = [
-  { type: 'table', icon: <TableOutlined />, label: chartDefinitions.table.label },
-  { type: 'bar', icon: <BarChartOutlined />, label: chartDefinitions.bar.label },
-  { type: 'line', icon: <LineChartOutlined />, label: chartDefinitions.line.label },
-  { type: 'pie', icon: <PieChartOutlined />, label: chartDefinitions.pie.label },
-  { type: 'area', icon: <AreaChartOutlined />, label: chartDefinitions.area.label },
-  { type: 'scatter', icon: <DotChartOutlined />, label: chartDefinitions.scatter.label },
-  { type: 'pivot', icon: <AppstoreOutlined />, label: chartDefinitions.pivot.label },
-] as const;
+const chartTypeOptions = Object.values(chartDefinitions).map((def) => ({
+  type: def.type,
+  icon: def.icon,
+  label: def.label,
+}));
 
 const ConfigPanel: React.FC<ConfigPanelProps> = ({
   config,
@@ -445,7 +434,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
             <Button
               key={opt.type}
               type={config.chartType === opt.type ? 'primary' : 'default'}
-              icon={opt.icon}
+              icon={React.createElement(opt.icon)}
               onClick={() => onConfigChange({ chartType: opt.type })}
               style={{ height: 40 }}
             >
