@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Chart, type ChartDataResponse, chartsApi, sharesApi } from '../api';
 import { chartDefinitions } from '../components/ChartBuilder/chartDefinitions';
+import KpiCard from '../components/ChartBuilder/KpiCard';
 import TableChart from '../components/ChartBuilder/TableChart';
 import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../lib/chartOptions';
@@ -291,6 +292,18 @@ const ShareView: React.FC = () => {
   const tablePayload =
     isTableLike && !Array.isArray(chartData) && 'columns' in chartData ? chartData : null;
 
+  // kpi 臂（R-51）：标量 {value, label}（ChartKpiResponse），不走 ECharts。
+  // unit/format 从持久化 v2 文档的 fieldMeta 按 kpi 唯一 metric 槽位
+  // （metricGroups[0] 的首个 binding）的 bindingId 取——后端 KpiResponse.Unit/Format
+  // 恒为空（wire 协议限制，见 KpiProcessor 注释），展示信息只来自配置侧。
+  const isKpi = chartDoc?.chartType === 'kpi';
+  const kpiPayload =
+    isKpi && !Array.isArray(chartData) && 'value' in chartData && 'label' in chartData
+      ? chartData
+      : null;
+  const kpiBindingId = isKpi ? chartDoc?.query.metricGroups[0]?.bindings[0]?.bindingId : undefined;
+  const kpiMeta = kpiBindingId ? chartDoc?.fieldMeta[kpiBindingId] : undefined;
+
   return (
     <div style={{ minHeight: '100vh', background: '#f0f2f5', padding: 24 }}>
       <Card>
@@ -324,6 +337,14 @@ const ShareView: React.FC = () => {
               <Text type="secondary">Loading chart data...</Text>
             </div>
           </div>
+        ) : isKpi ? (
+          <KpiCard
+            value={kpiPayload?.value ?? 0}
+            label={kpiPayload?.label ?? ''}
+            unit={kpiMeta?.unit}
+            format={kpiMeta?.format}
+            loading={false}
+          />
         ) : isTableLike && !isEmptyPayload(chartData) ? (
           <TableChart
             data={tablePayload ? tablePayload.data : (chartData as RawRow[])}

@@ -146,6 +146,16 @@ type PivotResponse struct {
 	Data    []map[string]any `json:"data"`
 }
 
+// KpiResponse KPI 单值卡响应（无维度，标量聚合结果）。
+// 字段与 api/openapi.yaml 的 ChartKpiResponse schema 逐一对应：
+// value/label 必填，unit/format 为 omitempty（缺省时不出现在 JSON）。
+type KpiResponse struct {
+	Value  float64 `json:"value"`
+	Label  string  `json:"label"`
+	Unit   string  `json:"unit,omitempty"`
+	Format string  `json:"format,omitempty"`
+}
+
 // ResolveAlias 解析字段别名
 func (m *MetricConfig) ResolveAlias() string {
 	if m.Alias != "" {

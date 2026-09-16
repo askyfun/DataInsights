@@ -2,6 +2,7 @@ import {
   AppstoreOutlined,
   AreaChartOutlined,
   BarChartOutlined,
+  DashboardOutlined,
   DotChartOutlined,
   FundOutlined,
   LineChartOutlined,
@@ -293,6 +294,26 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         label: '次轴指标',
         emptyText: '拖拽次轴指标到此',
         minGroups: 1,
+      },
+    ],
+  },
+  kpi: {
+    type: 'kpi',
+    label: 'KPI 卡',
+    // kpi（R-51）不走 ECharts：后端 KpiProcessor 返回标量 {value, label}，
+    // 前端由 KpiCard（AntD Statistic）渲染，buildChartOption 对 kpi 恒返回 null。
+    resultShape: 'kpi',
+    icon: DashboardOutlined,
+    // KPI 卡不消费 colors/smooth/stack 等 ECharts 样式控件。
+    styleKeys: [],
+    fieldGroups: [
+      {
+        id: 'value',
+        kind: 'metric',
+        label: '指标',
+        emptyText: '拖拽指标到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
       },
     ],
   },

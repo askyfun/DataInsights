@@ -30,7 +30,16 @@
  */
 import type { BindingInstance } from '../store';
 
-export type ChartType = 'bar' | 'line' | 'pie' | 'area' | 'scatter' | 'table' | 'pivot' | 'combo';
+export type ChartType =
+  | 'bar'
+  | 'line'
+  | 'pie'
+  | 'area'
+  | 'scatter'
+  | 'table'
+  | 'pivot'
+  | 'combo'
+  | 'kpi';
 
 export interface ChartMeta {
   label?: string;
@@ -95,6 +104,7 @@ const CHART_TYPES: readonly string[] = [
   'table',
   'pivot',
   'combo',
+  'kpi',
 ];
 
 /** 旧平铺 Record → fieldMeta 键的映射 */

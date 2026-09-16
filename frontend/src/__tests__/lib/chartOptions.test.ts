@@ -295,6 +295,28 @@ describe('buildChartOption：返回 null 的边界', () => {
     ).toBeNull();
   });
 
+  it('kpi 走 KpiCard（AntD Statistic），不产出 ECharts option', () => {
+    // 标量 KpiResponse 负载（{value, label}）：无 x_axis/data 键，
+    // isEmptyPayload 判空 + switch default 兜底，两重保证恒返回 null。
+    expect(
+      buildChartOption(
+        'kpi',
+        { value: 95380, label: 'total_amount' },
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: [],
+          metrics: ['amount'],
+        }
+      )
+    ).toBeNull();
+    // 未查询/空负载同样返回 null
+    expect(
+      buildChartOption('kpi', [], baseStyle, {}, { title: '', dimensions: [], metrics: [] })
+    ).toBeNull();
+  });
+
   it('空负载（三种空形状）返回 null', () => {
     expect(
       buildChartOption('bar', [], baseStyle, {}, { title: '', dimensions: ['a'], metrics: ['b'] })

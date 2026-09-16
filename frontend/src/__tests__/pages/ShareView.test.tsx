@@ -206,4 +206,51 @@ describe('ShareView live password gate (has_password envelope)', () => {
     expect(option.xAxis.data).toEqual(['华北', '华东']);
     expect(option.series).toEqual([{ name: 'Revenue', type: 'bar', data: [36635, 37730] }]);
   });
+
+  it('renders a KPI card (AntD Statistic, not ECharts) for kpi shares', async () => {
+    mockGetShareByToken.mockResolvedValue(
+      mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: openShare })
+    );
+    const kpiChart: Chart = {
+      id: 7,
+      name: 'Revenue KPI',
+      dataset_id: 3,
+      chart_type: 'kpi',
+      config: JSON.stringify({
+        version: 1,
+        chartType: 'kpi',
+        title: 'Revenue KPI',
+        query: {
+          dimensionGroups: [],
+          metricGroups: [{ fields: ['total'] }],
+        },
+        // v1 fieldMeta 键为列名，迁移后复制到唯一 metric binding 的 bindingId 上
+        fieldMeta: { total: { unit: '元' } },
+      }),
+      created_at: '',
+      updated_at: '',
+    };
+    mockGetChartById.mockResolvedValue(
+      mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data: kpiChart })
+    );
+    // kpi 的结构化响应是标量 {value, label}（后端 KpiProcessor 产物）
+    mockGetChartData.mockResolvedValue(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'success',
+        trace: '',
+        data: { value: 42, label: 'total' },
+      })
+    );
+
+    renderShareView();
+
+    await waitFor(() => expect(screen.getByText('42')).toBeInTheDocument());
+    // KpiCard（真实组件，未 mock）：Statistic 标题为 label，unit 来自持久化 fieldMeta
+    expect(screen.getByText('total')).toBeInTheDocument();
+    expect(screen.getByText('元')).toBeInTheDocument();
+    // 不落入 ECharts 臂，也不落入 "Unable to display chart" 兜底
+    expect(screen.queryByTestId('echarts')).not.toBeInTheDocument();
+    expect(screen.queryByText('Unable to display chart')).not.toBeInTheDocument();
+  });
 });

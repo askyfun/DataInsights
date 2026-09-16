@@ -519,6 +519,38 @@ func (p *PivotProcessor) Process(rows []map[string]any, dims []string, metrics [
 	}, nil
 }
 
+// KpiProcessor KPI 单值卡处理器（R-51）
+type KpiProcessor struct{}
+
+// Process 处理 KPI 单值数据。ast 参数在本任务里不消费（裁定A：只有 AxisProcessor 需要槽位感知）。
+// kpi 图型约定：无维度（dims 为空）、单指标；查询在 SQL 层已退化为标量聚合
+// （零维度 → BunQueryBuilder 不生成 GROUP BY，聚合查询恰好返回一行），这里从第一行
+// 按指标别名取值。边界情况：rows 为空（无数据）、聚合结果为 NULL、或值不可转数值时
+// 返回 Value:0 而不是报错或 panic；多行时防御性取第一行。
+// 已知限制（Task 1-5 范围内接受）：MetricConfig 只有 Field/Agg/Alias，没有 Unit/Format
+// 字段（扩展涉及 wire 协议变更，超出本任务范围），因此 Unit/Format 恒为空
+// （omitempty，JSON 里不出现）；前端 KpiCard 的 unit/format 展示信息改从前端配置侧取。
+func (p *KpiProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error) {
+	if len(metrics) == 0 {
+		return &KpiResponse{}, nil
+	}
+
+	label := metrics[0].ResolveAlias()
+	resp := &KpiResponse{Label: label}
+
+	if len(rows) == 0 {
+		return resp, nil
+	}
+
+	// SELECT 别名经 quoteResultAlias 引号保留，行键与 ResolveAlias() 逐字一致；
+	// toFloat64 覆盖 pgtype.Numeric（SUM(numeric)）、数值字符串（PG numeric 经 pgx）
+	// 等形态，NULL（nil）或不可转数值时落回 Value:0。
+	if v, ok := toFloat64(rows[0][label]); ok {
+		resp.Value = v
+	}
+	return resp, nil
+}
+
 // GetProcessor 获取对应的处理器
 func GetProcessor(chartType ChartType) Processor {
 	switch chartType {
@@ -537,6 +569,8 @@ func GetProcessor(chartType ChartType) Processor {
 		return &ScatterProcessor{}
 	case ChartTypePivot:
 		return &PivotProcessor{}
+	case ChartTypeKpi:
+		return &KpiProcessor{}
 	default:
 		return &AxisProcessor{}
 	}

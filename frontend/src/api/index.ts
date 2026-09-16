@@ -165,12 +165,15 @@ export type AxisResponse = G['ChartAxisResponse'];
 
 export type ScatterResponse = G['ChartScatterResponse'];
 
+export type KpiResponse = G['ChartKpiResponse'];
+
 export type ChartDataResponse =
   | G['ChartTableResponse']
   | G['ChartPieResponse']
   | G['ChartAxisResponse']
   | G['ChartScatterResponse']
   | G['ChartPivotResponse']
+  | G['ChartKpiResponse']
   | unknown[];
 
 // NOT G['ChartQueryResponse'] (that is the Envelope wrapper): the bare wire

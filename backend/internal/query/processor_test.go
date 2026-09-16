@@ -960,3 +960,171 @@ func TestAxisProcessor_SlotAware_FieldMismatchFallback(t *testing.T) {
 		}
 	}
 }
+
+// TestKpiProcessor_SingleValue 验证正常单值：从零维度标量聚合的第一行按指标别名取值，
+// Label 用 ResolveAlias()（与其他 Processor 的命名规则一致）。
+func TestKpiProcessor_SingleValue(t *testing.T) {
+	p := &KpiProcessor{}
+	rows := []map[string]any{{"total_amount": 148730.5}}
+	metrics := []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "total_amount"}}
+
+	resp, err := p.Process(rows, []string{}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	kpiResp, ok := resp.(*KpiResponse)
+	if !ok {
+		t.Fatalf("expected *KpiResponse, got %T", resp)
+	}
+	if kpiResp.Value != 148730.5 {
+		t.Errorf("expected Value=148730.5, got %v", kpiResp.Value)
+	}
+	if kpiResp.Label != "total_amount" {
+		t.Errorf("expected Label=total_amount, got %q", kpiResp.Label)
+	}
+	// Unit/Format 本任务恒为空（wire 协议限制，见 KpiProcessor 注释）
+	if kpiResp.Unit != "" || kpiResp.Format != "" {
+		t.Errorf("expected empty Unit/Format, got %q/%q", kpiResp.Unit, kpiResp.Format)
+	}
+}
+
+// TestKpiProcessor_LabelFallsBackToField 验证无 Alias 时 Label 回退为字段名（ResolveAlias 语义）。
+func TestKpiProcessor_LabelFallsBackToField(t *testing.T) {
+	p := &KpiProcessor{}
+	rows := []map[string]any{{"amount": 42.0}}
+	metrics := []MetricConfig{{Field: "amount", Agg: AggSum}}
+
+	resp, err := p.Process(rows, []string{}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	kpiResp := resp.(*KpiResponse)
+	if kpiResp.Label != "amount" {
+		t.Errorf("expected Label=amount, got %q", kpiResp.Label)
+	}
+	if kpiResp.Value != 42.0 {
+		t.Errorf("expected Value=42, got %v", kpiResp.Value)
+	}
+}
+
+// TestKpiProcessor_EmptyRows 验证空 rows（无数据）时返回 Value:0 而不是报错或 panic。
+func TestKpiProcessor_EmptyRows(t *testing.T) {
+	p := &KpiProcessor{}
+	metrics := []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "total_amount"}}
+
+	resp, err := p.Process([]map[string]any{}, []string{}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	kpiResp, ok := resp.(*KpiResponse)
+	if !ok {
+		t.Fatalf("expected *KpiResponse, got %T", resp)
+	}
+	if kpiResp.Value != 0 {
+		t.Errorf("expected Value=0 for empty rows, got %v", kpiResp.Value)
+	}
+	if kpiResp.Label != "total_amount" {
+		t.Errorf("expected Label=total_amount, got %q", kpiResp.Label)
+	}
+}
+
+// TestKpiProcessor_MultipleRows 验证多行时防御性取第一行（理论上标量聚合只返回一行）。
+func TestKpiProcessor_MultipleRows(t *testing.T) {
+	p := &KpiProcessor{}
+	rows := []map[string]any{
+		{"total_amount": 100.0},
+		{"total_amount": 200.0},
+	}
+	metrics := []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "total_amount"}}
+
+	resp, err := p.Process(rows, []string{}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	kpiResp := resp.(*KpiResponse)
+	if kpiResp.Value != 100.0 {
+		t.Errorf("expected Value=100 (first row), got %v", kpiResp.Value)
+	}
+}
+
+// TestKpiProcessor_NullAggregateValue 验证聚合结果为 NULL（如空表上的 SUM 返回 NULL）时
+// Value 落回 0 而不是报错。
+func TestKpiProcessor_NullAggregateValue(t *testing.T) {
+	p := &KpiProcessor{}
+	rows := []map[string]any{{"total_amount": nil}}
+	metrics := []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "total_amount"}}
+
+	resp, err := p.Process(rows, []string{}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	kpiResp := resp.(*KpiResponse)
+	if kpiResp.Value != 0 {
+		t.Errorf("expected Value=0 for NULL aggregate, got %v", kpiResp.Value)
+	}
+}
+
+// TestKpiProcessor_PgNumericValue 验证 SUM(numeric) 经 pgx 返回的 pgtype.Numeric
+// 被正确转换（与 Pie/Scatter 的数值转换同一共享路径 toFloat64）。
+func TestKpiProcessor_PgNumericValue(t *testing.T) {
+	p := &KpiProcessor{}
+	rows := []map[string]any{
+		{"total_amount": pgtype.Numeric{Int: big.NewInt(95380), Exp: 0, Valid: true}},
+	}
+	metrics := []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "total_amount"}}
+
+	resp, err := p.Process(rows, []string{}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	kpiResp := resp.(*KpiResponse)
+	if kpiResp.Value != 95380 {
+		t.Errorf("expected Value=95380, got %v", kpiResp.Value)
+	}
+}
+
+// TestKpiProcessor_NumericStringValue 验证 PG numeric 经 pgx 解码为字符串（如 "148730.0"）
+// 时被正确解析为数值。
+func TestKpiProcessor_NumericStringValue(t *testing.T) {
+	p := &KpiProcessor{}
+	rows := []map[string]any{{"total_amount": "148730.0"}}
+	metrics := []MetricConfig{{Field: "amount", Agg: AggSum, Alias: "total_amount"}}
+
+	resp, err := p.Process(rows, []string{}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	kpiResp := resp.(*KpiResponse)
+	if kpiResp.Value != 148730.0 {
+		t.Errorf("expected Value=148730, got %v", kpiResp.Value)
+	}
+}
+
+// TestKpiProcessor_NoMetrics 验证 metrics 为空时防御性返回空响应而不是 panic。
+func TestKpiProcessor_NoMetrics(t *testing.T) {
+	p := &KpiProcessor{}
+
+	resp, err := p.Process([]map[string]any{{"x": 1}}, []string{}, []MetricConfig{}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	kpiResp, ok := resp.(*KpiResponse)
+	if !ok {
+		t.Fatalf("expected *KpiResponse, got %T", resp)
+	}
+	if kpiResp.Value != 0 || kpiResp.Label != "" {
+		t.Errorf("expected empty KpiResponse, got %+v", kpiResp)
+	}
+}
+
+// TestGetProcessor_Kpi 验证 kpi（R-51）经显式 case 返回 *KpiProcessor，
+// 而不是 default 兜底的 *AxisProcessor（类型断言本身即可区分两者）。
+func TestGetProcessor_Kpi(t *testing.T) {
+	processor := GetProcessor(ChartTypeKpi)
+	if processor == nil {
+		t.Fatal("expected non-nil processor for kpi")
+	}
+	if _, ok := processor.(*KpiProcessor); !ok {
+		t.Fatalf("expected *KpiProcessor for kpi, got %T", processor)
+	}
+}

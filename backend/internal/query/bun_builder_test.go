@@ -567,6 +567,34 @@ func TestBuildQueryStringWithBun(t *testing.T) {
 	}
 }
 
+// TestBuildQueryStringWithBun_ZeroDimSingleMetricNoGroupBy 验证「零维度 + 单聚合指标」
+// （kpi 单值卡的退化形态，Task 1-5 B 部分实测确认点）自然生成标量聚合 SQL：
+// 无 GROUP BY 子句、无 LIMIT——SQL 语义保证无 GROUP BY 的聚合查询恰好返回一行，
+// 因此 executor/planner 层无需为 kpi 做特殊处理（不强制 LIMIT 1、不跳过任何步骤）。
+func TestBuildQueryStringWithBun_ZeroDimSingleMetricNoGroupBy(t *testing.T) {
+	qb := NewBunQueryBuilder()
+
+	ast := qb.Build(
+		"orders",
+		SourceTypeTable,
+		[]string{},
+		[]MetricConfig{{Field: "amount", Agg: AggSum, Alias: "total_amount"}},
+		[]FilterConfig{},
+		nil,
+		nil,
+	)
+
+	selectSQL, _, _ := BuildQueryStringWithBun(DialectPostgreSQL, ast)
+
+	expectedSelect := "SELECT SUM(amount) AS \"total_amount\" FROM orders"
+	if selectSQL != expectedSelect {
+		t.Errorf("Expected select:\n%s\nGot:\n%s", expectedSelect, selectSQL)
+	}
+	if strings.Contains(selectSQL, "GROUP BY") {
+		t.Errorf("zero-dimension query must not contain GROUP BY, got:\n%s", selectSQL)
+	}
+}
+
 func TestBuildQueryStringWithBun_PostgreSQLGranularityAndLimit(t *testing.T) {
 	ast := &QueryAST{
 		Source:     "orders",

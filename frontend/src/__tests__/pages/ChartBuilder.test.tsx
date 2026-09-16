@@ -475,6 +475,73 @@ describe('ChartBuilder', () => {
     errorSpy.mockRestore();
   });
 
+  it('renders KpiCard (AntD Statistic, not ECharts) for kpi charts and sends a v1 zero-dim request', async () => {
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Revenue KPI',
+          dataset_id: 1,
+          chart_type: 'kpi',
+          config: JSON.stringify({
+            version: 1,
+            chartType: 'kpi',
+            title: 'Revenue KPI',
+            query: {
+              dimensionGroups: [],
+              metricGroups: [{ id: 'metric-group-main', fields: ['revenue'] }],
+              filters: [],
+              limit: 1000,
+            },
+            fieldMeta: {
+              revenue: { unit: '元' },
+            },
+          }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      })
+    );
+    // kpi 的结构化响应是标量 {value, label}（后端 KpiProcessor 产物）
+    mockExecuteChartQuery.mockResolvedValue(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          data: { value: 95380, label: 'revenue' },
+          select_sql: 'SELECT SUM(revenue) AS "revenue" FROM sales',
+        },
+      })
+    );
+
+    const { container } = renderChartBuilder();
+
+    await waitFor(() => {
+      expect(screen.getByText('95,380')).toBeInTheDocument();
+    });
+
+    // KPI 卡走 AntD Statistic：标题为指标 label，unit（来自 store metricUnits[bindingId]）作 suffix
+    expect(container.querySelector('.ant-statistic-title')?.textContent).toBe('revenue');
+    expect(screen.getByText('元')).toBeInTheDocument();
+    // 不走 ECharts（ChartCanvas 在 kpi 分支之前已被绕过）
+    expect(screen.queryByTestId('echarts')).not.toBeInTheDocument();
+
+    // wire 请求：kpi 无维度槽位 → v1 平铺格式，dims 为空数组、单指标
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chart_type: 'kpi',
+          dims: [],
+          metrics: [expect.objectContaining({ field: 'revenue' })],
+        })
+      );
+    });
+  });
+
   it('limits pie query metrics to the visible chart definition groups', async () => {
     mockGetChartById.mockResolvedValueOnce(
       mockAxiosResponse({

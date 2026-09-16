@@ -51,6 +51,7 @@ import {
 } from '../components/ChartBuilder/chartDefinitions';
 import DraggableField, { FieldDragPreview } from '../components/ChartBuilder/DraggableField';
 import FilterBuilder from '../components/ChartBuilder/FilterBuilder';
+import KpiCard from '../components/ChartBuilder/KpiCard';
 import QueryConfigRow from '../components/ChartBuilder/QueryConfigRow';
 import TableChart from '../components/ChartBuilder/TableChart';
 import {
@@ -1368,6 +1369,27 @@ const ChartBuilder: React.FC = () => {
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
           onPageChange={chartBuilderConfig.chartType === 'table' ? handlePageChange : undefined}
           onSortChange={chartBuilderConfig.chartType === 'table' ? handleSortChange : undefined}
+        />
+      );
+    }
+    if (chartBuilderConfig.chartType === 'kpi') {
+      // kpi 的结构化响应是标量 {value, label}（ChartKpiResponse）：按形状判别安全提取，
+      // 未查询/形状不匹配（如 legacy 裸行数组）时回退 0/''。unit/format 按 kpi 唯一
+      // metric 槽位（metricGroups[0] 的首个 binding）的 bindingId 从 store 取——后端
+      // KpiResponse.Unit/Format 恒为空（wire 协议限制，见 KpiProcessor 注释），
+      // 展示信息只来自前端配置侧。kpi 不走 ECharts，在 ChartCanvas 之前 return。
+      const kpiData =
+        !Array.isArray(chartData) && 'value' in chartData && 'label' in chartData
+          ? chartData
+          : null;
+      const kpiBindingId = queryConfig.metricGroups[0]?.bindings[0]?.bindingId;
+      return (
+        <KpiCard
+          value={kpiData?.value ?? 0}
+          label={kpiData?.label ?? ''}
+          unit={kpiBindingId ? metricUnits[kpiBindingId] : undefined}
+          format={kpiBindingId ? metricFormats[kpiBindingId] : undefined}
+          loading={chartDataLoading}
         />
       );
     }
