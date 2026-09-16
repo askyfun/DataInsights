@@ -172,8 +172,12 @@ func (c *starRocksConnection) Execute(ctx context.Context, sql string, args ...a
 }
 
 func (c *starRocksConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
-	// TODO(Task 3-0): 未经真实实例探针验证，当前返回保守默认值（不支持），
-	// StarRocks 不继承 MySQL 的探针结果，待有可用实例时独立实测。
+	// TODO(Task 3-0): 未经真实实例探针验证，当前返回保守默认值（不支持）。
+	// StarRocks 不继承 MySQL 的探针结果，待有可用实例时独立实测：
+	//   - GROUPING SETS：SELECT GROUPING(c) FROM (VALUES (1)) AS t(c) GROUP BY GROUPING SETS ((c), ())
+	//     （按 StarRocks 自身语法调整；不照抄 MySQL 结论）
+	//   - 窗口函数：SELECT PERCENT_RANK() OVER (ORDER BY 1) FROM (SELECT 1) t
+	//   - 百分位：StarRocks 有 percentile_cont 系函数，语义需实测验证后再声明策略。
 	return &DialectCapabilities{
 		SupportsGroupingSets:    false,
 		SupportsPercentileCont:  false,

@@ -3,8 +3,10 @@ package datasource
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -41,6 +43,10 @@ func (d *postgresqlDriver) TestConnection(ctx context.Context, config Connection
 
 type postgresqlConnection struct {
 	pool *pgxpool.Pool
+	// capsOnce/caps：方言能力懒探针缓存——每个连接只探测一次（executor 每次 pivot
+	// 请求都调 Capabilities()，不能每次重探）。
+	capsOnce sync.Once
+	caps     *DialectCapabilities
 }
 
 func (c *postgresqlConnection) Close() error {
@@ -185,11 +191,49 @@ func (c *postgresqlConnection) Execute(ctx context.Context, sql string, args ...
 	}, nil
 }
 
+// Capabilities 懒探针 + 缓存：首次调用时对真实 PG 跑轻量探针 SQL，结果缓存
+// （sync.Once），连接生命周期内后续调用直接返回缓存。
 func (c *postgresqlConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
-	return &DialectCapabilities{
-		SupportsGroupingSets:    true,
-		SupportsPercentileCont:  true,
-		SupportsWindowFunctions: true,
-		PercentileStrategy:      "percentile_cont",
-	}, nil
+	c.capsOnce.Do(func() {
+		c.caps = c.probeCapabilities(ctx)
+	})
+	return c.caps, nil
+}
+
+// probeCapabilities 对每个能力跑一条轻量只读探针 SQL（内联 (VALUES(1))/(SELECT 1)
+// 数据，零 DDL/写入），复用 c.Execute。探针成功 → 对应能力 true；SQL 报错 →
+// 保守降级为 false 并记日志（不静默吞错）。预期 PG 12+ 三条全成功。
+func (c *postgresqlConnection) probeCapabilities(ctx context.Context) *DialectCapabilities {
+	// nil-pool 兜底：生产路径都经 driver.Connect 构造，不会 nil；仅为杜绝
+	// zero-value 误用 panic，返回保守默认值。
+	if c.pool == nil {
+		slog.Warn("postgresql capabilities probe: nil pool, returning conservative defaults")
+		return &DialectCapabilities{PercentileStrategy: "unsupported"}
+	}
+
+	caps := &DialectCapabilities{PercentileStrategy: "unsupported"}
+
+	// GROUPING SETS（PG 9.5+）
+	if _, err := c.Execute(ctx, `SELECT GROUPING(c) FROM (VALUES (1)) AS t(c) GROUP BY GROUPING SETS ((c), ())`); err != nil {
+		slog.Warn("postgresql capabilities probe: GROUPING SETS unavailable", "error", err)
+	} else {
+		caps.SupportsGroupingSets = true
+	}
+
+	// percentile_cont（有序集聚合）
+	if _, err := c.Execute(ctx, `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY 1)`); err != nil {
+		slog.Warn("postgresql capabilities probe: percentile_cont unavailable", "error", err)
+	} else {
+		caps.SupportsPercentileCont = true
+		caps.PercentileStrategy = "percentile_cont"
+	}
+
+	// 窗口函数
+	if _, err := c.Execute(ctx, `SELECT PERCENT_RANK() OVER (ORDER BY 1) FROM (SELECT 1) t`); err != nil {
+		slog.Warn("postgresql capabilities probe: window functions unavailable", "error", err)
+	} else {
+		caps.SupportsWindowFunctions = true
+	}
+
+	return caps
 }

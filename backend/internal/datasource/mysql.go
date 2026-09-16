@@ -171,7 +171,10 @@ func (c *mysqlConnection) Execute(ctx context.Context, sql string, args ...any) 
 
 func (c *mysqlConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
 	// TODO(Task 3-0): 未经真实实例探针验证，当前返回保守默认值（不支持），
-	// 待有可用 MySQL 实例时按 plan §4.1 的探针 SQL 实测后翻转。
+	// 待有可用 MySQL 实例时按下列探针 SQL 实测后翻转：
+	//   - 窗口函数（MySQL 8+ 支持）：SELECT PERCENT_RANK() OVER (ORDER BY 1) FROM (SELECT 1) t
+	//   - GROUPING SETS：MySQL 无 GROUPING SETS（仅 WITH ROLLUP），SupportsGroupingSets
+	//     恒 false 是文档事实，无需探针。
 	return &DialectCapabilities{
 		SupportsGroupingSets:    false,
 		SupportsPercentileCont:  false,

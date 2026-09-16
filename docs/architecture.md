@@ -116,6 +116,19 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 - `QueryAST` 第一阶段已支持结构化维度/指标元信息、`limit`，以及日期维度 `day` 粒度的 PostgreSQL / MySQL / ClickHouse 方言 SQL 生成。
 - 分桶、复杂过滤组、更多时间粒度仍属于后续阶段。
 
+## 方言能力矩阵（Task 3-0 探针）
+
+`datasource.Connection.Capabilities(ctx)` 返回 `DialectCapabilities`（GROUPING SETS / 百分位 / 窗口函数支持 + 百分位策略），上层（如 `query.Executor` 的 pivot 路径）据此选择 SQL 路径；能力不足时显式报错，不静默降级。探测为懒加载：PostgreSQL 首次调用时对真实库跑轻量只读探针 SQL 并在连接生命周期内缓存（`sync.Once`）；其余方言本机无实例，返回诚实保守的静态值。
+
+| 方言 | GROUPING SETS | 百分位策略 | 窗口函数 | 验证状态 |
+|------|--------------|-----------|---------|---------|
+| PostgreSQL | ✓ | `percentile_cont` | ✓ | **实测验证**（dev PG 18.6，真实探针 + `capabilities_integration_test.go`） |
+| ClickHouse | ✓（文档支持，CH 21.x+） | `unsupported`（保守） | ✓（文档支持） | grouping-sets/window 文档支持但**本会话无 CH 实例未运行验证**（失败模式为显式 SQL 报错）；百分位保守 unsupported（silent-wrong-data 风险），待实例探针验证 `quantilesExactInclusive` 后翻转 |
+| MySQL | ✗（无 GROUPING SETS，仅 WITH ROLLUP） | `unsupported`（保守） | 待探针（8+ 支持） | **保守默认，未实测（无实例）**；探针 SQL 见驱动 TODO |
+| StarRocks | ✗（保守，独立于 MySQL） | `unsupported`（保守） | 待探针 | **保守默认，未实测（无实例）**；独立探针不继承 MySQL 结果 |
+
+待有 MySQL/ClickHouse/StarRocks 真实实例时，按各驱动 `Capabilities()` TODO 注释中的探针 SQL 实测后翻转保守默认。
+
 ## 契约与路由（Batch 2）
 
 - **契约单一事实源**：`api/openapi.yaml` 定义全部端点请求/响应 + `Envelope`（`code/msg/trace/data`）+ `ChartSpec`/`QuerySpec`；`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。当前生成物作为契约与校验基线；运行时类型尚未全量切换到生成物（列入 Batch 3）。

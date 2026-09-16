@@ -155,11 +155,21 @@ func (c *clickhouseConnection) Execute(ctx context.Context, sql string, args ...
 	}, nil
 }
 
+// Capabilities 返回 ClickHouse 的静态能力值（本会话无 CH 实例，未运行探针）。
+// 按失败模式非对称处理（Task 3-0，Q3 ruling）：
+//   - GROUPING SETS / 窗口函数保持 true：CH 21.x+ 支持是文档化事实，若与实际不符，
+//     失败模式是显式 SQL 报错（loud），不会静默返回错误数据。注意：这两项是
+//     "文档支持、未运行验证"，有实例后应补探针实测。
+//   - percentile_cont 保持 false：CH 没有 percentile_cont 函数，是事实而非保守。
+//   - PercentileStrategy 保守 "unsupported"：quantilesExactInclusive 的插值语义若与
+//     预期 Type-7 不符会静默返回错误的 Q1/Q3 数值（silent wrong data），故未实测前
+//     不声明。TODO(Task 3-x)：有真实 CH 实例后用探针 SQL 实测再翻转：
+//     SELECT quantilesExactInclusive(0.25, 0.5, 0.75)(number) FROM (SELECT 1 AS number) t
 func (c *clickhouseConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
 	return &DialectCapabilities{
 		SupportsGroupingSets:    true,
 		SupportsPercentileCont:  false,
 		SupportsWindowFunctions: true,
-		PercentileStrategy:      "quantilesExactInclusive",
+		PercentileStrategy:      "unsupported",
 	}, nil
 }
