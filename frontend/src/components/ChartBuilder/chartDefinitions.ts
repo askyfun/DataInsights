@@ -47,8 +47,8 @@ export interface ChartDefinition {
   resultShape: ResultShape;
   /** 图表类型图标。存组件引用（非 JSX 元素），由调用方实例化。 */
   icon: ComponentType;
-  /** 该图型支持的样式子集，供 ConfigPanel 条件渲染（未填 = 暂无专属样式）。 */
-  styleSchema?: Partial<ChartStyleConfig>;
+  /** 该图型支持的样式开关集合，供 ConfigPanel 条件渲染（未填 = 暂无专属样式）。 */
+  styleKeys?: Array<keyof ChartStyleConfig>;
   fieldGroups: ChartFieldGroupDefinition[];
 }
 
