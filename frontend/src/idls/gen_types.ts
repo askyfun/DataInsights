@@ -882,7 +882,7 @@ export interface components {
         /** @description 指标聚合配置（entity.MetricConfig，chart.go:26-30）。 */
         ChartMetricConfig: {
             field: string;
-            /** @description 聚合函数：sum / avg / count / max / min；未知值后端按 SUM 回退 （query.AggregationType.GetAggFunc default）。 */
+            /** @description 聚合函数：sum / avg / count / max / min / count_distinct；未知值后端按 SUM 回退 （query.AggregationType.GetAggFunc default）。 */
             agg: string;
             /** @description omitempty：结果列别名，缺省时后端用 field 原名（ResolveAlias）。 */
             alias?: string;

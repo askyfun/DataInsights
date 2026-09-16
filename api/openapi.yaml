@@ -1601,7 +1601,7 @@ components:
         agg:
           type: string
           description: >-
-            聚合函数：sum / avg / count / max / min；未知值后端按 SUM 回退
+            聚合函数：sum / avg / count / max / min / count_distinct；未知值后端按 SUM 回退
             （query.AggregationType.GetAggFunc default）。
         alias:
           type: string

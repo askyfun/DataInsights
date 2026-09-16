@@ -32,6 +32,7 @@ const AGGREGATION_OPTIONS = [
   { label: '求和', value: 'sum' },
   { label: '平均', value: 'avg' },
   { label: '计数', value: 'count' },
+  { label: '去重计数', value: 'count_distinct' },
   { label: '最大值', value: 'max' },
   { label: '最小值', value: 'min' },
   { label: '无聚合', value: 'none' },

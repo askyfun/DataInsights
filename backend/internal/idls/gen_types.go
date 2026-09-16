@@ -143,7 +143,7 @@ type ChartListResponse struct {
 
 // ChartMetricConfig 指标聚合配置（entity.MetricConfig，chart.go:26-30）。
 type ChartMetricConfig struct {
-	// Agg 聚合函数：sum / avg / count / max / min；未知值后端按 SUM 回退 （query.AggregationType.GetAggFunc default）。
+	// Agg 聚合函数：sum / avg / count / max / min / count_distinct；未知值后端按 SUM 回退 （query.AggregationType.GetAggFunc default）。
 	Agg string `json:"agg"`
 
 	// Alias omitempty：结果列别名，缺省时后端用 field 原名（ResolveAlias）。

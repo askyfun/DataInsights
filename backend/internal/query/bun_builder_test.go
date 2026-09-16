@@ -443,6 +443,70 @@ func TestBunQueryBuilder_MixedCaseMetricAliasIsDialectQuoted(t *testing.T) {
 	}
 }
 
+// TestBunQueryBuilder_CountDistinct 验证 AggCountDistinct 生成 COUNT(DISTINCT field)：
+// buildSelectParts 走专用分支（不套用通用 "%s(%s)" 模板，避免括号不配对的畸形 SQL），
+// 字段名过 safeIdentifier、别名按方言加引号，与 sum/avg 等既有聚合的输出形态一致。
+// 字段名用 user_id（不以 COUNT/SUM/AVG/MIN/MAX 开头），确保 isAggregateFunction 判定为
+// 非聚合列（IsAgg=false），命中 AggCountDistinct 分支。
+func TestBunQueryBuilder_CountDistinct(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  DialectType
+		expected string
+	}{
+		{
+			name:     "postgresql double quotes",
+			dialect:  DialectPostgreSQL,
+			expected: `SELECT region, COUNT(DISTINCT user_id) AS "unique_users" FROM sales GROUP BY region`,
+		},
+		{
+			name:     "mysql backticks",
+			dialect:  DialectMySQL,
+			expected: "SELECT region, COUNT(DISTINCT user_id) AS `unique_users` FROM sales GROUP BY region",
+		},
+		{
+			name:     "clickhouse backticks",
+			dialect:  DialectClickHouse,
+			expected: "SELECT region, COUNT(DISTINCT user_id) AS `unique_users` FROM sales GROUP BY region",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			qb := NewBunQueryBuilder()
+			qb.SetDialect(tt.dialect)
+
+			ast := qb.Build(
+				"sales",
+				SourceTypeTable,
+				[]string{"region"},
+				[]MetricConfig{{Field: "user_id", Agg: AggCountDistinct, Alias: "unique_users"}},
+				[]FilterConfig{},
+				nil,
+				nil,
+			)
+
+			sql, _ := qb.BuildSelectQuery(ast)
+			if sql != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, sql)
+			}
+		})
+	}
+}
+
+// TestGetAggFunc_CountDistinctNotSilentSum 锁定 AggCountDistinct 不被静默降级为 SUM：
+// GetAggFunc 返回防御性的 "COUNT(DISTINCT"（无右括号）。若将来有人误删该 case 使其
+// 回落到 default，本断言会立即失败，避免 count_distinct 被悄悄当成 SUM 计算。
+func TestGetAggFunc_CountDistinctNotSilentSum(t *testing.T) {
+	got := AggCountDistinct.GetAggFunc()
+	if got == "SUM" {
+		t.Errorf("AggCountDistinct.GetAggFunc() = %q, must not silently degrade to SUM", got)
+	}
+	if got != "COUNT(DISTINCT" {
+		t.Errorf("AggCountDistinct.GetAggFunc() = %q, want %q (defensive, no closing paren)", got, "COUNT(DISTINCT")
+	}
+}
+
 // TestBunQueryBuilder_MixedCaseAliasQuotedForPreAggregatedMetric 验证列映射本身已是
 // 聚合表达式（IsAgg 分支，直接 "expr AS alias"）时，别名位置同样按方言加引号。
 func TestBunQueryBuilder_MixedCaseAliasQuotedForPreAggregatedMetric(t *testing.T) {

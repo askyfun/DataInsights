@@ -30,8 +30,8 @@ const (
 	AggMax   AggregationType = "max"
 	AggMin   AggregationType = "min"
 
-	// AggCountDistinct 的 SQL 生成（COUNT(DISTINCT ...)）在 Task 1-6 实现，
-	// 当前 GetAggFunc() 尚未处理该值，会走 default 分支，调用方在 Task 1-6 之前不应依赖它。
+	// AggCountDistinct 生成 COUNT(DISTINCT field)：buildSelectParts 对该值走专用分支
+	// （不套用通用 "%s(%s)" 模板），GetAggFunc() 返回防御性的 "COUNT(DISTINCT"（见其注释）。
 	AggCountDistinct AggregationType = "count_distinct"
 )
 
@@ -177,6 +177,13 @@ func (a AggregationType) GetAggFunc() string {
 		return "MAX"
 	case AggMin:
 		return "MIN"
+	case AggCountDistinct:
+		// COUNT(DISTINCT field) 不是简单的 "FUNC(field)" 形态，不能套用调用方的
+		// "%s(%s)" 模板（会拼出括号不配对的畸形 SQL）。buildSelectParts 已对该值走
+		// 专用分支，正常不会到达此处；返回故意不带右括号的 "COUNT(DISTINCT" 作为防御性
+		// 信号——若将来有新调用点误用通用模板，会立刻产出明显畸形 SQL 而在测试中暴露，
+		// 而不是静默降级成 SUM。
+		return "COUNT(DISTINCT"
 	default:
 		return "SUM"
 	}

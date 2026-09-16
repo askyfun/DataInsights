@@ -231,6 +231,10 @@ func (qb *BunQueryBuilder) buildSelectParts(ast *QueryAST) []string {
 		var expr string
 		if metric.IsAgg {
 			expr = fmt.Sprintf("%s AS %s", safeExpr(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
+		} else if metric.Agg == AggCountDistinct {
+			// COUNT(DISTINCT field) 无法套用通用 "%s(%s)" 模板（会拼出括号不配对的
+			// "COUNT(DISTINCT(field)" 畸形 SQL），单独生成。
+			expr = fmt.Sprintf("COUNT(DISTINCT %s) AS %s", safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 		} else {
 			aggFunc := metric.Agg.GetAggFunc()
 			expr = fmt.Sprintf("%s(%s) AS %s", aggFunc, safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
