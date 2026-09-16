@@ -39,6 +39,22 @@ const ensureFieldGroupAtIndex = (
   return nextGroups;
 };
 
+/**
+ * 返回移除指定键后的 Record 浅拷贝（键不存在时原样返回）。
+ * 调用场景：removeDimensionField/removeMetricField 清理按 bindingId 存的五个元数据
+ * Record。nextBindingId 取 max+1，删除最大号后新增列会复用该号；不清理会让新列
+ * 静默继承被删列的 aggregation/alias/unit/format/label（跨列元数据污染）。
+ */
+const omitBindingMeta = (
+  record: Record<string, string>,
+  bindingId: string
+): Record<string, string> => {
+  if (!(bindingId in record)) return record;
+  const next = { ...record };
+  delete next[bindingId];
+  return next;
+};
+
 // Field types for chart builder
 export type FieldType = 'dimension' | 'metric';
 
@@ -694,6 +710,12 @@ export const useStore = create<AppState>((set) => ({
             : g
         ),
       },
+      // 同步清理该 bindingId 的元数据，防止 nextBindingId(max+1) 复用号导致跨列污染
+      dimensionLabels: omitBindingMeta(state.dimensionLabels, bindingId),
+      metricAggregations: omitBindingMeta(state.metricAggregations, bindingId),
+      metricAliases: omitBindingMeta(state.metricAliases, bindingId),
+      metricUnits: omitBindingMeta(state.metricUnits, bindingId),
+      metricFormats: omitBindingMeta(state.metricFormats, bindingId),
     }));
   },
 
@@ -759,6 +781,12 @@ export const useStore = create<AppState>((set) => ({
             : g
         ),
       },
+      // 同步清理该 bindingId 的元数据，防止 nextBindingId(max+1) 复用号导致跨列污染
+      dimensionLabels: omitBindingMeta(state.dimensionLabels, bindingId),
+      metricAggregations: omitBindingMeta(state.metricAggregations, bindingId),
+      metricAliases: omitBindingMeta(state.metricAliases, bindingId),
+      metricUnits: omitBindingMeta(state.metricUnits, bindingId),
+      metricFormats: omitBindingMeta(state.metricFormats, bindingId),
     }));
   },
 
