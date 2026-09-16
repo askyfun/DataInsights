@@ -84,21 +84,24 @@ func pivotDimOutputKey(dim DimensionExprAST) string {
 	return dim.Field
 }
 
-// PivotProcessorV2 透视表 v2 处理器（R-53）：消费 GROUPING SETS 查询的结果行，
-// 组装交叉表形状 PivotResponseV2。核心不变量：所有聚合值（含小计/合计）都直接取
-// 数据库在每个分组层级上重算的结果（AVG/COUNT(DISTINCT) 的小计正确性由此保证），
-// Go 端绝不对子分组结果做二次聚合。
-// 仅在 executor 判定 Capabilities().SupportsGroupingSets == true 且
-// resolvePivotSlots 成功后被调用；否则走旧的 PivotProcessor 行透传。
+// PivotProcessorV2 透视表 v2 处理器（R-53）：消费 GROUPING SETS 或 UNION ALL 查询的结果行
+// （两种 builder 产出行形状相同），组装交叉表形状 PivotResponseV2。核心不变量：所有聚合值
+// （含小计/合计）都直接取数据库在每个分组层级上重算的结果（AVG/COUNT(DISTINCT) 的小计正确性
+// 由此保证），Go 端绝不对子分组结果做二次聚合。
+// 只要 resolvePivotSlots 成功即被调用；caps.SupportsGroupingSets 只决定 executor 用哪个 builder
+// （true→GROUPING SETS 单条分组查询，false→UNION ALL 三分支回退），两者产出相同的行形状
+// （同款 __pivot_row_grp_i/__pivot_col_grp_j 标记列 + 指标别名）供本 processor 消费。
+// resolvePivotSlots 失败（v1 平铺请求、无 columns 槽位）才走旧的 PivotProcessor 行透传。
 type PivotProcessorV2 struct{}
 
-// Process 处理 GROUPING SETS 结果行。每行按 GROUPING() 标记列分类：
+// Process 处理 GROUPING SETS 或 UNION ALL 结果行（行形状相同）。每行按 GROUPING() 标记列分类：
 //   - 所有标记为 0：明细行 → 按 RowKey 合并进 Cells（同一 RowKey 的多条明细
 //     交叉进同一个 PivotRow 的 Values，键 "<colHeader>|<metricAlias>"）；
 //   - 列维度标记全 1、行维度标记全 0：行小计 → 追加一个 IsSubtotal=true 的 PivotRow，
 //     RowKey 仍是具体行维度值，Values 键用哨兵 "__subtotal__|<metricAlias>"；
 //   - 全部标记为 1：合计 → GrandTotal（RowKey 为空数组，IsSubtotal=true，Values 同用哨兵键）；
-//   - 其他部分汇总组合：本处理器的 SQL 生成不会产出（GROUPING SETS 只有三个组合），
+//   - 其他部分汇总组合：本处理器的 SQL 生成不会产出（两种 builder 都只产出
+//     (rows+cols)/(rows)/() 三个组合，不会出现部分汇总形状），
 //     出现即视为契约破坏，记录日志并返回错误（禁止静默吞掉）。
 func (p *PivotProcessorV2) Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error) {
 	rowDims, colDims, ok := resolvePivotSlots(dims, ast)
@@ -184,8 +187,8 @@ func (p *PivotProcessorV2) Process(rows []map[string]any, dims []string, metrics
 				resp.Cells[idx].Values[PivotValueKey(colHeader, alias)] = metricValue(row, alias)
 			}
 		default:
-			// 部分汇总（如行维度被汇总但列维度保留）：BuildPivotGroupingSetsQuery 生成的
-			// GROUPING SETS 只有 (rows+cols)/(rows)/() 三个组合，不会出现该形状。
+			// 部分汇总（如行维度被汇总但列维度保留）：BuildPivotGroupingSetsQuery 与
+			// BuildPivotUnionAllQuery 都只产出 (rows+cols)/(rows)/() 三个组合，不会出现该形状。
 			err := fmt.Errorf("unexpected partial grouping row (rowFlags=%v, colFlags=%v)", rowFlags, colFlags)
 			slog.Warn("pivot v2: dropping malformed grouping-sets row", "error", err)
 			return nil, err
