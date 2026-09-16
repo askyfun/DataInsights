@@ -54,15 +54,15 @@ func (o ListOptions) pageSize() int {
 // ListItem is a metadata-only projection of a query record. It deliberately
 // omits spec_json so that listing never leaks filter value details in bulk.
 type ListItem struct {
-	QueryID        string    `json:"query_id"`
-	DatasetID      int       `json:"dataset_id"`
-	ChartID        *int      `json:"chart_id,omitempty"`
-	SourceType     string    `json:"source_type"`
-	RowCount       *int      `json:"row_count,omitempty"`
-	DurationMs     *int      `json:"duration_ms,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	QueryID        string     `json:"query_id"`
+	DatasetID      int        `json:"dataset_id"`
+	ChartID        *int       `json:"chart_id,omitempty"`
+	SourceType     string     `json:"source_type"`
+	RowCount       *int       `json:"row_count,omitempty"`
+	DurationMs     *int       `json:"duration_ms,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 	LastAccessedAt *time.Time `json:"last_accessed_at,omitempty"`
-	HitCount       int       `json:"hit_count"`
+	HitCount       int        `json:"hit_count"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }
 

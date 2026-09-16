@@ -10,14 +10,20 @@ ALTER TABLE bi_dataset_lineage ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NUL
 ALTER TABLE bi_chart            ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
 ALTER TABLE bi_share           ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
 
--- Partial index over only the live rows (deleted_at IS NULL), so the ubiquitous
+-- Partial indexes over only the live rows (deleted_at IS NULL), so the ubiquitous
 -- "list / detail" filters (WHERE deleted_at IS NULL) hit an index instead of a
 -- full scan, and deleted rows never bloat the index.
-CREATE INDEX IF NOT EXISTS idx_datasource_not_deleted ON bi_datasource (deleted_at) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_dataset_not_deleted    ON bi_dataset (deleted_at) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_dataset_lineage_not_deleted ON bi_dataset_lineage (deleted_at) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_chart_not_deleted      ON bi_chart (deleted_at) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_share_not_deleted      ON bi_share (deleted_at) WHERE deleted_at IS NULL;
+--
+-- NOTE: the indexed column is deliberately NOT deleted_at. On a partial index
+-- whose predicate is "deleted_at IS NULL", every indexed row has deleted_at =
+-- NULL, so an index keyed on deleted_at would be a constant — it could narrow the
+-- scan set but could not support ORDER BY id / WHERE dataset_id = ? pushdown.
+-- Key the indexes on the columns the queries actually order/filter by instead.
+CREATE INDEX IF NOT EXISTS idx_datasource_not_deleted ON bi_datasource (id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_dataset_not_deleted    ON bi_dataset (datasource_id, id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_dataset_lineage_not_deleted ON bi_dataset_lineage (upstream_dataset_id, downstream_dataset_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_chart_not_deleted      ON bi_chart (dataset_id, id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_share_not_deleted      ON bi_share (chart_id) WHERE deleted_at IS NULL;
 
 -- +goose Down
 DROP INDEX IF EXISTS idx_share_not_deleted;

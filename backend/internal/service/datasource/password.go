@@ -37,7 +37,7 @@ func ResolvePassword(ctx context.Context, db bun.IDB, ds *model.Datasource, key 
 	if err != nil {
 		return "", fmt.Errorf("upgrade legacy datasource password: %w", err)
 	}
-	if _, err := db.NewUpdate().Model(&model.Datasource{ID: ds.ID, Password: ct}).Column("password").WherePK().Exec(ctx); err != nil {
+	if _, err := db.NewUpdate().Model(&model.Datasource{ID: ds.ID, Password: ct}).Column("password").WherePK().Where("deleted_at IS NULL").Exec(ctx); err != nil {
 		return "", fmt.Errorf("upgrade legacy datasource password: %w", err)
 	}
 	slog.Info("upgraded legacy plaintext datasource password", "datasource_id", ds.ID)

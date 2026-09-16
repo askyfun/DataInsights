@@ -64,10 +64,10 @@ type Service struct {
 	ch      chan *model.QueryRecord
 	workers int
 
-	mu      sync.Mutex // guards ch sends vs. Close
-	closing bool
-	pending atomic.Int64
-	wg      sync.WaitGroup
+	mu        sync.Mutex // guards ch sends vs. Close
+	closing   bool
+	pending   atomic.Int64
+	wg        sync.WaitGroup
 	closeOnce sync.Once
 }
 
@@ -89,7 +89,7 @@ func WithTTL(d time.Duration) Option { return func(o *options) { o.ttl = d } }
 func WithListWindow(d time.Duration) Option {
 	return func(o *options) { o.listWindow = d }
 }
-func WithMaxSpecBytes(n int) Option { return func(o *options) { o.maxSpecBytes = n } }
+func WithMaxSpecBytes(n int) Option        { return func(o *options) { o.maxSpecBytes = n } }
 func WithClock(fn func() time.Time) Option { return func(o *options) { o.clock = fn } }
 
 func applyOptions(opts []Option) *options {
@@ -167,21 +167,21 @@ func (s *Service) Record(_ context.Context, in RecordInput) error {
 
 	now := s.clock()
 	rec := &model.QueryRecord{
-		QueryID:    uuid.NewString(),
-		SpecJSON:   string(canon),
-		SpecHash:   hashSpec(canon),
-		DatasetID:  in.DatasetID,
-		SourceType: in.SourceType,
-		IP:         in.IP,
-		CreatedAt:  now,
-		HitCount:   1, // this execution counts as the first hit
+		QueryID:        uuid.NewString(),
+		SpecJSON:       string(canon),
+		SpecHash:       hashSpec(canon),
+		DatasetID:      in.DatasetID,
+		SourceType:     in.SourceType,
+		IP:             in.IP,
+		CreatedAt:      now,
+		HitCount:       1, // this execution counts as the first hit
 		LastAccessedAt: sql.NullTime{Time: now, Valid: true},
-		ExpiresAt:  sql.NullTime{Time: now.Add(s.ttl), Valid: true},
-		ChartID:    nullInt32(in.ChartID),
-		RowCount:   nullInt32(in.RowCount),
-		DurationMs: nullInt32(in.DurationMs),
-		OwnerID:    nullInt32(in.OwnerID),
-		TenantID:   nullInt32(in.TenantID),
+		ExpiresAt:      sql.NullTime{Time: now.Add(s.ttl), Valid: true},
+		ChartID:        nullInt32(in.ChartID),
+		RowCount:       nullInt32(in.RowCount),
+		DurationMs:     nullInt32(in.DurationMs),
+		OwnerID:        nullInt32(in.OwnerID),
+		TenantID:       nullInt32(in.TenantID),
 	}
 	return s.enqueue(rec)
 }

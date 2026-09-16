@@ -228,13 +228,13 @@ func TestExpiredGetByIDStillWorks(t *testing.T) {
 
 	past := time.Now().Add(-time.Hour)
 	expired := &model.QueryRecord{
-		QueryID:    "expired-id",
-		SpecJSON:   `{"v":1,"dimensions":[{"field":"x"}],"metrics":[]}`,
-		SpecHash:   "expired-hash",
-		DatasetID:  3,
-		CreatedAt:  past,
-		HitCount:   5,
-		ExpiresAt:  sql.NullTime{Time: past.Add(-time.Minute), Valid: true}, // 已过期
+		QueryID:   "expired-id",
+		SpecJSON:  `{"v":1,"dimensions":[{"field":"x"}],"metrics":[]}`,
+		SpecHash:  "expired-hash",
+		DatasetID: 3,
+		CreatedAt: past,
+		HitCount:  5,
+		ExpiresAt: sql.NullTime{Time: past.Add(-time.Minute), Valid: true}, // 已过期
 	}
 	if err := mem.Upsert(ctx, expired); err != nil {
 		t.Fatal(err)
