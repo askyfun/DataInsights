@@ -146,6 +146,27 @@ type PivotResponse struct {
 	Data    []map[string]any `json:"data"`
 }
 
+// PivotResponseV2 透视表 v2 响应（R-53，plan §3.2）：交叉表头 + 含小计的数据行 + 合计行。
+// 字段与 api/openapi.yaml 的 ChartPivotResponseV2 schema 逐一对应。
+// 仅在数据源 Capabilities().SupportsGroupingSets == true 时由 PivotProcessorV2 返回；
+// 否则仍走旧的 PivotResponse 平铺形状（Task 2-2 的 UNION ALL 回退路径替换该兜底）。
+type PivotResponseV2 struct {
+	RowHeaders  []string   `json:"row_headers"`  // 行维度列名
+	ColHeaders  []string   `json:"col_headers"`  // 列维度值（交叉后的列，多列维度时用 " - " 连接）
+	MetricNames []string   `json:"metric_names"` // 指标别名
+	Cells       []PivotRow `json:"cells"`        // 数据行（明细行按 RowKey 交叉合并，含小计行）
+	GrandTotal  *PivotRow  `json:"grand_total"`  // 合计行；null 表示未请求/无数据
+}
+
+// PivotRow 透视表 v2 数据行，与 openapi ChartPivotRow schema 对应。
+// Values 是扁平 map：键为 "<colHeader>|<metricAlias>"（明细行）或
+// "<PivotSubtotalColKey>|<metricAlias>"（小计/合计行，见 processor_pivot.go）。
+type PivotRow struct {
+	RowKey     []string           `json:"row_key"`
+	IsSubtotal bool               `json:"is_subtotal"`
+	Values     map[string]float64 `json:"values"`
+}
+
 // KpiResponse KPI 单值卡响应（无维度，标量聚合结果）。
 // 字段与 api/openapi.yaml 的 ChartKpiResponse schema 逐一对应：
 // value/label 必填，unit/format 为 omitempty（缺省时不出现在 JSON）。

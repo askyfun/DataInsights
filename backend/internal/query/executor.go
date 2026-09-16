@@ -70,6 +70,44 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 	if err := ast.ValidateGranularity(dialect); err != nil {
 		return ExecutorResult{}, err
 	}
+
+	// pivot v2 分支（R-53）：数据源支持 GROUPING SETS 且请求携带显式 rows/columns
+	// 槽位（v2 协议）时，走交叉表查询 + PivotProcessorV2；否则（MySQL/StarRocks 的
+	// SupportsGroupingSets=false stub、v1 平铺请求、槽位不可解析）落到下方既有通用
+	// 路径（旧 PivotProcessor 行透传），行为与改动前完全一致——UNION ALL 回退是
+	// Task 2-2 的范围，本分支暂不实现。GetProcessor 是按 chartType 静态选择的，
+	// 感知不到运行时 Capabilities，因此 v1/v2 处理器选择必须发生在这里。
+	if req.ChartType == ChartTypePivot {
+		caps, err := e.conn.Capabilities(ctx)
+		if err != nil {
+			slog.Error("pivot: capabilities probe failed", "error", err)
+			return ExecutorResult{}, fmt.Errorf("capabilities probe failed: %v", err)
+		}
+		if caps != nil && caps.SupportsGroupingSets {
+			if rowDims, colDims, ok := resolvePivotSlots(req.Dims, ast); ok {
+				pivotSQL, pivotArgs := BuildPivotGroupingSetsQuery(dialect, ast, rowDims, colDims)
+				slog.Debug("executing pivot grouping sets query", "sql", pivotSQL, "args", pivotArgs)
+
+				result, err := e.conn.Execute(ctx, pivotSQL, pivotArgs...)
+				if err != nil {
+					return ExecutorResult{}, fmt.Errorf("query failed: %v", err)
+				}
+
+				data, err := (&PivotProcessorV2{}).Process(result.Rows, req.Dims, req.Metrics, ast)
+				if err != nil {
+					return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
+				}
+
+				return ExecutorResult{
+					Data: data,
+					GeneratedSQL: GeneratedSQL{
+						Select: pivotSQL,
+					},
+				}, nil
+			}
+		}
+	}
+
 	sql, countSQL, args := BuildQueryStringWithBun(dialect, ast)
 	slog.Debug("generated SQL", "select", sql, "count", countSQL, "args", args)
 

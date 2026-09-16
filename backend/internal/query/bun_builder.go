@@ -228,18 +228,7 @@ func (qb *BunQueryBuilder) buildSelectParts(ast *QueryAST) []string {
 
 	// 指标
 	for _, metric := range ast.Metrics {
-		var expr string
-		if metric.IsAgg {
-			expr = fmt.Sprintf("%s AS %s", safeExpr(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
-		} else if metric.Agg == AggCountDistinct {
-			// COUNT(DISTINCT field) 无法套用通用 "%s(%s)" 模板（会拼出括号不配对的
-			// "COUNT(DISTINCT(field)" 畸形 SQL），单独生成。
-			expr = fmt.Sprintf("COUNT(DISTINCT %s) AS %s", safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
-		} else {
-			aggFunc := metric.Agg.GetAggFunc()
-			expr = fmt.Sprintf("%s(%s) AS %s", aggFunc, safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
-		}
-		parts = append(parts, expr)
+		parts = append(parts, qb.renderMetricSelect(metric))
 	}
 
 	if len(parts) == 0 {
@@ -247,6 +236,22 @@ func (qb *BunQueryBuilder) buildSelectParts(ast *QueryAST) []string {
 	}
 
 	return parts
+}
+
+// renderMetricSelect 渲染单个指标的 SELECT 片段（聚合函数 + 引号保留的结果别名）。
+// 调用场景：buildSelectParts（通用路径）与 buildPivotGroupingSetsQuery（透视表 v2
+// GROUPING SETS 路径）共用，保证两条路径的聚合表达式与别名引号规则完全一致。
+func (qb *BunQueryBuilder) renderMetricSelect(metric MetricExpr) string {
+	if metric.IsAgg {
+		return fmt.Sprintf("%s AS %s", safeExpr(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
+	}
+	if metric.Agg == AggCountDistinct {
+		// COUNT(DISTINCT field) 无法套用通用 "%s(%s)" 模板（会拼出括号不配对的
+		// "COUNT(DISTINCT(field)" 畸形 SQL），单独生成。
+		return fmt.Sprintf("COUNT(DISTINCT %s) AS %s", safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
+	}
+	aggFunc := metric.Agg.GetAggFunc()
+	return fmt.Sprintf("%s(%s) AS %s", aggFunc, safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 }
 
 // buildGroupByParts 构建 GROUP BY 字段列表。
