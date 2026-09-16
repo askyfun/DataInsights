@@ -335,7 +335,8 @@ func (p *AxisProcessor) Process(rows []map[string]any, dims []string, metrics []
 // 与 PlanAST 都按 spec.Dimensions 顺序遍历），因此按索引一一对应；额外校验 Field 名对齐，
 // 一旦发现数量或字段名不匹配（理论上不会发生，防御性兜底），返回 ok=false 让调用方回退到
 // 位置推断，避免用错槽位名切分数据。返回 ok=false 也覆盖 v1 平铺协议的正常情况
-// （ast 为 nil、无 DimensionExprs，或所有 GroupName 均为空/未知槽位名）。
+// （ast 为 nil、无 DimensionExprs、所有 GroupName 均为空/未知槽位名，或只有 x_axis
+// 槽位而没有 color_group 槽位——见下方裁定B注释）。
 func resolveAxisSlots(dims []string, ast *QueryAST) (xAxisDims []string, colorGroupDims []string, ok bool) {
 	if ast == nil || len(ast.DimensionExprs) != len(dims) {
 		return nil, nil, false
@@ -352,7 +353,12 @@ func resolveAxisSlots(dims []string, ast *QueryAST) (xAxisDims []string, colorGr
 			colorGroupDims = append(colorGroupDims, d)
 		}
 	}
-	if len(xAxisDims) == 0 && len(colorGroupDims) == 0 {
+	if len(xAxisDims) == 0 || len(colorGroupDims) == 0 {
+		// 裁定B：前端只在 color_group 真正非空时才发 v2 wire 格式，因此真正的 v2
+		// bar/line/area 请求必然带 color_group 槽位。缺少 color_group 说明这是 v1
+		// 请求（defaultDimGroupName 会把所有维度标成 "x_axis"）或 color_group 为空的
+		// v2 请求，两者都必须走旧的位置推断逻辑（dims[0]=X 轴，dims[1:]=series 拆分），
+		// 避免多维度 v1 请求被误拼成复合 X 轴。
 		return nil, nil, false
 	}
 	return xAxisDims, colorGroupDims, true

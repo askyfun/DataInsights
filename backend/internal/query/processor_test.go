@@ -790,6 +790,60 @@ func TestAxisProcessor_SlotAware_XAxisOnly(t *testing.T) {
 	}
 }
 
+// TestAxisProcessor_SlotAware_XAxisOnlyMultiDimFallback 复现向后兼容性 bug：v1 平铺协议的
+// 多维度 bar/line/area 请求经 ChartSpecFromRequest 的 defaultDimGroupName 会把**所有**维度
+// 标成 GroupName="x_axis"（没有 color_group 维度）。此时必须回退到旧的位置推断逻辑
+// （X 轴 = dims[0]，series 按 dims[1:] 拆分），而不是走槽位感知路径把所有维度拼成复合 X 轴。
+func TestAxisProcessor_SlotAware_XAxisOnlyMultiDimFallback(t *testing.T) {
+	p := &AxisProcessor{}
+	rows := []map[string]any{
+		{"date": "2024-01", "city": "Beijing", "sales": 100},
+		{"date": "2024-01", "city": "Shanghai", "sales": 200},
+		{"date": "2024-02", "city": "Beijing", "sales": 150},
+		{"date": "2024-02", "city": "Shanghai", "sales": 250},
+	}
+	metrics := []MetricConfig{{Field: "sales", Agg: AggSum}}
+	dims := []string{"date", "city"}
+	// 模拟 v1 请求：defaultDimGroupName 对 bar/line/area 一律返回 "x_axis"
+	ast := slotAST(dims, []string{SlotXAxis, SlotXAxis})
+
+	resp, err := p.Process(rows, dims, metrics, ast)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	axisResp, ok := resp.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", resp)
+	}
+
+	// 旧位置推断逻辑：X 轴取 dims[0]=date 的值；
+	// 若误走槽位感知路径，X 轴会变成复合拼接值（如 "2024-01 - Beijing"）
+	if len(axisResp.XAxis) != 2 || axisResp.XAxis[0] != "2024-01" || axisResp.XAxis[1] != "2024-02" {
+		t.Fatalf("expected XAxis=['2024-01','2024-02'] (positional fallback), got %v", axisResp.XAxis)
+	}
+	// series 按 dims[1:]=city 拆分，而不是退化成单条指标 series
+	names := getSeriesNames(axisResp.Series)
+	expected := []string{"Beijing", "Shanghai"}
+	if len(names) != len(expected) {
+		t.Fatalf("expected series %v (one per dims[1:] value), got %v", expected, names)
+	}
+	for i := range expected {
+		if names[i] != expected[i] {
+			t.Errorf("expected series[%d]=%q, got %q", i, expected[i], names[i])
+		}
+	}
+	seriesMap := map[string][]any{}
+	for _, s := range axisResp.Series {
+		seriesMap[s.Name] = s.Data
+	}
+	if seriesMap["Beijing"][0] != 100 || seriesMap["Beijing"][1] != 150 {
+		t.Errorf("expected Beijing data=[100,150], got %v", seriesMap["Beijing"])
+	}
+	if seriesMap["Shanghai"][0] != 200 || seriesMap["Shanghai"][1] != 250 {
+		t.Errorf("expected Shanghai data=[200,250], got %v", seriesMap["Shanghai"])
+	}
+}
+
 // TestAxisProcessor_SlotAware_EmptyGroupNameFallback 验证 AST 存在但 GroupName 全为空
 // （模拟 v1 平铺协议经 PlanAST 产出的 AST，GroupName 不会被填充）时，回退到位置推断逻辑。
 func TestAxisProcessor_SlotAware_EmptyGroupNameFallback(t *testing.T) {
