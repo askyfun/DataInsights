@@ -12,8 +12,18 @@ function mockAxiosResponse<T>(data: ApiResponse<T>): AxiosResponse<ApiResponse<T
   return { data, status: 200, statusText: 'OK', headers: {}, config: {} as never };
 }
 
+// 捕获 ChartCanvas 传给 ReactECharts 的 option（本文件的渲染断言只看 option 结构，
+// 不挂载真实 echarts）。vi.hoisted 保证在 vi.mock 工厂执行前已初始化。
+interface CapturedChartOption {
+  series?: Array<{ name?: string; type?: string; yAxisIndex?: number }>;
+}
+const echartsOptionCapture = vi.hoisted(() => ({ current: null as CapturedChartOption | null }));
+
 vi.mock('echarts-for-react', () => ({
-  default: () => <div data-testid="echarts" />,
+  default: ({ option }: { option: CapturedChartOption }) => {
+    echartsOptionCapture.current = option;
+    return <div data-testid="echarts" />;
+  },
 }));
 
 vi.mock('../../components/ChartBuilder/DraggableField', () => ({
@@ -140,6 +150,7 @@ const renderNewChartBuilder = () => {
 describe('ChartBuilder', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    echartsOptionCapture.current = null;
     resetChartBuilderState();
 
     mockGetDatasets.mockResolvedValue(
@@ -999,5 +1010,113 @@ describe('ChartBuilder', () => {
         fields: [{ field: 'growth', agg: 'sum', alias: 'growth', binding_id: 'b-2' }],
       },
     ]);
+  });
+
+  it('keeps an aliased combo secondary metric on yAxisIndex 1 (metricSlots alias 优先反查)', async () => {
+    mockGetColumns.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: [
+          { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
+          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+          { name: 'growth', expr: 'growth', type: 'number', comment: '', role: 'metric' },
+        ],
+      })
+    );
+
+    // combo：x_axis=month，主轴=revenue（无别名），次轴=growth（用户设了别名「增长率」），
+    // color_group 为空——combo 最常见的配置形态。
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Combo Chart',
+          dataset_id: 1,
+          chart_type: 'combo',
+          config: JSON.stringify({
+            version: 2,
+            chartType: 'combo',
+            title: 'Combo Chart',
+            query: {
+              dimensionGroups: [
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'month' }] },
+              ],
+              metricGroups: [
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+                { id: 'metric-group-2', bindings: [{ bindingId: 'b-2', field: 'growth' }] },
+              ],
+              filters: [],
+              limit: 1000,
+            },
+            fieldMeta: { 'b-2': { alias: '增长率' } },
+          }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      })
+    );
+
+    // 后端按 ResolveAlias() 命名 series：growth 带别名 → series 名是「增长率」而非「growth」。
+    mockExecuteChartQuery.mockImplementation((request) =>
+      Promise.resolve(
+        mockAxiosResponse({
+          code: 20000,
+          msg: 'ok',
+          trace: '',
+          data:
+            request.chart_type === 'combo'
+              ? {
+                  data: {
+                    x_axis: ['2024-01', '2024-02'],
+                    series: [
+                      { name: 'revenue', data: [1000, 2000] },
+                      { name: '增长率', data: [0.1, 0.2] },
+                    ],
+                  },
+                  select_sql: 'select month, sum(revenue), sum(growth) from sales group by month',
+                }
+              : {
+                  data: {
+                    columns: ['region'],
+                    data: [{ region: 'East' }],
+                    pagination: { page: 1, page_size: 10, total: 1, total_pages: 1 },
+                  },
+                  select_sql: 'select region from sales',
+                  count_sql: 'select count(*) from sales',
+                },
+        })
+      )
+    );
+
+    renderChartBuilder();
+
+    // 请求侧：别名随 v2 请求发出（后端据此命名 series），与渲染侧的反查键必须同源。
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.chart_type).toBe('combo');
+    });
+    const request =
+      mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+    expect(request?.metric_groups?.[1]).toEqual({
+      name: 'secondary_values',
+      label: '次轴指标',
+      fields: [{ field: 'growth', agg: 'sum', alias: '增长率', binding_id: 'b-2' }],
+    });
+
+    // 渲染侧：alias 命名的次轴 series 必须仍反查到 secondary_values → yAxisIndex 1（line）。
+    // 修复前 metricSlots 只含列名 'growth'，「增长率」反查失败会被防御性兜底静默降级到
+    // yAxisIndex 0（bar）——百分比指标画到绝对值主轴刻度上，看似合理实则错误。
+    await waitFor(() => {
+      expect(echartsOptionCapture.current?.series).toHaveLength(2);
+    });
+    const series = echartsOptionCapture.current?.series ?? [];
+    expect(series[0]).toMatchObject({ name: 'revenue', type: 'bar', yAxisIndex: 0 });
+    expect(series[1]).toMatchObject({ name: '增长率', type: 'line', yAxisIndex: 1 });
   });
 });

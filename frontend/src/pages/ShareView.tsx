@@ -164,13 +164,18 @@ const ShareView: React.FC = () => {
     // combo 双轴：按图型定义的 metric 槽位（primary_values/secondary_values）与持久化文档的
     // metricGroups 按 index 对齐派生 metricSlots。ShareView 无运行时字段列表，持久化的
     // binding.field 本身即稳定列名，可直接使用。槽位名取自定义的 fieldGroup id（非组的位置 id）。
+    // metrics 用 alias 优先（列名兜底），与 displayLabels 读 fieldMeta.alias 的方式一致——
+    // 后端 series 名按 ResolveAlias()（alias 优先，列名兜底）生成，若这里只填列名，
+    // 带别名的 series 会反查不到槽位而被静默分配到主轴。
     const metricSlots =
       chartDoc.chartType === 'combo'
         ? chartDefinitions[chartDoc.chartType].fieldGroups
             .filter((group) => group.kind === 'metric')
             .map((def, index) => ({
               slot: def.id,
-              metrics: (chartDoc.query.metricGroups[index]?.bindings ?? []).map((b) => b.field),
+              metrics: (chartDoc.query.metricGroups[index]?.bindings ?? []).map(
+                (b) => chartDoc.fieldMeta[b.bindingId]?.alias || b.field
+              ),
             }))
         : undefined;
     return buildChartOption(chartDoc.chartType, chartData, chartStyle, displayLabels, {

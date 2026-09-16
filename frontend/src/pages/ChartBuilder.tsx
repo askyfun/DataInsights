@@ -423,6 +423,9 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     // 槽位名取自 chartDefinitions 的 fieldGroups（store 里 metricGroups[].id 是位置 id
     // 'metric-group-N'，并非槽位名），按 kind==='metric' 的顺序与 store 组按 index 对齐——
     // 与 composeChartQueryRequest 组装 v2 metric_groups 的约定一致。非 combo 图型为 undefined。
+    // metrics 用 alias 优先（列名兜底），与上方请求 alias 表达式（metricAliases[bindingId]
+    // || chartField.name）完全一致——后端 series 名按 ResolveAlias()（alias 优先，列名兜底）
+    // 生成，若这里只填列名，带别名的 series 会反查不到槽位而被静默分配到主轴。
     const metricSlots =
       config.chartType === 'combo'
         ? chartDefinitions[config.chartType].fieldGroups
@@ -430,7 +433,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
             .map((def, index) => ({
               slot: def.id,
               metrics: (queryConfig.metricGroups[index]?.bindings ?? [])
-                .map((b) => fieldMap.get(b.field)?.name)
+                .map((b) => metricAliases[b.bindingId] || fieldMap.get(b.field)?.name)
                 .filter((name): name is string => name !== undefined),
             }))
         : undefined;
