@@ -76,6 +76,12 @@ export interface ChartOptionContext {
   dimensions: string[];
   /** 指标列名，按配置顺序；散点取前两项作 X/Y */
   metrics: string[];
+  /**
+   * 指标槽位分组（可选，仅 combo 双轴组合图填充）：每项给出槽位名与该槽位的指标列名。
+   * combo 用它把每条 series 归到左/右 Y 轴（primary_values→yAxisIndex 0、
+   * secondary_values→yAxisIndex 1）。其余图型留空 undefined，调用方无需改动（裁定）。
+   */
+  metricSlots?: Array<{ slot: string; metrics: string[] }>;
 }
 
 /** legacy 裸行按列名索引 */
@@ -313,6 +319,59 @@ export function buildChartOption(
             })),
             style.stack
           ),
+          color: palette,
+        };
+      }
+
+      case 'combo': {
+        if (
+          context.dimensions.length === 0 ||
+          context.metrics.length === 0 ||
+          !('x_axis' in data)
+        ) {
+          return null;
+        }
+        // 'x_axis' 判别已将该臂收窄为 ChartAxisResponse。
+        const axis: AxisResponse = data;
+        // series→slot 映射：无 color_group 时后端 AxisProcessor 逐指标产出一条 series，
+        // name = metric.ResolveAlias()（默认等于列名）。据 metricSlots 建立「指标列名 →
+        // yAxisIndex」映射（primary_values→0、secondary_values→1），再按 series.name 反查。
+        // metricSlots 缺失（防御）或 name 反查不到（用户设了别名，或 color_group 非空产出
+        // "别名 - 颜色值" 复合名——本任务的 combo 渲染分支不精确支持 color_group）时，
+        // 一律回落 yAxisIndex 0（主轴），保证不抛异常、图仍渲染（退化限制见 task 报告）。
+        const slotAxisIndex = new Map<string, number>();
+        for (const metricSlot of context.metricSlots ?? []) {
+          const axisIndex = metricSlot.slot === 'secondary_values' ? 1 : 0;
+          for (const metricName of metricSlot.metrics) {
+            slotAxisIndex.set(metricName, axisIndex);
+          }
+        }
+        const categoryAxis = {
+          type: 'category' as const,
+          data: axis.x_axis,
+          name: labelOf(context.dimensions[0]),
+          axisLabel: categoryAxisLabel(axis.x_axis.length),
+        };
+        return {
+          ...commonOptions,
+          xAxis: categoryAxis,
+          // 双 Y 轴：index 0 主轴（左）、index 1 次轴（右）——这是 combo 与单轴
+          // bar/line/area 在 option 结构上的关键差异（yAxis 是数组而非单个对象）。
+          yAxis: [
+            { type: 'value' as const },
+            { type: 'value' as const, position: 'right' as const },
+          ],
+          series: axis.series.map((s) => {
+            const yAxisIndex = slotAxisIndex.get(s.name) ?? 0;
+            return {
+              name: labelOf(s.name),
+              // 主轴指标渲染为柱、次轴指标渲染为线（双轴「组合」图的组合语义）。
+              type: yAxisIndex === 1 ? ('line' as const) : ('bar' as const),
+              yAxisIndex,
+              ...(yAxisIndex === 1 ? { connectNulls: true } : {}),
+              data: s.data.map(toOptionValue),
+            };
+          }),
           color: palette,
         };
       }

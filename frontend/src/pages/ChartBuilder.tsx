@@ -154,16 +154,25 @@ interface ChartQueryRequestInput {
 }
 
 /**
+ * combo 双轴组合图的两个指标槽位名（与 chartDefinitions.ts 的 fieldGroups[].id 对齐）。
+ * 只要图型定义了其中之一，就必须走 v2 槽位协议——v1 平铺的 metrics[] 无法表达某个指标
+ * 属于主轴还是次轴。scatter 虽然也有两个指标槽位（x_metric/y_metric），但它按位置消费
+ * （metrics[0]/metrics[1]，v1 保序即可），不在此集合内，故继续走 v1、行为不变。
+ */
+const DUAL_AXIS_METRIC_SLOTS = new Set(['primary_values', 'secondary_values']);
+
+/**
  * 图表查询请求的唯一构造出口（纯函数，所有输入经参数传入）。
  * 调用场景：手动执行查询（含排序/翻页覆盖）与两个自动查询 effect 共用。
  * 主要逻辑：按图表定义裁剪字段组、字段 id 映射回列名、组装 filters/pagination；
  * 维度与指标同时为空时返回 null 表示不发起查询。
  *
- * v1/v2 判别（裁定B）：仅当当前图型定义了 color_group 槽位（bar/line/area）且该槽位
- * 非空时，才发出 v2 格式请求（spec_version:2 + dimension_groups/metric_groups，携带真实
- * 槽位名 x_axis/color_group/values 与每个字段的 binding_id）；color_group 为空（或
- * table/pie/scatter/pivot 根本没有该槽位）时继续发出 v1 平铺格式（dims/metrics），
- * 请求形状与本任务改动前完全一致。
+ * v1/v2 判别（裁定B）：当当前图型定义了 color_group 槽位（bar/line/area）且该槽位非空，
+ * **或** 当前图型定义了 combo 的双轴指标槽位（primary_values/secondary_values）时，发出 v2
+ * 格式请求（spec_version:2 + dimension_groups/metric_groups，携带真实槽位名与每个字段的
+ * binding_id）；combo 即使 color_group 为空也走 v2（否则主/次轴的槽位区分信息会在 v1 平铺
+ * metrics[] 中丢失）。其余情况（color_group 为空的 bar/line/area，或 table/pie/scatter/pivot
+ * 根本没有这些槽位）继续发出 v1 平铺格式（dims/metrics），请求形状与本任务改动前完全一致。
  */
 const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequest | null => {
   const {
@@ -210,13 +219,20 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
   // 的同序号（kind-local index，与 getFieldGroupKindIndex 的既有约定一致）。
   const definition = chartDefinitions[chartType];
   const dimensionDefs = definition.fieldGroups.filter((group) => group.kind === 'dimension');
+  const metricDefs = definition.fieldGroups.filter((group) => group.kind === 'metric');
   const colorGroupDefIndex = dimensionDefs.findIndex((group) => group.id === 'color_group');
   const colorGroupBindings =
     colorGroupDefIndex >= 0
       ? (activeGroups.dimensionGroups[colorGroupDefIndex]?.bindings ?? [])
       : [];
 
-  if (colorGroupBindings.length > 0) {
+  // v2 触发条件：color_group 非空（bar/line/area）**或** 图型带 combo 的双轴指标槽位。
+  // 后者保证 combo 即使 color_group 为空也走 v2，主/次轴槽位名不丢失（详见函数 doc）。
+  const requiresSlotProtocol =
+    colorGroupBindings.length > 0 ||
+    metricDefs.some((group) => DUAL_AXIS_METRIC_SLOTS.has(group.id));
+
+  if (requiresSlotProtocol) {
     // v2 槽位协议：dimension_groups/metric_groups 携带真实槽位名与 binding_id
     const dimensionGroupsPayload: ChartDimensionGroup[] = [];
     dimensionDefs.forEach((def, index) => {
@@ -234,7 +250,6 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
       dimensionGroupsPayload.push({ name: def.id, label: def.label, fields: groupFields });
     });
 
-    const metricDefs = definition.fieldGroups.filter((group) => group.kind === 'metric');
     const metricGroupsPayload: ChartMetricGroup[] = [];
     metricDefs.forEach((def, index) => {
       const group = activeGroups.metricGroups[index];
@@ -404,10 +419,27 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
       labels[baseName] = unit ? `${displayName} (${unit})` : displayName;
     }
 
+    // combo 双轴：按图型定义的 metric 槽位（primary_values/secondary_values）派生 metricSlots。
+    // 槽位名取自 chartDefinitions 的 fieldGroups（store 里 metricGroups[].id 是位置 id
+    // 'metric-group-N'，并非槽位名），按 kind==='metric' 的顺序与 store 组按 index 对齐——
+    // 与 composeChartQueryRequest 组装 v2 metric_groups 的约定一致。非 combo 图型为 undefined。
+    const metricSlots =
+      config.chartType === 'combo'
+        ? chartDefinitions[config.chartType].fieldGroups
+            .filter((group) => group.kind === 'metric')
+            .map((def, index) => ({
+              slot: def.id,
+              metrics: (queryConfig.metricGroups[index]?.bindings ?? [])
+                .map((b) => fieldMap.get(b.field)?.name)
+                .filter((name): name is string => name !== undefined),
+            }))
+        : undefined;
+
     return buildChartOption(config.chartType, data, chartStyle, labels, {
       title: config.title,
       dimensions,
       metrics,
+      metricSlots,
     });
   }, [chartStyle, config, data, dimensionLabels, metricAliases, metricUnits]);
 

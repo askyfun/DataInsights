@@ -3,6 +3,7 @@ import {
   AreaChartOutlined,
   BarChartOutlined,
   DotChartOutlined,
+  FundOutlined,
   LineChartOutlined,
   PieChartOutlined,
   TableOutlined,
@@ -248,6 +249,49 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         kind: 'metric',
         label: '值指标',
         emptyText: '拖拽值指标到此，或点击+添加',
+        minGroups: 1,
+      },
+    ],
+  },
+  combo: {
+    type: 'combo',
+    label: '组合图',
+    // 复用 AxisResponse（x_axis + series）：两个指标槽位的 metrics 合并进同一 metrics[]，
+    // 后端 AxisProcessor 逐指标产出 series，前端按槽位名分配左右 Y 轴（buildChartOption）。
+    resultShape: 'axis',
+    icon: FundOutlined,
+    // combo 本任务只支持主色，不支持 stack/orientation/smooth（plan 未要求，避免过度实现）。
+    styleKeys: ['colors'],
+    fieldGroups: [
+      {
+        id: 'x_axis',
+        kind: 'dimension',
+        label: 'X 轴维度',
+        emptyText: '拖拽 X 轴维度到此',
+        minGroups: 1,
+        maxFields: 1,
+      },
+      {
+        id: 'color_group',
+        kind: 'dimension',
+        label: '颜色分组',
+        emptyText: '拖拽颜色分组维度到此（可选）',
+        minGroups: 0,
+        maxFields: 1,
+        optional: true,
+      },
+      {
+        id: 'primary_values',
+        kind: 'metric',
+        label: '主轴指标',
+        emptyText: '拖拽主轴指标到此',
+        minGroups: 1,
+      },
+      {
+        id: 'secondary_values',
+        kind: 'metric',
+        label: '次轴指标',
+        emptyText: '拖拽次轴指标到此',
         minGroups: 1,
       },
     ],

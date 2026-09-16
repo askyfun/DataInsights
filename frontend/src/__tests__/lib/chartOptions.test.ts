@@ -809,3 +809,144 @@ describe('normalizeChartStyle：orientation/donut 安全窄化', () => {
     });
   });
 });
+
+// combo 双轴组合图的 option 结构视图：yAxis 是数组（左/右两个值轴），series 带 yAxisIndex
+interface ComboOptionView {
+  yAxis: { type: string; position?: string }[];
+  series: {
+    name?: string;
+    type: string;
+    yAxisIndex?: number;
+    connectNulls?: boolean;
+    data: unknown;
+  }[];
+}
+
+describe('buildChartOption：combo 双轴组合图（R-58）', () => {
+  // 后端 AxisProcessor 无 color_group 时逐指标产出一条 series，name=ResolveAlias()（默认列名）
+  const comboPayload = {
+    x_axis: ['2024-01', '2024-02'],
+    series: [
+      { name: 'revenue', data: [1000, 2000] },
+      { name: 'growth', data: [0.1, 0.2] },
+    ],
+  };
+  const comboContext = {
+    title: 'Combo',
+    dimensions: ['month'],
+    metrics: ['revenue', 'growth'],
+    metricSlots: [
+      { slot: 'primary_values', metrics: ['revenue'] },
+      { slot: 'secondary_values', metrics: ['growth'] },
+    ],
+  };
+
+  it('metricSlots 驱动双 Y 轴：primary→yAxisIndex 0（bar），secondary→yAxisIndex 1（line）', () => {
+    const option = view<ComboOptionView>(
+      buildChartOption('combo', comboPayload, baseStyle, {}, comboContext)
+    );
+    // yAxis 必须是长度为 2 的数组（combo 与单轴 bar/line/area 的关键差异），次轴在右侧
+    expect(Array.isArray(option.yAxis)).toBe(true);
+    expect(option.yAxis).toHaveLength(2);
+    expect(option.yAxis[1]?.position).toBe('right');
+    // 两个 series 分别落到左右轴，且主轴为柱、次轴为线
+    expect(option.series[0]).toMatchObject({
+      name: 'revenue',
+      type: 'bar',
+      yAxisIndex: 0,
+      data: [1000, 2000],
+    });
+    expect(option.series[1]).toMatchObject({
+      name: 'growth',
+      type: 'line',
+      yAxisIndex: 1,
+      connectNulls: true,
+      data: [0.1, 0.2],
+    });
+  });
+
+  it('labels 生效：series 名按 labels 映射，但 yAxisIndex 仍按原 series.name 反查槽位', () => {
+    const option = view<ComboOptionView>(
+      buildChartOption(
+        'combo',
+        comboPayload,
+        baseStyle,
+        { revenue: '营收', growth: '增长率' },
+        comboContext
+      )
+    );
+    expect(option.series[0]).toMatchObject({ name: '营收', type: 'bar', yAxisIndex: 0 });
+    expect(option.series[1]).toMatchObject({ name: '增长率', type: 'line', yAxisIndex: 1 });
+  });
+
+  it('metricSlots 缺失（防御）：全部退化到 yAxisIndex 0，但仍产出双轴数组、不抛异常', () => {
+    const option = view<ComboOptionView>(
+      buildChartOption(
+        'combo',
+        comboPayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['month'],
+          metrics: ['revenue', 'growth'],
+        }
+      )
+    );
+    expect(option.yAxis).toHaveLength(2);
+    expect(option.series[0]).toMatchObject({ type: 'bar', yAxisIndex: 0 });
+    expect(option.series[1]).toMatchObject({ type: 'bar', yAxisIndex: 0 });
+  });
+
+  it('color_group 非空的复合 series 名（"别名 - 颜色值"）反查不到槽位：退化到 yAxisIndex 0', () => {
+    // 本任务的 combo 渲染分支不精确支持 color_group，复合名不匹配列名 → 统一落主轴（不崩溃）
+    const colorGroupPayload = {
+      x_axis: ['2024-01'],
+      series: [
+        { name: 'revenue - Beijing', data: [100] },
+        { name: 'growth - Beijing', data: [0.1] },
+      ],
+    };
+    const option = view<ComboOptionView>(
+      buildChartOption('combo', colorGroupPayload, baseStyle, {}, comboContext)
+    );
+    expect(option.yAxis).toHaveLength(2);
+    expect(option.series[0]).toMatchObject({ type: 'bar', yAxisIndex: 0 });
+    expect(option.series[1]).toMatchObject({ type: 'bar', yAxisIndex: 0 });
+  });
+
+  it('维度/指标不足或负载无 x_axis 时返回 null', () => {
+    // 缺维度
+    expect(
+      buildChartOption(
+        'combo',
+        comboPayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: [],
+          metrics: ['revenue', 'growth'],
+          metricSlots: comboContext.metricSlots,
+        }
+      )
+    ).toBeNull();
+    // 缺指标
+    expect(
+      buildChartOption(
+        'combo',
+        comboPayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['month'],
+          metrics: [],
+          metricSlots: comboContext.metricSlots,
+        }
+      )
+    ).toBeNull();
+    // 负载形状不匹配（pie 负载无 x_axis）
+    expect(buildChartOption('combo', piePayload, baseStyle, {}, comboContext)).toBeNull();
+  });
+});

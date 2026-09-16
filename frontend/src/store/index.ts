@@ -205,7 +205,7 @@ export interface FilterCondition {
 
 // 图表配置接口
 export interface ChartConfig {
-  chartType: 'table' | 'line' | 'bar' | 'pie' | 'area' | 'scatter' | 'pivot';
+  chartType: 'table' | 'line' | 'bar' | 'pie' | 'area' | 'scatter' | 'pivot' | 'combo';
   xAxisField: string | null;
   yAxisFields: string[];
   title: string;

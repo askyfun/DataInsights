@@ -919,4 +919,85 @@ describe('ChartBuilder', () => {
       metrics: [{ field: 'revenue', agg: 'sum', alias: 'revenue' }],
     });
   });
+
+  it('emits a v2 slot-protocol request for combo even when color_group is empty (R-58)', async () => {
+    mockGetColumns.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: [
+          { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
+          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+          { name: 'growth', expr: 'growth', type: 'number', comment: '', role: 'metric' },
+        ],
+      })
+    );
+
+    // combo 图表：x_axis=month，主轴指标=revenue，次轴指标=growth，未填 color_group
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Combo Chart',
+          dataset_id: 1,
+          chart_type: 'combo',
+          config: JSON.stringify({
+            version: 2,
+            chartType: 'combo',
+            title: 'Combo Chart',
+            query: {
+              dimensionGroups: [
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'month' }] },
+              ],
+              metricGroups: [
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+                { id: 'metric-group-2', bindings: [{ bindingId: 'b-2', field: 'growth' }] },
+              ],
+              filters: [],
+              limit: 1000,
+            },
+            fieldMeta: {},
+          }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      })
+    );
+
+    renderChartBuilder();
+
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.chart_type).toBe('combo');
+      expect(lastRequest?.spec_version).toBe(2);
+    });
+
+    const request =
+      mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+    // combo 天然走 v2：不得回落到 v1 平铺 dims/metrics（否则主/次轴槽位区分丢失）
+    expect(request).not.toHaveProperty('dims');
+    expect(request).not.toHaveProperty('metrics');
+    // color_group 为空 → 只有一个 x_axis 维度组
+    expect(request?.dimension_groups).toEqual([
+      { name: 'x_axis', label: 'X 轴维度', fields: [{ field: 'month', binding_id: 'b-0' }] },
+    ]);
+    // 两个指标槽位分别携带真实槽位名，主/次轴区分保留在 wire 上
+    expect(request?.metric_groups).toEqual([
+      {
+        name: 'primary_values',
+        label: '主轴指标',
+        fields: [{ field: 'revenue', agg: 'sum', alias: 'revenue', binding_id: 'b-1' }],
+      },
+      {
+        name: 'secondary_values',
+        label: '次轴指标',
+        fields: [{ field: 'growth', agg: 'sum', alias: 'growth', binding_id: 'b-2' }],
+      },
+    ]);
+  });
 });

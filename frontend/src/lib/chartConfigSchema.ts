@@ -30,7 +30,7 @@
  */
 import type { BindingInstance } from '../store';
 
-export type ChartType = 'bar' | 'line' | 'pie' | 'area' | 'scatter' | 'table' | 'pivot';
+export type ChartType = 'bar' | 'line' | 'pie' | 'area' | 'scatter' | 'table' | 'pivot' | 'combo';
 
 export interface ChartMeta {
   label?: string;
@@ -86,7 +86,16 @@ export interface ChartConfigDocument {
 }
 
 /** 旧配置字段引用可解析出的最大位置 id 形式仅用于文档，不做结构假设 */
-const CHART_TYPES: readonly string[] = ['bar', 'line', 'pie', 'area', 'scatter', 'table', 'pivot'];
+const CHART_TYPES: readonly string[] = [
+  'bar',
+  'line',
+  'pie',
+  'area',
+  'scatter',
+  'table',
+  'pivot',
+  'combo',
+];
 
 /** 旧平铺 Record → fieldMeta 键的映射 */
 const LEGACY_META_RECORDS: readonly [recordKey: string, metaKey: keyof ChartMeta][] = [

@@ -528,6 +528,11 @@ func GetProcessor(chartType ChartType) Processor {
 		return NewPieProcessor()
 	case ChartTypeBar, ChartTypeLine, ChartTypeArea:
 		return &AxisProcessor{}
+	case ChartTypeCombo:
+		// combo（双轴组合图，R-58）复用 AxisProcessor：primary/secondary 的区分在
+		// ChartSpec 的 metric 槽位名中，两个槽位的 metrics 合并进同一个 metrics[] 传给
+		// processor（plan §3.1），processor 本身无需感知槽位——显式分支而非依赖 default 兜底。
+		return &AxisProcessor{}
 	case ChartTypeScatter:
 		return &ScatterProcessor{}
 	case ChartTypePivot:

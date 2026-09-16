@@ -10,6 +10,7 @@ import ReactECharts from 'echarts-for-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Chart, type ChartDataResponse, chartsApi, sharesApi } from '../api';
+import { chartDefinitions } from '../components/ChartBuilder/chartDefinitions';
 import TableChart from '../components/ChartBuilder/TableChart';
 import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../lib/chartOptions';
@@ -160,10 +161,23 @@ const ShareView: React.FC = () => {
     if (!chart || !chartDoc) {
       return null;
     }
+    // combo 双轴：按图型定义的 metric 槽位（primary_values/secondary_values）与持久化文档的
+    // metricGroups 按 index 对齐派生 metricSlots。ShareView 无运行时字段列表，持久化的
+    // binding.field 本身即稳定列名，可直接使用。槽位名取自定义的 fieldGroup id（非组的位置 id）。
+    const metricSlots =
+      chartDoc.chartType === 'combo'
+        ? chartDefinitions[chartDoc.chartType].fieldGroups
+            .filter((group) => group.kind === 'metric')
+            .map((def, index) => ({
+              slot: def.id,
+              metrics: (chartDoc.query.metricGroups[index]?.bindings ?? []).map((b) => b.field),
+            }))
+        : undefined;
     return buildChartOption(chartDoc.chartType, chartData, chartStyle, displayLabels, {
       title: chartDoc.title || chart.name,
       dimensions: chartDoc.query.dimensionGroups.flatMap((g) => g.bindings.map((b) => b.field)),
       metrics: chartDoc.query.metricGroups.flatMap((g) => g.bindings.map((b) => b.field)),
+      metricSlots,
     });
   }, [chart, chartDoc, chartData, chartStyle, displayLabels]);
 

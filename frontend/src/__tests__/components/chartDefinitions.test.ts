@@ -3,6 +3,7 @@ import {
   AreaChartOutlined,
   BarChartOutlined,
   DotChartOutlined,
+  FundOutlined,
   LineChartOutlined,
   PieChartOutlined,
   TableOutlined,
@@ -38,6 +39,7 @@ const EXPECTED_RESULT_SHAPE: Record<BuilderChartType, ResultShape> = {
   area: 'axis',
   scatter: 'scatter',
   pivot: 'pivot',
+  combo: 'axis',
 };
 
 /** 期望的 chartType → icon 组件映射，须与迁移前 ChartBuilder.tsx 的硬编码逐项一致。 */
@@ -49,6 +51,7 @@ const EXPECTED_ICON: Record<BuilderChartType, ChartDefinition['icon']> = {
   area: AreaChartOutlined,
   scatter: DotChartOutlined,
   pivot: AppstoreOutlined,
+  combo: FundOutlined,
 };
 
 const CHART_TYPES = Object.keys(chartDefinitions) as BuilderChartType[];

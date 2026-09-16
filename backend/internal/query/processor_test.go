@@ -462,6 +462,46 @@ func TestGetProcessor_BarLineArea(t *testing.T) {
 	}
 }
 
+// TestGetProcessor_Combo 验证 combo（双轴组合图，R-58）经显式 case 返回 *AxisProcessor。
+// 单纯的类型断言无法区分“显式 case”与“default 兜底”（两者都返回 &AxisProcessor{}），
+// 因此额外对返回的 processor 做一次真实处理：单维度 + 两个 metrics 应产出 *AxisResponse
+// 且每个 metric 一条 series，证明 combo 确实被接到了可用的坐标轴处理逻辑上。
+func TestGetProcessor_Combo(t *testing.T) {
+	processor := GetProcessor(ChartTypeCombo)
+	if processor == nil {
+		t.Fatal("expected non-nil processor for combo")
+	}
+	axisProcessor, ok := processor.(*AxisProcessor)
+	if !ok {
+		t.Fatalf("expected *AxisProcessor for combo, got %T", processor)
+	}
+
+	rows := []map[string]any{
+		{"month": "2024-01", "revenue": 100, "growth": 0.1},
+		{"month": "2024-02", "revenue": 200, "growth": 0.2},
+	}
+	// combo 的两个指标槽位（primary_values/secondary_values）在此已合并为一个 metrics[]
+	metrics := []MetricConfig{
+		{Field: "revenue", Agg: AggSum},
+		{Field: "growth", Agg: AggAvg},
+	}
+	resp, err := axisProcessor.Process(rows, []string{"month"}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	axisResp, ok := resp.(*AxisResponse)
+	if !ok {
+		t.Fatalf("expected *AxisResponse, got %T", resp)
+	}
+	if len(axisResp.Series) != 2 {
+		t.Fatalf("expected 2 series (one per metric), got %d: %v", len(axisResp.Series), getSeriesNames(axisResp.Series))
+	}
+	names := getSeriesNames(axisResp.Series)
+	if names[0] != "revenue" || names[1] != "growth" {
+		t.Errorf("expected series names [revenue growth], got %v", names)
+	}
+}
+
 // TestScatterProcessor_TwoMetrics 验证散点图使用 metrics[0] 作为 X、metrics[1] 作为 Y
 func TestScatterProcessor_TwoMetrics(t *testing.T) {
 	p := &ScatterProcessor{}
