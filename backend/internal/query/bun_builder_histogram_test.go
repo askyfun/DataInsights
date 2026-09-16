@@ -57,9 +57,10 @@ func TestBuildHistogramStatsQuery_SQLSource(t *testing.T) {
 }
 
 // TestBuildHistogramBinQuery_FullSQL 钉死阶段2（分箱）SQL 的完整形状：
-// FLOOR((field - ?) / ?) + 引号保留别名 + 参数化 WHERE + GROUP BY 重复表达式 +
-// ORDER BY "bin"；min/binWidth 必须是参数化 ? 占位（args 两份：SELECT 与
-// GROUP BY 各一份），绝不能是裸浮点拼进 SQL 文本。
+// FLOOR((field - ?) / ?) + 引号保留别名 + 参数化 WHERE + GROUP BY 派生表列
+// （子查询包一层，GROUP BY "bin" 引用派生列而非重复表达式）+ ORDER BY "bin"；
+// min/binWidth 必须是参数化 ? 占位（args 一份：[min, binWidth, 过滤值...]，
+// FLOOR 参数只出现一次），绝不能是裸浮点拼进 SQL 文本。
 func TestBuildHistogramBinQuery_FullSQL(t *testing.T) {
 	ast := histogramPlanAST(
 		[]MetricExpr2{{Field: "amount", Agg: AggSum, Alias: "total"}},

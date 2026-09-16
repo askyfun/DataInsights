@@ -227,7 +227,8 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 //     - total==0（空数据）→ 直接返回空 Bins（不报错，不跑阶段2）；
 //     - 有行但 MIN/MAX 为 NULL（值列全 NULL）→ 显式报错，不静默；
 //     - 用户 query_options.bin_width（>0）→ 覆盖 bin_count 推算的宽度，
-//     箱数 = ceil((mx-mn)/bin_width)（至少 1）；
+//     箱数 = ceil((mx-mn)/bin_width)（至少 1，钳到 maxHistogramBins，钳后
+//     按钳定箱数重算宽度）；
 //     - mx==mn（所有值相同）→ 宽度会算出 0，兜底 bin_width=1、单箱
 //     [mn, mn+1)，杜绝除 0 / NaN；
 //     - 否则 bin_width = (mx-mn)/bin_count（bin_count 缺省 20）。
@@ -275,7 +276,15 @@ func (e *Executor) executeHistogram(ctx context.Context, dialect DialectType, as
 	binWidth, numBins := userBinWidth, binCount
 	switch {
 	case userBinWidth > 0:
-		numBins = int(math.Ceil((mx - mn) / userBinWidth))
+		numBinsF := math.Ceil((mx - mn) / userBinWidth)
+		if numBinsF > maxHistogramBins {
+			// 极小 bin_width 会把箱数放大到无界分配（钳制在 float 域做，
+			// 荒谬值如 1e300 不会经 int 转换溢出）；钳后按钳定箱数重算宽度，
+			// 保证 bins 仍连续铺满 [mn, mx]（sum(count)==total 不变式保持）。
+			numBinsF = maxHistogramBins
+			binWidth = (mx - mn) / numBinsF
+		}
+		numBins = int(numBinsF)
 		if numBins < 1 {
 			numBins = 1 // mx==mn（或宽度大于值域）：单箱
 		}

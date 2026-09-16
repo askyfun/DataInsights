@@ -121,6 +121,7 @@ func TestHistogramProcessor_Process_Rejects(t *testing.T) {
 
 // TestHistogramBinOptions 验证 query_options 解析：缺省 bin_count=20、
 // JSON 数字（float64）与 int/int64/数值字符串形态、非法值回落默认、
+// 荒谬 bin_count 钳到 maxHistogramBins（防无界分配）、
 // bin_width 仅 >0 生效（用户覆盖）。
 func TestHistogramBinOptions(t *testing.T) {
 	for _, tc := range []struct {
@@ -139,6 +140,8 @@ func TestHistogramBinOptions(t *testing.T) {
 		{"negative bin_count falls back", map[string]any{"bin_count": float64(-3)}, 20, 0},
 		{"garbage bin_count falls back", map[string]any{"bin_count": "abc"}, 20, 0},
 		{"bool bin_count falls back", map[string]any{"bin_count": true}, 20, 0},
+		{"absurd bin_count clamped", map[string]any{"bin_count": float64(100000000)}, maxHistogramBins, 0},
+		{"int-overflowing bin_count clamped", map[string]any{"bin_count": 1e300}, maxHistogramBins, 0},
 		{"user bin_width", map[string]any{"bin_width": 2.5}, 20, 2.5},
 		{"bin_width overrides with bin_count", map[string]any{"bin_count": float64(4), "bin_width": 2.5}, 4, 2.5},
 		{"zero bin_width ignored", map[string]any{"bin_width": float64(0)}, 20, 0},

@@ -14,7 +14,7 @@ import (
 // 本文件用真实 PostgreSQL 端到端验证直方图两阶段分箱查询的正确性（R-57，
 // plan §8 验收标准）：
 //   - 两阶段 SQL（MIN/MAX/COUNT → FLOOR((v-?)/?) 分箱）在真实 PG 上语法有效
-//     （含参数化 float args、GROUP BY 重复表达式、rebind ?→$N 全链路）；
+//     （含参数化 float args、GROUP BY 派生表列（子查询）、rebind ?→$N 全链路）；
 //   - 所有 bin 的 count 之和 == 种子总行数（无遗漏、无重复）；
 //   - bin 边界连续无重叠：BinEnd[i] == BinStart[i+1]，首 bin BinStart==mn、
 //     末 bin BinEnd>=mx；

@@ -207,6 +207,82 @@ func TestExecutor_Histogram_UserBinWidthOverrides(t *testing.T) {
 	}
 }
 
+// assertHistogramBinsClampedContiguous 断言钳制后的 bins 仍正确：箱数 ==
+// maxHistogramBins、连续铺满 [mn, mx]（BinEnd[i]==BinStart[i+1]，首 BinStart==mn、
+// 末 BinEnd==mx）、sum(count)==total（钳制不破坏不变式）。
+func assertHistogramBinsClampedContiguous(t *testing.T, resp *HistogramResponse, mn, mx float64, wantTotal int64) {
+	t.Helper()
+	if len(resp.Bins) != maxHistogramBins {
+		t.Fatalf("expected numBins clamped to %d, got %d", maxHistogramBins, len(resp.Bins))
+	}
+	if resp.Bins[0].BinStart != mn {
+		t.Errorf("expected first BinStart==%v, got %v", mn, resp.Bins[0].BinStart)
+	}
+	if last := resp.Bins[len(resp.Bins)-1]; last.BinEnd != mx {
+		t.Errorf("expected last BinEnd==%v, got %v", mx, last.BinEnd)
+	}
+	var sum int64
+	for i, b := range resp.Bins {
+		if i > 0 && b.BinStart != resp.Bins[i-1].BinEnd {
+			t.Fatalf("bins not contiguous at %d: prev BinEnd=%v, BinStart=%v", i, resp.Bins[i-1].BinEnd, b.BinStart)
+		}
+		sum += b.Count
+	}
+	if sum != wantTotal {
+		t.Errorf("expected sum(counts)==%d, got %d", wantTotal, sum)
+	}
+}
+
+// TestExecutor_Histogram_AbsurdBinCountClamped 验证 bin_count 上限钳制：请求体
+// bin_count=100000000 被钳到 maxHistogramBins（防 ProcessBins 无界分配），
+// binWidth=(mx-mn)/钳定箱数，bins 仍连续铺满 [mn, mx]、sum(count)==total。
+func TestExecutor_Histogram_AbsurdBinCountClamped(t *testing.T) {
+	dataset, ds := histogramFixture()
+	conn := &histogramMockConnection{
+		rowSets: [][]map[string]any{
+			{histogramStatsRow(float64(0), float64(100000), int64(50))},
+			{{"bin": float64(0), "cnt": int64(20)}, {"bin": float64(maxHistogramBins - 1), "cnt": int64(30)}},
+		},
+	}
+	executor := NewExecutor(conn, dataset, ds)
+
+	result, err := executor.Execute(context.Background(), histogramRequest(map[string]any{"bin_count": float64(100000000)}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 阶段2 参数化 binWidth 按钳定箱数计算：(100000-0)/maxHistogramBins=10
+	if conn.argsCalls[1][1] != float64(10) {
+		t.Errorf("expected clamped binWidth=(mx-mn)/maxHistogramBins=10, got arg %v", conn.argsCalls[1][1])
+	}
+	resp := result.Data.(*HistogramResponse)
+	assertHistogramBinsClampedContiguous(t, resp, 0, 100000, 50)
+}
+
+// TestExecutor_Histogram_TinyBinWidthClamped 验证 bin_width 过小路径的钳制：
+// bin_width=1e-9 over [0, 1e6] → ceil=1e15，钳到 maxHistogramBins，钳后重算
+// 宽度=(mx-mn)/maxHistogramBins，bins 仍连续铺满 [mn, mx]、sum(count)==total。
+func TestExecutor_Histogram_TinyBinWidthClamped(t *testing.T) {
+	dataset, ds := histogramFixture()
+	conn := &histogramMockConnection{
+		rowSets: [][]map[string]any{
+			{histogramStatsRow(float64(0), float64(1e6), int64(7))},
+			{{"bin": float64(0), "cnt": int64(3)}, {"bin": float64(maxHistogramBins - 1), "cnt": int64(4)}},
+		},
+	}
+	executor := NewExecutor(conn, dataset, ds)
+
+	result, err := executor.Execute(context.Background(), histogramRequest(map[string]any{"bin_width": 1e-9}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 阶段2 参数化 binWidth 按钳定箱数重算：1e6/maxHistogramBins=100（不再是 1e-9）
+	if conn.argsCalls[1][1] != float64(100) {
+		t.Errorf("expected recomputed binWidth=(mx-mn)/maxHistogramBins=100, got arg %v", conn.argsCalls[1][1])
+	}
+	resp := result.Data.(*HistogramResponse)
+	assertHistogramBinsClampedContiguous(t, resp, 0, 1e6, 7)
+}
+
 // TestExecutor_Histogram_EmptyData 验证 total==0 边界：不跑阶段2，返回空
 // （非 nil）Bins，不报错。
 func TestExecutor_Histogram_EmptyData(t *testing.T) {

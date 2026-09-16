@@ -12,6 +12,11 @@ import (
 // defaultHistogramBinCount query_options.bin_count 缺省值（plan §3.3 裁定）。
 const defaultHistogramBinCount = 20
 
+// maxHistogramBins 分箱数上限：bin_count/bin_width 直接来自请求体，荒谬值
+// （巨量 bin_count / 极小 bin_width）会放大为 ProcessBins 的无界内存分配
+// （bin_count=1e8 单请求即 ~2.4GB）；超过该上限的分箱在视觉上也无意义。
+const maxHistogramBins = 10000
+
 // HistogramProcessor 直方图处理器（R-57）。
 // histogram 是两阶段查询：阶段1 MIN/MAX/COUNT → Go 端算 bin 宽 → 阶段2 FLOOR
 // 分箱计数。bins 组装需要阶段1 的 minValue/binWidth——这些只在 executor 的
@@ -77,12 +82,16 @@ func (p *HistogramProcessor) ProcessBins(rows []map[string]any, minValue, binWid
 }
 
 // histogramBinOptions 从请求的 query_options 解析分箱参数（executor histogram
-// 分支调用）：bin_count 缺省/非数值/<1 时回落 defaultHistogramBinCount(20)；
+// 分支调用）：bin_count 缺省/非数值/<1 时回落 defaultHistogramBinCount(20)，
+// >maxHistogramBins 时钳到上限（防无界分配，float 域钳制避免荒谬值 int 溢出）；
 // bin_width 为可选用户覆盖（仅 >0 生效），返回 0 表示未指定。JSON 数字进
 // map[string]any 后是 float64，toFloat64 同时兼容 int/int64/数值字符串等形态。
 func histogramBinOptions(opts map[string]any) (binCount int, userBinWidth float64) {
 	binCount = defaultHistogramBinCount
 	if v, ok := toFloat64(opts["bin_count"]); ok && v >= 1 {
+		if v > maxHistogramBins {
+			v = maxHistogramBins
+		}
 		binCount = int(v)
 	}
 	if v, ok := toFloat64(opts["bin_width"]); ok && v > 0 {
