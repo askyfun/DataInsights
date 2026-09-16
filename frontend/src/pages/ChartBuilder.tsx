@@ -40,9 +40,9 @@ import {
   Typography,
 } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Chart, ChartQueryAggregation, ChartQueryRequest } from '../api';
+import { Chart, type ChartDataResponse, ChartQueryAggregation, ChartQueryRequest } from '../api';
 import {
   chartDefinitions,
   normalizeQueryConfigForChartType,
@@ -57,6 +57,7 @@ import {
   type ChartType,
   migrateChartConfig,
 } from '../lib/chartConfigSchema';
+import { buildChartOption, isEmptyPayload } from '../lib/chartOptions';
 import {
   ChartConfig,
   ChartField,
@@ -235,7 +236,7 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
 
 interface ChartCanvasProps {
   config: ChartConfig;
-  data: any[];
+  data: ChartDataResponse;
   loading: boolean;
   dimensionLabels: Record<string, string>;
   metricAliases: Record<string, string>;
@@ -277,210 +278,44 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   metricUnits,
   chartStyle,
 }) => {
-  const getChartOption = useCallback(() => {
+  // option 构造走共享纯函数 buildChartOption（与 ShareView 同一出口）；
+  // 「字段名 → 显示名」映射依赖 store 状态（queryConfig/chartBuilderFields），
+  // 在组件体内计算为纯数据 labels 后传入。
+  const chartOption = useMemo(() => {
     const { queryConfig, chartBuilderFields } = useStore.getState();
     const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
 
     const dimensionIds = queryConfig.dimensionGroups.flatMap((g) => g.fields);
-    const dimensionFields = dimensionIds
-      .map((id) => fieldMap.get(id)?.name)
-      .filter(Boolean) as string[];
-
     const metricIds = queryConfig.metricGroups.flatMap((g) => g.fields);
-    const metricFields = metricIds.map((id) => fieldMap.get(id)?.name).filter(Boolean) as string[];
-    const metricNameMap = new Map(
-      metricIds.map((id) => {
-        const field = fieldMap.get(id);
-        const baseName = field?.name || id;
-        const alias = metricAliases[id];
-        const unit = metricUnits[id];
-        const displayName = alias || baseName;
-        return [baseName, unit ? `${displayName} (${unit})` : displayName];
-      })
-    );
+    const dimensions = dimensionIds
+      .map((id) => fieldMap.get(id)?.name)
+      .filter((name): name is string => name !== undefined);
+    const metrics = metricIds
+      .map((id) => fieldMap.get(id)?.name)
+      .filter((name): name is string => name !== undefined);
 
-    // scatter needs 2 metrics (x/y) and no dimensions; other types need a
-    // dimension. Anything less renders the empty state instead of building a
-    // broken ECharts option (missing xAxis would throw and blank the page).
-    const isScatter = config.chartType === 'scatter';
-    if (
-      metricFields.length === 0 ||
-      data.length === 0 ||
-      (!isScatter && dimensionFields.length === 0) ||
-      (isScatter && metricFields.length < 2)
-    ) {
-      return null;
-    }
-
-    const xAxisField = dimensionFields[0];
-    const xAxisData = data.map((item) => item[xAxisField]);
-
-    const commonOptions = {
-      title: {
-        text: config.title,
-        left: 'center',
-      },
-      tooltip: {
-        trigger: 'axis',
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '3%',
-        containLabel: true,
-      },
-    };
-
-    // 多维度时 series key 是维度值，单维度时是指标名
-    const dataKeys = data.length > 0 ? Object.keys(data[0]) : [];
-    const seriesFields = dataKeys.filter((k) => k !== xAxisField);
-    const effectiveSeries = seriesFields.length > 0 ? seriesFields : metricFields;
-
-    switch (config.chartType) {
-      case 'line':
-        return {
-          ...commonOptions,
-          xAxis: {
-            type: 'category',
-            data: xAxisData,
-            name: dimensionLabels[queryConfig.dimensionGroups[0]?.fields[0] || ''] || xAxisField,
-            axisLabel: {
-              rotate: xAxisData.length > 10 ? 30 : 0,
-              formatter: (val: string) => {
-                // 截断 "+0000 UTC" 后缀，保留日期+时间
-                return val.replace(/\s*\+\d{4}\s*UTC$/, '');
-              },
-            },
-          },
-          yAxis: {
-            type: 'value',
-          },
-          series: effectiveSeries.map((yField) => ({
-            name: metricNameMap.get(yField) || yField,
-            type: 'line',
-            smooth: chartStyle.smooth,
-            connectNulls: true,
-            data: data.map((item) => item[yField] ?? null),
-          })),
-          color: chartStyle.colors.length > 0 ? chartStyle.colors : undefined,
-        };
-
-      case 'bar':
-        return {
-          ...commonOptions,
-          xAxis: {
-            type: 'category',
-            data: xAxisData,
-            axisLabel: {
-              rotate: xAxisData.length > 10 ? 30 : 0,
-              formatter: (val: string) => val.replace(/\s*\+\d{4}\s*UTC$/, ''),
-            },
-          },
-          yAxis: {
-            type: 'value',
-          },
-          series: effectiveSeries.map((yField) => ({
-            name: metricNameMap.get(yField) || yField,
-            type: 'bar',
-            data: data.map((item) => item[yField] ?? null),
-          })),
-          color: chartStyle.colors.length > 0 ? chartStyle.colors : undefined,
-        };
-
-      case 'pie': {
-        const pieData = data.map((item) => ({
-          name: item[xAxisField] || item.name,
-          value: item[metricFields[0] || ''] || item.value,
-        }));
-        return {
-          ...commonOptions,
-          tooltip: {
-            trigger: 'item',
-            formatter: '{b}: {c} ({d}%)',
-          },
-          legend: {
-            orient: 'vertical',
-            left: 'left',
-          },
-          series: [
-            {
-              name: metricFields[0] || 'Value',
-              type: 'pie',
-              radius: '50%',
-              data: pieData,
-              emphasis: {
-                itemStyle: {
-                  shadowBlur: 10,
-                  shadowOffsetX: 0,
-                  shadowColor: 'rgba(0, 0, 0, 0.5)',
-                },
-              },
-              label: {
-                formatter: '{b}: {d}%',
-              },
-            },
-          ],
-          color: chartStyle.colors.length > 0 ? chartStyle.colors : undefined,
-        };
+    const labels: Record<string, string> = {};
+    for (const id of dimensionIds) {
+      const name = fieldMap.get(id)?.name;
+      const label = dimensionLabels[id];
+      if (name && label) {
+        labels[name] = label;
       }
-
-      case 'area':
-        return {
-          ...commonOptions,
-          xAxis: {
-            type: 'category',
-            data: xAxisData,
-            axisLabel: {
-              rotate: xAxisData.length > 10 ? 30 : 0,
-              formatter: (val: string) => val.replace(/\s*\+\d{4}\s*UTC$/, ''),
-            },
-          },
-          yAxis: {
-            type: 'value',
-          },
-          series: effectiveSeries.map((yField) => ({
-            name: metricNameMap.get(yField) || yField,
-            type: 'line',
-            areaStyle: {},
-            smooth: chartStyle.smooth,
-            connectNulls: true,
-            data: data.map((item) => item[yField] ?? null),
-          })),
-          color: chartStyle.colors.length > 0 ? chartStyle.colors : undefined,
-        };
-
-      case 'scatter':
-        return {
-          ...commonOptions,
-          xAxis: {
-            type: 'value',
-          },
-          yAxis: {
-            type: 'value',
-          },
-          series: [
-            {
-              type: 'scatter',
-              // ScatterResponse.data is [number, number][] — access by index
-              data: data.map((item) => [item[0], item[1]]),
-            },
-          ],
-        };
-
-      default:
-        return null;
     }
-  }, [
-    chartStyle.colors,
-    chartStyle.smooth,
-    config,
-    data,
-    dimensionLabels,
-    metricAliases,
-    metricUnits,
-  ]);
+    for (const id of metricIds) {
+      const baseName = fieldMap.get(id)?.name || id;
+      const alias = metricAliases[id];
+      const unit = metricUnits[id];
+      const displayName = alias || baseName;
+      labels[baseName] = unit ? `${displayName} (${unit})` : displayName;
+    }
 
-  const chartOption = getChartOption();
+    return buildChartOption(config.chartType, data, chartStyle, labels, {
+      title: config.title,
+      dimensions,
+      metrics,
+    });
+  }, [chartStyle, config, data, dimensionLabels, metricAliases, metricUnits]);
 
   if (loading) {
     return (
@@ -619,7 +454,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
       </Card>
 
       <Card title="图表配置" size="small" style={{ marginBottom: 12 }}>
-        <Space direction="vertical" style={{ width: '100%' }} size="small">
+        <Space orientation="vertical" style={{ width: '100%' }} size="small">
           <div>
             <Text strong>图表标题</Text>
             <Input
@@ -669,7 +504,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
 
       {dimensionFields.length > 0 && (
         <Card title="维度属性" size="small" style={{ marginBottom: 12 }}>
-          <Space direction="vertical" style={{ width: '100%' }} size="small">
+          <Space orientation="vertical" style={{ width: '100%' }} size="small">
             {dimensionFields.map((field) => (
               <div key={field.id}>
                 <Text strong>{field.name}</Text>
@@ -687,7 +522,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
 
       {metricFields.length > 0 && (
         <Card title="指标属性" size="small" style={{ marginBottom: 12 }}>
-          <Space direction="vertical" style={{ width: '100%' }} size="small">
+          <Space orientation="vertical" style={{ width: '100%' }} size="small">
             {metricFields.map((field) => (
               <div key={field.id}>
                 <Text strong>{field.name}</Text>
@@ -1315,9 +1150,15 @@ const ChartBuilder: React.FC = () => {
     if (chartBuilderConfig.chartType === 'table' || chartBuilderConfig.chartType === 'pivot') {
       const dimensionFields = getDimensionFields();
       const metricFields = getMetricFields();
+      // table/pivot 的结构化响应是 {columns, data}，TableChart 消费行数组：
+      // 按形状判别安全提取，空数组/形状不匹配时回退为 []。
+      const tableRows =
+        !Array.isArray(chartData) && 'columns' in chartData && Array.isArray(chartData.data)
+          ? chartData.data
+          : [];
       return (
         <TableChart
-          data={chartData}
+          data={tableRows}
           loading={chartDataLoading}
           columns={tableColumns}
           columnLabels={Object.fromEntries(
@@ -1401,7 +1242,7 @@ const ChartBuilder: React.FC = () => {
               size="small"
               icon={<CodeOutlined />}
               onClick={() => setSqlModalVisible(true)}
-              disabled={chartData.length === 0}
+              disabled={isEmptyPayload(chartData)}
               title="SQL"
             />
             <Button
@@ -1465,7 +1306,7 @@ const ChartBuilder: React.FC = () => {
               执行查询
             </Button>
           )}
-          {chartData.length > 0 && (
+          {!isEmptyPayload(chartData) && (
             <Button icon={<CodeOutlined />} onClick={() => setSqlModalVisible(true)}>
               查看 SQL
             </Button>
@@ -1604,7 +1445,7 @@ const ChartBuilder: React.FC = () => {
           placement="left"
           onClose={() => setLeftDrawerOpen(false)}
           open={leftDrawerOpen}
-          width={300}
+          size={300}
         >
           <Card title="字段列表" size="small">
             <FieldListPanel fields={chartBuilderFields} loading={chartBuilderFieldsLoading} />
@@ -1616,7 +1457,7 @@ const ChartBuilder: React.FC = () => {
           placement="right"
           onClose={() => setRightDrawerOpen(false)}
           open={rightDrawerOpen}
-          width={300}
+          size={300}
         >
           <ConfigPanel
             config={chartBuilderConfig}

@@ -2,8 +2,8 @@ import { arrayMove } from '@dnd-kit/sortable';
 import { message } from 'antd';
 import { create } from 'zustand';
 import {
-  AxisResponse,
   Chart,
+  ChartDataResponse,
   ChartFormData,
   ChartQueryRequest,
   ChartQueryResponse,
@@ -15,11 +15,8 @@ import {
   DatasourceFormData,
   datasetsApi,
   datasourcesApi,
-  PieResponse,
-  ScatterResponse,
   ShareFormData,
   sharesApi,
-  TableResponse,
 } from '../api';
 
 /**
@@ -133,7 +130,7 @@ export interface AppState {
   chartBuilderFields: ChartField[];
   chartBuilderFieldsLoading: boolean;
   chartBuilderConfig: ChartConfig;
-  chartData: any[];
+  chartData: ChartDataResponse;
   chartDataLoading: boolean;
   queryConfig: QueryConfig;
   autoQuery: boolean;
@@ -450,11 +447,9 @@ export const useStore = create<AppState>((set) => ({
     set({ chartDataLoading: true });
     try {
       const response = await chartsApi.getChartData(chartId);
-      // chartData 状态约定是行数组（builder 的旧消费面）。v1 配置下
-      // getChartData 现在返回聚合对象（分享页 ShareView 直接消费该联合类型），
-      // 这里仅保留 legacy 的裸行回退，聚合负载不强行塞进行数组状态。
-      const payload = response.data.data;
-      set({ chartData: Array.isArray(payload) ? payload : [], chartDataLoading: false });
+      // chartData 状态即结构化联合（ChartDataResponse）：v1 配置的聚合负载
+      // 与 legacy 裸行回退都在联合内，直接存储，不做形状转换。
+      set({ chartData: response.data.data, chartDataLoading: false });
     } catch (_error: any) {
       set({ chartData: [], chartDataLoading: false });
     }
@@ -780,79 +775,31 @@ export const useStore = create<AppState>((set) => ({
     try {
       const response = await chartsApi.executeChartQuery(request);
       const result = response.data.data; // { data, select_sql, count_sql }
-      const chartData = result?.data;
-      const queryResponse = result as ChartQueryResponse;
+      // chartData 直接存结构化响应（与 ShareView 消费面一致），不再按
+      // chartType 拆平铺行；table/pivot 额外提取 columns（两者都有）与
+      // 分页（仅 table 有）供 TableChart 使用。
+      const chartData = result?.data ?? [];
 
-      if (request.chart_type === 'table' && chartData && 'pagination' in chartData) {
-        const tableData = chartData as TableResponse;
+      if (!Array.isArray(chartData) && 'columns' in chartData) {
+        const tablePatch =
+          'pagination' in chartData
+            ? {
+                tablePagination: {
+                  page: chartData.pagination.page,
+                  pageSize: chartData.pagination.page_size,
+                  total: chartData.pagination.total,
+                },
+              }
+            : {};
         set({
-          chartData: tableData.data,
-          chartQueryResponse: queryResponse,
-          tablePagination: {
-            page: tableData.pagination.page,
-            pageSize: tableData.pagination.page_size,
-            total: tableData.pagination.total,
-          },
-          tableColumns: tableData.columns || [],
-          chartDataLoading: false,
-        });
-      } else if (request.chart_type === 'pie' && chartData && 'data' in chartData) {
-        const pieData = chartData as PieResponse;
-        const transformedData = pieData.data.map((item: any) => ({
-          name: item.name,
-          value: item.value,
-        }));
-        set({
-          chartData: transformedData,
-          chartQueryResponse: queryResponse,
-          chartDataLoading: false,
-        });
-      } else if (
-        request.chart_type === 'bar' ||
-        request.chart_type === 'line' ||
-        request.chart_type === 'area'
-      ) {
-        const axisData = chartData as AxisResponse;
-        const transformedData = axisData.x_axis.map((xVal: string, idx: number) => {
-          const row: Record<string, any> = { [request.dims[0] || 'x']: xVal };
-          axisData.series.forEach((series: any) => {
-            row[series.name] = series.data[idx];
-          });
-          return row;
-        });
-        set({
-          chartData: transformedData,
-          chartQueryResponse: queryResponse,
-          chartDataLoading: false,
-        });
-      } else if (request.chart_type === 'scatter' && chartData && 'data' in chartData) {
-        // ScatterResponse.data 是 [x, y] 二元组数组，ChartCanvas 按下标消费
-        const scatterData = chartData as ScatterResponse;
-        set({
-          chartData: scatterData.data,
-          chartQueryResponse: queryResponse,
-          chartDataLoading: false,
-        });
-      } else if (
-        request.chart_type === 'pivot' &&
-        chartData &&
-        'columns' in chartData &&
-        Array.isArray((chartData as TableResponse).data)
-      ) {
-        // PivotResponse 与 TableResponse 同构（columns + data，无分页）
-        const pivotData = chartData as TableResponse;
-        set({
-          chartData: pivotData.data,
-          tableColumns: pivotData.columns || [],
-          chartQueryResponse: queryResponse,
+          chartData,
+          chartQueryResponse: result,
+          tableColumns: chartData.columns || [],
+          ...tablePatch,
           chartDataLoading: false,
         });
       } else {
-        set({
-          chartData: Array.isArray(chartData) ? chartData : [],
-          chartQueryResponse: queryResponse,
-          chartDataLoading: false,
-        });
+        set({ chartData, chartQueryResponse: result, chartDataLoading: false });
       }
     } catch (error: any) {
       console.error('Chart query failed:', error);

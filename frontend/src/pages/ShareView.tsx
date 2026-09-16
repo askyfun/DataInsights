@@ -9,16 +9,10 @@ import { Button, Card, Input, Result, Space, Spin, Tag, Typography } from 'antd'
 import ReactECharts from 'echarts-for-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import {
-  Chart,
-  type ChartDataResponse,
-  chartsApi,
-  type PieResponse,
-  type ScatterResponse,
-  sharesApi,
-} from '../api';
+import { Chart, type ChartDataResponse, chartsApi, sharesApi } from '../api';
 import TableChart from '../components/ChartBuilder/TableChart';
 import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
+import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../lib/chartOptions';
 
 const { Title, Text } = Typography;
 
@@ -35,23 +29,6 @@ interface ShareInfo {
 
 /** legacy 回退的裸数据行按列名索引 */
 type RawRow = Record<string, unknown>;
-
-/**
- * 两臂统一判空：v1 配置的聚合负载（判别对象形状，空结果时内层数组为空，
- * 与 builder 预览一致）vs legacy 的裸行数组回退。
- */
-function isEmptyPayload(data: ChartDataResponse): boolean {
-  if (Array.isArray(data)) {
-    return data.length === 0;
-  }
-  if ('x_axis' in data) {
-    return data.x_axis.length === 0;
-  }
-  if ('data' in data) {
-    return data.data.length === 0;
-  }
-  return true;
-}
 
 const ShareView: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -169,226 +146,22 @@ const ShareView: React.FC = () => {
     return labels;
   }, [chartDoc]);
 
-  // Generate chart option
-  const getChartOption = useCallback(() => {
-    if (!chart || !chartDoc || isEmptyPayload(chartData)) {
+  // 样式来自持久化 v1 文档的 style 小节（schema 上是 unknown）：
+  // 缺失/形状非法时经 normalizeChartStyle 回落 ChartStyleConfig 默认值。
+  const chartStyle = useMemo(() => normalizeChartStyle(chartDoc?.style), [chartDoc]);
+
+  // option 构造与 builder 预览共用 buildChartOption 唯一出口（结构化聚合
+  // 负载与 legacy 裸行回退两臂都在函数内部处理）。
+  const chartOption = useMemo(() => {
+    if (!chart || !chartDoc) {
       return null;
     }
-
-    // 表格类走 TableChart 渲染，不使用 ECharts option
-    if (chartDoc.chartType === 'table' || chartDoc.chartType === 'pivot') {
-      return null;
-    }
-
-    const dimensionNames = chartDoc.query.dimensionGroups.flatMap((g) => g.fields);
-    const metricNames = chartDoc.query.metricGroups.flatMap((g) => g.fields);
-    const labelOf = (name: string) => displayLabels[name] || name;
-
-    const commonOptions = {
-      title: {
-        text: chartDoc.title || chart.name,
-        left: 'center',
-      },
-      tooltip: {
-        trigger: 'axis',
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '3%',
-        containLabel: true,
-      },
-    };
-
-    // v1 配置：GET /charts/:id/data 返回与 builder 预览（POST /charts/query）
-    // 相同的聚合负载，按判别形状消费（判别方式对齐 store.executeChartQuery
-    // 的 `'x_axis' in d` / `'data' in d`）。
-    if (!Array.isArray(chartData)) {
-      switch (chartDoc.chartType) {
-        case 'scatter': {
-          const [xField, yField] = metricNames;
-          if (!xField || !yField || !('data' in chartData)) {
-            return null;
-          }
-          return {
-            ...commonOptions,
-            xAxis: {
-              type: 'value',
-              name: labelOf(xField),
-            },
-            yAxis: {
-              type: 'value',
-              name: labelOf(yField),
-            },
-            series: [
-              {
-                type: 'scatter',
-                data: (chartData as ScatterResponse).data,
-              },
-            ],
-          };
-        }
-
-        case 'pie': {
-          const valueField = metricNames[0];
-          if (!('data' in chartData)) {
-            return null;
-          }
-          return {
-            ...commonOptions,
-            series: [
-              {
-                name: labelOf(valueField) || 'Value',
-                type: 'pie',
-                radius: '50%',
-                data: (chartData as PieResponse).data.map((item) => ({
-                  name: item.name,
-                  value: item.value,
-                })),
-                emphasis: {
-                  itemStyle: {
-                    shadowBlur: 10,
-                    shadowOffsetX: 0,
-                    shadowColor: 'rgba(0, 0, 0, 0.5)',
-                  },
-                },
-              },
-            ],
-          };
-        }
-
-        case 'bar':
-        case 'line':
-        case 'area': {
-          if (!('x_axis' in chartData)) {
-            return null;
-          }
-          // 'x_axis' 判别已将该臂收窄为 ChartAxisResponse。
-          const axis = chartData;
-          return {
-            ...commonOptions,
-            xAxis: {
-              type: 'category',
-              data: axis.x_axis,
-            },
-            yAxis: {
-              type: 'value',
-            },
-            series: axis.series.map((s) => ({
-              name: s.name,
-              type: chartDoc.chartType === 'bar' ? 'bar' : 'line',
-              ...(chartDoc.chartType === 'area' ? { areaStyle: {} } : {}),
-              data: s.data,
-            })),
-          };
-        }
-
-        default:
-          return null;
-      }
-    }
-
-    // legacy 裸行回退（旧结构/损坏/空配置的分享仍可达）：按列名索引行。
-    const rows = chartData as RawRow[];
-
-    // 散点图只需两个指标，维度可选
-    if (chartDoc.chartType === 'scatter') {
-      const [xField, yField] = metricNames;
-      if (!xField || !yField) {
-        return null;
-      }
-      return {
-        ...commonOptions,
-        xAxis: {
-          type: 'value',
-          name: labelOf(xField),
-        },
-        yAxis: {
-          type: 'value',
-          name: labelOf(yField),
-        },
-        series: [
-          {
-            type: 'scatter',
-            data: rows.map((item) => [item[xField], item[yField]]),
-          },
-        ],
-      };
-    }
-
-    const xAxisField = dimensionNames[0];
-    if (!xAxisField || metricNames.length === 0) {
-      return null;
-    }
-
-    const xAxisData = rows.map((item) => item[xAxisField]);
-
-    switch (chartDoc.chartType) {
-      case 'line':
-      case 'area':
-        return {
-          ...commonOptions,
-          xAxis: {
-            type: 'category',
-            data: xAxisData,
-          },
-          yAxis: {
-            type: 'value',
-          },
-          series: metricNames.map((yField) => ({
-            name: labelOf(yField),
-            type: 'line',
-            ...(chartDoc.chartType === 'area' ? { areaStyle: {} } : {}),
-            data: rows.map((item) => item[yField]),
-          })),
-        };
-
-      case 'bar':
-        return {
-          ...commonOptions,
-          xAxis: {
-            type: 'category',
-            data: xAxisData,
-          },
-          yAxis: {
-            type: 'value',
-          },
-          series: metricNames.map((yField) => ({
-            name: labelOf(yField),
-            type: 'bar',
-            data: rows.map((item) => item[yField]),
-          })),
-        };
-
-      case 'pie': {
-        const valueField = metricNames[0];
-        return {
-          ...commonOptions,
-          series: [
-            {
-              name: labelOf(valueField) || 'Value',
-              type: 'pie',
-              radius: '50%',
-              data: rows.map((item) => ({
-                name: item[xAxisField],
-                value: item[valueField],
-              })),
-              emphasis: {
-                itemStyle: {
-                  shadowBlur: 10,
-                  shadowOffsetX: 0,
-                  shadowColor: 'rgba(0, 0, 0, 0.5)',
-                },
-              },
-            },
-          ],
-        };
-      }
-
-      default:
-        return null;
-    }
-  }, [chart, chartData, chartDoc, displayLabels]);
+    return buildChartOption(chartDoc.chartType, chartData, chartStyle, displayLabels, {
+      title: chartDoc.title || chart.name,
+      dimensions: chartDoc.query.dimensionGroups.flatMap((g) => g.fields),
+      metrics: chartDoc.query.metricGroups.flatMap((g) => g.fields),
+    });
+  }, [chart, chartDoc, chartData, chartStyle, displayLabels]);
 
   // Get chart type icon
   const getChartTypeIcon = (type: string) => {
@@ -462,7 +235,7 @@ const ShareView: React.FC = () => {
           <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
             This chart is password protected. Please enter the password to view.
           </Text>
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             <Input.Password
               placeholder="Enter password"
               value={password}
@@ -488,7 +261,6 @@ const ShareView: React.FC = () => {
   }
 
   // Chart display
-  const chartOption = getChartOption();
   const isTableLike = chartDoc?.chartType === 'table' || chartDoc?.chartType === 'pivot';
   // 聚合负载的 table/pivot 臂：TableResponse 带 pagination、PivotResponse 不带，
   // 两者都有 columns + data（行由后端按维度在前/指标别名在后组装，

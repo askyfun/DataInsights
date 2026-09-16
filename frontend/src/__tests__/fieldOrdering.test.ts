@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { buildChartOption } from '@/lib/chartOptions';
 import type { ChartField } from '@/store';
 import { useStore } from '@/store';
 
@@ -143,102 +144,90 @@ describe('字段顺序：添加字段后顺序正确', () => {
   });
 });
 
-describe('AxisResponse 多维度转换', () => {
+describe('结构化 AxisResponse：顺序原样保留（executeChartQuery 不再拆平铺行）', () => {
   /**
-   * 模拟 store 的 executeChartQuery 对 line/bar/area 的转换逻辑。
-   * 用 request.dims[0] 作为行数据的 key。
+   * 旧架构里 store 会把 AxisResponse 拆成行数组（用 dims[0] 作行键），
+   * x 轴/系列顺序依赖行键匹配，出过 xAxisField 错配的 bug。
+   * D7 修复后 chartData 即结构化负载原样，x 轴顺序 = x_axis 顺序、
+   * 系列顺序 = series 顺序，由共享的 buildChartOption 直接消费。
    */
-  function transformAxisResponse(
+  function buildAxisOption(
     axisData: { x_axis: string[]; series: Array<{ name: string; data: unknown[] }> },
-    dimName: string
-  ): Record<string, unknown>[] {
-    return axisData.x_axis.map((xVal, idx) => {
-      const row: Record<string, unknown> = { [dimName]: xVal };
-      for (const series of axisData.series) {
-        row[series.name] = series.data[idx];
-      }
-      return row;
-    });
+    dimensions: string[],
+    metrics: string[]
+  ) {
+    const option = buildChartOption(
+      'bar',
+      axisData,
+      { colors: [], smooth: false, tableRowSize: 'small' },
+      {},
+      { title: '', dimensions, metrics }
+    );
+    expect(option).not.toBeNull();
+    return option as unknown as {
+      xAxis: { data: unknown[] };
+      series: { name: string; data: unknown[] }[];
+    };
   }
 
-  it('单维度：key 是维度名，series 是指标名', () => {
-    const axisData = {
-      x_axis: ['A', 'B'],
-      series: [{ name: 'revenue', data: [100, 200] }],
-    };
-    const result = transformAxisResponse(axisData, 'category');
-    expect(result).toEqual([
-      { category: 'A', revenue: 100 },
-      { category: 'B', revenue: 200 },
+  it('单维度：x 轴是 x_axis 原序，系列是指标名', () => {
+    const option = buildAxisOption(
+      { x_axis: ['A', 'B'], series: [{ name: 'revenue', data: [100, 200] }] },
+      ['category'],
+      ['revenue']
+    );
+    expect(option.xAxis.data).toEqual(['A', 'B']);
+    expect(option.series).toEqual([{ name: 'revenue', type: 'bar', data: [100, 200] }]);
+  });
+
+  it('多维度：系列名是第二个维度的值，顺序原样保留', () => {
+    const option = buildAxisOption(
+      {
+        x_axis: ['2024-01', '2024-02'],
+        series: [
+          { name: 'Beijing', data: [100, 150] },
+          { name: 'Shanghai', data: [200, 250] },
+        ],
+      },
+      ['date', 'city'],
+      ['revenue']
+    );
+    expect(option.xAxis.data).toEqual(['2024-01', '2024-02']);
+    expect(option.series.map((s) => s.name)).toEqual(['Beijing', 'Shanghai']);
+    expect(option.series[1]?.data).toEqual([200, 250]);
+  });
+
+  it('多维度多指标：系列名是 "指标 - 维度" 组合，顺序原样保留', () => {
+    const option = buildAxisOption(
+      {
+        x_axis: ['2024-01'],
+        series: [
+          { name: 'revenue - Beijing', data: [100] },
+          { name: 'revenue - Shanghai', data: [200] },
+          { name: 'cost - Beijing', data: [50] },
+          { name: 'cost - Shanghai', data: [80] },
+        ],
+      },
+      ['date', 'city'],
+      ['revenue', 'cost']
+    );
+    expect(option.series.map((s) => s.name)).toEqual([
+      'revenue - Beijing',
+      'revenue - Shanghai',
+      'cost - Beijing',
+      'cost - Shanghai',
     ]);
   });
 
-  it('多维度：key 是第一个维度名，series 是第二个维度值', () => {
-    const axisData = {
-      x_axis: ['2024-01', '2024-02'],
-      series: [
-        { name: 'Beijing', data: [100, 150] },
-        { name: 'Shanghai', data: [200, 250] },
-      ],
-    };
-    const result = transformAxisResponse(axisData, 'date');
-    expect(result).toEqual([
-      { date: '2024-01', Beijing: 100, Shanghai: 200 },
-      { date: '2024-02', Beijing: 150, Shanghai: 250 },
-    ]);
-    // 确认 key 是 "date"（第一个维度），不是 "city"（第二个维度）
-    expect(result[0]).toHaveProperty('date');
-    expect(result[0]).not.toHaveProperty('city');
-  });
-
-  it('多维度多指标：key 是第一个维度名，series 是 "指标-维度" 组合', () => {
-    const axisData = {
-      x_axis: ['2024-01'],
-      series: [
-        { name: 'revenue - Beijing', data: [100] },
-        { name: 'revenue - Shanghai', data: [200] },
-        { name: 'cost - Beijing', data: [50] },
-        { name: 'cost - Shanghai', data: [80] },
-      ],
-    };
-    const result = transformAxisResponse(axisData, 'date');
-    expect(result[0]).toEqual({
-      date: '2024-01',
-      'revenue - Beijing': 100,
-      'revenue - Shanghai': 200,
-      'cost - Beijing': 50,
-      'cost - Shanghai': 80,
-    });
-  });
-
-  it('series 字段名和 xAxisField 不同时，xAxisData 正确提取', () => {
-    const axisData = {
-      x_axis: ['2024-01', '2024-02'],
-      series: [
-        { name: 'Beijing', data: [100, 150] },
-        { name: 'Shanghai', data: [200, 250] },
-      ],
-    };
-    const data = transformAxisResponse(axisData, 'date');
-    const xAxisField = 'date';
-    const xAxisData = data.map((item) => item[xAxisField]);
-
-    expect(xAxisData).toEqual(['2024-01', '2024-02']);
-    // 确保不会返回 undefined
-    expect(xAxisData.every((v) => v !== undefined)).toBe(true);
-  });
-
-  it('xAxisField 错误时返回 undefined — 这就是之前的 bug', () => {
-    const axisData = {
-      x_axis: ['2024-01', '2024-02'],
-      series: [{ name: 'Beijing', data: [100, 150] }],
-    };
-    const data = transformAxisResponse(axisData, 'date');
-
-    // 错误的 xAxisField（应该是 "date" 但用了 "city"）
-    const wrongXAxisField = 'city';
-    const xAxisData = data.map((item) => item[wrongXAxisField]);
-
-    expect(xAxisData).toEqual([undefined, undefined]);
+  it('系列数据不再经行键索引：维度名与系列名不一致也不会丢数据（旧 bug 已消除）', () => {
+    // 旧平铺架构：行键是 dims[0]，若 xAxisField 配错（date vs city），
+    // 取值全为 undefined。结构化消费下系列数据来自 payload 本身，与维度名无关。
+    const option = buildAxisOption(
+      { x_axis: ['2024-01', '2024-02'], series: [{ name: 'Beijing', data: [100, 150] }] },
+      ['date', 'city'],
+      ['revenue']
+    );
+    expect(option.series[0]?.data).toEqual([100, 150]);
+    expect(option.series[0]?.data.every((v) => v !== undefined)).toBe(true);
   });
 });
