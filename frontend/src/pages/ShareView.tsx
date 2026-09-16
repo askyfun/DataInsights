@@ -9,9 +9,10 @@ import { Button, Card, Input, Result, Space, Spin, Tag, Typography } from 'antd'
 import ReactECharts from 'echarts-for-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Chart, type ChartDataResponse, chartsApi, sharesApi } from '../api';
+import { Chart, type ChartDataResponse, chartsApi, isPivotV2Payload, sharesApi } from '../api';
 import { chartDefinitions } from '../components/ChartBuilder/chartDefinitions';
 import KpiCard from '../components/ChartBuilder/KpiCard';
+import PivotTable from '../components/ChartBuilder/PivotTable';
 import TableChart from '../components/ChartBuilder/TableChart';
 import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../lib/chartOptions';
@@ -292,6 +293,11 @@ const ShareView: React.FC = () => {
   const tablePayload =
     isTableLike && !Array.isArray(chartData) && 'columns' in chartData ? chartData : null;
 
+  // pivot v2 臂（R-53）：交叉表负载（cells+col_headers+row_headers）按响应形状判别——
+  // v1 平铺 pivot（{columns,data}）时 pivotPayload 为 null，仍走下方 TableChart 分支。
+  const isPivot = chartDoc?.chartType === 'pivot';
+  const pivotPayload = isPivot && isPivotV2Payload(chartData) ? chartData : null;
+
   // kpi 臂（R-51）：标量 {value, label}（ChartKpiResponse），不走 ECharts。
   // unit/format 从持久化 v2 文档的 fieldMeta 按 kpi 唯一 metric 槽位
   // （metricGroups[0] 的首个 binding）的 bindingId 取——后端 KpiResponse.Unit/Format
@@ -345,6 +351,8 @@ const ShareView: React.FC = () => {
             format={kpiMeta?.format}
             loading={false}
           />
+        ) : pivotPayload ? (
+          <PivotTable data={pivotPayload} columnLabels={displayLabels} />
         ) : isTableLike && !isEmptyPayload(chartData) ? (
           <TableChart
             data={tablePayload ? tablePayload.data : (chartData as RawRow[])}

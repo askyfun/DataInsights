@@ -167,14 +167,36 @@ export type ScatterResponse = G['ChartScatterResponse'];
 
 export type KpiResponse = G['ChartKpiResponse'];
 
+export type PivotResponseV2 = G['ChartPivotResponseV2'];
+
+export type PivotRow = G['ChartPivotRow'];
+
 export type ChartDataResponse =
   | G['ChartTableResponse']
   | G['ChartPieResponse']
   | G['ChartAxisResponse']
   | G['ChartScatterResponse']
   | G['ChartPivotResponse']
+  | G['ChartPivotResponseV2']
   | G['ChartKpiResponse']
   | unknown[];
+
+// pivot v2 交叉表负载判别：按响应形状（cells + col_headers + row_headers 均为数组）
+// 判别，而非 chartType——v1 平铺 pivot（{columns,data}，ChartPivotResponse）与 v2
+// 交叉 pivot 并存，前者与 table 一样仍走 TableChart。
+export function isPivotV2Payload(x: unknown): x is PivotResponseV2 {
+  return (
+    typeof x === 'object' &&
+    x !== null &&
+    !Array.isArray(x) &&
+    'cells' in x &&
+    Array.isArray(x.cells) &&
+    'col_headers' in x &&
+    Array.isArray(x.col_headers) &&
+    'row_headers' in x &&
+    Array.isArray(x.row_headers)
+  );
+}
 
 // NOT G['ChartQueryResponse'] (that is the Envelope wrapper): the bare wire
 // payload is G['ChartDataResult'], with data narrowed from unknown to the union.

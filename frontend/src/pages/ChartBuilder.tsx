@@ -44,6 +44,7 @@ import {
   ChartMetricGroup,
   ChartQueryAggregation,
   ChartQueryRequest,
+  isPivotV2Payload,
 } from '../api';
 import {
   chartDefinitions,
@@ -52,6 +53,7 @@ import {
 import DraggableField, { FieldDragPreview } from '../components/ChartBuilder/DraggableField';
 import FilterBuilder from '../components/ChartBuilder/FilterBuilder';
 import KpiCard from '../components/ChartBuilder/KpiCard';
+import PivotTable from '../components/ChartBuilder/PivotTable';
 import QueryConfigRow from '../components/ChartBuilder/QueryConfigRow';
 import TableChart from '../components/ChartBuilder/TableChart';
 import {
@@ -1456,6 +1458,22 @@ const ChartBuilder: React.FC = () => {
   };
 
   const renderPreview = () => {
+    // pivot v2（交叉表形状 cells+col_headers+row_headers）走 PivotTable。按响应形状
+    // 判别而非仅 chartType：v1 平铺 pivot（{columns,data}）仍落到下方 TableChart 分支。
+    if (chartBuilderConfig.chartType === 'pivot' && isPivotV2Payload(chartData)) {
+      return (
+        <PivotTable
+          data={chartData}
+          loading={chartDataLoading}
+          columnLabels={Object.fromEntries(
+            getDimensionFields().map((bound) => [
+              bound.field.name,
+              dimensionLabels[bound.binding.bindingId] || bound.field.name,
+            ])
+          )}
+        />
+      );
+    }
     if (chartBuilderConfig.chartType === 'table' || chartBuilderConfig.chartType === 'pivot') {
       const dimensionFields = getDimensionFields();
       const metricFields = getMetricFields();
