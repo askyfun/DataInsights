@@ -16,7 +16,8 @@
  * - fieldMeta 的键由列名改为 bindingId——同一列被拖入两个不同组会得到两个不同
  *   bindingId 与各自独立的元数据拷贝（修复 D2：按列名共享 aggregation/alias/
  *   unit/format 导致的互相覆盖）；
- * - filters/sort 的 field 仍为列名（按 bindingId 排序是后续任务）；
+ * - sort 以 bindingId 引用排序目标绑定（Task 1-7/R-50；v1/legacy 文档的列名键在
+ *   迁移时翻译为对应 binding 的 bindingId，翻译不到则丢弃）；filters 的 field 仍为列名；
  * - chartType / title / style / queryOptions 小节形状不变。
  *
  * 迁移是全覆盖函数：任何输入（空串、损坏 JSON、非对象）都返回合法 v2 文档，
@@ -63,7 +64,7 @@ interface V1FieldGroup {
   alias?: string;
 }
 
-/** v1 中间查询表示（仅迁移内部使用） */
+/** v1 中间查询表示（仅迁移内部使用）；sort.field 是列名，转 v2 时翻译为 bindingId */
 interface V1Query {
   dimensionGroups: V1FieldGroup[];
   metricGroups: V1FieldGroup[];
@@ -77,7 +78,8 @@ export interface ChartConfigQuery {
   metricGroups: ConfigFieldGroup[];
   /** 透传既有 FilterCondition 形状；迁移时仅重写 field 键 */
   filters: unknown[];
-  sort?: { field: string; order: string };
+  /** v2 形态：bindingId 引用排序目标绑定（Task 1-7/R-50） */
+  sort?: { bindingId: string; order: string };
   limit?: number;
 }
 
@@ -183,7 +185,12 @@ function migrateFilters(input: unknown, resolve: FieldResolver): unknown[] {
   });
 }
 
-function migrateSort(input: unknown, resolve: FieldResolver): ChartConfigQuery['sort'] | undefined {
+/**
+ * 解析 v1/legacy 文档的 sort 为列名中间表示（旧位置 id 经 resolve 翻译为列名）。
+ * 列名 → bindingId 的最终转换在 convertV1ToV2 里做——bindingId 是那里才生成的，
+ * 本函数拿不到（先后顺序见 Task 1-7 E 部分）。
+ */
+function migrateSort(input: unknown, resolve: FieldResolver): V1Query['sort'] {
   if (!isPlainObject(input) || typeof input.field !== 'string') {
     return undefined;
   }
@@ -191,6 +198,55 @@ function migrateSort(input: unknown, resolve: FieldResolver): ChartConfigQuery['
     field: resolve(input.field) ?? input.field,
     order: typeof input.order === 'string' ? input.order : 'asc',
   };
+}
+
+/**
+ * 把列名形态的 sort 翻译为 v2 的 bindingId 形态：按 dimensionGroups → metricGroups
+ * （即 bindingId 分配顺序）遍历所有 bindings，取 field 与列名匹配的第一个 binding；
+ * 找不到匹配的 binding（排序引用的列在任何组里都不存在）时丢弃 sort（返回 undefined）。
+ */
+function sortFromColumnField(
+  field: string,
+  order: unknown,
+  dimensionGroups: ConfigFieldGroup[],
+  metricGroups: ConfigFieldGroup[]
+): ChartConfigQuery['sort'] {
+  for (const group of [...dimensionGroups, ...metricGroups]) {
+    for (const binding of group.bindings) {
+      if (binding.field === field) {
+        return {
+          bindingId: binding.bindingId,
+          order: typeof order === 'string' ? order : 'asc',
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * v2 直通的 sort 校验拷贝：bindingId 键（Task 1-7 起的形状）做形状校验后透传；
+ * 兼容 Task 0-3~1-7 窗口期保存的 field 键（列名）文档，按 sortFromColumnField
+ * 翻译为 bindingId；两种键都没有则丢弃。
+ */
+function normalizeV2Sort(
+  input: unknown,
+  dimensionGroups: ConfigFieldGroup[],
+  metricGroups: ConfigFieldGroup[]
+): ChartConfigQuery['sort'] {
+  if (!isPlainObject(input)) {
+    return undefined;
+  }
+  if (typeof input.bindingId === 'string' && input.bindingId !== '') {
+    return {
+      bindingId: input.bindingId,
+      order: typeof input.order === 'string' ? input.order : 'asc',
+    };
+  }
+  if (typeof input.field === 'string') {
+    return sortFromColumnField(input.field, input.order, dimensionGroups, metricGroups);
+  }
+  return undefined;
 }
 
 function migrateLimit(input: unknown): number | undefined {
@@ -311,6 +367,7 @@ function normalizeV2Groups(input: unknown): ConfigFieldGroup[] {
  * metricGroups、组内按 fields 顺序，跨所有组连续编号 b-0/b-1/…），并把原列名键
  * fieldMeta 的内容复制到每个由该列名生成的 bindingId 上（同名列的多个 binding 各得
  * 一份独立拷贝，之后可各自修改互不影响——D2 修复目标）；原列名键条目丢弃。
+ * sort 的列名键在 bindings 生成后翻译为对应 bindingId（无匹配 binding 则丢弃）。
  */
 function convertV1ToV2(
   v1Query: V1Query,
@@ -336,13 +393,19 @@ function convertV1ToV2(
       return converted;
     });
 
+  // bindingId 分配顺序：dimensionGroups 先于 metricGroups（与原对象字面量求值顺序一致）
+  const dimensionGroups = convertGroups(v1Query.dimensionGroups);
+  const metricGroups = convertGroups(v1Query.metricGroups);
+
   return {
     query: {
-      // 对象字面量按源码顺序求值：dimensionGroups 先于 metricGroups 编号
-      dimensionGroups: convertGroups(v1Query.dimensionGroups),
-      metricGroups: convertGroups(v1Query.metricGroups),
+      dimensionGroups,
+      metricGroups,
       filters: v1Query.filters,
-      sort: v1Query.sort,
+      // sort 的列名 → bindingId 翻译必须在 bindings 生成之后进行（Task 1-7 E 部分）
+      sort: v1Query.sort
+        ? sortFromColumnField(v1Query.sort.field, v1Query.sort.order, dimensionGroups, metricGroups)
+        : undefined,
       limit: v1Query.limit,
     },
     fieldMeta,
@@ -405,15 +468,17 @@ export function migrateChartConfig(
   if (version === 2) {
     // v2 直通：校验拷贝 bindings + bindingId 键 fieldMeta，绝不改动输入
     const querySource = isPlainObject(parsed.query) ? parsed.query : {};
+    const dimensionGroups = normalizeV2Groups(querySource.dimensionGroups);
+    const metricGroups = normalizeV2Groups(querySource.metricGroups);
     return {
       version: 2,
       chartType,
       title,
       query: {
-        dimensionGroups: normalizeV2Groups(querySource.dimensionGroups),
-        metricGroups: normalizeV2Groups(querySource.metricGroups),
+        dimensionGroups,
+        metricGroups,
         filters: migrateFilters(querySource.filters, identityResolver),
-        sort: migrateSort(querySource.sort, identityResolver),
+        sort: normalizeV2Sort(querySource.sort, dimensionGroups, metricGroups),
         limit: migrateLimit(querySource.limit),
       },
       fieldMeta: normalizeFieldMeta(parsed.fieldMeta),

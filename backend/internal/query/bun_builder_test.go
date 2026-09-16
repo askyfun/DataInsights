@@ -574,6 +574,109 @@ func TestBunQueryBuilder_OrderByAliasUsesSameQuoting(t *testing.T) {
 	}
 }
 
+// TestBunQueryBuilder_SortByBindingID_Metric 覆盖 Task 1-7 选择1：v2 请求的 sort.field
+// 是 bindingId，renderSortRef 先经 resolveSortAlias 翻译为绑定实际输出别名，再进入既有
+// 的"输出别名 → 方言引号"逻辑（AST 经 PlanAST + ApplyColumnMappings 的真实管道构造）。
+func TestBunQueryBuilder_SortByBindingID_Metric(t *testing.T) {
+	spec := &QuerySpec{
+		Dimensions: []DimensionExpr{
+			{Field: "region", GroupName: "x_axis", BindingID: "b-0"},
+		},
+		Metrics: []MetricExpr2{
+			{Field: "amount", Agg: AggSum, Alias: "total", GroupName: "values", BindingID: "b-2"},
+		},
+		Sort: &SortConfig{Field: "b-2", Order: "desc"},
+	}
+	ast := NewQueryPlanner().PlanAST("orders", SourceTypeTable, spec)
+	ast.ApplyColumnMappings(map[string]string{})
+
+	qb := NewBunQueryBuilder()
+	qb.SetDialect(DialectPostgreSQL)
+	sql, _ := qb.BuildSelectQuery(ast)
+
+	expected := `SELECT region, SUM(amount) AS "total" FROM orders GROUP BY region ORDER BY "total" DESC`
+	if sql != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
+	}
+}
+
+// TestBunQueryBuilder_SortByBindingID_Dimension 验证排序键指向维度 binding 时翻译为
+// 维度别名：普通维度（别名==列名、无粒度）保持不加引号的既有渲染，与普通列排序一致。
+func TestBunQueryBuilder_SortByBindingID_Dimension(t *testing.T) {
+	spec := &QuerySpec{
+		Dimensions: []DimensionExpr{
+			{Field: "region", GroupName: "x_axis", BindingID: "b-0"},
+		},
+		Metrics: []MetricExpr2{
+			{Field: "amount", Agg: AggSum, Alias: "total", GroupName: "values", BindingID: "b-1"},
+		},
+		Sort: &SortConfig{Field: "b-0", Order: "asc"},
+	}
+	ast := NewQueryPlanner().PlanAST("orders", SourceTypeTable, spec)
+	ast.ApplyColumnMappings(map[string]string{})
+
+	qb := NewBunQueryBuilder()
+	qb.SetDialect(DialectPostgreSQL)
+	sql, _ := qb.BuildSelectQuery(ast)
+
+	expected := `SELECT region, SUM(amount) AS "total" FROM orders GROUP BY region ORDER BY region ASC`
+	if sql != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
+	}
+}
+
+// TestBunQueryBuilder_SortByAlias_V1PlanASTUnchanged 是 v1 向后兼容回归：经 PlanAST
+// 产出的 v1 AST（DimensionExprs/MetricExprs 的 BindingID 全为空）里 sort.field 仍是
+// 输出别名/列名，resolveSortAlias 翻译为恒等，ORDER BY 渲染与本任务改动前完全一致。
+func TestBunQueryBuilder_SortByAlias_V1PlanASTUnchanged(t *testing.T) {
+	spec := &QuerySpec{
+		Dimensions: []DimensionExpr{{Field: "region"}},
+		Metrics: []MetricExpr2{
+			{Field: "amount", Agg: AggSum, Alias: "total"},
+		},
+		Sort: &SortConfig{Field: "total", Order: "desc"},
+	}
+	ast := NewQueryPlanner().PlanAST("orders", SourceTypeTable, spec)
+	ast.ApplyColumnMappings(map[string]string{})
+
+	qb := NewBunQueryBuilder()
+	qb.SetDialect(DialectPostgreSQL)
+	sql, _ := qb.BuildSelectQuery(ast)
+
+	expected := `SELECT region, SUM(amount) AS "total" FROM orders GROUP BY region ORDER BY "total" DESC`
+	if sql != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
+	}
+}
+
+// TestResolveSortAlias 直接覆盖翻译函数的查找规则：指标优先于维度、未命中原样返回
+// （v1 的列名/别名键）、空串不得命中 BindingID 为空的条目（v1 AST 全空 BindingID）。
+func TestResolveSortAlias(t *testing.T) {
+	qb := NewBunQueryBuilder()
+	ast := &QueryAST{
+		MetricExprs: []MetricPlanExpr{
+			{Field: "amount", Alias: "total", BindingID: "b-2"},
+			{Field: "qty", Alias: "qty"}, // v1 形态：BindingID 为空
+		},
+		DimensionExprs: []DimensionExprAST{
+			{Field: "region", Alias: "region", BindingID: "b-0"},
+		},
+	}
+
+	if got := qb.resolveSortAlias(ast, "b-2"); got != "total" {
+		t.Errorf("metric bindingId: expected total, got %q", got)
+	}
+	if got := qb.resolveSortAlias(ast, "b-0"); got != "region" {
+		t.Errorf("dimension bindingId: expected region, got %q", got)
+	}
+	if got := qb.resolveSortAlias(ast, "amount"); got != "amount" {
+		t.Errorf("column-name miss must be identity, got %q", got)
+	}
+	if got := qb.resolveSortAlias(ast, ""); got != "" {
+		t.Errorf("empty name must not match empty BindingID entries, got %q", got)
+	}
+}
+
 func TestBunQueryBuilder_ColumnMappings(t *testing.T) {
 	qb := NewBunQueryBuilder()
 

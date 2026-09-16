@@ -632,7 +632,8 @@ describe('ChartBuilder', () => {
     // 请求体不得携带 config / query_options（断链控件已移除）。
     expect(request).not.toHaveProperty('config');
     expect(request).not.toHaveProperty('query_options');
-    // 钉死其余请求形状不变。
+    // 钉死其余请求形状不变。sort 键仅在 queryConfig.sort 存在且 bindingId 可解析时
+    // 才携带（Task 1-7 起自动查询 effect 也发送 sort；本用例未设置 sort）。
     expect(Object.keys(request).sort()).toEqual([
       'chart_type',
       'dataset_id',
@@ -644,6 +645,156 @@ describe('ChartBuilder', () => {
 
     // UI 不再有「合并其他比例」输入控件。
     expect(screen.queryByText('饼图“其他”阈值 (%)')).not.toBeInTheDocument();
+  });
+
+  it('auto query effect sends sort with the output-name wire value on v1 flat requests (R-50)', async () => {
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+    });
+
+    // revenue → 指标组 b-1，别名 gmv；sort 引用 bindingId（新 QueryConfig.sort 形状）
+    act(() => {
+      const state = useStore.getState();
+      state.addMetricField(state.chartBuilderFields[1], 0);
+      state.setMetricAlias('b-1', 'gmv');
+      state.setQueryConfig({ sort: { bindingId: 'b-1', order: 'desc' } });
+    });
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(2);
+    });
+
+    const request = mockExecuteChartQuery.mock.calls[1][0];
+    // v1 平铺请求：sort.field 是该绑定的输出列名（指标 = 别名 || 列名），
+    // 与改动前直接发送 TableChart sorter.field 的 wire 字节等价
+    expect(request.sort).toEqual({ field: 'gmv', order: 'desc' });
+    expect(request.metrics).toEqual([{ field: 'revenue', agg: 'sum', alias: 'gmv' }]);
+  });
+
+  it('sends sort.field as the raw bindingId on v2 slot-protocol requests (裁定B 选择1)', async () => {
+    mockGetColumns.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: [
+          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
+          { name: 'city', expr: 'city', type: 'string', comment: '', role: 'dimension' },
+          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+        ],
+      })
+    );
+
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Stacked Bar',
+          dataset_id: 1,
+          chart_type: 'bar',
+          config: JSON.stringify({
+            version: 2,
+            chartType: 'bar',
+            title: 'Stacked Bar',
+            query: {
+              dimensionGroups: [
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+                { id: 'dim-group-2', bindings: [{ bindingId: 'b-1', field: 'city' }] },
+              ],
+              metricGroups: [
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-2', field: 'revenue' }] },
+              ],
+              filters: [],
+              limit: 1000,
+            },
+            fieldMeta: {},
+          }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      })
+    );
+
+    renderChartBuilder();
+
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.chart_type).toBe('bar');
+      expect(lastRequest?.spec_version).toBe(2);
+    });
+
+    // color_group 非空 → v2 槽位协议；sort 引用指标 binding b-2
+    act(() => {
+      useStore.getState().setQueryConfig({ sort: { bindingId: 'b-2', order: 'desc' } });
+    });
+
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.sort).toEqual({ field: 'b-2', order: 'desc' });
+    });
+
+    const request =
+      mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+    expect(request?.spec_version).toBe(2);
+  });
+
+  it('drops the sort key when the referenced bindingId no longer exists (悬挂引用)', async () => {
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      useStore.getState().setQueryConfig({ sort: { bindingId: 'b-99', order: 'asc' } });
+    });
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(2);
+    });
+
+    const request = mockExecuteChartQuery.mock.calls[1][0];
+    // 悬挂 bindingId 不得上 wire（后端会渲染成 _invalid_identifier 破坏 SQL）
+    expect(request).not.toHaveProperty('sort');
+  });
+
+  it('translates a table header sort click into a bindingId-keyed queryConfig.sort', async () => {
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+    });
+
+    // 表格首列 region（维度 binding b-0）：点击表头触发 antd sorter（首次点击 = ascend）。
+    // 用 columnheader role 定位表头单元格，避免命中侧边栏的同名字段标签。
+    await waitFor(() => {
+      expect(screen.getByText('East')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('columnheader', { name: /region/ }));
+
+    await waitFor(() => {
+      expect(useStore.getState().queryConfig.sort).toEqual({ bindingId: 'b-0', order: 'asc' });
+    });
+
+    // 点击排序会依次触发：handlePageChange 重建（antd onChange 的分页副作用，闭包里
+    // 尚无新 sort）→ handleSortChange 直发 → autoQuery effect 重跑。最后两次
+    // （直发 + effect）都必须携带 sort——R-50 修复前 effect 那次从不带 sort，
+    // 会用未排序结果覆盖已排序数据。
+    await waitFor(() => {
+      const calls = mockExecuteChartQuery.mock.calls;
+      expect(calls.length).toBeGreaterThanOrEqual(3);
+      for (const call of calls.slice(-2)) {
+        // v1 平铺：维度绑定的输出列名 = 列名本身
+        expect(call[0].sort).toEqual({ field: 'region', order: 'asc' });
+      }
+    });
   });
 
   it('sends filters with the operator key to match the backend entity.Filter contract', async () => {

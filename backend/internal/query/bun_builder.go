@@ -421,14 +421,38 @@ func (qb *BunQueryBuilder) quoteResultAlias(alias string) string {
 	return string(bundialect.AppendIdent(nil, name, quote))
 }
 
+// resolveSortAlias 把 v2 协议的排序引用键（bindingId）翻译为实际的 SQL 输出别名。
+// 调用场景：renderSortRef 在决定引号/渲染策略前对排序键做一次性翻译。
+// 主要逻辑：先按 BindingID 查 MetricExprs，再查 DimensionExprs，命中返回其 Alias；
+// 都未命中（v1 请求 BindingID 全为空、或排序键本就是列名/输出别名）时原样返回，
+// 交给下游现有的"按名直接匹配输出别名"逻辑，保证 v1 行为完全不变。
+func (qb *BunQueryBuilder) resolveSortAlias(ast *QueryAST, name string) string {
+	if name == "" {
+		return name
+	}
+	for _, m := range ast.MetricExprs {
+		if m.BindingID == name {
+			return m.Alias
+		}
+	}
+	for _, dim := range ast.DimensionExprs {
+		if dim.BindingID == name {
+			return dim.Alias
+		}
+	}
+	return name
+}
+
 // renderSortRef 渲染 ORDER BY 引用：排序键指向 SELECT 输出别名时，必须使用与
 // SELECT 相同的引号（折叠大小写后就匹配不到带引号保留的输出列）；普通列排序
-// 保持 safeIdentifier 原样输出。
+// 保持 safeIdentifier 原样输出。v2 请求的排序键是 bindingId，先经 resolveSortAlias
+// 翻译为输出别名再进入上述既有逻辑；v1 请求 BindingID 全为空，翻译为恒等。
 func (qb *BunQueryBuilder) renderSortRef(ast *QueryAST) string {
 	name := ast.Sort.FieldExpr
 	if name == "" {
 		name = ast.Sort.Field
 	}
+	name = qb.resolveSortAlias(ast, name)
 	if qb.referencesResultAlias(ast, name) {
 		return qb.quoteResultAlias(name)
 	}
@@ -437,6 +461,8 @@ func (qb *BunQueryBuilder) renderSortRef(ast *QueryAST) string {
 
 // referencesResultAlias 判断排序键是否等于某个会被引号保留的输出别名：
 // 指标别名，或实际渲染出 AS 别名的维度（改名或带时间粒度）。
+// 入参 name 必须已经过 resolveSortAlias 翻译（唯一调用方 renderSortRef 负责），
+// 函数内部不再重复翻译，避免"别名恰好等于另一个 bindingId"时被二次替换。
 func (qb *BunQueryBuilder) referencesResultAlias(ast *QueryAST, name string) bool {
 	if name == "" {
 		return false

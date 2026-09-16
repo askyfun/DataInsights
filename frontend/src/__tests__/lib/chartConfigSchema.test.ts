@@ -146,11 +146,42 @@ describe('migrateChartConfig：旧结构 → v2', () => {
     expect(fields).toEqual(['region', 'region']);
   });
 
-  it('sort 的 field 解析为列名，limit 保留', () => {
+  it('sort 的列名翻译为对应 binding 的 bindingId，limit 保留', () => {
     const doc = migrateChartConfig(legacyConfig(), 'table', FIELDS);
 
-    expect(doc.query.sort).toEqual({ field: 'gmv', order: 'desc' });
+    // legacy sort.field='field-1' → 列名 'gmv' → metric 组 binding b-1
+    expect(doc.query.sort).toEqual({ bindingId: 'b-1', order: 'desc' });
     expect(doc.query.limit).toBe(1000);
+  });
+
+  it('sort 引用的列不在任何组里：丢弃 sort（undefined）', () => {
+    const raw = JSON.stringify({
+      chartType: 'bar',
+      queryConfig: {
+        dimensionGroups: [{ id: 'dim-0', fields: ['field-0'] }],
+        metricGroups: [],
+        sort: { field: 'field-1', order: 'desc' },
+      },
+    });
+    // field-1 解析为列名 gmv，但 gmv 不在任何组里 → sort 丢弃
+    expect(migrateChartConfig(raw, 'bar', FIELDS).query.sort).toBeUndefined();
+  });
+
+  it('sort 列名同时出现在维度组与指标组：取 bindingId 分配顺序的第一个（维度在前）', () => {
+    const raw = JSON.stringify({
+      chartType: 'pivot',
+      queryConfig: {
+        dimensionGroups: [{ id: 'rows', fields: ['field-1'] }],
+        metricGroups: [{ id: 'v0', fields: ['field-1'] }],
+        sort: { field: 'field-1', order: 'asc' },
+      },
+    });
+    const doc = migrateChartConfig(raw, 'pivot', FIELDS);
+
+    // gmv 在维度组是 b-0、指标组是 b-1：与 bindingId 分配顺序一致取 b-0
+    expect(doc.query.dimensionGroups[0].bindings).toEqual([{ bindingId: 'b-0', field: 'gmv' }]);
+    expect(doc.query.metricGroups[0].bindings).toEqual([{ bindingId: 'b-1', field: 'gmv' }]);
+    expect(doc.query.sort).toEqual({ bindingId: 'b-0', order: 'asc' });
   });
 
   it('chartStyle → style、chartQueryOptions → queryOptions 透传', () => {
@@ -332,6 +363,52 @@ describe('migrateChartConfig：v2 直通', () => {
 
     expect(doc.query.dimensionGroups[0].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
     expect(doc.fieldMeta).toEqual({ 'b-0': { label: '地区' } });
+  });
+
+  it('v2 直通：bindingId 形态的 sort 原样透传', () => {
+    const raw = JSON.stringify({
+      version: 2,
+      chartType: 'table',
+      query: {
+        dimensionGroups: [{ id: 'd0', bindings: [{ bindingId: 'b-0', field: 'region' }] }],
+        metricGroups: [{ id: 'm0', bindings: [{ bindingId: 'b-1', field: 'gmv' }] }],
+        filters: [],
+        sort: { bindingId: 'b-1', order: 'desc' },
+      },
+      fieldMeta: {},
+    });
+    const doc = migrateChartConfig(raw, 'table');
+
+    expect(doc.query.sort).toEqual({ bindingId: 'b-1', order: 'desc' });
+  });
+
+  it('v2 直通兼容窗口期 field 键 sort：按列名翻译为 bindingId，翻译不到则丢弃', () => {
+    const base = {
+      version: 2,
+      chartType: 'table',
+      query: {
+        dimensionGroups: [{ id: 'd0', bindings: [{ bindingId: 'b-0', field: 'region' }] }],
+        metricGroups: [{ id: 'm0', bindings: [{ bindingId: 'b-1', field: 'gmv' }] }],
+        filters: [],
+      },
+      fieldMeta: {},
+    };
+
+    // Task 0-3~1-7 窗口期保存的文档：sort.field 是列名
+    const withField = migrateChartConfig(
+      JSON.stringify({ ...base, query: { ...base.query, sort: { field: 'gmv', order: 'desc' } } }),
+      'table'
+    );
+    expect(withField.query.sort).toEqual({ bindingId: 'b-1', order: 'desc' });
+
+    const dangling = migrateChartConfig(
+      JSON.stringify({
+        ...base,
+        query: { ...base.query, sort: { field: 'nonexistent', order: 'asc' } },
+      }),
+      'table'
+    );
+    expect(dangling.query.sort).toBeUndefined();
   });
 });
 

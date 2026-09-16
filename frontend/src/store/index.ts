@@ -232,7 +232,8 @@ export interface QueryConfig {
   dimensionGroups: FieldGroup[];
   metricGroups: FieldGroup[];
   filters: FilterCondition[];
-  sort?: { field: string; order: 'asc' | 'desc' };
+  /** 排序引用 bindingId（而非列名）：同一列在多个槽位时排序目标不歧义（R-50）。 */
+  sort?: { bindingId: string; order: 'asc' | 'desc' };
   limit?: number;
 }
 

@@ -301,13 +301,22 @@ type chartConfigV2 struct {
 		DimensionGroups []chartConfigBindingGroup `json:"dimensionGroups"`
 		MetricGroups    []chartConfigBindingGroup `json:"metricGroups"`
 		Filters         []chartConfigFilter       `json:"filters"`
-		Sort            *entity.SortConfig        `json:"sort"`
+		Sort            *chartConfigSort          `json:"sort"`
 		Limit           int                       `json:"limit"`
 	} `json:"query"`
 	FieldMeta map[string]struct {
 		Aggregation string `json:"aggregation"`
 		Alias       string `json:"alias"`
 	} `json:"fieldMeta"`
+}
+
+// chartConfigSort v2 持久化文档的 sort 小节，兼容两种键形态：Task 1-7 起前端保存
+// bindingId 键（引用 BindingInstance，与前端 QueryConfig.sort 对齐）；Task 0-3~1-7
+// 窗口期保存的文档是 field 键（输出列名/别名）。翻译逻辑见 resolveV2DocSort。
+type chartConfigSort struct {
+	Field     string `json:"field"`
+	BindingID string `json:"bindingId"`
+	Order     string `json:"order"`
 }
 
 // chartConfigBindingGroup v2 文档字段组：bindings 为带 bindingId 的字段实例
@@ -407,7 +416,44 @@ func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, 
 		return nil, false
 	}
 
-	return buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, doc.Query.Sort, doc.Query.Limit), true
+	return buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, resolveV2DocSort(doc.Query.Sort, &doc), doc.Query.Limit), true
+}
+
+// resolveV2DocSort 把 v2 持久化文档的 sort 小节翻译为平铺请求可用的 entity.SortConfig：
+//   - bindingId 键（Task 1-7 起前端保存的形状）：先查指标组再查维度组，命中后取该绑定的
+//     输出列名（指标 = fieldMeta[bindingId].alias 或列名，与 chartDataQueryFromConfigV2
+//     构造 metrics 的 alias 逻辑对称；维度 = 列名）——平铺 v1 请求的 AST 不携带
+//     BindingID，后端 resolveSortAlias 无从反查，必须还原为输出列名；
+//   - 悬挂的 bindingId（绑定已被移除）：丢弃 sort（返回 nil），避免后端把无法解析的
+//     引用渲染成 _invalid_identifier 导致 SQL 报错；
+//   - field 键（Task 0-3~1-7 窗口期保存的文档）：原样透传，行为与改动前一致。
+func resolveV2DocSort(sort *chartConfigSort, doc *chartConfigV2) *entity.SortConfig {
+	if sort == nil {
+		return nil
+	}
+	if sort.BindingID == "" {
+		return &entity.SortConfig{Field: sort.Field, Order: sort.Order}
+	}
+	for _, group := range doc.Query.MetricGroups {
+		for _, b := range group.Bindings {
+			if b.BindingID != sort.BindingID {
+				continue
+			}
+			field := b.Field
+			if meta, ok := doc.FieldMeta[sort.BindingID]; ok && meta.Alias != "" {
+				field = meta.Alias
+			}
+			return &entity.SortConfig{Field: field, Order: sort.Order}
+		}
+	}
+	for _, group := range doc.Query.DimensionGroups {
+		for _, b := range group.Bindings {
+			if b.BindingID == sort.BindingID {
+				return &entity.SortConfig{Field: b.Field, Order: sort.Order}
+			}
+		}
+	}
+	return nil
 }
 
 // buildConfigQueryRequest 组装持久化 config 解析出的平铺请求（v1/v2 共用尾段）：

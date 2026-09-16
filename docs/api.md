@@ -979,7 +979,7 @@ POST /api/charts/query
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| field | string | 是 | 排序字段 |
+| field | string | 是 | 排序引用键：v1 平铺请求为输出列名/别名；v2 槽位协议请求（spec_version=2）为 binding_id（后端按 AST 中维度/指标的 BindingID 解析为输出别名，未命中回退按列名/别名匹配） |
 | order | string | 是 | 排序方向: asc, desc |
 
 **响应 (Line/Bar/Area)**:

@@ -3,6 +3,7 @@ package chart
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -836,6 +837,69 @@ func TestChartDataQueryFromConfig_V2ChartTypeFallback(t *testing.T) {
 	}
 	if len(req.Metrics) != 1 || req.Metrics[0].Agg != "sum" || req.Metrics[0].Alias != "amount" {
 		t.Fatalf("expected default sum + column alias, got %+v", req.Metrics)
+	}
+}
+
+// TestChartDataQueryFromConfig_V2SortBindingID 覆盖 Task 1-7：v2 文档的 sort 以
+// bindingId 引用绑定实例，GetData 重建平铺请求时必须翻译为该绑定的输出列名
+// （指标 = fieldMeta[bindingId].alias 或列名；维度 = 列名）；悬挂 bindingId 丢弃 sort；
+// Task 0-3~1-7 窗口期文档的 field 键原样透传（行为与改动前一致）。
+func TestChartDataQueryFromConfig_V2SortBindingID(t *testing.T) {
+	baseDoc := `"version":2,"query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","field":"region"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-1","field":"amount"},{"bindingId":"b-2","field":"qty"}]}],"filters":[],%s},"fieldMeta":{"b-1":{"aggregation":"sum","alias":"客单价"}}`
+
+	for _, tc := range []struct {
+		name      string
+		sortJSON  string
+		wantField string // "" 表示期望 sort 被丢弃（nil）
+		wantOrder string
+	}{
+		{
+			name:      "指标 binding 翻译为 fieldMeta 别名",
+			sortJSON:  `"sort":{"bindingId":"b-1","order":"desc"}`,
+			wantField: "客单价",
+			wantOrder: "desc",
+		},
+		{
+			name:      "无别名指标 binding 翻译为列名",
+			sortJSON:  `"sort":{"bindingId":"b-2","order":"asc"}`,
+			wantField: "qty",
+			wantOrder: "asc",
+		},
+		{
+			name:      "维度 binding 翻译为列名",
+			sortJSON:  `"sort":{"bindingId":"b-0","order":"desc"}`,
+			wantField: "region",
+			wantOrder: "desc",
+		},
+		{
+			name:     "悬挂 bindingId 丢弃 sort",
+			sortJSON: `"sort":{"bindingId":"b-99","order":"desc"}`,
+		},
+		{
+			name:      "窗口期 field 键原样透传",
+			sortJSON:  `"sort":{"field":"amount","order":"desc"}`,
+			wantField: "amount",
+			wantOrder: "desc",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := "{" + fmt.Sprintf(baseDoc, tc.sortJSON) + `,"style":{},"queryOptions":{}}`
+			chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "bar", Config: config}
+
+			req, ok := chartDataQueryFromConfig(chart)
+			if !ok {
+				t.Fatal("expected v2 config to parse (ok=true)")
+			}
+			if tc.wantField == "" {
+				if req.Sort != nil {
+					t.Fatalf("expected sort dropped, got %+v", req.Sort)
+				}
+				return
+			}
+			if req.Sort == nil || req.Sort.Field != tc.wantField || req.Sort.Order != tc.wantOrder {
+				t.Fatalf("expected sort %s %s, got %+v", tc.wantField, tc.wantOrder, req.Sort)
+			}
+		})
 	}
 }
 

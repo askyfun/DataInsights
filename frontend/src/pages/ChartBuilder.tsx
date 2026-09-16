@@ -62,11 +62,13 @@ import {
 } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload } from '../lib/chartOptions';
 import {
+  BindingInstance,
   BoundField,
   ChartConfig,
   ChartField,
   ChartQueryOptions,
   ChartStyleConfig,
+  FieldGroup,
   FilterCondition,
   QueryConfig,
   useStore,
@@ -142,6 +144,71 @@ const getFieldGroupKindIndex = (
   );
 };
 
+/**
+ * 在裁剪后的活动字段组里查找 sort 引用的 binding（Task 1-7/R-50）。
+ * 调用场景：composeChartQueryRequest 构造 sort wire payload 前定位排序目标。
+ * 主要逻辑：按 bindingId 精确匹配（bindingId 全局唯一），指标组优先、维度组其次；
+ * 绑定已被移除（悬挂引用）时返回 undefined，调用方据此丢弃 sort。
+ */
+const findSortBinding = (
+  activeGroups: { dimensionGroups: FieldGroup[]; metricGroups: FieldGroup[] },
+  bindingId: string
+): { binding: BindingInstance; kind: 'metric' | 'dimension' } | undefined => {
+  for (const group of activeGroups.metricGroups) {
+    const binding = group.bindings.find((b) => b.bindingId === bindingId);
+    if (binding) {
+      return { binding, kind: 'metric' };
+    }
+  }
+  for (const group of activeGroups.dimensionGroups) {
+    const binding = group.bindings.find((b) => b.bindingId === bindingId);
+    if (binding) {
+      return { binding, kind: 'dimension' };
+    }
+  }
+  return undefined;
+};
+
+/**
+ * 按表格输出列名（TableChart sorter.field）反查对应绑定的 bindingId。
+ * 调用场景：handleSortChange 把用户点击的排序列翻译回 queryConfig.sort 的引用键。
+ * 主要逻辑：输出键与后端行值键一致——指标 = metricAliases[bindingId] || 列名，
+ * 维度 = 列名；同名冲突时指标优先（按值排序是主场景）；无对应绑定返回 undefined。
+ */
+const findBindingIdByOutputName = (
+  queryConfig: QueryConfig,
+  fields: ChartField[],
+  metricAliases: Record<string, string>,
+  outputName: string
+): string | undefined => {
+  const fieldMap = new Map(fields.map((f) => [f.id, f]));
+  const outputNameOf = (
+    binding: BindingInstance,
+    kind: 'metric' | 'dimension'
+  ): string | undefined => {
+    const columnName = fieldMap.get(binding.field)?.name;
+    if (columnName === undefined) {
+      return undefined;
+    }
+    return kind === 'metric' ? metricAliases[binding.bindingId] || columnName : columnName;
+  };
+  for (const group of queryConfig.metricGroups) {
+    for (const binding of group.bindings) {
+      if (outputNameOf(binding, 'metric') === outputName) {
+        return binding.bindingId;
+      }
+    }
+  }
+  for (const group of queryConfig.dimensionGroups) {
+    for (const binding of group.bindings) {
+      if (outputNameOf(binding, 'dimension') === outputName) {
+        return binding.bindingId;
+      }
+    }
+  }
+  return undefined;
+};
+
 interface ChartQueryRequestInput {
   datasetId: number;
   chartType: ChartConfig['chartType'];
@@ -150,7 +217,7 @@ interface ChartQueryRequestInput {
   metricAggregations: Record<string, string>;
   metricAliases: Record<string, string>;
   tablePagination: { page: number; pageSize: number };
-  /** 返回对象是否携带 sort 键。两个自动查询 effect 历史上从不发送 sort， 请求键集合测试也钉死了这一点，统一会让 sort 生效并改变 wire 语义。 */
+  /** 返回对象是否可携带 sort 键（仅当 queryConfig.sort 存在且 bindingId 在活动组内可解析时实际携带）。历史上两个自动查询 effect 传 false（从不发送 sort，R-50 bug）；Task 1-7 起三个调用点统一为 true。 */
   includeSort: boolean;
 }
 
@@ -200,13 +267,6 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
       logic: f.logic,
     };
   });
-  const sortPayload = includeSort
-    ? {
-        sort: queryConfig.sort
-          ? { field: queryConfig.sort.field, order: queryConfig.sort.order }
-          : undefined,
-      }
-    : {};
   const paginationPayload =
     chartType === 'table'
       ? {
@@ -232,6 +292,39 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
   const requiresSlotProtocol =
     colorGroupBindings.length > 0 ||
     metricDefs.some((group) => DUAL_AXIS_METRIC_SLOTS.has(group.id));
+
+  // sort wire payload（Task 1-7/R-50）：queryConfig.sort 以 bindingId 引用排序目标。
+  // - v2 槽位协议：field 直接发送 bindingId（组内携带 binding_id，后端 resolveSortAlias
+  //   按 AST 的 BindingID 查出输出别名后渲染 ORDER BY）；
+  // - v1 平铺协议：请求不携带任何 binding_id，后端无从反查，field 发送该绑定的输出列名
+  //   （指标 = metricAliases[bindingId] || 列名，维度 = 列名）——与本任务前直接发送
+  //   TableChart sorter.field（列名/别名）的 wire 字节等价，v1 行为不变；
+  // - bindingId 悬挂（绑定已移除）或对应列已不在数据集字段里：丢弃 sort，
+  //   避免后端把无法解析的引用渲染成 _invalid_identifier 造成 SQL 报错；
+  // - 无有效 sort 时不携带 sort 键（与 includeSort:false 时代的请求形状一致）。
+  const sortWireField = (() => {
+    if (!includeSort || !queryConfig.sort) {
+      return undefined;
+    }
+    const sortBinding = findSortBinding(activeGroups, queryConfig.sort.bindingId);
+    if (!sortBinding) {
+      return undefined;
+    }
+    const columnName = fieldMap.get(sortBinding.binding.field)?.name;
+    if (columnName === undefined) {
+      return undefined;
+    }
+    if (requiresSlotProtocol) {
+      return sortBinding.binding.bindingId;
+    }
+    return sortBinding.kind === 'metric'
+      ? metricAliases[sortBinding.binding.bindingId] || columnName
+      : columnName;
+  })();
+  const sortPayload =
+    sortWireField !== undefined && queryConfig.sort
+      ? { sort: { field: sortWireField, order: queryConfig.sort.order } }
+      : {};
 
   if (requiresSlotProtocol) {
     // v2 槽位协议：dimension_groups/metric_groups 携带真实槽位名与 binding_id
@@ -1029,29 +1122,34 @@ const ChartBuilder: React.FC = () => {
     setMetricAlias,
   ]);
 
-  const buildChartQueryRequest = useCallback((): ChartQueryRequest | null => {
-    if (!selectedDatasetId) return null;
+  // queryConfigOverride：调用方持有比组件闭包更新的 queryConfig 时显式传入
+  // （handleSortChange 的 setQueryConfig 尚未触发重渲染），保证 compose 看到最新 sort。
+  const buildChartQueryRequest = useCallback(
+    (queryConfigOverride?: QueryConfig): ChartQueryRequest | null => {
+      if (!selectedDatasetId) return null;
 
-    return composeChartQueryRequest({
-      datasetId: selectedDatasetId,
-      chartType: chartBuilderConfig.chartType,
-      queryConfig,
-      fields: chartBuilderFields,
+      return composeChartQueryRequest({
+        datasetId: selectedDatasetId,
+        chartType: chartBuilderConfig.chartType,
+        queryConfig: queryConfigOverride ?? queryConfig,
+        fields: chartBuilderFields,
+        metricAggregations,
+        metricAliases,
+        tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
+        includeSort: true,
+      });
+    },
+    [
+      selectedDatasetId,
       metricAggregations,
       metricAliases,
-      tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
-      includeSort: true,
-    });
-  }, [
-    selectedDatasetId,
-    metricAggregations,
-    metricAliases,
-    queryConfig,
-    chartBuilderConfig.chartType,
-    tablePagination.page,
-    tablePagination.pageSize,
-    chartBuilderFields,
-  ]);
+      queryConfig,
+      chartBuilderConfig.chartType,
+      tablePagination.page,
+      tablePagination.pageSize,
+      chartBuilderFields,
+    ]
+  );
 
   const handleExecuteQuery = useCallback(() => {
     const request = buildChartQueryRequest();
@@ -1074,14 +1172,31 @@ const ChartBuilder: React.FC = () => {
 
   const handleSortChange = useCallback(
     (sort: { field: string; order: 'asc' | 'desc' }) => {
-      setQueryConfig({ sort });
-      const request = buildChartQueryRequest();
+      // TableChart 回传的是被点击的输出列名（sorter.field）：先反查对应 bindingId
+      // 再写入 queryConfig.sort（R-50：sort 引用 bindingId）。列无对应绑定时忽略本次点击。
+      const bindingId = findBindingIdByOutputName(
+        queryConfig,
+        chartBuilderFields,
+        metricAliases,
+        sort.field
+      );
+      if (!bindingId) return;
+      const nextSort = { bindingId, order: sort.order };
+      setQueryConfig({ sort: nextSort });
+      // 闭包里的 queryConfig 还是旧值（setQueryConfig 尚未触发重渲染），显式传覆盖
+      const request = buildChartQueryRequest({ ...queryConfig, sort: nextSort });
       if (request) {
-        request.sort = sort;
         executeChartQuery(request);
       }
     },
-    [buildChartQueryRequest, executeChartQuery, setQueryConfig]
+    [
+      buildChartQueryRequest,
+      chartBuilderFields,
+      executeChartQuery,
+      metricAliases,
+      queryConfig,
+      setQueryConfig,
+    ]
   );
 
   useEffect(() => {
@@ -1123,7 +1238,7 @@ const ChartBuilder: React.FC = () => {
       metricAggregations: state.metricAggregations,
       metricAliases: state.metricAliases,
       tablePagination: state.tablePagination,
-      includeSort: false,
+      includeSort: true,
     });
     if (request) {
       executeChartQuery(request);
@@ -1142,7 +1257,7 @@ const ChartBuilder: React.FC = () => {
       metricAggregations,
       metricAliases,
       tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
-      includeSort: false,
+      includeSort: true,
     });
     if (request) {
       executeChartQuery(request);
@@ -1206,7 +1321,7 @@ const ChartBuilder: React.FC = () => {
               filters: doc.query.filters as FilterCondition[],
               sort: doc.query.sort
                 ? {
-                    field: doc.query.sort.field,
+                    bindingId: doc.query.sort.bindingId,
                     order: doc.query.sort.order === 'desc' ? 'desc' : 'asc',
                   }
                 : undefined,
