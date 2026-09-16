@@ -55,6 +55,36 @@ const omitBindingMeta = (
   return next;
 };
 
+/** 五个按 bindingId 索引的元数据 Record（整组删除/取消选中路径批量清理时的输入输出形状） */
+interface BindingMetaRecords {
+  dimensionLabels: Record<string, string>;
+  metricAggregations: Record<string, string>;
+  metricAliases: Record<string, string>;
+  metricUnits: Record<string, string>;
+  metricFormats: Record<string, string>;
+}
+
+/**
+ * 从五个元数据 Record 中批量移除多个 bindingId 的键（逐个复用 omitBindingMeta）。
+ * 调用场景：removeDimensionGroup/removeMetricGroup（整组删除，一次移除该组全部 binding）
+ * 与 reconcileGroupFields（QueryPanel 取消选中，一次移除多个 binding）。这些路径同样受
+ * nextBindingId(max+1) 复用号影响，不清理会让新列静默继承被删列的元数据（跨列污染）。
+ */
+const omitBindingsMeta = (
+  records: BindingMetaRecords,
+  bindingIds: readonly string[]
+): BindingMetaRecords => {
+  let { dimensionLabels, metricAggregations, metricAliases, metricUnits, metricFormats } = records;
+  for (const bindingId of bindingIds) {
+    dimensionLabels = omitBindingMeta(dimensionLabels, bindingId);
+    metricAggregations = omitBindingMeta(metricAggregations, bindingId);
+    metricAliases = omitBindingMeta(metricAliases, bindingId);
+    metricUnits = omitBindingMeta(metricUnits, bindingId);
+    metricFormats = omitBindingMeta(metricFormats, bindingId);
+  }
+  return { dimensionLabels, metricAggregations, metricAliases, metricUnits, metricFormats };
+};
+
 // Field types for chart builder
 export type FieldType = 'dimension' | 'metric';
 
@@ -273,6 +303,11 @@ export interface AppState {
   removeDimensionGroup: (id: string) => void;
   addMetricGroup: (group?: FieldGroup) => void;
   removeMetricGroup: (id: string) => void;
+  reconcileGroupFields: (
+    groupType: 'dimension' | 'metric',
+    groupId: string,
+    selectedFields: string[]
+  ) => void;
   addFilter: (filter?: FilterCondition) => void;
   removeFilter: (id: string) => void;
   updateFilter: (id: string, filter: Partial<FilterCondition>) => void;
@@ -598,12 +633,19 @@ export const useStore = create<AppState>((set) => ({
   },
 
   removeDimensionGroup: (id: string) => {
-    set((state) => ({
-      queryConfig: {
-        ...state.queryConfig,
-        dimensionGroups: state.queryConfig.dimensionGroups.filter((g) => g.id !== id),
-      },
-    }));
+    set((state) => {
+      const removed = state.queryConfig.dimensionGroups.find((g) => g.id === id);
+      const removedIds = removed ? removed.bindings.map((b) => b.bindingId) : [];
+      return {
+        queryConfig: {
+          ...state.queryConfig,
+          dimensionGroups: state.queryConfig.dimensionGroups.filter((g) => g.id !== id),
+        },
+        // 整组删除会移除该组全部 binding：在同一次 set 里清理它们的元数据，防止
+        // nextBindingId(max+1) 复用号导致跨列污染（与 removeDimensionField 同一防护）
+        ...omitBindingsMeta(state, removedIds),
+      };
+    });
   },
 
   addMetricGroup: (group?: FieldGroup) => {
@@ -622,12 +664,53 @@ export const useStore = create<AppState>((set) => ({
   },
 
   removeMetricGroup: (id: string) => {
-    set((state) => ({
-      queryConfig: {
-        ...state.queryConfig,
-        metricGroups: state.queryConfig.metricGroups.filter((g) => g.id !== id),
-      },
-    }));
+    set((state) => {
+      const removed = state.queryConfig.metricGroups.find((g) => g.id === id);
+      const removedIds = removed ? removed.bindings.map((b) => b.bindingId) : [];
+      return {
+        queryConfig: {
+          ...state.queryConfig,
+          metricGroups: state.queryConfig.metricGroups.filter((g) => g.id !== id),
+        },
+        // 整组删除会移除该组全部 binding：在同一次 set 里清理它们的元数据，防止
+        // nextBindingId(max+1) 复用号导致跨列污染（与 removeMetricField 同一防护）
+        ...omitBindingsMeta(state, removedIds),
+      };
+    });
+  },
+
+  reconcileGroupFields: (groupType, groupId, selectedFields) => {
+    set((state) => {
+      const isDimension = groupType === 'dimension';
+      const groups = isDimension
+        ? state.queryConfig.dimensionGroups
+        : state.queryConfig.metricGroups;
+      // 全局 bindingId 视野：所有维度组 + 指标组的现有 bindings（供 nextBindingId 分配新号）
+      const allBindings = [
+        ...state.queryConfig.dimensionGroups.map((g) => g.bindings),
+        ...state.queryConfig.metricGroups.map((g) => g.bindings),
+      ];
+      const target = groups.find((g) => g.id === groupId);
+      const nextBindings = target
+        ? reconcileGroupBindings(target.bindings, selectedFields, allBindings)
+        : [];
+      // 本次被移除（取消选中）的 bindingId：旧组里有、reconcile 后不再有
+      const kept = new Set(nextBindings.map((b) => b.bindingId));
+      const removedIds = target
+        ? target.bindings.map((b) => b.bindingId).filter((bindingId) => !kept.has(bindingId))
+        : [];
+      const updatedGroups = groups.map((g) =>
+        g.id === groupId ? { ...g, bindings: nextBindings } : g
+      );
+      return {
+        queryConfig: {
+          ...state.queryConfig,
+          ...(isDimension ? { dimensionGroups: updatedGroups } : { metricGroups: updatedGroups }),
+        },
+        // 清理被取消选中的 bindingId 元数据，防止 nextBindingId(max+1) 复用号导致跨列污染
+        ...omitBindingsMeta(state, removedIds),
+      };
+    });
   },
 
   addFilter: (filter?: FilterCondition) => {

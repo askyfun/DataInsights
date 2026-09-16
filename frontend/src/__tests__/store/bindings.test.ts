@@ -169,3 +169,208 @@ describe('removeDimensionField/removeMetricField 清理 bindingId 元数据', ()
     expect(state.metricAggregations['b-1']).toBeUndefined();
   });
 });
+
+/**
+ * removeDimensionGroup/removeMetricGroup 整组删除时，必须把该组所有 binding 的
+ * bindingId 从五个元数据 Record 中清理掉。否则整组删除后 nextBindingId(max+1) 会从
+ * b-0 重新分配，新列静默继承被删组里同号列的 aggregation/alias/unit/format/label
+ * （与 removeDimensionField/removeMetricField 同一 bug 类）。
+ */
+describe('removeDimensionGroup/removeMetricGroup 清理整组 bindingId 元数据', () => {
+  beforeEach(() => {
+    useStore.getState().resetChartBuilder();
+    useStore.setState({
+      chartBuilderFields: [
+        { id: 'revenue', name: 'revenue', type: 'metric', dataType: 'float' },
+        { id: 'profit', name: 'profit', type: 'metric', dataType: 'float' },
+        { id: 'cost', name: 'cost', type: 'metric', dataType: 'float' },
+        { id: 'city', name: 'city', type: 'dimension', dataType: 'string' },
+        { id: 'date', name: 'date', type: 'dimension', dataType: 'date' },
+        { id: 'region', name: 'region', type: 'dimension', dataType: 'string' },
+      ],
+    });
+  });
+
+  it('删除整个指标组后组内所有 bindingId 元数据清理，复用号不继承旧列元数据', () => {
+    const {
+      addMetricField,
+      removeMetricGroup,
+      setMetricAggregation,
+      setMetricAlias,
+      setMetricUnit,
+      setMetricFormat,
+    } = useStore.getState();
+    const fields = useStore.getState().chartBuilderFields;
+
+    addMetricField(fields[0], 0); // revenue → b-0（metric-group-1）
+    addMetricField(fields[1], 0); // profit → b-1
+    setMetricAggregation('b-0', 'max');
+    setMetricAlias('b-0', '营业收入');
+    setMetricUnit('b-0', '元');
+    setMetricFormat('b-0', '0.00');
+    setMetricAggregation('b-1', 'avg');
+
+    const groupId = useStore.getState().queryConfig.metricGroups[0].id;
+    removeMetricGroup(groupId);
+
+    // 整组删除后无指标组，b-0/b-1 在五个 Record 中全部清理
+    expect(useStore.getState().queryConfig.metricGroups).toHaveLength(0);
+    for (const id of ['b-0', 'b-1']) {
+      const s = useStore.getState();
+      expect(s.metricAggregations[id]).toBeUndefined();
+      expect(s.metricAliases[id]).toBeUndefined();
+      expect(s.metricUnits[id]).toBeUndefined();
+      expect(s.metricFormats[id]).toBeUndefined();
+    }
+
+    // 组已空 → nextBindingId 从 b-0 重新分配；加入不同列 cost 复用 b-0
+    addMetricField(fields[2], 0);
+    expect(useStore.getState().queryConfig.metricGroups[0].bindings).toEqual([
+      { bindingId: 'b-0', field: 'cost' },
+    ]);
+    const after = useStore.getState();
+    expect(after.metricAggregations['b-0']).toBeUndefined();
+    expect(after.metricAliases['b-0']).toBeUndefined();
+    expect(after.metricUnits['b-0']).toBeUndefined();
+    expect(after.metricFormats['b-0']).toBeUndefined();
+  });
+
+  it('删除整个维度组后 dimensionLabels 清理，复用号不继承旧 label', () => {
+    const { addDimensionField, removeDimensionGroup, setDimensionLabel } = useStore.getState();
+    const fields = useStore.getState().chartBuilderFields;
+
+    addDimensionField(fields[3], 0); // city → b-0（dim-group-1）
+    addDimensionField(fields[4], 0); // date → b-1
+    setDimensionLabel('b-0', '城市');
+    setDimensionLabel('b-1', '日期');
+
+    const groupId = useStore.getState().queryConfig.dimensionGroups[0].id;
+    removeDimensionGroup(groupId);
+
+    expect(useStore.getState().queryConfig.dimensionGroups).toHaveLength(0);
+    expect(useStore.getState().dimensionLabels['b-0']).toBeUndefined();
+    expect(useStore.getState().dimensionLabels['b-1']).toBeUndefined();
+
+    addDimensionField(fields[5], 0); // region → b-0（复用）
+    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings).toEqual([
+      { bindingId: 'b-0', field: 'region' },
+    ]);
+    expect(useStore.getState().dimensionLabels['b-0']).toBeUndefined();
+  });
+
+  it('只清理被删组的 bindingId，其它组的元数据保留', () => {
+    const { addMetricField, removeMetricGroup, setMetricAggregation } = useStore.getState();
+    const fields = useStore.getState().chartBuilderFields;
+
+    addMetricField(fields[0], 0); // revenue → b-0（metric-group-1）
+    addMetricField(fields[1], 1); // profit → b-1（metric-group-2）
+    setMetricAggregation('b-0', 'sum');
+    setMetricAggregation('b-1', 'avg');
+
+    const group1Id = useStore.getState().queryConfig.metricGroups[0].id;
+    removeMetricGroup(group1Id);
+
+    const s = useStore.getState();
+    expect(s.metricAggregations['b-0']).toBeUndefined();
+    expect(s.metricAggregations['b-1']).toBe('avg'); // 另一组保留
+  });
+});
+
+/**
+ * QueryPanel 多选 Select 取消选中列名时，reconcileGroupFields 必须在改写 bindings 的
+ * 同一次更新里，把被移除 bindingId 从五个元数据 Record 中清理掉。否则该号被 nextBindingId
+ * 复用后，新列会静默继承被取消选中列的元数据（与整组删除同一 bug 类）。
+ */
+describe('reconcileGroupFields 清理取消选中的 bindingId 元数据', () => {
+  beforeEach(() => {
+    useStore.getState().resetChartBuilder();
+    useStore.setState({
+      chartBuilderFields: [
+        { id: 'revenue', name: 'revenue', type: 'metric', dataType: 'float' },
+        { id: 'profit', name: 'profit', type: 'metric', dataType: 'float' },
+        { id: 'cost', name: 'cost', type: 'metric', dataType: 'float' },
+        { id: 'city', name: 'city', type: 'dimension', dataType: 'string' },
+        { id: 'date', name: 'date', type: 'dimension', dataType: 'date' },
+      ],
+    });
+  });
+
+  it('取消选中指标后被移除 bindingId 元数据清理，复用号不继承旧列元数据', () => {
+    const {
+      addMetricField,
+      reconcileGroupFields,
+      setMetricAggregation,
+      setMetricAlias,
+      setMetricUnit,
+      setMetricFormat,
+    } = useStore.getState();
+    const fields = useStore.getState().chartBuilderFields;
+
+    addMetricField(fields[0], 0); // revenue → b-0
+    addMetricField(fields[1], 0); // profit → b-1
+    setMetricAggregation('b-1', 'max');
+    setMetricAlias('b-1', '利润');
+    setMetricUnit('b-1', '元');
+    setMetricFormat('b-1', '0.00');
+
+    const groupId = useStore.getState().queryConfig.metricGroups[0].id;
+
+    // 用户在 Select 里取消选中 profit，只保留 revenue
+    reconcileGroupFields('metric', groupId, ['revenue']);
+
+    expect(useStore.getState().queryConfig.metricGroups[0].bindings).toEqual([
+      { bindingId: 'b-0', field: 'revenue' },
+    ]);
+    const afterDeselect = useStore.getState();
+    expect(afterDeselect.metricAggregations['b-1']).toBeUndefined();
+    expect(afterDeselect.metricAliases['b-1']).toBeUndefined();
+    expect(afterDeselect.metricUnits['b-1']).toBeUndefined();
+    expect(afterDeselect.metricFormats['b-1']).toBeUndefined();
+
+    // 当前最大号回退到 b-0 → 再选中不同列 cost 会复用 b-1
+    reconcileGroupFields('metric', groupId, ['revenue', 'cost']);
+    expect(useStore.getState().queryConfig.metricGroups[0].bindings).toEqual([
+      { bindingId: 'b-0', field: 'revenue' },
+      { bindingId: 'b-1', field: 'cost' },
+    ]);
+    const afterReuse = useStore.getState();
+    expect(afterReuse.metricAggregations['b-1']).toBeUndefined();
+    expect(afterReuse.metricAliases['b-1']).toBeUndefined();
+    expect(afterReuse.metricUnits['b-1']).toBeUndefined();
+    expect(afterReuse.metricFormats['b-1']).toBeUndefined();
+  });
+
+  it('取消选中维度后 dimensionLabels 清理', () => {
+    const { addDimensionField, reconcileGroupFields, setDimensionLabel } = useStore.getState();
+    const fields = useStore.getState().chartBuilderFields;
+
+    addDimensionField(fields[3], 0); // city → b-0
+    addDimensionField(fields[4], 0); // date → b-1
+    setDimensionLabel('b-1', '日期');
+
+    const groupId = useStore.getState().queryConfig.dimensionGroups[0].id;
+    reconcileGroupFields('dimension', groupId, ['city']); // 取消选中 date
+
+    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings).toEqual([
+      { bindingId: 'b-0', field: 'city' },
+    ]);
+    expect(useStore.getState().dimensionLabels['b-1']).toBeUndefined();
+  });
+
+  it('保留仍选中列名的元数据（只清被取消选中的 bindingId）', () => {
+    const { addMetricField, reconcileGroupFields, setMetricAggregation } = useStore.getState();
+    const fields = useStore.getState().chartBuilderFields;
+
+    addMetricField(fields[0], 0); // revenue → b-0
+    addMetricField(fields[1], 0); // profit → b-1
+    setMetricAggregation('b-0', 'sum');
+    setMetricAggregation('b-1', 'avg');
+
+    const groupId = useStore.getState().queryConfig.metricGroups[0].id;
+    reconcileGroupFields('metric', groupId, ['revenue']);
+
+    const s = useStore.getState();
+    expect(s.metricAggregations['b-0']).toBe('sum'); // revenue 保留
+    expect(s.metricAggregations['b-1']).toBeUndefined(); // profit 清理
+  });
+});

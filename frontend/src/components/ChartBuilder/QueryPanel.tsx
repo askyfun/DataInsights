@@ -1,11 +1,15 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Card, Select, Space } from 'antd';
-import { type ChartField, type QueryConfig, reconcileGroupBindings } from '../../store';
+import { type ChartField, type QueryConfig } from '../../store';
 
 interface QueryPanelProps {
   fields: ChartField[];
   queryConfig: QueryConfig;
-  onUpdateConfig: (config: Partial<QueryConfig>) => void;
+  onReconcileGroupFields: (
+    groupType: 'dimension' | 'metric',
+    groupId: string,
+    selectedFields: string[]
+  ) => void;
   onAddDimensionGroup: () => void;
   onRemoveDimensionGroup: (id: string) => void;
   onAddMetricGroup: () => void;
@@ -15,7 +19,7 @@ interface QueryPanelProps {
 const QueryPanel: React.FC<QueryPanelProps> = ({
   fields,
   queryConfig,
-  onUpdateConfig,
+  onReconcileGroupFields,
   onAddDimensionGroup,
   onRemoveDimensionGroup,
   onAddMetricGroup,
@@ -37,23 +41,9 @@ const QueryPanel: React.FC<QueryPanelProps> = ({
     type: 'dimension' | 'metric',
     values: string[]
   ) => {
-    const groups = type === 'dimension' ? queryConfig.dimensionGroups : queryConfig.metricGroups;
-    // 全局 bindingId 视野：所有维度组 + 指标组的现有 bindings
-    const allBindings = [
-      ...queryConfig.dimensionGroups.map((g) => g.bindings),
-      ...queryConfig.metricGroups.map((g) => g.bindings),
-    ];
-    const updatedGroups = groups.map((g) =>
-      g.id === groupId
-        ? { ...g, bindings: reconcileGroupBindings(g.bindings, values, allBindings) }
-        : g
-    );
-
-    if (type === 'dimension') {
-      onUpdateConfig({ dimensionGroups: updatedGroups });
-    } else {
-      onUpdateConfig({ metricGroups: updatedGroups });
-    }
+    // 交给 store action 原子完成：按 values reconcile 目标组的 bindings，并在同一次更新里
+    // 清理被取消选中 bindingId 的五个元数据 Record（防止 nextBindingId(max+1) 复用号跨列污染）。
+    onReconcileGroupFields(type, groupId, values);
   };
 
   return (
