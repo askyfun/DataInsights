@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ChartField } from '@/store';
+import type { BoundField, ChartField } from '@/store';
 import FieldDropZone, { DropZoneType } from './FieldDropZone';
 
 export interface QueryConfigRowProps {
@@ -11,20 +11,20 @@ export interface QueryConfigRowProps {
   label?: string;
   /** 自定义空态文案 */
   emptyText?: string;
-  /** 当前字段列表 */
-  fields: ChartField[];
+  /** 当前字段列表（绑定实例 + 字段对象） */
+  fields: BoundField[];
   /** 所有可用字段列表 */
   availableFields?: ChartField[];
-  /** 指标聚合方式映射 */
+  /** 指标聚合方式映射（键为 bindingId） */
   aggregations?: Record<string, string>;
-  /** 字段别名映射 */
+  /** 字段别名映射（键为 bindingId） */
   aliases?: Record<string, string>;
-  /** 删除字段回调 */
-  onRemoveField?: (fieldId: string) => void;
-  /** 聚合方式变更回调 */
-  onAggregationChange?: (fieldId: string, aggregation: string) => void;
+  /** 删除字段回调（按 bindingId） */
+  onRemoveField?: (bindingId: string) => void;
+  /** 聚合方式变更回调（按 bindingId） */
+  onAggregationChange?: (bindingId: string, aggregation: string) => void;
   /** 打开设置回调 */
-  onOpenSettings?: (field: ChartField) => void;
+  onOpenSettings?: (bound: BoundField) => void;
   /** 添加字段回调 */
   onAddField?: (field: ChartField) => void;
   /** 重排序回调 */

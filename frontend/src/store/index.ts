@@ -33,7 +33,7 @@ const ensureFieldGroupAtIndex = (
   while (nextGroups.length <= groupIndex) {
     nextGroups.push({
       id: `${prefix}-${nextGroups.length + 1}`,
-      fields: [],
+      bindings: [],
     });
   }
   return nextGroups;
@@ -51,11 +51,86 @@ export interface ChartField {
   comment?: string;
 }
 
+/**
+ * 字段绑定实例：一次"把某列拖入某个槽位"的唯一记录。
+ * bindingId 全局唯一（形如 b-0/b-1，顺序递增），field 为稳定列名。
+ * 同一列被拖入两个不同组会得到两个不同 bindingId，从而各自持有独立的
+ * aggregation/alias/unit/format 元数据（修复 D2：按列名共享导致的互相覆盖）。
+ */
+export interface BindingInstance {
+  bindingId: string;
+  field: string;
+}
+
 // 字段组 - 支持多维度/多指标
 export interface FieldGroup {
   id: string;
-  fields: string[];
+  bindings: BindingInstance[];
   alias?: string;
+}
+
+/** 绑定实例 + 解析后的完整字段对象，供 UI 渲染（key 用 bindingId，展示用 field） */
+export interface BoundField {
+  binding: BindingInstance;
+  field: ChartField;
+}
+
+/**
+ * 生成下一个全局唯一 bindingId（形如 b-N，顺序递增）。
+ * 调用场景：addDimensionField/addMetricField 与 QueryPanel 的 Select diff。
+ * 主要逻辑：扫描所有组的全部 bindings，取当前最大的 b-N 序号返回 b-(N+1)；
+ * 删除中间某个 binding 后新增不会复用被删的号，保证不与任何存量 id 冲突。
+ */
+export function nextBindingId(existing: BindingInstance[][]): string {
+  let max = -1;
+  for (const bindings of existing) {
+    for (const binding of bindings) {
+      const match = /^b-(\d+)$/.exec(binding.bindingId);
+      if (match) {
+        const n = Number.parseInt(match[1], 10);
+        if (n > max) {
+          max = n;
+        }
+      }
+    }
+  }
+  return `b-${max + 1}`;
+}
+
+/**
+ * QueryPanel 多选 Select 的 diff：把"新选中的列名集合"与某组现有 bindings 对齐。
+ * 调用场景：QueryPanel 用 AntD Select(mode=multiple) 直接改写某个字段组。
+ * 主要逻辑：仍被选中的列名保留其现有 bindingId（避免用户重选导致按 bindingId 存的
+ * aggregation/alias 丢失），新增列名用 nextBindingId 分配全局唯一新号，取消选中的
+ * 列名对应 binding 移除；输出顺序跟随 selectedFields（用户在 Select 里看到的顺序）。
+ *
+ * @param groupBindings 目标组当前 bindings
+ * @param selectedFields Select 返回的列名数组（有序）
+ * @param allBindings 所有组（维度+指标）的 bindings，作为全局 bindingId 生成视野
+ */
+export function reconcileGroupBindings(
+  groupBindings: BindingInstance[],
+  selectedFields: string[],
+  allBindings: BindingInstance[][]
+): BindingInstance[] {
+  const existingByField = new Map<string, BindingInstance>();
+  for (const binding of groupBindings) {
+    if (!existingByField.has(binding.field)) {
+      existingByField.set(binding.field, binding);
+    }
+  }
+  // 本次新增的 binding 追加进 id 生成视野，保证同一次变更多个新增列名号互不冲突
+  const newBindings: BindingInstance[] = [];
+  const idScope = [...allBindings, newBindings];
+  return selectedFields.flatMap((field) => {
+    const existing = existingByField.get(field);
+    if (existing) {
+      return [existing];
+    }
+    const binding: BindingInstance = { bindingId: nextBindingId(idScope), field };
+    newBindings.push(binding);
+    return [binding];
+  });
 }
 
 // 过滤条件操作符
@@ -186,20 +261,20 @@ export interface AppState {
   removeFilter: (id: string) => void;
   updateFilter: (id: string, filter: Partial<FilterCondition>) => void;
   addDimensionField: (field: ChartField, groupIndex?: number) => void;
-  removeDimensionField: (fieldId: string, groupIndex?: number) => void;
+  removeDimensionField: (bindingId: string, groupIndex?: number) => void;
   reorderDimensionField: (oldIndex: number, newIndex: number, groupIndex?: number) => void;
   addMetricField: (field: ChartField, groupIndex?: number) => void;
-  removeMetricField: (fieldId: string, groupIndex?: number) => void;
+  removeMetricField: (bindingId: string, groupIndex?: number) => void;
   reorderMetricField: (oldIndex: number, newIndex: number, groupIndex?: number) => void;
-  setDimensionLabel: (fieldId: string, label: string) => void;
+  setDimensionLabel: (bindingId: string, label: string) => void;
   setDimensionLabels: (labels: Record<string, string>) => void;
-  setMetricAggregation: (fieldId: string, aggregation: string) => void;
-  setMetricAlias: (fieldId: string, alias: string) => void;
+  setMetricAggregation: (bindingId: string, aggregation: string) => void;
+  setMetricAlias: (bindingId: string, alias: string) => void;
   setMetricAggregations: (aggregations: Record<string, string>) => void;
   setMetricAliases: (aliases: Record<string, string>) => void;
-  setMetricUnit: (fieldId: string, unit: string) => void;
+  setMetricUnit: (bindingId: string, unit: string) => void;
   setMetricUnits: (units: Record<string, string>) => void;
-  setMetricFormat: (fieldId: string, format: string) => void;
+  setMetricFormat: (bindingId: string, format: string) => void;
   setMetricFormats: (formats: Record<string, string>) => void;
   setChartStyle: (style: Partial<ChartStyleConfig>) => void;
   setChartStyleState: (style: ChartStyleConfig) => void;
@@ -495,7 +570,7 @@ export const useStore = create<AppState>((set) => ({
     set((state) => {
       const newGroup = group || {
         id: `dim-group-${Date.now()}`,
-        fields: [],
+        bindings: [],
       };
       return {
         queryConfig: {
@@ -519,7 +594,7 @@ export const useStore = create<AppState>((set) => ({
     set((state) => {
       const newGroup = group || {
         id: `metric-group-${Date.now()}`,
-        fields: [],
+        bindings: [],
       };
       return {
         queryConfig: {
@@ -584,12 +659,18 @@ export const useStore = create<AppState>((set) => ({
         groupIndex,
         'dim-group'
       );
-      const existingFields = dimensionGroups[groupIndex]?.fields || [];
-      if (existingFields.includes(field.id)) return state;
+      const existingBindings = dimensionGroups[groupIndex]?.bindings || [];
+      // 同一 group 内不允许重复列名；不同 group 之间允许相同列名（D2 场景）
+      if (existingBindings.some((b) => b.field === field.id)) return state;
 
-      const newGroup = {
+      const bindingId = nextBindingId([
+        ...dimensionGroups.map((g) => g.bindings),
+        ...state.queryConfig.metricGroups.map((g) => g.bindings),
+      ]);
+
+      const newGroup: FieldGroup = {
         id: dimensionGroups[groupIndex]?.id || `dim-group-${groupIndex + 1}`,
-        fields: [...existingFields, field.id],
+        bindings: [...existingBindings, { bindingId, field: field.id }],
       };
 
       dimensionGroups[groupIndex] = newGroup;
@@ -603,13 +684,13 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  removeDimensionField: (fieldId: string, groupIndex) => {
+  removeDimensionField: (bindingId: string, groupIndex) => {
     set((state) => ({
       queryConfig: {
         ...state.queryConfig,
         dimensionGroups: state.queryConfig.dimensionGroups.map((g, index) =>
           groupIndex === undefined || index === groupIndex
-            ? { ...g, fields: g.fields.filter((f) => f !== fieldId) }
+            ? { ...g, bindings: g.bindings.filter((b) => b.bindingId !== bindingId) }
             : g
         ),
       },
@@ -624,7 +705,7 @@ export const useStore = create<AppState>((set) => ({
       const dimensionGroups = [...state.queryConfig.dimensionGroups];
       dimensionGroups[groupIndex] = {
         ...group,
-        fields: arrayMove(group.fields, oldIndex, newIndex),
+        bindings: arrayMove(group.bindings, oldIndex, newIndex),
       };
 
       return {
@@ -643,12 +724,18 @@ export const useStore = create<AppState>((set) => ({
         groupIndex,
         'metric-group'
       );
-      const existingFields = metricGroups[groupIndex]?.fields || [];
-      if (existingFields.includes(field.id)) return state;
+      const existingBindings = metricGroups[groupIndex]?.bindings || [];
+      // 同一 group 内不允许重复列名；不同 group 之间允许相同列名（D2 场景）
+      if (existingBindings.some((b) => b.field === field.id)) return state;
 
-      const newGroup = {
+      const bindingId = nextBindingId([
+        ...state.queryConfig.dimensionGroups.map((g) => g.bindings),
+        ...metricGroups.map((g) => g.bindings),
+      ]);
+
+      const newGroup: FieldGroup = {
         id: metricGroups[groupIndex]?.id || `metric-group-${groupIndex + 1}`,
-        fields: [...existingFields, field.id],
+        bindings: [...existingBindings, { bindingId, field: field.id }],
       };
 
       metricGroups[groupIndex] = newGroup;
@@ -662,13 +749,13 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  removeMetricField: (fieldId: string, groupIndex) => {
+  removeMetricField: (bindingId: string, groupIndex) => {
     set((state) => ({
       queryConfig: {
         ...state.queryConfig,
         metricGroups: state.queryConfig.metricGroups.map((g, index) =>
           groupIndex === undefined || index === groupIndex
-            ? { ...g, fields: g.fields.filter((f) => f !== fieldId) }
+            ? { ...g, bindings: g.bindings.filter((b) => b.bindingId !== bindingId) }
             : g
         ),
       },
@@ -681,7 +768,10 @@ export const useStore = create<AppState>((set) => ({
       if (!group) return state;
 
       const metricGroups = [...state.queryConfig.metricGroups];
-      metricGroups[groupIndex] = { ...group, fields: arrayMove(group.fields, oldIndex, newIndex) };
+      metricGroups[groupIndex] = {
+        ...group,
+        bindings: arrayMove(group.bindings, oldIndex, newIndex),
+      };
 
       return {
         queryConfig: {
@@ -692,9 +782,9 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  setDimensionLabel: (fieldId: string, label: string) => {
+  setDimensionLabel: (bindingId: string, label: string) => {
     set((state) => ({
-      dimensionLabels: { ...state.dimensionLabels, [fieldId]: label },
+      dimensionLabels: { ...state.dimensionLabels, [bindingId]: label },
     }));
   },
 
@@ -702,9 +792,9 @@ export const useStore = create<AppState>((set) => ({
     set({ dimensionLabels: labels });
   },
 
-  setMetricAggregation: (fieldId: string, aggregation: string) => {
+  setMetricAggregation: (bindingId: string, aggregation: string) => {
     set((state) => ({
-      metricAggregations: { ...state.metricAggregations, [fieldId]: aggregation },
+      metricAggregations: { ...state.metricAggregations, [bindingId]: aggregation },
     }));
   },
 
@@ -712,9 +802,9 @@ export const useStore = create<AppState>((set) => ({
     set({ metricAggregations: aggregations });
   },
 
-  setMetricAlias: (fieldId: string, alias: string) => {
+  setMetricAlias: (bindingId: string, alias: string) => {
     set((state) => ({
-      metricAliases: { ...state.metricAliases, [fieldId]: alias },
+      metricAliases: { ...state.metricAliases, [bindingId]: alias },
     }));
   },
 
@@ -722,9 +812,9 @@ export const useStore = create<AppState>((set) => ({
     set({ metricAliases: aliases });
   },
 
-  setMetricUnit: (fieldId: string, unit: string) => {
+  setMetricUnit: (bindingId: string, unit: string) => {
     set((state) => ({
-      metricUnits: { ...state.metricUnits, [fieldId]: unit },
+      metricUnits: { ...state.metricUnits, [bindingId]: unit },
     }));
   },
 
@@ -732,9 +822,9 @@ export const useStore = create<AppState>((set) => ({
     set({ metricUnits: units });
   },
 
-  setMetricFormat: (fieldId: string, format: string) => {
+  setMetricFormat: (bindingId: string, format: string) => {
     set((state) => ({
-      metricFormats: { ...state.metricFormats, [fieldId]: format },
+      metricFormats: { ...state.metricFormats, [bindingId]: format },
     }));
   },
 

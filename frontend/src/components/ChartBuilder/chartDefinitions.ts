@@ -172,13 +172,13 @@ const normalizeGroups = <T extends QueryConfig['dimensionGroups'] | QueryConfig[
   prefix: 'dim-group' | 'metric-group'
 ): T => {
   return groups.map((group, index) => {
-    if (group && Array.isArray(group.fields)) {
+    if (group && Array.isArray(group.bindings)) {
       return group;
     }
 
     return {
       id: `${prefix}-${index + 1}`,
-      fields: [],
+      bindings: [],
     };
   }) as T;
 };
@@ -192,7 +192,7 @@ const ensureGroupCount = (
   while (nextGroups.length < requiredCount) {
     nextGroups.push({
       id: `${prefix}-${nextGroups.length + 1}`,
-      fields: [],
+      bindings: [],
     });
   }
   return nextGroups;

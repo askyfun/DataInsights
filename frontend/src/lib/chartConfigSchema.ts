@@ -1,22 +1,34 @@
 /**
- * bi_chart.config 的 v1 文档 schema 与迁移函数（纯逻辑，不依赖 UI/store 运行时）。
+ * bi_chart.config 的 v2 文档 schema 与迁移函数（纯逻辑，不依赖 UI/store 运行时）。
  *
- * 旧结构（无 version 字段）把字段引用存为位置 id（`field-0`…），
- * 列名只存在于运行时字段列表，且 6 个小节平铺在顶层
- * （queryConfig / dimensionLabels / metricAggregations / metricAliases /
- * metricUnits / metricFormats / chartStyle / chartQueryOptions）。
+ * 历史结构演进：
+ * - 旧结构（无 version 字段）把字段引用存为位置 id（`field-0`…），列名只存在于
+ *   运行时字段列表，且 6 个小节平铺在顶层（queryConfig / dimensionLabels /
+ *   metricAggregations / metricAliases / metricUnits / metricFormats / chartStyle /
+ *   chartQueryOptions）。
+ * - v1 把组字段与 filters/sort 的 field 统一为稳定列名，5 个平铺 Record 收敛为
+ *   fieldMeta（键为列名），chartStyle → style、chartQueryOptions → queryOptions，
+ *   丢弃 xAxisField / yAxisFields。
  *
- * v1 约定：
- * - query.dimensionGroups / metricGroups 的 fields 与 filters/sort 的 field
- *   一律使用稳定列名；
- * - 5 个平铺 Record 收敛为 fieldMeta（键为列名）；
- * - chartStyle → style，chartQueryOptions → queryOptions；
- * - xAxisField / yAxisFields 丢弃。
+ * v2 约定（本版本）：
+ * - 字段组的 `fields: string[]`（列名数组）升级为 `bindings: BindingInstance[]`，
+ *   每个"拖入槽位的字段实例"持有全局唯一 bindingId（形如 b-0/b-1）；
+ * - fieldMeta 的键由列名改为 bindingId——同一列被拖入两个不同组会得到两个不同
+ *   bindingId 与各自独立的元数据拷贝（修复 D2：按列名共享 aggregation/alias/
+ *   unit/format 导致的互相覆盖）；
+ * - filters/sort 的 field 仍为列名（按 bindingId 排序是后续任务）；
+ * - chartType / title / style / queryOptions 小节形状不变。
  *
- * 迁移是全覆盖函数：任何输入（空串、损坏 JSON、非对象）都返回合法 v1 文档，
- * 绝不抛异常。旧位置 id 只有借助可选 fields 参数才能解析为列名；
- * 解析不到的 id 在组字段中原样保留（有损路径），对应 fieldMeta 条目被丢弃。
+ * 迁移是全覆盖函数：任何输入（空串、损坏 JSON、非对象）都返回合法 v2 文档，
+ * 绝不抛异常。version===2 走校验拷贝直通；version===1 与旧结构先解析为 v1 中间
+ * 表示（fields 列名数组 + 列名键 fieldMeta），再按"先 dimensionGroups 后
+ * metricGroups、组内按 fields 顺序"跨所有组连续分配 bindingId（b-0/b-1/…）转为 v2，
+ * 并把原列名键 fieldMeta 的内容复制到每个由该列名生成的 bindingId 上（同名列的多个
+ * binding 各得一份独立拷贝），原列名键条目丢弃。旧位置 id 只有借助可选 fields 参数
+ * 才能解析为列名；解析不到的 id 在组字段中原样保留（有损路径），对应 fieldMeta 条目
+ * 被丢弃。
  */
+import type { BindingInstance } from '../store';
 
 export type ChartType = 'bar' | 'line' | 'pie' | 'area' | 'scatter' | 'table' | 'pivot';
 
@@ -28,11 +40,27 @@ export interface ChartMeta {
   format?: string;
 }
 
-/** v1 字段组：fields[] 为稳定列名（v1）；迁移输入可能是旧位置 id */
+/** v2 字段组：bindings[] 为带全局唯一 bindingId 的字段实例 */
 export interface ConfigFieldGroup {
+  id: string;
+  bindings: BindingInstance[];
+  alias?: string;
+}
+
+/** v1 中间表示（仅迁移内部使用）：fields[] 为稳定列名；迁移输入可能是旧位置 id */
+interface V1FieldGroup {
   id: string;
   fields: string[];
   alias?: string;
+}
+
+/** v1 中间查询表示（仅迁移内部使用） */
+interface V1Query {
+  dimensionGroups: V1FieldGroup[];
+  metricGroups: V1FieldGroup[];
+  filters: unknown[];
+  sort?: { field: string; order: string };
+  limit?: number;
 }
 
 export interface ChartConfigQuery {
@@ -45,11 +73,11 @@ export interface ChartConfigQuery {
 }
 
 export interface ChartConfigDocument {
-  version: 1;
+  version: 2;
   chartType: ChartType;
   title: string;
   query: ChartConfigQuery;
-  /** 键为列名；由旧 dimensionLabels 等 5 个平铺 Record 收敛而来 */
+  /** 键为 bindingId（v2）；由旧 dimensionLabels 等 5 个平铺 Record 收敛而来 */
   fieldMeta: Record<string, ChartMeta>;
   /** 透传 ChartStyleConfig 形状 */
   style: unknown;
@@ -99,11 +127,11 @@ function normalizeChartType(value: unknown, fallback: ChartType): ChartType {
   return fallback;
 }
 
-function migrateGroups(input: unknown, resolve: FieldResolver): ConfigFieldGroup[] {
+function migrateGroups(input: unknown, resolve: FieldResolver): V1FieldGroup[] {
   if (!Array.isArray(input)) {
     return [];
   }
-  const groups: ConfigFieldGroup[] = [];
+  const groups: V1FieldGroup[] = [];
   input.forEach((entry, index) => {
     if (!isPlainObject(entry)) {
       return;
@@ -111,7 +139,7 @@ function migrateGroups(input: unknown, resolve: FieldResolver): ConfigFieldGroup
     const fields = Array.isArray(entry.fields)
       ? entry.fields.filter((f): f is string => typeof f === 'string').map((f) => resolve(f) ?? f)
       : [];
-    const group: ConfigFieldGroup = {
+    const group: V1FieldGroup = {
       id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `group-${index}`,
       fields,
     };
@@ -150,7 +178,7 @@ function migrateLimit(input: unknown): number | undefined {
   return typeof input === 'number' && Number.isFinite(input) ? input : undefined;
 }
 
-function migrateQuery(source: Record<string, unknown>, resolve: FieldResolver): ChartConfigQuery {
+function migrateQuery(source: Record<string, unknown>, resolve: FieldResolver): V1Query {
   const querySource = isPlainObject(source.query)
     ? source.query
     : isPlainObject(source.queryConfig)
@@ -195,7 +223,7 @@ function mergeLegacyFieldMeta(
   return fieldMeta;
 }
 
-/** v1 直通时的 fieldMeta 校验拷贝：仅保留已知元数据键的字符串值 */
+/** fieldMeta 校验拷贝：仅保留已知元数据键的字符串值（键语义无关，v2 为 bindingId） */
 function normalizeFieldMeta(input: unknown): Record<string, ChartMeta> {
   const fieldMeta: Record<string, ChartMeta> = {};
   if (!isPlainObject(input)) {
@@ -221,13 +249,94 @@ function normalizeFieldMeta(input: unknown): Record<string, ChartMeta> {
   return fieldMeta;
 }
 
+/** BindingInstance 校验：bindingId 与 field 均为非空字符串 */
+function isBindingInstance(value: unknown): value is BindingInstance {
+  return (
+    isPlainObject(value) &&
+    typeof value.bindingId === 'string' &&
+    value.bindingId !== '' &&
+    typeof value.field === 'string' &&
+    value.field !== ''
+  );
+}
+
+/** v2 直通：校验拷贝 bindings（产出全新对象，绝不与输入共享引用） */
+function normalizeV2Groups(input: unknown): ConfigFieldGroup[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const groups: ConfigFieldGroup[] = [];
+  input.forEach((entry, index) => {
+    if (!isPlainObject(entry)) {
+      return;
+    }
+    const bindings = Array.isArray(entry.bindings)
+      ? entry.bindings
+          .filter(isBindingInstance)
+          .map((b) => ({ bindingId: b.bindingId, field: b.field }))
+      : [];
+    const group: ConfigFieldGroup = {
+      id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `group-${index}`,
+      bindings,
+    };
+    if (typeof entry.alias === 'string') {
+      group.alias = entry.alias;
+    }
+    groups.push(group);
+  });
+  return groups;
+}
+
+/**
+ * v1 中间表示 → v2：给每个字段实例分配全局递增 bindingId（先 dimensionGroups 后
+ * metricGroups、组内按 fields 顺序，跨所有组连续编号 b-0/b-1/…），并把原列名键
+ * fieldMeta 的内容复制到每个由该列名生成的 bindingId 上（同名列的多个 binding 各得
+ * 一份独立拷贝，之后可各自修改互不影响——D2 修复目标）；原列名键条目丢弃。
+ */
+function convertV1ToV2(
+  v1Query: V1Query,
+  v1FieldMeta: Record<string, ChartMeta>
+): { query: ChartConfigQuery; fieldMeta: Record<string, ChartMeta> } {
+  const fieldMeta: Record<string, ChartMeta> = {};
+  let counter = 0;
+  const convertGroups = (groups: V1FieldGroup[]): ConfigFieldGroup[] =>
+    groups.map((group) => {
+      const bindings: BindingInstance[] = group.fields.map((field) => {
+        const bindingId = `b-${counter}`;
+        counter += 1;
+        const meta = v1FieldMeta[field];
+        if (meta) {
+          fieldMeta[bindingId] = { ...meta };
+        }
+        return { bindingId, field };
+      });
+      const converted: ConfigFieldGroup = { id: group.id, bindings };
+      if (group.alias !== undefined) {
+        converted.alias = group.alias;
+      }
+      return converted;
+    });
+
+  return {
+    query: {
+      // 对象字面量按源码顺序求值：dimensionGroups 先于 metricGroups 编号
+      dimensionGroups: convertGroups(v1Query.dimensionGroups),
+      metricGroups: convertGroups(v1Query.metricGroups),
+      filters: v1Query.filters,
+      sort: v1Query.sort,
+      limit: v1Query.limit,
+    },
+    fieldMeta,
+  };
+}
+
 function passthroughSection(input: unknown): unknown {
   return isPlainObject(input) ? { ...input } : {};
 }
 
 function emptyDocument(fallbackType: ChartType): ChartConfigDocument {
   return {
-    version: 1,
+    version: 2,
     chartType: fallbackType,
     title: '',
     query: {
@@ -243,10 +352,13 @@ function emptyDocument(fallbackType: ChartType): ChartConfigDocument {
   };
 }
 
+/** v2 的 filters/sort field 已是稳定列名，无需位置 id 解析（恒等） */
+const identityResolver = (id: string): string => id;
+
 /**
- * 把任意 bi_chart.config JSON 字符串转为合法 v1 文档。
+ * 把任意 bi_chart.config JSON 字符串转为合法 v2 文档。
  *
- * @param raw 图表 config 的 JSON 字符串（可能是旧结构、v1 或损坏内容）
+ * @param raw 图表 config 的 JSON 字符串（可能是旧结构、v1、v2 或损坏内容）
  * @param fallbackType chartType 缺失/非法时的回退（一般传后端 chart_type）
  * @param fields 运行时字段列表（id→name），用于把旧位置 id 解析为稳定列名；
  *               缺省时旧 id 在组字段中原样保留（有损路径）
@@ -268,28 +380,43 @@ export function migrateChartConfig(
 
   const resolve = makeResolver(fields);
   const version = typeof parsed.version === 'number' ? parsed.version : undefined;
+  const chartType = normalizeChartType(parsed.chartType, fallbackType);
+  const title = typeof parsed.title === 'string' ? parsed.title : '';
 
-  if (version !== undefined && version >= 1) {
-    // v1（或更高版本的尽力解析）：校验拷贝 + 补默认，绝不改动输入
+  if (version === 2) {
+    // v2 直通：校验拷贝 bindings + bindingId 键 fieldMeta，绝不改动输入
+    const querySource = isPlainObject(parsed.query) ? parsed.query : {};
     return {
-      version: 1,
-      chartType: normalizeChartType(parsed.chartType, fallbackType),
-      title: typeof parsed.title === 'string' ? parsed.title : '',
-      query: migrateQuery(parsed, resolve),
+      version: 2,
+      chartType,
+      title,
+      query: {
+        dimensionGroups: normalizeV2Groups(querySource.dimensionGroups),
+        metricGroups: normalizeV2Groups(querySource.metricGroups),
+        filters: migrateFilters(querySource.filters, identityResolver),
+        sort: migrateSort(querySource.sort, identityResolver),
+        limit: migrateLimit(querySource.limit),
+      },
       fieldMeta: normalizeFieldMeta(parsed.fieldMeta),
       style: passthroughSection(parsed.style),
       queryOptions: passthroughSection(parsed.queryOptions),
     };
   }
 
-  // 旧结构（无 version 或 version < 1）
+  // version === 1 或旧结构（无 version / version < 1）：先解析为 v1 中间表示，再转 v2
+  const isV1 = version === 1;
+  const v1Query = migrateQuery(parsed, resolve);
+  const v1FieldMeta = isV1
+    ? normalizeFieldMeta(parsed.fieldMeta)
+    : mergeLegacyFieldMeta(parsed, resolve);
+  const { query, fieldMeta } = convertV1ToV2(v1Query, v1FieldMeta);
   return {
-    version: 1,
-    chartType: normalizeChartType(parsed.chartType, fallbackType),
-    title: typeof parsed.title === 'string' ? parsed.title : '',
-    query: migrateQuery(parsed, resolve),
-    fieldMeta: mergeLegacyFieldMeta(parsed, resolve),
-    style: passthroughSection(parsed.chartStyle),
-    queryOptions: passthroughSection(parsed.chartQueryOptions),
+    version: 2,
+    chartType,
+    title,
+    query,
+    fieldMeta,
+    style: passthroughSection(isV1 ? parsed.style : parsed.chartStyle),
+    queryOptions: passthroughSection(isV1 ? parsed.queryOptions : parsed.chartQueryOptions),
   };
 }

@@ -101,7 +101,9 @@ const resetChartBuilderState = () => {
     chartData: [],
     chartDataLoading: false,
     queryConfig: {
-      dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
+      dimensionGroups: [
+        { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+      ],
       metricGroups: [],
       filters: [],
       limit: 1000,
@@ -303,7 +305,9 @@ describe('ChartBuilder', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加指标' }));
 
     await waitFor(() => {
-      expect(useStore.getState().queryConfig.metricGroups[0]?.fields).toEqual(['revenue']);
+      expect(useStore.getState().queryConfig.metricGroups[0]?.bindings).toEqual([
+        { bindingId: 'b-1', field: 'revenue' },
+      ]);
     });
 
     expect(mockExecuteChartQuery).toHaveBeenCalledWith(
@@ -349,10 +353,10 @@ describe('ChartBuilder', () => {
     renderChartBuilder();
 
     await waitFor(() => {
-      expect(useStore.getState().metricAliases.revenue).toBe('gmv');
+      expect(useStore.getState().metricAliases['b-1']).toBe('gmv');
     });
 
-    expect(useStore.getState().metricAggregations.revenue).toBe('avg');
+    expect(useStore.getState().metricAggregations['b-1']).toBe('avg');
   });
 
   it('restores dimension labels, metric units, formats, style and query options from saved config', async () => {
@@ -398,11 +402,11 @@ describe('ChartBuilder', () => {
     renderChartBuilder();
 
     await waitFor(() => {
-      expect(useStore.getState().dimensionLabels.region).toBe('区域');
+      expect(useStore.getState().dimensionLabels['b-0']).toBe('区域');
     });
 
-    expect(useStore.getState().metricUnits.revenue).toBe('元');
-    expect(useStore.getState().metricFormats.revenue).toBe('0,0.00');
+    expect(useStore.getState().metricUnits['b-1']).toBe('元');
+    expect(useStore.getState().metricFormats['b-1']).toBe('0,0.00');
     expect(useStore.getState().chartStyle.colors).toEqual(['#ff4d4f']);
     expect(useStore.getState().chartStyle.smooth).toBe(true);
     expect(useStore.getState().chartStyle.tableRowSize).toBe('middle');
@@ -632,8 +636,8 @@ describe('ChartBuilder', () => {
 
     // 迁移丢弃空洞条目，图表定义规范化补齐到散点图需要的 2 个指标组
     expect(useStore.getState().queryConfig.metricGroups).toEqual([
-      { id: 'metric-group-secondary', fields: ['revenue'] },
-      { id: 'metric-group-2', fields: [] },
+      { id: 'metric-group-secondary', bindings: [{ bindingId: 'b-0', field: 'revenue' }] },
+      { id: 'metric-group-2', bindings: [] },
     ]);
     expect(errorSpy).not.toHaveBeenCalled();
 
@@ -678,22 +682,26 @@ describe('ChartBuilder', () => {
 
     renderChartBuilder();
 
-    // 旧位置 id 借助 chartBuilderFields 解析为列名
+    // 旧位置 id 借助 chartBuilderFields 解析为列名，再转 v2 bindings
     await waitFor(() => {
-      expect(useStore.getState().queryConfig.dimensionGroups[0]?.fields).toEqual(['region']);
+      expect(useStore.getState().queryConfig.dimensionGroups[0]?.bindings).toEqual([
+        { bindingId: 'b-0', field: 'region' },
+      ]);
     });
 
-    expect(useStore.getState().queryConfig.metricGroups[0]?.fields).toEqual(['revenue']);
+    expect(useStore.getState().queryConfig.metricGroups[0]?.bindings).toEqual([
+      { bindingId: 'b-1', field: 'revenue' },
+    ]);
     expect(useStore.getState().queryConfig.filters[0]?.field).toBe('region');
-    expect(useStore.getState().dimensionLabels).toEqual({ region: '区域' });
-    expect(useStore.getState().metricAggregations).toEqual({ revenue: 'avg' });
-    expect(useStore.getState().metricAliases).toEqual({ revenue: 'gmv' });
+    expect(useStore.getState().dimensionLabels).toEqual({ 'b-0': '区域' });
+    expect(useStore.getState().metricAggregations).toEqual({ 'b-1': 'avg' });
+    expect(useStore.getState().metricAliases).toEqual({ 'b-1': 'gmv' });
     expect(useStore.getState().metricUnits).toEqual({});
     expect(useStore.getState().chartStyle.tableRowSize).toBe('middle');
     expect(useStore.getState().chartQueryOptions.pieMergeOtherBelowRatio).toBe(5);
   });
 
-  it('saves the chart config as a v1 document with column-name fields and fieldMeta', async () => {
+  it('saves the chart config as a v2 document with bindings and bindingId-keyed fieldMeta', async () => {
     mockUpdateChart.mockResolvedValue(
       mockAxiosResponse({
         code: 20000,
@@ -713,15 +721,20 @@ describe('ChartBuilder', () => {
 
     renderChartBuilder();
 
+    // 等待字段加载 + loadChartConfig 完成迁移（region 绑定为 b-0），保证后续按
+    // bindingId 写入是确定性的。
     await waitFor(() => {
       expect(useStore.getState().chartBuilderFields).toHaveLength(2);
+      expect(useStore.getState().queryConfig.dimensionGroups[0]?.bindings).toEqual([
+        { bindingId: 'b-0', field: 'region' },
+      ]);
     });
 
     act(() => {
       const state = useStore.getState();
-      state.setDimensionLabel('region', '区域');
-      state.setMetricAlias('revenue', 'gmv');
-      state.addMetricField(state.chartBuilderFields[1], 0);
+      state.setDimensionLabel('b-0', '区域');
+      state.addMetricField(state.chartBuilderFields[1], 0); // revenue → b-1
+      state.setMetricAlias('b-1', 'gmv');
     });
 
     fireEvent.click(screen.getByRole('button', { name: /更新$/ }));
@@ -741,18 +754,22 @@ describe('ChartBuilder', () => {
 
     const savedDoc = JSON.parse(payload.config ?? '') as ChartConfigDocument;
     expect(savedDoc).toEqual({
-      version: 1,
+      version: 2,
       chartType: 'table',
       title: 'Sales Table',
       query: {
-        dimensionGroups: [{ id: 'dim-group-main', fields: ['region'] }],
-        metricGroups: [{ id: 'metric-group-1', fields: ['revenue'] }],
+        dimensionGroups: [
+          { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+        ],
+        metricGroups: [
+          { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+        ],
         filters: [],
         limit: 1000,
       },
       fieldMeta: {
-        region: { label: '区域' },
-        revenue: { alias: 'gmv' },
+        'b-0': { label: '区域' },
+        'b-1': { alias: 'gmv' },
       },
       style: { colors: [], smooth: false, tableRowSize: 'small' },
       queryOptions: {},

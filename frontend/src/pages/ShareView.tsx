@@ -138,9 +138,13 @@ const ShareView: React.FC = () => {
     const labels: Record<string, string> = {};
     if (!chartDoc) return labels;
     for (const group of [...chartDoc.query.dimensionGroups, ...chartDoc.query.metricGroups]) {
-      for (const name of group.fields) {
-        const meta = chartDoc.fieldMeta[name];
-        labels[name] = meta?.label || meta?.alias || name;
+      for (const binding of group.bindings) {
+        // fieldMeta 按 bindingId 取（v2 键），但 labels 的键保持列名——buildChartOption
+        // 用列名匹配结构化响应的 series name / x_axis（后端目前仍按列名/别名返回）。
+        // 已知歧义（Task 0-6+0-8 解决）：同一列名有多个 binding（多个不同 label）时，
+        // 共享列名键上后写入者覆盖先写入者。
+        const meta = chartDoc.fieldMeta[binding.bindingId];
+        labels[binding.field] = meta?.label || meta?.alias || binding.field;
       }
     }
     return labels;
@@ -158,8 +162,8 @@ const ShareView: React.FC = () => {
     }
     return buildChartOption(chartDoc.chartType, chartData, chartStyle, displayLabels, {
       title: chartDoc.title || chart.name,
-      dimensions: chartDoc.query.dimensionGroups.flatMap((g) => g.fields),
-      metrics: chartDoc.query.metricGroups.flatMap((g) => g.fields),
+      dimensions: chartDoc.query.dimensionGroups.flatMap((g) => g.bindings.map((b) => b.field)),
+      metrics: chartDoc.query.metricGroups.flatMap((g) => g.bindings.map((b) => b.field)),
     });
   }, [chart, chartDoc, chartData, chartStyle, displayLabels]);
 

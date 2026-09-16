@@ -59,6 +59,7 @@ import {
 } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload } from '../lib/chartOptions';
 import {
+  BoundField,
   ChartConfig,
   ChartField,
   ChartQueryOptions,
@@ -101,22 +102,6 @@ const getDraggedField = (value: unknown): ChartField | null => {
     return null;
   }
   return value.field;
-};
-
-/**
- * 按字段 id 去重，同时保留第一次出现的顺序。
- * 调用场景：右侧配置面板会聚合多个字段组的已选字段，同一字段可能出现在多个组里。
- * 主要逻辑：使用 Set 过滤重复 id，避免 React 列表出现重复 key，同时不影响查询配置原始分组。
- */
-const dedupeFieldsById = (fields: ChartField[]): ChartField[] => {
-  const seen = new Set<string>();
-  return fields.filter((field) => {
-    if (seen.has(field.id)) {
-      return false;
-    }
-    seen.add(field.id);
-    return true;
-  });
 };
 
 /**
@@ -186,15 +171,30 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
   const activeGroups = getActiveFieldGroups(chartType, queryConfig);
   const fieldMap = new Map(fields.map((f) => [f.id, f]));
   const dimensionFields = activeGroups.dimensionGroups
-    .flatMap((group) => group.fields)
-    .map((id) => fieldMap.get(id))
-    .filter((f): f is ChartField => f !== undefined);
-  const metricFields = activeGroups.metricGroups
-    .flatMap((group) => group.fields)
-    .map((id) => fieldMap.get(id))
+    .flatMap((group) => group.bindings.map((b) => b.field))
+    .map((name) => fieldMap.get(name))
     .filter((f): f is ChartField => f !== undefined);
 
-  if (dimensionFields.length === 0 && metricFields.length === 0) {
+  // 已知限制（Task 0-6+0-8 解决）：wire 这一层 metrics[].field 仍是列名，若同一列名
+  // 出现在两个不同指标组（D2 场景），flatMap 会产生重复列名，后端将收到两个相同 field
+  // 的 metric 配置。本阶段按现有逻辑原样发送、不去重——真正区分要等 v2 wire 的 bindingId 别名。
+  const metrics = activeGroups.metricGroups
+    .flatMap((group) => group.bindings)
+    .flatMap((binding) => {
+      const chartField = fieldMap.get(binding.field);
+      if (!chartField) {
+        return [];
+      }
+      return [
+        {
+          field: chartField.name,
+          agg: (metricAggregations[binding.bindingId] || 'sum') as ChartQueryAggregation,
+          alias: metricAliases[binding.bindingId] || chartField.name,
+        },
+      ];
+    });
+
+  if (dimensionFields.length === 0 && metrics.length === 0) {
     return null;
   }
 
@@ -202,11 +202,7 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
     dataset_id: datasetId,
     chart_type: chartType,
     dims: dimensionFields.map((f) => f.name),
-    metrics: metricFields.map((f) => ({
-      field: f.name,
-      agg: (metricAggregations[f.id] || 'sum') as ChartQueryAggregation,
-      alias: metricAliases[f.id] || f.name,
-    })),
+    metrics,
     filters: queryConfig.filters.map((f) => {
       const field = fields.find((candidate) => candidate.id === f.field);
       return {
@@ -285,28 +281,34 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     const { queryConfig, chartBuilderFields } = useStore.getState();
     const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
 
-    const dimensionIds = queryConfig.dimensionGroups.flatMap((g) => g.fields);
-    const metricIds = queryConfig.metricGroups.flatMap((g) => g.fields);
-    const dimensions = dimensionIds
-      .map((id) => fieldMap.get(id)?.name)
+    const dimensionBindings = queryConfig.dimensionGroups.flatMap((g) => g.bindings);
+    const metricBindings = queryConfig.metricGroups.flatMap((g) => g.bindings);
+    // context.dimensions/metrics 仍是列名：buildChartOption 用它们匹配结构化响应的
+    // x_axis / series[].name（后端目前仍按列名/别名返回，未切到 bindingId）。
+    const dimensions = dimensionBindings
+      .map((b) => fieldMap.get(b.field)?.name)
       .filter((name): name is string => name !== undefined);
-    const metrics = metricIds
-      .map((id) => fieldMap.get(id)?.name)
+    const metrics = metricBindings
+      .map((b) => fieldMap.get(b.field)?.name)
       .filter((name): name is string => name !== undefined);
 
+    // labels 的键保持列名（buildChartOption 按列名/系列名查显示名），但 label/alias/unit
+    // 的值按 bindingId 取（五个 Record 已改为 bindingId 键）。
     const labels: Record<string, string> = {};
-    for (const id of dimensionIds) {
-      const name = fieldMap.get(id)?.name;
-      const label = dimensionLabels[id];
+    for (const binding of dimensionBindings) {
+      const name = fieldMap.get(binding.field)?.name;
+      const label = dimensionLabels[binding.bindingId];
       if (name && label) {
         labels[name] = label;
       }
     }
-    for (const id of metricIds) {
-      const baseName = fieldMap.get(id)?.name || id;
-      const alias = metricAliases[id];
-      const unit = metricUnits[id];
+    for (const binding of metricBindings) {
+      const baseName = fieldMap.get(binding.field)?.name || binding.field;
+      const alias = metricAliases[binding.bindingId];
+      const unit = metricUnits[binding.bindingId];
       const displayName = alias || baseName;
+      // 已知限制（Task 0-6+0-8 解决）：同一列名有多个 binding（多个不同 alias）时，
+      // 共享的列名键上后写入者覆盖先写入者，图表暂时无法区分显示名。
       labels[baseName] = unit ? `${displayName} (${unit})` : displayName;
     }
 
@@ -403,11 +405,11 @@ interface ConfigPanelProps {
   metricUnits: Record<string, string>;
   metricFormats: Record<string, string>;
   chartStyle: ChartStyleConfig;
-  dimensionFields: ChartField[];
-  metricFields: ChartField[];
-  onDimensionLabelChange: (fieldId: string, label: string) => void;
-  onMetricUnitChange: (fieldId: string, unit: string) => void;
-  onMetricFormatChange: (fieldId: string, format: string) => void;
+  dimensionFields: BoundField[];
+  metricFields: BoundField[];
+  onDimensionLabelChange: (bindingId: string, label: string) => void;
+  onMetricUnitChange: (bindingId: string, unit: string) => void;
+  onMetricFormatChange: (bindingId: string, format: string) => void;
   onChartStyleChange: (style: Partial<ChartStyleConfig>) => void;
 }
 
@@ -505,13 +507,13 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
       {dimensionFields.length > 0 && (
         <Card title="维度属性" size="small" style={{ marginBottom: 12 }}>
           <Space orientation="vertical" style={{ width: '100%' }} size="small">
-            {dimensionFields.map((field) => (
-              <div key={field.id}>
-                <Text strong>{field.name}</Text>
+            {dimensionFields.map((bound) => (
+              <div key={bound.binding.bindingId}>
+                <Text strong>{bound.field.name}</Text>
                 <Input
                   style={{ width: '100%', marginTop: 4 }}
-                  value={dimensionLabels[field.id] || ''}
-                  onChange={(e) => onDimensionLabelChange(field.id, e.target.value)}
+                  value={dimensionLabels[bound.binding.bindingId] || ''}
+                  onChange={(e) => onDimensionLabelChange(bound.binding.bindingId, e.target.value)}
                   placeholder="显示名称"
                 />
               </div>
@@ -523,19 +525,19 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
       {metricFields.length > 0 && (
         <Card title="指标属性" size="small" style={{ marginBottom: 12 }}>
           <Space orientation="vertical" style={{ width: '100%' }} size="small">
-            {metricFields.map((field) => (
-              <div key={field.id}>
-                <Text strong>{field.name}</Text>
+            {metricFields.map((bound) => (
+              <div key={bound.binding.bindingId}>
+                <Text strong>{bound.field.name}</Text>
                 <Input
                   style={{ width: '100%', marginTop: 4, marginBottom: 4 }}
-                  value={metricUnits[field.id] || ''}
-                  onChange={(e) => onMetricUnitChange(field.id, e.target.value)}
+                  value={metricUnits[bound.binding.bindingId] || ''}
+                  onChange={(e) => onMetricUnitChange(bound.binding.bindingId, e.target.value)}
                   placeholder="单位，例如 元 / %"
                 />
                 <Input
                   style={{ width: '100%' }}
-                  value={metricFormats[field.id] || ''}
-                  onChange={(e) => onMetricFormatChange(field.id, e.target.value)}
+                  value={metricFormats[bound.binding.bindingId] || ''}
+                  onChange={(e) => onMetricFormatChange(bound.binding.bindingId, e.target.value)}
                   placeholder="格式，例如 0,0.00"
                 />
               </div>
@@ -710,28 +712,39 @@ const ChartBuilder: React.FC = () => {
     [addDimensionField, addMetricField, addFilter]
   );
 
-  const getDimensionFields = useCallback(() => {
-    const dimensionIds = queryConfig.dimensionGroups.flatMap((g) => g.fields);
+  const getDimensionFields = useCallback((): BoundField[] => {
     const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
-    return dimensionIds.map((id) => fieldMap.get(id)).filter(Boolean) as ChartField[];
+    return queryConfig.dimensionGroups.flatMap((g) =>
+      g.bindings.flatMap((binding) => {
+        const field = fieldMap.get(binding.field);
+        return field ? [{ binding, field }] : [];
+      })
+    );
   }, [queryConfig.dimensionGroups, chartBuilderFields]);
 
-  const getMetricFields = useCallback(() => {
-    const metricIds = queryConfig.metricGroups.flatMap((g) => g.fields);
+  const getMetricFields = useCallback((): BoundField[] => {
     const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
-    return metricIds.map((id) => fieldMap.get(id)).filter(Boolean) as ChartField[];
+    return queryConfig.metricGroups.flatMap((g) =>
+      g.bindings.flatMap((binding) => {
+        const field = fieldMap.get(binding.field);
+        return field ? [{ binding, field }] : [];
+      })
+    );
   }, [queryConfig.metricGroups, chartBuilderFields]);
 
   /**
    * 按维度组索引读取字段，供定义驱动的查询配置面板复用。
    * 调用场景：一个图表类型需要多个维度组时，例如透视表的行/列维度。
-   * 主要逻辑：从指定 group 的 field id 列表映射回完整字段对象。
+   * 主要逻辑：从指定 group 的 bindings 映射回完整字段对象（保留 bindingId 供 key/元数据查找）。
    */
   const getDimensionFieldsByGroup = useCallback(
-    (groupIndex: number) => {
-      const fieldIds = queryConfig.dimensionGroups[groupIndex]?.fields || [];
+    (groupIndex: number): BoundField[] => {
+      const bindings = queryConfig.dimensionGroups[groupIndex]?.bindings || [];
       const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
-      return fieldIds.map((id) => fieldMap.get(id)).filter(Boolean) as ChartField[];
+      return bindings.flatMap((binding) => {
+        const field = fieldMap.get(binding.field);
+        return field ? [{ binding, field }] : [];
+      });
     },
     [queryConfig.dimensionGroups, chartBuilderFields]
   );
@@ -739,13 +752,16 @@ const ChartBuilder: React.FC = () => {
   /**
    * 按指标组索引读取字段，供定义驱动的查询配置面板复用。
    * 调用场景：一个图表类型需要多个指标组时，例如散点图的 X/Y 指标。
-   * 主要逻辑：从指定 group 的 field id 列表映射回完整字段对象。
+   * 主要逻辑：从指定 group 的 bindings 映射回完整字段对象（保留 bindingId 供 key/元数据查找）。
    */
   const getMetricFieldsByGroup = useCallback(
-    (groupIndex: number) => {
-      const fieldIds = queryConfig.metricGroups[groupIndex]?.fields || [];
+    (groupIndex: number): BoundField[] => {
+      const bindings = queryConfig.metricGroups[groupIndex]?.bindings || [];
       const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
-      return fieldIds.map((id) => fieldMap.get(id)).filter(Boolean) as ChartField[];
+      return bindings.flatMap((binding) => {
+        const field = fieldMap.get(binding.field);
+        return field ? [{ binding, field }] : [];
+      });
     },
     [queryConfig.metricGroups, chartBuilderFields]
   );
@@ -789,10 +805,10 @@ const ChartBuilder: React.FC = () => {
           availableFields={chartBuilderFields}
           aggregations={metricAggregations}
           aliases={metricAliases}
-          onRemoveField={(fieldId) =>
+          onRemoveField={(bindingId) =>
             group.kind === 'dimension'
-              ? removeDimensionField(fieldId, groupIndex)
-              : removeMetricField(fieldId, groupIndex)
+              ? removeDimensionField(bindingId, groupIndex)
+              : removeMetricField(bindingId, groupIndex)
           }
           onAggregationChange={setMetricAggregation}
           onAddField={(field) =>
@@ -807,10 +823,10 @@ const ChartBuilder: React.FC = () => {
           }
           onOpenSettings={
             group.kind === 'metric'
-              ? (field) => {
-                  const alias = prompt('输入字段别名:', field.name);
+              ? (bound) => {
+                  const alias = prompt('输入字段别名:', bound.field.name);
                   if (alias !== null) {
-                    setMetricAlias(field.id, alias);
+                    setMetricAlias(bound.binding.bindingId, alias);
                   }
                 }
               : undefined
@@ -1020,18 +1036,18 @@ const ChartBuilder: React.FC = () => {
             })
           );
 
-          // v1 fieldMeta（键为列名）→ 5 个运行时 Record
+          // v2 fieldMeta（键为 bindingId）→ 5 个运行时 Record
           const restoredLabels: Record<string, string> = {};
           const restoredAggregations: Record<string, string> = {};
           const restoredAliases: Record<string, string> = {};
           const restoredUnits: Record<string, string> = {};
           const restoredFormats: Record<string, string> = {};
-          for (const [name, meta] of Object.entries(doc.fieldMeta)) {
-            if (meta.label) restoredLabels[name] = meta.label;
-            if (meta.aggregation) restoredAggregations[name] = meta.aggregation;
-            if (meta.alias) restoredAliases[name] = meta.alias;
-            if (meta.unit) restoredUnits[name] = meta.unit;
-            if (meta.format) restoredFormats[name] = meta.format;
+          for (const [bindingId, meta] of Object.entries(doc.fieldMeta)) {
+            if (meta.label) restoredLabels[bindingId] = meta.label;
+            if (meta.aggregation) restoredAggregations[bindingId] = meta.aggregation;
+            if (meta.alias) restoredAliases[bindingId] = meta.alias;
+            if (meta.unit) restoredUnits[bindingId] = meta.unit;
+            if (meta.format) restoredFormats[bindingId] = meta.format;
           }
           setDimensionLabels(restoredLabels);
           setMetricAggregations(restoredAggregations);
@@ -1078,13 +1094,13 @@ const ChartBuilder: React.FC = () => {
     }
 
     try {
-      // v1 持久化文档：字段组已是列名（fieldId === name），
-      // 5 个平铺 Record 在序列化边界收敛为 fieldMeta（键为列名），仅保留非空条目。
+      // v2 持久化文档：字段组是 bindings（bindingId + 列名），5 个 Record 在序列化
+      // 边界收敛为 fieldMeta（键为 bindingId），仅保留非空条目。
       const fieldMeta: Record<string, ChartMeta> = {};
       const assignMeta = (record: Record<string, string>, key: keyof ChartMeta) => {
-        for (const [name, value] of Object.entries(record)) {
+        for (const [bindingId, value] of Object.entries(record)) {
           if (value) {
-            fieldMeta[name] = { ...fieldMeta[name], [key]: value };
+            fieldMeta[bindingId] = { ...fieldMeta[bindingId], [key]: value };
           }
         }
       };
@@ -1095,7 +1111,7 @@ const ChartBuilder: React.FC = () => {
       assignMeta(metricFormats, 'format');
 
       const doc: ChartConfigDocument = {
-        version: 1,
+        version: 2,
         chartType: chartBuilderConfig.chartType,
         title: chartBuilderConfig.title,
         query: {
@@ -1162,13 +1178,15 @@ const ChartBuilder: React.FC = () => {
           loading={chartDataLoading}
           columns={tableColumns}
           columnLabels={Object.fromEntries(
-            getDimensionFields().map((field) => [
-              field.name,
-              dimensionLabels[field.id] || field.name,
+            // columnLabels 仍按列名索引（TableChart 按列名取行值）；同一列名有多个
+            // 维度 binding 时后写入的 label 覆盖先写入的（Task 0-6+0-8 前的已知歧义）。
+            getDimensionFields().map((bound) => [
+              bound.field.name,
+              dimensionLabels[bound.binding.bindingId] || bound.field.name,
             ])
           )}
-          dimensionNames={dimensionFields.map((f) => f.name)}
-          metricNames={metricFields.map((f) => f.name)}
+          dimensionNames={dimensionFields.map((bound) => bound.field.name)}
+          metricNames={metricFields.map((bound) => bound.field.name)}
           rowSize={chartStyle.tableRowSize}
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
           onPageChange={chartBuilderConfig.chartType === 'table' ? handlePageChange : undefined}
@@ -1409,8 +1427,8 @@ const ChartBuilder: React.FC = () => {
             metricUnits={metricUnits}
             metricFormats={metricFormats}
             chartStyle={chartStyle}
-            dimensionFields={dedupeFieldsById(getDimensionFields())}
-            metricFields={dedupeFieldsById(getMetricFields())}
+            dimensionFields={getDimensionFields()}
+            metricFields={getMetricFields()}
             onDimensionLabelChange={setDimensionLabel}
             onMetricUnitChange={setMetricUnit}
             onMetricFormatChange={setMetricFormat}
@@ -1465,8 +1483,8 @@ const ChartBuilder: React.FC = () => {
             metricUnits={metricUnits}
             metricFormats={metricFormats}
             chartStyle={chartStyle}
-            dimensionFields={dedupeFieldsById(getDimensionFields())}
-            metricFields={dedupeFieldsById(getMetricFields())}
+            dimensionFields={getDimensionFields()}
+            metricFields={getMetricFields()}
             onDimensionLabelChange={setDimensionLabel}
             onMetricUnitChange={setMetricUnit}
             onMetricFormatChange={setMetricFormat}

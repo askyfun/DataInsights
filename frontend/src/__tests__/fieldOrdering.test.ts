@@ -29,8 +29,25 @@ function setupStore() {
   useStore.setState({
     chartBuilderFields: MOCK_FIELDS,
     queryConfig: {
-      dimensionGroups: [{ id: 'dim-main', fields: ['date', 'city', 'country'] }],
-      metricGroups: [{ id: 'metric-main', fields: ['revenue', 'cost'] }],
+      dimensionGroups: [
+        {
+          id: 'dim-main',
+          bindings: [
+            { bindingId: 'b-0', field: 'date' },
+            { bindingId: 'b-1', field: 'city' },
+            { bindingId: 'b-2', field: 'country' },
+          ],
+        },
+      ],
+      metricGroups: [
+        {
+          id: 'metric-main',
+          bindings: [
+            { bindingId: 'b-3', field: 'revenue' },
+            { bindingId: 'b-4', field: 'cost' },
+          ],
+        },
+      ],
       filters: [],
       limit: 1000,
     },
@@ -44,14 +61,14 @@ function setupStore() {
 function getDimensionFieldNames(): string[] {
   const state = useStore.getState();
   const fieldMap = new Map(state.chartBuilderFields.map((f) => [f.id, f]));
-  const dimIds = state.queryConfig.dimensionGroups.flatMap((g) => g.fields);
+  const dimIds = state.queryConfig.dimensionGroups.flatMap((g) => g.bindings.map((b) => b.field));
   return dimIds.map((id) => fieldMap.get(id)?.name).filter(Boolean) as string[];
 }
 
 function getMetricFieldNames(): string[] {
   const state = useStore.getState();
   const fieldMap = new Map(state.chartBuilderFields.map((f) => [f.id, f]));
-  const metIds = state.queryConfig.metricGroups.flatMap((g) => g.fields);
+  const metIds = state.queryConfig.metricGroups.flatMap((g) => g.bindings.map((b) => b.field));
   return metIds.map((id) => fieldMap.get(id)?.name).filter(Boolean) as string[];
 }
 
@@ -61,7 +78,7 @@ function getMetricFieldNames(): string[] {
  */
 function getDimensionFieldNames_BUGGY(): string[] {
   const state = useStore.getState();
-  const dimIds = state.queryConfig.dimensionGroups.flatMap((g) => g.fields);
+  const dimIds = state.queryConfig.dimensionGroups.flatMap((g) => g.bindings.map((b) => b.field));
   return state.chartBuilderFields.filter((f) => dimIds.includes(f.id)).map((f) => f.name);
 }
 
@@ -79,7 +96,9 @@ describe('字段顺序：store 的 queryConfig 顺序优先于 chartBuilderField
   });
 
   it('queryConfig 顺序: date, city, country', () => {
-    const storeOrder = useStore.getState().queryConfig.dimensionGroups[0].fields;
+    const storeOrder = useStore
+      .getState()
+      .queryConfig.dimensionGroups[0].bindings.map((b) => b.field);
     expect(storeOrder).toEqual(['date', 'city', 'country']);
   });
 
@@ -101,7 +120,7 @@ describe('字段顺序：store 的 queryConfig 顺序优先于 chartBuilderField
 
   it('指标字段 .filter() 顺序也是错的', () => {
     const state = useStore.getState();
-    const metIds = state.queryConfig.metricGroups.flatMap((g) => g.fields);
+    const metIds = state.queryConfig.metricGroups.flatMap((g) => g.bindings.map((b) => b.field));
     const buggy = state.chartBuilderFields.filter((f) => metIds.includes(f.id)).map((f) => f.name);
     // source order: revenue, cost, profit; store order: revenue, cost
     // .filter() 返回 source 中匹配的前两个: revenue, cost

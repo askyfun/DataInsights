@@ -1,6 +1,6 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Card, Select, Space } from 'antd';
-import type { ChartField, QueryConfig } from '../../store';
+import { type ChartField, type QueryConfig, reconcileGroupBindings } from '../../store';
 
 interface QueryPanelProps {
   fields: ChartField[];
@@ -38,7 +38,16 @@ const QueryPanel: React.FC<QueryPanelProps> = ({
     values: string[]
   ) => {
     const groups = type === 'dimension' ? queryConfig.dimensionGroups : queryConfig.metricGroups;
-    const updatedGroups = groups.map((g) => (g.id === groupId ? { ...g, fields: values } : g));
+    // 全局 bindingId 视野：所有维度组 + 指标组的现有 bindings
+    const allBindings = [
+      ...queryConfig.dimensionGroups.map((g) => g.bindings),
+      ...queryConfig.metricGroups.map((g) => g.bindings),
+    ];
+    const updatedGroups = groups.map((g) =>
+      g.id === groupId
+        ? { ...g, bindings: reconcileGroupBindings(g.bindings, values, allBindings) }
+        : g
+    );
 
     if (type === 'dimension') {
       onUpdateConfig({ dimensionGroups: updatedGroups });
@@ -68,7 +77,7 @@ const QueryPanel: React.FC<QueryPanelProps> = ({
           mode="multiple"
           style={{ width: '100%' }}
           placeholder="选择维度字段（支持多选）"
-          value={queryConfig.dimensionGroups[0]?.fields || []}
+          value={queryConfig.dimensionGroups[0]?.bindings.map((b) => b.field) || []}
           onChange={(values) =>
             handleGroupFieldsChange(
               queryConfig.dimensionGroups[0]?.id || 'default-dim',
@@ -97,7 +106,7 @@ const QueryPanel: React.FC<QueryPanelProps> = ({
                 mode="multiple"
                 style={{ minWidth: 150 }}
                 placeholder={`维度组 ${index + 2}`}
-                value={group.fields}
+                value={group.bindings.map((b) => b.field)}
                 onChange={(values) => handleGroupFieldsChange(group.id, 'dimension', values)}
                 options={getFieldOptions('dimension')}
                 suffixIcon={
@@ -139,7 +148,7 @@ const QueryPanel: React.FC<QueryPanelProps> = ({
           mode="multiple"
           style={{ width: '100%' }}
           placeholder="选择指标字段（支持多选）"
-          value={queryConfig.metricGroups[0]?.fields || []}
+          value={queryConfig.metricGroups[0]?.bindings.map((b) => b.field) || []}
           onChange={(values) =>
             handleGroupFieldsChange(
               queryConfig.metricGroups[0]?.id || 'default-metric',
@@ -168,7 +177,7 @@ const QueryPanel: React.FC<QueryPanelProps> = ({
                 mode="multiple"
                 style={{ minWidth: 150 }}
                 placeholder={`指标组 ${index + 2}`}
-                value={group.fields}
+                value={group.bindings.map((b) => b.field)}
                 onChange={(values) => handleGroupFieldsChange(group.id, 'metric', values)}
                 options={getFieldOptions('metric')}
                 suffixIcon={

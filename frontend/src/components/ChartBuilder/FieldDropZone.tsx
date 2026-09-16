@@ -9,7 +9,7 @@ import {
 import { useDroppable } from '@dnd-kit/core';
 import { Button, Dropdown, Tag } from 'antd';
 import React, { useState } from 'react';
-import type { ChartField } from '@/store';
+import type { BoundField, ChartField } from '@/store';
 
 export type DropZoneType = 'dimension' | 'metric' | 'filter';
 
@@ -17,13 +17,13 @@ export interface FieldDropZoneProps {
   zoneType: DropZoneType;
   label: string;
   groupIndex?: number;
-  fields: ChartField[];
+  fields: BoundField[];
   availableFields?: ChartField[];
   aggregations?: Record<string, string>;
   aliases?: Record<string, string>;
-  onRemoveField?: (fieldId: string) => void;
-  onAggregationChange?: (fieldId: string, aggregation: string) => void;
-  onOpenSettings?: (field: ChartField) => void;
+  onRemoveField?: (bindingId: string) => void;
+  onAggregationChange?: (bindingId: string, aggregation: string) => void;
+  onOpenSettings?: (bound: BoundField) => void;
   onAddField?: (field: ChartField) => void;
   onReorderField?: (oldIndex: number, newIndex: number) => void;
   emptyText?: string;
@@ -39,21 +39,21 @@ const AGGREGATION_OPTIONS = [
 ];
 
 interface FieldPillInlineProps {
-  field: ChartField;
+  bound: BoundField;
   zoneType: DropZoneType;
   aggregations: Record<string, string>;
   aliases: Record<string, string>;
   index: number;
   total: number;
-  onRemoveField?: (fieldId: string) => void;
-  onAggregationChange?: (fieldId: string, aggregation: string) => void;
-  onOpenSettings?: (field: ChartField) => void;
+  onRemoveField?: (bindingId: string) => void;
+  onAggregationChange?: (bindingId: string, aggregation: string) => void;
+  onOpenSettings?: (bound: BoundField) => void;
   onMoveLeft?: () => void;
   onMoveRight?: () => void;
 }
 
 const FieldPillInline: React.FC<FieldPillInlineProps> = ({
-  field,
+  bound,
   zoneType,
   aggregations,
   aliases,
@@ -64,9 +64,11 @@ const FieldPillInline: React.FC<FieldPillInlineProps> = ({
   onMoveLeft,
   onMoveRight,
 }) => {
+  const { field, binding } = bound;
+  const bindingId = binding.bindingId;
   const fieldType = zoneType === 'filter' ? 'dimension' : zoneType;
-  const agg = (aggregations[field.id] || 'sum') as string;
-  const alias = aliases[field.id];
+  const agg = (aggregations[bindingId] || 'sum') as string;
+  const alias = aliases[bindingId];
 
   const getColor = () => {
     if (fieldType === 'dimension') {
@@ -105,7 +107,7 @@ const FieldPillInline: React.FC<FieldPillInlineProps> = ({
             style={{ fontSize: '12px', opacity: 0.6, cursor: 'pointer' }}
             onClick={(e) => {
               e.stopPropagation();
-              onOpenSettings(field);
+              onOpenSettings(bound);
             }}
           />
         )}
@@ -113,7 +115,7 @@ const FieldPillInline: React.FC<FieldPillInlineProps> = ({
           style={{ fontSize: '12px', opacity: 0.6, cursor: 'pointer' }}
           onClick={(e) => {
             e.stopPropagation();
-            onRemoveField?.(field.id);
+            onRemoveField?.(bindingId);
           }}
         />
       </Tag>
@@ -174,7 +176,7 @@ const FieldDropZone: React.FC<FieldDropZoneProps> = ({
       if (zoneType === 'metric') return f.type === 'metric';
       return true;
     })
-    .filter((f) => !fields.some((added) => added.id === f.id));
+    .filter((f) => !fields.some((added) => added.field.id === f.id));
 
   const dropdownItems = filteredFields.map((field) => ({
     key: field.id,
@@ -264,10 +266,10 @@ const FieldDropZone: React.FC<FieldDropZoneProps> = ({
         )
       ) : (
         <>
-          {fields.map((field, index) => (
+          {fields.map((bound, index) => (
             <FieldPillInline
-              key={field.id}
-              field={field}
+              key={bound.binding.bindingId}
+              bound={bound}
               zoneType={zoneType}
               aggregations={aggregations}
               aliases={aliases}

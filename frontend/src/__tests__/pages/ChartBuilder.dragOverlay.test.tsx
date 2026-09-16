@@ -217,7 +217,9 @@ describe('ChartBuilder drag overlay', () => {
       });
     });
 
-    expect(useStore.getState().queryConfig.dimensionGroups[0]?.fields).toEqual([]);
-    expect(useStore.getState().queryConfig.dimensionGroups[1]?.fields).toEqual(['region']);
+    expect(useStore.getState().queryConfig.dimensionGroups[0]?.bindings).toEqual([]);
+    expect(useStore.getState().queryConfig.dimensionGroups[1]?.bindings).toEqual([
+      { bindingId: 'b-0', field: 'region' },
+    ]);
   });
 });

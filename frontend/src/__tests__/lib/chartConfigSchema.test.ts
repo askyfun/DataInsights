@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { type ChartConfigDocument, migrateChartConfig } from '@/lib/chartConfigSchema';
 
 /**
- * chartConfigSchema v1 迁移测试。
+ * chartConfigSchema v2 迁移测试。
  *
- * 背景：bi_chart.config 旧结构以 `field-${index}` 位置 id 存字段引用，
- * 列名只存在于运行时字段列表。migrateChartConfig 必须接受可选 fields
- * 参数把旧 id 解析为稳定列名；无 fields 时按原样透传（有损路径）。
+ * 背景：bi_chart.config 旧结构以 `field-${index}` 位置 id 存字段引用，v1 统一为列名，
+ * v2 进一步把字段组升级为 bindings（每个字段实例带全局唯一 bindingId），fieldMeta 的键
+ * 由列名改为 bindingId（修复 D2：同列多组共享元数据）。migrateChartConfig 必须接受可选
+ * fields 参数把旧 id 解析为列名；无 fields 时按原样透传（有损路径）。
  */
 
 const FIELDS = [
@@ -40,23 +41,27 @@ function legacyConfig(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-describe('migrateChartConfig：旧结构 → v1', () => {
-  it('完整旧结构迁移为 v1 文档', () => {
+describe('migrateChartConfig：旧结构 → v2', () => {
+  it('完整旧结构迁移为 v2 文档', () => {
     const doc = migrateChartConfig(legacyConfig(), 'table', FIELDS);
 
-    expect(doc.version).toBe(1);
+    expect(doc.version).toBe(2);
     expect(doc.chartType).toBe('bar');
     expect(doc.title).toBe('各地区 GMV');
 
-    // queryConfig → query
-    expect(doc.query.dimensionGroups).toEqual([{ id: 'dim-0', fields: ['region'] }]);
-    expect(doc.query.metricGroups).toEqual([{ id: 'metric-0', fields: ['gmv'], alias: '销售额' }]);
+    // queryConfig → query，fields → bindings（region=b-0，gmv=b-1）
+    expect(doc.query.dimensionGroups).toEqual([
+      { id: 'dim-0', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+    ]);
+    expect(doc.query.metricGroups).toEqual([
+      { id: 'metric-0', bindings: [{ bindingId: 'b-1', field: 'gmv' }], alias: '销售额' },
+    ]);
     expect(doc.query.limit).toBe(1000);
 
-    // 5 个平铺 Record 收敛为 fieldMeta，键为列名
+    // 5 个平铺 Record 收敛为 fieldMeta，键由列名改为 bindingId
     expect(doc.fieldMeta).toEqual({
-      region: { label: '地区' },
-      gmv: { aggregation: 'sum', alias: 'GMV', unit: '元', format: 'thousands' },
+      'b-0': { label: '地区' },
+      'b-1': { aggregation: 'sum', alias: 'GMV', unit: '元', format: 'thousands' },
     });
 
     // 轴字段被丢弃
@@ -66,7 +71,7 @@ describe('migrateChartConfig：旧结构 → v1', () => {
     expect(doc).not.toHaveProperty('dimensionLabels');
   });
 
-  it('fieldId → 列名解析：组字段与 fieldMeta 同步解析', () => {
+  it('fieldId → 列名解析：组 bindings 与 fieldMeta 同步解析为 bindingId 键', () => {
     const raw = JSON.stringify({
       chartType: 'line',
       title: '',
@@ -79,18 +84,20 @@ describe('migrateChartConfig：旧结构 → v1', () => {
     });
     const doc = migrateChartConfig(raw, 'table', FIELDS);
 
-    expect(doc.query.dimensionGroups[0].fields).toEqual(['region']);
-    expect(doc.query.metricGroups[0].fields).toEqual(['gmv']);
-    expect(doc.fieldMeta.gmv).toEqual({ aggregation: 'sum' });
+    expect(doc.query.dimensionGroups[0].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
+    expect(doc.query.metricGroups[0].bindings).toEqual([{ bindingId: 'b-1', field: 'gmv' }]);
+    expect(doc.fieldMeta['b-1']).toEqual({ aggregation: 'sum' });
+    // 列名键与旧位置 id 键都不再保留
     expect(doc.fieldMeta['field-1']).toBeUndefined();
+    expect(doc.fieldMeta.gmv).toBeUndefined();
   });
 
   it('无 fields 参数时旧位置 id 原样透传（有损路径）', () => {
     const doc = migrateChartConfig(legacyConfig(), 'table');
 
-    expect(doc.query.dimensionGroups[0].fields).toEqual(['field-0']);
-    expect(doc.query.metricGroups[0].fields).toEqual(['field-1']);
-    expect(doc.fieldMeta['field-1']).toEqual({
+    expect(doc.query.dimensionGroups[0].bindings).toEqual([{ bindingId: 'b-0', field: 'field-0' }]);
+    expect(doc.query.metricGroups[0].bindings).toEqual([{ bindingId: 'b-1', field: 'field-1' }]);
+    expect(doc.fieldMeta['b-1']).toEqual({
       aggregation: 'sum',
       alias: 'GMV',
       unit: '元',
@@ -109,7 +116,9 @@ describe('migrateChartConfig：旧结构 → v1', () => {
     });
     const doc = migrateChartConfig(raw, 'table', FIELDS);
 
-    expect(doc.query.dimensionGroups[0].fields).toEqual(['field-99']);
+    expect(doc.query.dimensionGroups[0].bindings).toEqual([
+      { bindingId: 'b-0', field: 'field-99' },
+    ]);
     expect(doc.fieldMeta).toEqual({});
   });
 
@@ -166,7 +175,7 @@ describe('migrateChartConfig：旧结构 → v1', () => {
 
 describe('migrateChartConfig：损坏输入', () => {
   const emptyDoc = (fallback: ChartConfigDocument['chartType']): ChartConfigDocument => ({
-    version: 1,
+    version: 2,
     chartType: fallback,
     title: '',
     query: {
@@ -188,38 +197,79 @@ describe('migrateChartConfig：损坏输入', () => {
     ['JSON 字符串', '"hello"'],
     ['JSON 数字', '42'],
     ['null', 'null'],
-  ])('%s → 返回空 v1 文档且不抛异常', (_label, raw) => {
+  ])('%s → 返回空 v2 文档且不抛异常', (_label, raw) => {
     const doc = migrateChartConfig(raw, 'line');
     expect(doc).toEqual(emptyDoc('line'));
   });
 });
 
-describe('migrateChartConfig：v1 直通', () => {
-  it('version===1 返回等价文档', () => {
-    const migrated = migrateChartConfig(legacyConfig(), 'table', FIELDS);
-    const passthrough = migrateChartConfig(JSON.stringify(migrated), 'pie', FIELDS);
+describe('migrateChartConfig：v1 → v2 迁移（bindingId 生成）', () => {
+  it('v1 文档转 v2：bindingId 按 dimension→metric、组内顺序连续生成', () => {
+    const v1 = JSON.stringify({
+      version: 1,
+      chartType: 'bar',
+      title: 'T',
+      query: {
+        dimensionGroups: [{ id: 'd0', fields: ['region', 'city'] }],
+        metricGroups: [{ id: 'm0', fields: ['gmv'] }],
+        filters: [],
+        limit: 10,
+      },
+      fieldMeta: { region: { label: '地区' }, gmv: { aggregation: 'sum' } },
+      style: {},
+      queryOptions: {},
+    });
+    const doc = migrateChartConfig(v1, 'table');
 
-    expect(passthrough).toEqual(migrated);
-    expect(passthrough.version).toBe(1);
+    expect(doc.version).toBe(2);
+    expect(doc.query.dimensionGroups[0].bindings).toEqual([
+      { bindingId: 'b-0', field: 'region' },
+      { bindingId: 'b-1', field: 'city' },
+    ]);
+    expect(doc.query.metricGroups[0].bindings).toEqual([{ bindingId: 'b-2', field: 'gmv' }]);
+    // fieldMeta 从列名键复制到 bindingId 键
+    expect(doc.fieldMeta['b-0']).toEqual({ label: '地区' });
+    expect(doc.fieldMeta['b-2']).toEqual({ aggregation: 'sum' });
+    // 原列名键丢弃
+    expect(doc.fieldMeta.region).toBeUndefined();
+    expect(doc.fieldMeta.gmv).toBeUndefined();
   });
 
-  it('不改动输入：修改返回文档不影响后续解析结果', () => {
-    const raw = JSON.stringify(migrateChartConfig(legacyConfig(), 'table', FIELDS));
-    const first = migrateChartConfig(raw, 'table');
-    const snapshot = JSON.parse(raw) as ChartConfigDocument;
+  it('同一列名出现在两个组：生成两个不同 bindingId，各得一份独立 fieldMeta 拷贝', () => {
+    const v1 = JSON.stringify({
+      version: 1,
+      chartType: 'pivot',
+      title: '',
+      query: {
+        dimensionGroups: [{ id: 'rows', fields: ['region'] }],
+        metricGroups: [
+          { id: 'v0', fields: ['amount'] },
+          { id: 'v1', fields: ['amount'] },
+        ],
+        filters: [],
+      },
+      fieldMeta: { amount: { aggregation: 'sum', alias: '金额' } },
+    });
+    const doc = migrateChartConfig(v1, 'pivot');
 
-    first.query.dimensionGroups.push({ id: 'evil', fields: ['x'] });
-    first.fieldMeta.evil = { label: 'evil' };
+    // region→b-0，amount(v0)→b-1，amount(v1)→b-2
+    expect(doc.query.metricGroups[0].bindings).toEqual([{ bindingId: 'b-1', field: 'amount' }]);
+    expect(doc.query.metricGroups[1].bindings).toEqual([{ bindingId: 'b-2', field: 'amount' }]);
+    expect(doc.fieldMeta['b-1']).toEqual({ aggregation: 'sum', alias: '金额' });
+    expect(doc.fieldMeta['b-2']).toEqual({ aggregation: 'sum', alias: '金额' });
 
-    const second = migrateChartConfig(raw, 'table');
-    expect(second).toEqual(snapshot);
+    // 两份拷贝相互独立（D2 修复目标）：修改其一不影响其二
+    expect(doc.fieldMeta['b-1']).not.toBe(doc.fieldMeta['b-2']);
+    doc.fieldMeta['b-1'].alias = '主轴金额';
+    expect(doc.fieldMeta['b-1'].alias).toBe('主轴金额');
+    expect(doc.fieldMeta['b-2'].alias).toBe('金额');
   });
 
-  it('v1 缺省小节时补默认值', () => {
+  it('v1 缺省小节时补默认值（输出仍是 v2）', () => {
     const doc = migrateChartConfig('{"version":1,"chartType":"area"}', 'bar');
 
     expect(doc).toEqual({
-      version: 1,
+      version: 2,
       chartType: 'area',
       title: '',
       query: {
@@ -236,12 +286,61 @@ describe('migrateChartConfig：v1 直通', () => {
   });
 });
 
+describe('migrateChartConfig：v2 直通', () => {
+  it('version===2 返回等价文档', () => {
+    const migrated = migrateChartConfig(legacyConfig(), 'table', FIELDS);
+    const passthrough = migrateChartConfig(JSON.stringify(migrated), 'pie', FIELDS);
+
+    expect(passthrough).toEqual(migrated);
+    expect(passthrough.version).toBe(2);
+  });
+
+  it('不改动输入：修改返回文档不影响后续解析结果', () => {
+    const raw = JSON.stringify(migrateChartConfig(legacyConfig(), 'table', FIELDS));
+    const first = migrateChartConfig(raw, 'table');
+    const snapshot = JSON.parse(raw) as ChartConfigDocument;
+
+    first.query.dimensionGroups.push({ id: 'evil', bindings: [{ bindingId: 'b-99', field: 'x' }] });
+    first.fieldMeta.evil = { label: 'evil' };
+
+    const second = migrateChartConfig(raw, 'table');
+    expect(second).toEqual(snapshot);
+  });
+
+  it('v2 直通校验 bindings：剔除缺 bindingId/field 的非法条目', () => {
+    const raw = JSON.stringify({
+      version: 2,
+      chartType: 'bar',
+      query: {
+        dimensionGroups: [
+          {
+            id: 'd0',
+            bindings: [
+              { bindingId: 'b-0', field: 'region' },
+              { bindingId: '', field: 'bad' },
+              { field: 'no-id' },
+              'not-an-object',
+            ],
+          },
+        ],
+        metricGroups: [],
+        filters: [],
+      },
+      fieldMeta: { 'b-0': { label: '地区' } },
+    });
+    const doc = migrateChartConfig(raw, 'bar');
+
+    expect(doc.query.dimensionGroups[0].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
+    expect(doc.fieldMeta).toEqual({ 'b-0': { label: '地区' } });
+  });
+});
+
 describe('migrateChartConfig：ShareView 消费契约', () => {
-  it('迁移产物的 query 组字段是列名，ShareView 无需字段列表即可取轴', () => {
+  it('迁移产物的 query 组 bindings 携带列名，ShareView 无需字段列表即可取轴', () => {
     const doc = migrateChartConfig(legacyConfig(), 'table', FIELDS);
 
-    const dimensionNames = doc.query.dimensionGroups.flatMap((g) => g.fields);
-    const metricNames = doc.query.metricGroups.flatMap((g) => g.fields);
+    const dimensionNames = doc.query.dimensionGroups.flatMap((g) => g.bindings.map((b) => b.field));
+    const metricNames = doc.query.metricGroups.flatMap((g) => g.bindings.map((b) => b.field));
     const knownNames = FIELDS.map((f) => f.name);
 
     expect(dimensionNames).toEqual(['region']);
@@ -250,7 +349,7 @@ describe('migrateChartConfig：ShareView 消费契约', () => {
       expect(knownNames).toContain(name);
       expect(name).not.toMatch(/^field-\d+$/);
     }
-    // 轴配置读取 fieldMeta 也按列名命中
-    expect(doc.fieldMeta.gmv.aggregation).toBe('sum');
+    // 轴配置读取 fieldMeta 按 bindingId 命中（gmv 是 b-1）
+    expect(doc.fieldMeta['b-1'].aggregation).toBe('sum');
   });
 });
