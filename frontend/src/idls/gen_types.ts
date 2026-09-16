@@ -415,9 +415,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 图表语义查询（旧协议）
-         * @description 请求体为 entity.ChartQueryRequest（字段级核对清单见 ChartQueryRequest schema
-         *     注释；Batch 3 将迁移到 ChartSpec/QuerySpec 协议，见 components 中的内部建模）。
+         * 图表语义查询（v1 平铺 / v2 槽位协议，spec_version 判别）
+         * @description 请求体为 ChartSpecQueryRequest（entity.ChartQueryRequest 超集，同一 schema 描述
+         *     v1/v2 两种协议）：spec_version 缺失或 !=2 时走 v1 平铺协议（dims/metrics，
+         *     形状同 ChartQueryRequest）；spec_version=2 时走 v2 槽位协议
+         *     （dimension_groups/metric_groups，槽位名与 binding_id 保留进查询 AST）。
          *     成功 data 为 ChartDataResult：{ data, select_sql, count_sql }，其中 data 的
          *     形状由 chart_type 决定（table/pie/axis/scatter 四族，另加 pivot，详见
          *     ChartDataResult 描述）。select_sql 成功时恒返回；count_sql 仅 table +
@@ -898,7 +900,7 @@ export interface components {
              */
             page_size: number;
         };
-        /** @description POST /api/charts/query 请求体（entity.ChartQueryRequest，旧协议）。 */
+        /** @description v1 平铺协议请求体形状（entity.ChartQueryRequest 的 v1 字段子集）。 POST /api/charts/query 现绑定其超集 ChartSpecQueryRequest；本 schema 保留作 v1 形状的文档参考（frontend api/index.ts 仍以其为类型打底）， 不再被任何 path 直接引用。 */
         ChartQueryRequest: {
             dataset_id: number;
             /** @description 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse。 */
@@ -908,6 +910,26 @@ export interface components {
             /** @description 指标数组；scatter 需至少 2 个指标（第 1 个为 X、第 2 个为 Y），空则 pie/axis 返回空形状。 */
             metrics: components["schemas"]["ChartMetricConfig"][];
             /** @description 过滤条件（entity.Filter）；键为 operator（非 op），含前端未使用的 id 键。 */
+            filters?: components["schemas"]["Filter"][];
+            pagination?: components["schemas"]["ChartPagination"];
+            sort?: components["schemas"]["SortConfig"];
+        };
+        /** @description POST /api/charts/query 请求体（entity.ChartQueryRequest 超集，同一 schema 描述 v1/v2 两种协议，按 spec_version 判别）。spec_version 缺失或 !=2： v1 平铺协议，消费 dims/metrics（形状同 ChartQueryRequest）；spec_version=2： v2 槽位协议，消费 dimension_groups/metric_groups（槽位名与 binding_id 经 ChartSpecFromRequestV2 保留进 QuerySpec/QueryAST）。filters/pagination/sort 两协议共用。 */
+        ChartSpecQueryRequest: {
+            dataset_id: number;
+            /** @description 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse。 */
+            chart_type: string;
+            /** @description 协议版本判别键；v2 路径必填且值为 2，缺失或其他值按 v1 平铺协议处理。 */
+            spec_version?: number;
+            /** @description v1 平铺维度列（spec_version 缺失或 !=2 时使用）。 */
+            dims?: string[];
+            /** @description v1 平铺指标数组（spec_version 缺失或 !=2 时使用）。 */
+            metrics?: components["schemas"]["ChartMetricConfig"][];
+            /** @description v2 维度槽位组（spec_version=2 时使用）；name 为槽位名（x_axis / color_group / rows 等）。 */
+            dimension_groups?: components["schemas"]["ChartDimensionGroup"][];
+            /** @description v2 指标槽位组（spec_version=2 时使用）；name 为槽位名（values / primary_values 等）。 */
+            metric_groups?: components["schemas"]["ChartMetricGroup"][];
+            /** @description 过滤条件（entity.Filter）；键为 operator（非 op），v1/v2 共用。 */
             filters?: components["schemas"]["Filter"][];
             pagination?: components["schemas"]["ChartPagination"];
             sort?: components["schemas"]["SortConfig"];
@@ -974,6 +996,93 @@ export interface components {
         ChartPivotResponse: {
             columns: string[];
             data: components["schemas"]["DataRow"][];
+        };
+        /** @description 透视表 v2 响应（plan §3.2 Go struct PivotResponse，Task 2-1 实现后替代 ChartPivotResponse 的平铺形状）：交叉表头 + 含小计的数据行 + 可选合计行。 当前仅声明，无 processor 返回。 */
+        ChartPivotResponseV2: {
+            /** @description 行维度列名。 */
+            row_headers: string[];
+            /** @description 列维度值（交叉后的列）。 */
+            col_headers: string[];
+            /** @description 指标别名。 */
+            metric_names: string[];
+            /** @description 数据行（含小计行）。 */
+            cells: components["schemas"]["ChartPivotRow"][];
+            /** @description 合计行；null 表示未请求（Go *PivotRow，键恒在）。 */
+            grand_total: components["schemas"]["ChartPivotRow"] | null;
+        };
+        /** @description 透视表 v2 数据行（plan §3.2 Go struct PivotRow）。 */
+        ChartPivotRow: {
+            /** @description 行维度值。 */
+            row_key: string[];
+            /** @description 是否小计行。 */
+            is_subtotal: boolean;
+            /** @description colHeader+metricAlias → 值。 */
+            values: {
+                [key: string]: number;
+            };
+        };
+        /** @description 直方图响应（plan §3.3 Go struct HistogramResponse，Task 3-1 实现）。 当前仅声明，无 processor 返回。 */
+        ChartHistogramResponse: {
+            bins: components["schemas"]["ChartHistogramBin"][];
+        };
+        /** @description 直方图分箱（plan §3.3 Go struct HistogramBin）。 */
+        ChartHistogramBin: {
+            /** Format: double */
+            bin_start: number;
+            /** Format: double */
+            bin_end: number;
+            /** Format: int64 */
+            count: number;
+        };
+        /** @description 箱线图响应（plan §3.3 Go struct BoxplotResponse，Task 3-5 实现）。 outliers 为展示截断（LIMIT 1000），outlier_total 为截断前总数。 当前仅声明，无 processor 返回。 */
+        ChartBoxplotResponse: {
+            /** Format: double */
+            whisker_low: number;
+            /** Format: double */
+            q1: number;
+            /** Format: double */
+            median: number;
+            /** Format: double */
+            q3: number;
+            /** Format: double */
+            whisker_high: number;
+            outliers: number[];
+            /**
+             * Format: int64
+             * @description 截断前的离群点总数。
+             */
+            outlier_total: number;
+            /** @description outliers 是否被展示截断。 */
+            truncated: boolean;
+        };
+        /** @description 雷达图响应（plan §3.3 Go struct RadarResponse，Task 3-3 实现）。 当前仅声明，无 processor 返回。 */
+        ChartRadarResponse: {
+            /** @description 维度值列表。 */
+            indicators: components["schemas"]["ChartRadarIndicator"][];
+            series: components["schemas"]["ChartRadarSeries"][];
+        };
+        /** @description 雷达图指示器（plan §3.3 Go struct RadarIndicator）。 */
+        ChartRadarIndicator: {
+            name: string;
+            /**
+             * Format: double
+             * @description 该维度的最大值（用于 ECharts radar indicator.max）。
+             */
+            max: number;
+        };
+        /** @description 雷达图系列（plan §3.3 Go struct RadarSeries）。 */
+        ChartRadarSeries: {
+            name: string;
+            /** @description 与 indicators 等长的值序列。 */
+            values: number[];
+        };
+        /** @description KPI 单值卡响应（plan §3.4 Go struct KpiResponse，Task 1-5 实现）。 unit/format 为 Go omitempty，缺省时不出现在 JSON。当前仅声明， 无 processor 返回。 */
+        ChartKpiResponse: {
+            /** Format: double */
+            value: number;
+            label: string;
+            unit?: string;
+            format?: string;
         };
         /** @description 分享响应实体（entity.Share，backend/internal/domain/entity/share.go）。 password 为 json:"-" 永不外泄（bcrypt 哈希也不回显），has_password 是 唯一的密码保护信号。 */
         Share: {
@@ -1057,6 +1166,8 @@ export interface components {
             label?: string;
             /** @description 时间粒度（day / week / month 等）；执行前按方言校验（ValidateGranularity）。 */
             granularity?: string;
+            /** @description 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。 */
+            binding_id?: string;
         };
         /** @description 指标组（query.MetricGroup）。 */
         ChartMetricGroup: {
@@ -1074,6 +1185,8 @@ export interface components {
             alias?: string;
             unit?: string;
             format?: string;
+            /** @description 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。 */
+            binding_id?: string;
         };
         /** @description 查询语义规格（query.QuerySpec:46）：表达"查什么"，不含视觉语义， 由 ChartSpec/旧请求转换而来，是 BunQueryBuilder 的上游输入。 */
         QuerySpec: {
@@ -1090,6 +1203,10 @@ export interface components {
             field: string;
             label?: string;
             granularity?: string;
+            /** @description 来源槽位/组名（v2 协议 DimensionGroup.Name，如 x_axis / color_group）；v1 路径为空（Go omitempty）。 */
+            group_name?: string;
+            /** @description 来源绑定实例标识（v2 协议 DimensionField.BindingID）；v1 路径为空（Go omitempty）。 */
+            binding_id?: string;
         };
         /** @description 结构化指标表达式（query.MetricExpr2；命名避开 ast.go 的 MetricExpr）。 */
         MetricExpr: {
@@ -1099,6 +1216,10 @@ export interface components {
             alias?: string;
             unit?: string;
             format?: string;
+            /** @description 来源槽位/组名（v2 协议 MetricGroup.Name，如 values / primary_values）；v1 路径为空（Go omitempty）。 */
+            group_name?: string;
+            /** @description 来源绑定实例标识（v2 协议 MetricField.BindingID）；v1 路径为空（Go omitempty）。 */
+            binding_id?: string;
         };
         /** @description 查询层过滤条件（query.FilterConfig）：JSON 键是 op，与旧协议 entity.Filter 的 operator 不同；Batch 3 chart_spec 协议统一采用本形状。 */
         FilterConfig: {
@@ -1811,7 +1932,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ChartQueryRequest"];
+                "application/json": components["schemas"]["ChartSpecQueryRequest"];
             };
         };
         responses: {

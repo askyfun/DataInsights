@@ -613,3 +613,264 @@ func TestChartServiceGetData_EmptyConfigFallsBackToRawRows(t *testing.T) {
 func TestChartServiceGetData_V1EmptyGroupsFallsBackToRawRows(t *testing.T) {
 	assertRawRowsFallback(t, `{"version":1,"chartType":"bar","query":{"dimensionGroups":[],"metricGroups":[]}}`)
 }
+
+// --- v2 wire 协议（spec_version=2）：executeQueryOnConn 判别与槽位保留 ---
+
+// newQueryTestService 构造 Query 路径依赖替身（图表模型不参与 Query）。
+func newQueryTestService() (*chartService, *stubConnection, *stubExecutor) {
+	conn := &stubConnection{}
+	executor := &stubExecutor{
+		result: query.ExecutorResult{
+			Data: &query.AxisResponse{
+				XAxis:  []string{"华北"},
+				Series: []query.AxisSeries{{Name: "销售额", Data: []any{1234.0}}},
+			},
+			GeneratedSQL: query.GeneratedSQL{Select: `SELECT region, SUM(amount) AS "销售额" FROM sales_orders GROUP BY region`},
+		},
+	}
+	service := NewService(nil).(*chartService)
+	service.getDatasetModelFn = func(ctx context.Context, id int) (*model.Dataset, error) {
+		return &model.Dataset{ID: id, DatasourceID: 1, QueryType: "table", TableName: sql.NullString{String: "sales_orders", Valid: true}}, nil
+	}
+	service.getDatasourceModelFn = func(ctx context.Context, id int) (*model.Datasource, error) {
+		return &model.Datasource{ID: id, Type: "postgresql"}, nil
+	}
+	service.connectFn = func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
+		return conn, nil
+	}
+	service.executorFactory = func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor {
+		return executor
+	}
+	return service, conn, executor
+}
+
+// TestChartServiceQuery_V2SpecPreservesSlotsAndBindings 验证 spec_version=2
+// 请求走 v2 路径：PlannedAST 的 DimensionExprs/MetricExprs 保留槽位名与
+// binding_id，平铺 dims/metrics/filters/sort/pagination 照常下传 executor。
+func TestChartServiceQuery_V2SpecPreservesSlotsAndBindings(t *testing.T) {
+	service, conn, executor := newQueryTestService()
+	specVersion := 2
+
+	_, err := service.Query(context.Background(), &entity.ChartQueryRequest{
+		DatasetID:   1,
+		ChartType:   "bar",
+		SpecVersion: &specVersion,
+		DimensionGroups: []entity.DimensionGroupIn{
+			{Name: "x_axis", Label: "X 轴", Fields: []entity.DimensionFieldIn{
+				{Field: "region", Label: "地区", BindingID: "b-0"},
+			}},
+			{Name: "color_group", Label: "颜色分组", Fields: []entity.DimensionFieldIn{
+				{Field: "product", BindingID: "b-1"},
+			}},
+		},
+		MetricGroups: []entity.MetricGroupIn{
+			{Name: "values", Label: "指标", Fields: []entity.MetricFieldIn{
+				{Field: "amount", Agg: "sum", Alias: "销售额", BindingID: "b-2"},
+			}},
+		},
+		Filters:    []entity.Filter{{Field: "region", Operator: "eq", Value: "华北"}},
+		Pagination: &entity.Pagination{Page: 1, PageSize: 50},
+		Sort:       &entity.SortConfig{Field: "销售额", Order: "desc"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !executor.called || executor.lastReq == nil {
+		t.Fatal("expected executor to receive request")
+	}
+	req := executor.lastReq
+	if len(req.Dims) != 2 || req.Dims[0] != "region" || req.Dims[1] != "product" {
+		t.Fatalf("expected flattened dims [region product], got %v", req.Dims)
+	}
+	if len(req.Metrics) != 1 || req.Metrics[0].Field != "amount" ||
+		req.Metrics[0].Agg != query.AggSum || req.Metrics[0].Alias != "销售额" {
+		t.Fatalf("expected flattened metric amount/sum/销售额, got %+v", req.Metrics)
+	}
+	if len(req.Filters) != 1 || req.Filters[0].Op != query.FilterEq || req.Filters[0].Value != "华北" {
+		t.Fatalf("expected eq filter on 华北, got %+v", req.Filters)
+	}
+	if req.Sort == nil || req.Sort.Field != "销售额" || req.Sort.Order != "desc" {
+		t.Fatalf("expected sort 销售额 desc, got %+v", req.Sort)
+	}
+	if req.Pagination == nil || req.Pagination.Page != 1 || req.Pagination.PageSize != 50 {
+		t.Fatalf("expected pagination {1,50}, got %+v", req.Pagination)
+	}
+	if req.PlannedAST == nil {
+		t.Fatal("expected planned AST")
+	}
+	if len(req.PlannedAST.DimensionExprs) != 2 {
+		t.Fatalf("expected 2 dimension exprs, got %d", len(req.PlannedAST.DimensionExprs))
+	}
+	if req.PlannedAST.DimensionExprs[0].GroupName != "x_axis" || req.PlannedAST.DimensionExprs[0].BindingID != "b-0" {
+		t.Fatalf("expected slot x_axis/b-0, got %+v", req.PlannedAST.DimensionExprs[0])
+	}
+	if req.PlannedAST.DimensionExprs[1].GroupName != "color_group" || req.PlannedAST.DimensionExprs[1].BindingID != "b-1" {
+		t.Fatalf("expected slot color_group/b-1, got %+v", req.PlannedAST.DimensionExprs[1])
+	}
+	if len(req.PlannedAST.MetricExprs) != 1 ||
+		req.PlannedAST.MetricExprs[0].GroupName != "values" || req.PlannedAST.MetricExprs[0].BindingID != "b-2" {
+		t.Fatalf("expected metric slot values/b-2, got %+v", req.PlannedAST.MetricExprs)
+	}
+	if !conn.closed {
+		t.Fatal("expected connection to be closed after query")
+	}
+}
+
+// TestChartServiceQuery_MissingOrV1SpecVersionUsesFlatPath 验证 spec_version
+// 缺失或 !=2 时仍走 v1 平铺路径：dims/metrics 生效，AST 不携带槽位信息。
+func TestChartServiceQuery_MissingOrV1SpecVersionUsesFlatPath(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		specVersion *int
+	}{
+		{"missing", nil},
+		{"explicit-v1", newTestInt(1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _, executor := newQueryTestService()
+
+			_, err := service.Query(context.Background(), &entity.ChartQueryRequest{
+				DatasetID:   1,
+				ChartType:   "table",
+				SpecVersion: tc.specVersion,
+				Dims:        []string{"status"},
+				Metrics:     []entity.MetricConfig{{Field: "amount", Agg: "sum", Alias: "total"}},
+				// v2 组同时存在也必须被忽略（v1 判别下不消费）
+				DimensionGroups: []entity.DimensionGroupIn{
+					{Name: "x_axis", Fields: []entity.DimensionFieldIn{{Field: "ignored", BindingID: "b-9"}}},
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			req := executor.lastReq
+			if req == nil {
+				t.Fatal("expected executor to receive request")
+			}
+			if len(req.Dims) != 1 || req.Dims[0] != "status" {
+				t.Fatalf("expected flat dims [status], got %v", req.Dims)
+			}
+			if len(req.Metrics) != 1 || req.Metrics[0].Alias != "total" {
+				t.Fatalf("expected flat metric total, got %+v", req.Metrics)
+			}
+			if req.PlannedAST == nil {
+				t.Fatal("expected planned AST")
+			}
+			for _, d := range req.PlannedAST.DimensionExprs {
+				if d.GroupName != "" || d.BindingID != "" {
+					t.Fatalf("v1 path must not carry slot info, got %+v", d)
+				}
+			}
+			for _, m := range req.PlannedAST.MetricExprs {
+				if m.GroupName != "" || m.BindingID != "" {
+					t.Fatalf("v1 path must not carry slot info, got %+v", m)
+				}
+			}
+		})
+	}
+}
+
+func newTestInt(v int) *int { return &v }
+
+// --- GetData: v2 持久化文档解析（裁定3 Critical 修复）---
+
+// TestChartDataQueryFromConfig_V2BindingsFlatten 直接断言 v2 文档（bindings
+// 结构 + bindingId 键 fieldMeta）解析出的平铺请求：dims/metrics 列名、按
+// bindingId 取 aggregation/alias（缺省 sum/列名）、filters/sort/limit 透传，ok=true。
+func TestChartDataQueryFromConfig_V2BindingsFlatten(t *testing.T) {
+	config := `{"version":2,"chartType":"bar","title":"t","query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","field":"region"},{"bindingId":"b-1","field":"product"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-2","field":"amount"},{"bindingId":"b-3","field":"qty"}]}],"filters":[{"field":"region","operator":"eq","value":"华北","logic":"and"}],"sort":{"field":"amount","order":"desc"},"limit":5},"fieldMeta":{"b-2":{"aggregation":"avg","alias":"客单价"},"b-3":{}},"style":{},"queryOptions":{}}`
+	chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "line", Config: config}
+
+	req, ok := chartDataQueryFromConfig(chart)
+	if !ok {
+		t.Fatal("expected v2 config to parse (ok=true), got ok=false")
+	}
+	if req.DatasetID != 10 {
+		t.Fatalf("expected dataset id 10, got %d", req.DatasetID)
+	}
+	if req.ChartType != "bar" {
+		t.Fatalf("expected chartType bar from document, got %q", req.ChartType)
+	}
+	if len(req.Dims) != 2 || req.Dims[0] != "region" || req.Dims[1] != "product" {
+		t.Fatalf("expected dims [region product], got %v", req.Dims)
+	}
+	if len(req.Metrics) != 2 {
+		t.Fatalf("expected 2 metrics, got %+v", req.Metrics)
+	}
+	// b-2 按 bindingId 命中 fieldMeta：avg + 自定义别名
+	if req.Metrics[0].Field != "amount" || req.Metrics[0].Agg != "avg" || req.Metrics[0].Alias != "客单价" {
+		t.Fatalf("expected amount/avg/客单价, got %+v", req.Metrics[0])
+	}
+	// b-3 fieldMeta 无有效键：回落 sum + 列名
+	if req.Metrics[1].Field != "qty" || req.Metrics[1].Agg != "sum" || req.Metrics[1].Alias != "qty" {
+		t.Fatalf("expected qty/sum/qty defaults, got %+v", req.Metrics[1])
+	}
+	if len(req.Filters) != 1 || req.Filters[0].Field != "region" || req.Filters[0].Operator != "eq" || req.Filters[0].Value != "华北" {
+		t.Fatalf("expected eq filter on 华北, got %+v", req.Filters)
+	}
+	if req.Sort == nil || req.Sort.Field != "amount" || req.Sort.Order != "desc" {
+		t.Fatalf("expected sort amount desc, got %+v", req.Sort)
+	}
+	if req.Pagination == nil || req.Pagination.Page != 1 || req.Pagination.PageSize != 5 {
+		t.Fatalf("expected pagination {1,5} from limit, got %+v", req.Pagination)
+	}
+}
+
+// TestChartDataQueryFromConfig_V2ChartTypeFallback 验证 v2 文档缺 chartType 时
+// 回落到 chart 行的 chart_type（与 v1 路径对称）。
+func TestChartDataQueryFromConfig_V2ChartTypeFallback(t *testing.T) {
+	config := `{"version":2,"query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","field":"amount"}]}]},"fieldMeta":{}}`
+	chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "pie", Config: config}
+
+	req, ok := chartDataQueryFromConfig(chart)
+	if !ok {
+		t.Fatal("expected v2 config to parse (ok=true)")
+	}
+	if req.ChartType != "pie" {
+		t.Fatalf("expected fallback chart type pie, got %q", req.ChartType)
+	}
+	if len(req.Metrics) != 1 || req.Metrics[0].Agg != "sum" || req.Metrics[0].Alias != "amount" {
+		t.Fatalf("expected default sum + column alias, got %+v", req.Metrics)
+	}
+}
+
+// TestChartServiceGetData_V2ConfigRunsAggregationPipeline 验证 v2 持久化文档的
+// 分享取数（GetData）不再因找不到 "fields" 键静默失效，而是走聚合管道。
+func TestChartServiceGetData_V2ConfigRunsAggregationPipeline(t *testing.T) {
+	config := `{"version":2,"chartType":"bar","query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","field":"region"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-1","field":"amount"}]}],"filters":[],"limit":5},"fieldMeta":{"b-1":{"aggregation":"sum","alias":"Revenue"}}}`
+	service, conn, executor := newGetDataTestService(config)
+
+	result, err := service.GetData(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !executor.called {
+		t.Fatal("expected v2 config to run the aggregation pipeline")
+	}
+	req := executor.lastReq
+	if req == nil {
+		t.Fatal("expected executor request to be recorded")
+	}
+	if len(req.Dims) != 1 || req.Dims[0] != "region" {
+		t.Fatalf("expected dims [region], got %v", req.Dims)
+	}
+	if len(req.Metrics) != 1 || req.Metrics[0].Field != "amount" ||
+		req.Metrics[0].Agg != query.AggSum || req.Metrics[0].Alias != "Revenue" {
+		t.Fatalf("expected metric amount/sum/Revenue, got %+v", req.Metrics)
+	}
+	if req.Pagination == nil || req.Pagination.PageSize != 5 {
+		t.Fatalf("expected pagination from limit 5, got %+v", req.Pagination)
+	}
+	if _, ok := result.Data.(*query.AxisResponse); !ok {
+		t.Fatalf("expected AxisResponse, got %T", result.Data)
+	}
+	if !conn.closed {
+		t.Fatal("expected connection closed")
+	}
+}
+
+// TestChartServiceGetData_V2EmptyGroupsFallsBackToRawRows 钉死 v2 文档但
+// bindings 全空（无可执行查询）时保持原始行回退（与 v1 空组口径一致）。
+func TestChartServiceGetData_V2EmptyGroupsFallsBackToRawRows(t *testing.T) {
+	assertRawRowsFallback(t, `{"version":2,"chartType":"bar","query":{"dimensionGroups":[],"metricGroups":[]},"fieldMeta":{}}`)
+}

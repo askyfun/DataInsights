@@ -38,20 +38,24 @@ type DimensionExprAST struct {
 	Granularity string
 	Bucket      string
 	Format      string
+	GroupName   string // 来源槽位/组名（v2 协议；v1 路径为空）
+	BindingID   string // 来源绑定实例标识（v2 协议；v1 路径为空）
 }
 
 // MetricPlanExpr 表示规划后保留展示语义的指标表达式。
 // 调用场景：在保留旧 MetricExpr 兼容路径的同时，为后续 QueryAST 能力扩展保存单位、格式等结构化信息。
 type MetricPlanExpr struct {
-	Field     string
-	FieldExpr string
-	Agg       AggregationType
-	Alias     string
-	Label     string
-	Unit      string
-	Format    string
-	Cumulative bool
+	Field          string
+	FieldExpr      string
+	Agg            AggregationType
+	Alias          string
+	Label          string
+	Unit           string
+	Format         string
+	Cumulative     bool
 	PercentOfTotal bool
+	GroupName      string // 来源槽位/组名（v2 协议；v1 路径为空）
+	BindingID      string // 来源绑定实例标识（v2 协议；v1 路径为空）
 }
 
 type SourceType int

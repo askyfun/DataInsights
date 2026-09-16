@@ -144,7 +144,7 @@ func (s *chartService) Delete(ctx context.Context, id int) error {
 	})
 }
 
-// GetData returns data for a chart. A persisted v1 config is executed through
+// GetData returns data for a chart. A persisted v1/v2 config is executed through
 // the same aggregation pipeline as POST /api/charts/query, so a shared chart
 // renders the same result as the builder preview. Parse failure / legacy
 // config / empty groups keep the historical raw-rows fallback (top 100 rows
@@ -227,7 +227,15 @@ func (s *chartService) executeQueryOnConn(
 	}
 
 	executor := s.executorFactory(conn, dataset, dsModel)
-	querySpec := buildQuerySpecFromEntityRequest(req)
+	// v2 协议（spec_version=2）走槽位保留路径：ChartSpecFromRequestV2 →
+	// QuerySpecFromChartSpecV2（GroupName/BindingID 随 PlanAST 传入 AST）；
+	// v1/缺失走原有平铺路径，逻辑不变。
+	var querySpec *query.QuerySpec
+	if req.SpecVersion != nil && *req.SpecVersion == 2 {
+		querySpec = buildQuerySpecFromEntityRequestV2(req)
+	} else {
+		querySpec = buildQuerySpecFromEntityRequest(req)
+	}
 	plannedQuery := query.NewQueryPlanner().Plan(querySpec)
 	plannedAST := query.NewQueryPlanner().PlanAST(getPlannerSource(dataset), getPlannerSourceType(dataset), querySpec)
 
@@ -284,13 +292,53 @@ type chartConfigFilter struct {
 	Logic      string `json:"logic"`
 }
 
+// chartConfigV2 是 bi_chart.config 持久化 v2 文档（Task 0-3 起前端保存的形状）中
+// 重建查询所需的最小子集：字段组由 fields: string[] 升级为 bindings: BindingInstance[]，
+// fieldMeta 键由列名改为 bindingId。键名与 frontend/src/lib/chartConfigSchema.ts 对齐。
+type chartConfigV2 struct {
+	ChartType string `json:"chartType"`
+	Query     *struct {
+		DimensionGroups []chartConfigBindingGroup `json:"dimensionGroups"`
+		MetricGroups    []chartConfigBindingGroup `json:"metricGroups"`
+		Filters         []chartConfigFilter       `json:"filters"`
+		Sort            *entity.SortConfig        `json:"sort"`
+		Limit           int                       `json:"limit"`
+	} `json:"query"`
+	FieldMeta map[string]struct {
+		Aggregation string `json:"aggregation"`
+		Alias       string `json:"alias"`
+	} `json:"fieldMeta"`
+}
+
+// chartConfigBindingGroup v2 文档字段组：bindings 为带 bindingId 的字段实例
+// （对应前端 BindingInstance，键为 camelCase bindingId）。
+type chartConfigBindingGroup struct {
+	ID       string `json:"id"`
+	Bindings []struct {
+		BindingID string `json:"bindingId"`
+		Field     string `json:"field"`
+	} `json:"bindings"`
+}
+
 // chartDataQueryFromConfig parses a persisted chart config into the same
 // entity request the interactive builder sends (see ChartBuilder's
 // composeChartQueryRequest): dims flatten all dimension-group fields, metrics
 // flatten all metric-group fields with agg from fieldMeta (default "sum") and
 // alias from fieldMeta (default = column name). Returns ok=false for legacy
 // (queryConfig + positional ids), malformed, or empty-group configs.
+// version 判别（与前端 migrateChartConfig 对称，裁定3）：version==2 走 v2 解析
+// 路径（bindings 结构 + bindingId 键 fieldMeta）；version 缺失或 !=2 走下面的
+// v1 路径（逻辑与修复前完全一致）。
 func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bool) {
+	var versionProbe struct {
+		Version int `json:"version"`
+	}
+	// 探针解析失败（损坏 JSON）不单独处理：v1 路径同样会解析失败并返回 ok=false，
+	// 与修复前行为一致。
+	if json.Unmarshal([]byte(chart.Config), &versionProbe) == nil && versionProbe.Version == 2 {
+		return chartDataQueryFromConfigV2(chart)
+	}
+
 	var doc chartConfigV1
 	if err := json.Unmarshal([]byte(chart.Config), &doc); err != nil || doc.Query == nil {
 		return nil, false
@@ -319,8 +367,63 @@ func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bo
 		return nil, false
 	}
 
-	filters := make([]entity.Filter, 0, len(doc.Query.Filters))
-	for _, f := range doc.Query.Filters {
+	return buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, doc.Query.Sort, doc.Query.Limit), true
+}
+
+// chartDataQueryFromConfigV2 解析 v2 持久化文档（Task 0-3 起前端保存的形状）并
+// 重建平铺 entity.ChartQueryRequest：dims 平铺各组 bindings[].field，metrics 平铺
+// bindings[].field 并按 bindingId 查 fieldMeta 取 aggregation（默认 sum）/alias
+// （默认列名），与 v1 路径按列名查 fieldMeta 的逻辑对称。槽位语义暂不下传：
+// GetData 路径的现有消费方仍按 chartType 走位置推断（裁定3，后续任务再评估升级）。
+// 空组/损坏文档返回 ok=false（回退裸数据行，与 v1 口径一致）。
+func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, bool) {
+	var doc chartConfigV2
+	if err := json.Unmarshal([]byte(chart.Config), &doc); err != nil || doc.Query == nil {
+		return nil, false
+	}
+
+	var dims []string
+	for _, group := range doc.Query.DimensionGroups {
+		for _, b := range group.Bindings {
+			dims = append(dims, b.Field)
+		}
+	}
+	var metrics []entity.MetricConfig
+	for _, group := range doc.Query.MetricGroups {
+		for _, b := range group.Bindings {
+			meta := doc.FieldMeta[b.BindingID]
+			agg := meta.Aggregation
+			if agg == "" {
+				agg = "sum"
+			}
+			alias := meta.Alias
+			if alias == "" {
+				alias = b.Field
+			}
+			metrics = append(metrics, entity.MetricConfig{Field: b.Field, Agg: agg, Alias: alias})
+		}
+	}
+	if len(dims) == 0 && len(metrics) == 0 {
+		return nil, false
+	}
+
+	return buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, doc.Query.Sort, doc.Query.Limit), true
+}
+
+// buildConfigQueryRequest 组装持久化 config 解析出的平铺请求（v1/v2 共用尾段）：
+// 过滤条件转换（valueEnd/value_end 双键兼容）、chartType 缺失时回退 chart 行的
+// chart_type、limit>0 转为 page=1 的分页。
+func buildConfigQueryRequest(
+	chart *model.Chart,
+	docChartType string,
+	dims []string,
+	metrics []entity.MetricConfig,
+	rawFilters []chartConfigFilter,
+	sort *entity.SortConfig,
+	limit int,
+) *entity.ChartQueryRequest {
+	filters := make([]entity.Filter, 0, len(rawFilters))
+	for _, f := range rawFilters {
 		valueEnd := f.ValueEnd
 		if valueEnd == nil {
 			valueEnd = f.ValueEndCC
@@ -334,7 +437,7 @@ func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bo
 		})
 	}
 
-	chartType := doc.ChartType
+	chartType := docChartType
 	if chartType == "" {
 		chartType = chart.ChartType
 	}
@@ -345,12 +448,12 @@ func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bo
 		Dims:      dims,
 		Metrics:   metrics,
 		Filters:   filters,
-		Sort:      doc.Query.Sort,
+		Sort:      sort,
 	}
-	if doc.Query.Limit > 0 {
-		req.Pagination = &entity.Pagination{Page: 1, PageSize: doc.Query.Limit}
+	if limit > 0 {
+		req.Pagination = &entity.Pagination{Page: 1, PageSize: limit}
 	}
-	return req, true
+	return req
 }
 
 // getPlannerSource 获取 QueryPlanner 生成 AST 所需的数据源。
@@ -388,6 +491,19 @@ func buildQuerySpecFromEntityRequest(req *entity.ChartQueryRequest) *query.Query
 	}
 
 	return query.QuerySpecFromRequest(queryReq)
+}
+
+// buildQuerySpecFromEntityRequestV2 将 v2 协议（spec_version=2）请求转换为 QuerySpec。
+// 调用场景：executeQueryOnConn 的 v2 分支。与 v1 路径不同，维度/指标来自显式槽位组，
+// GroupName/BindingID 保留在 DimensionExpr/MetricExpr2 上（由 PlanAST 传入 AST）；
+// ChartSpec 不承载 filters/sort/pagination，这里从请求补齐（与 v1 转换器口径一致）。
+func buildQuerySpecFromEntityRequestV2(req *entity.ChartQueryRequest) *query.QuerySpec {
+	chartSpec := query.ChartSpecFromRequestV2(req)
+	querySpec := query.QuerySpecFromChartSpecV2(chartSpec)
+	querySpec.Filters = convertFilters(req.Filters)
+	querySpec.Sort = convertSort(req.Sort)
+	querySpec.Pagination = convertPagination(req.Pagination)
+	return querySpec
 }
 
 // Helper functions

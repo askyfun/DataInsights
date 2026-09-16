@@ -196,6 +196,8 @@ func (h *ChartHandler) GetData(req router.Request[chartPathIn], res *router.Resp
 // POST /api/charts/query) with form:"-" on every field so the router's
 // ShouldBindQuery pass cannot read query params into the body struct (see
 // chartCreateIn and the dataset Query precedent).
+// v1/v2 协议超集（裁定2）：spec_version 缺失或 !=2 时消费平铺 dims/metrics；
+// spec_version=2 时消费 dimension_groups/metric_groups（槽位语义 + binding_id）。
 type chartQueryIn struct {
 	DatasetID  int                   `json:"dataset_id" form:"-"`
 	ChartType  string                `json:"chart_type" form:"-"`
@@ -204,6 +206,10 @@ type chartQueryIn struct {
 	Filters    []entity.Filter       `json:"filters" form:"-"`
 	Pagination *entity.Pagination    `json:"pagination" form:"-"`
 	Sort       *entity.SortConfig    `json:"sort" form:"-"`
+
+	SpecVersion     *int                      `json:"spec_version" form:"-"`
+	DimensionGroups []entity.DimensionGroupIn `json:"dimension_groups" form:"-"`
+	MetricGroups    []entity.MetricGroupIn    `json:"metric_groups" form:"-"`
 }
 
 func (in chartQueryIn) toRequest() entity.ChartQueryRequest {
@@ -215,6 +221,10 @@ func (in chartQueryIn) toRequest() entity.ChartQueryRequest {
 		Filters:    in.Filters,
 		Pagination: in.Pagination,
 		Sort:       in.Sort,
+
+		SpecVersion:     in.SpecVersion,
+		DimensionGroups: in.DimensionGroups,
+		MetricGroups:    in.MetricGroups,
 	}
 }
 

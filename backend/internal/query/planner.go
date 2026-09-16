@@ -88,6 +88,8 @@ func (p *QueryPlanner) PlanAST(source string, sourceType SourceType, spec *Query
 			Alias:       alias,
 			Label:       dim.Label,
 			Granularity: dim.Granularity,
+			GroupName:   dim.GroupName,
+			BindingID:   dim.BindingID,
 		})
 	}
 
@@ -118,6 +120,8 @@ func (p *QueryPlanner) PlanAST(source string, sourceType SourceType, spec *Query
 			Alias:     alias,
 			Unit:      metric.Unit,
 			Format:    metric.Format,
+			GroupName: metric.GroupName,
+			BindingID: metric.BindingID,
 		})
 	}
 

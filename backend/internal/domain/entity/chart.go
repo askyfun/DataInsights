@@ -11,7 +11,10 @@ type Chart struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// ChartQueryRequest represents a chart query request
+// ChartQueryRequest represents a chart query request.
+// v1（平铺协议）与 v2（槽位协议）共用同一超集结构：SpecVersion 缺失或 !=2 时
+// 消费 Dims/Metrics；SpecVersion=2 时消费 DimensionGroups/MetricGroups
+// （槽位名与 binding_id 保留，见 query.ChartSpecFromRequestV2）。
 type ChartQueryRequest struct {
 	DatasetID  int            `json:"dataset_id"`
 	ChartType  string         `json:"chart_type"`
@@ -20,6 +23,44 @@ type ChartQueryRequest struct {
 	Filters    []Filter       `json:"filters"`
 	Pagination *Pagination    `json:"pagination"`
 	Sort       *SortConfig    `json:"sort"`
+
+	SpecVersion     *int               `json:"spec_version,omitempty"`
+	DimensionGroups []DimensionGroupIn `json:"dimension_groups,omitempty"`
+	MetricGroups    []MetricGroupIn    `json:"metric_groups,omitempty"`
+}
+
+// DimensionGroupIn v2 协议的维度槽位组（json tag 与 query.DimensionGroup 一致）。
+// 注意与 FieldGroup（dataset.go，持久化 config 解析用）是完全不同的结构。
+type DimensionGroupIn struct {
+	Name   string             `json:"name"`
+	Label  string             `json:"label"`
+	Fields []DimensionFieldIn `json:"fields"`
+}
+
+// DimensionFieldIn v2 协议的维度字段绑定（json tag 与 query.DimensionField 一致）。
+type DimensionFieldIn struct {
+	Field       string `json:"field"`
+	Label       string `json:"label,omitempty"`
+	Granularity string `json:"granularity,omitempty"`
+	BindingID   string `json:"binding_id,omitempty"`
+}
+
+// MetricGroupIn v2 协议的指标槽位组（json tag 与 query.MetricGroup 一致）。
+type MetricGroupIn struct {
+	Name   string          `json:"name"`
+	Label  string          `json:"label"`
+	Fields []MetricFieldIn `json:"fields"`
+}
+
+// MetricFieldIn v2 协议的指标字段绑定（json tag 与 query.MetricField 一致）。
+type MetricFieldIn struct {
+	Field     string `json:"field"`
+	Label     string `json:"label,omitempty"`
+	Agg       string `json:"agg"`
+	Alias     string `json:"alias,omitempty"`
+	Unit      string `json:"unit,omitempty"`
+	Format    string `json:"format,omitempty"`
+	BindingID string `json:"binding_id,omitempty"`
 }
 
 // MetricConfig represents a metric aggregation configuration

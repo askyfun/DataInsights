@@ -108,6 +108,26 @@ type ChartDataResult struct {
 	SelectSql *string `json:"select_sql,omitempty"`
 }
 
+// ChartDimensionField 维度字段绑定（query.DimensionField）。
+type ChartDimensionField struct {
+	// BindingId 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。
+	BindingId *string `json:"binding_id,omitempty"`
+	Field     string  `json:"field"`
+
+	// Granularity 时间粒度（day / week / month 等）；执行前按方言校验（ValidateGranularity）。
+	Granularity *string `json:"granularity,omitempty"`
+	Label       *string `json:"label,omitempty"`
+}
+
+// ChartDimensionGroup 维度组（query.DimensionGroup）。
+type ChartDimensionGroup struct {
+	Fields []ChartDimensionField `json:"fields"`
+	Label  string                `json:"label"`
+
+	// Name 组标识，如 x_axis / rows / columns / category。
+	Name string `json:"name"`
+}
+
 // ChartListResponse GET /api/charts 响应：data 为 Chart 数组。
 type ChartListResponse struct {
 	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
@@ -131,6 +151,29 @@ type ChartMetricConfig struct {
 	Field string  `json:"field"`
 }
 
+// ChartMetricField 指标字段绑定（query.MetricField）。
+type ChartMetricField struct {
+	// Agg sum / avg / count / max / min（query.AggregationType）。
+	Agg   string  `json:"agg"`
+	Alias *string `json:"alias,omitempty"`
+
+	// BindingId 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。
+	BindingId *string `json:"binding_id,omitempty"`
+	Field     string  `json:"field"`
+	Format    *string `json:"format,omitempty"`
+	Label     *string `json:"label,omitempty"`
+	Unit      *string `json:"unit,omitempty"`
+}
+
+// ChartMetricGroup 指标组（query.MetricGroup）。
+type ChartMetricGroup struct {
+	Fields []ChartMetricField `json:"fields"`
+	Label  string             `json:"label"`
+
+	// Name 组标识，如 values / primary_values / secondary_values。
+	Name string `json:"name"`
+}
+
 // ChartPagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
 type ChartPagination struct {
 	// Page 页码（从 1 开始）；executor 生成 OFFSET = (page-1)*page_size。
@@ -140,26 +183,6 @@ type ChartPagination struct {
 	// PageSize 每页行数；executor 生成 LIMIT。0 会参与除零（total_pages），调用方须给正值。
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	PageSize int `json:"page_size"`
-}
-
-// ChartQueryRequest POST /api/charts/query 请求体（entity.ChartQueryRequest，旧协议）。
-type ChartQueryRequest struct {
-	// ChartType 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse。
-	ChartType string `json:"chart_type"`
-	DatasetId int    `json:"dataset_id"`
-
-	// Dims 分组维度列；pie/axis 族取 dims[0] 作类目/X 轴，多余维度作 series 组合。
-	Dims *[]string `json:"dims,omitempty"`
-
-	// Filters 过滤条件（entity.Filter）；键为 operator（非 op），含前端未使用的 id 键。
-	Filters *[]Filter `json:"filters,omitempty"`
-
-	// Metrics 指标数组；scatter 需至少 2 个指标（第 1 个为 X、第 2 个为 Y），空则 pie/axis 返回空形状。
-	Metrics []ChartMetricConfig `json:"metrics"`
-
-	// Pagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
-	Pagination *ChartPagination `json:"pagination,omitempty"`
-	Sort       *SortConfig      `json:"sort,omitempty"`
 }
 
 // ChartQueryResponse POST /api/charts/query 响应：data 为 ChartDataResult。
@@ -191,6 +214,35 @@ type ChartResponse struct {
 
 	// Trace 请求追踪 ID（X-Request-ID）
 	Trace string `json:"trace"`
+}
+
+// ChartSpecQueryRequest POST /api/charts/query 请求体（entity.ChartQueryRequest 超集，同一 schema 描述 v1/v2 两种协议，按 spec_version 判别）。spec_version 缺失或 !=2： v1 平铺协议，消费 dims/metrics（形状同 ChartQueryRequest）；spec_version=2： v2 槽位协议，消费 dimension_groups/metric_groups（槽位名与 binding_id 经 ChartSpecFromRequestV2 保留进 QuerySpec/QueryAST）。filters/pagination/sort 两协议共用。
+type ChartSpecQueryRequest struct {
+	// ChartType 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse。
+	ChartType string `json:"chart_type"`
+	DatasetId int    `json:"dataset_id"`
+
+	// DimensionGroups v2 维度槽位组（spec_version=2 时使用）；name 为槽位名（x_axis / color_group / rows 等）。
+	DimensionGroups *[]ChartDimensionGroup `json:"dimension_groups,omitempty"`
+
+	// Dims v1 平铺维度列（spec_version 缺失或 !=2 时使用）。
+	Dims *[]string `json:"dims,omitempty"`
+
+	// Filters 过滤条件（entity.Filter）；键为 operator（非 op），v1/v2 共用。
+	Filters *[]Filter `json:"filters,omitempty"`
+
+	// MetricGroups v2 指标槽位组（spec_version=2 时使用）；name 为槽位名（values / primary_values 等）。
+	MetricGroups *[]ChartMetricGroup `json:"metric_groups,omitempty"`
+
+	// Metrics v1 平铺指标数组（spec_version 缺失或 !=2 时使用）。
+	Metrics *[]ChartMetricConfig `json:"metrics,omitempty"`
+
+	// Pagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
+	Pagination *ChartPagination `json:"pagination,omitempty"`
+	Sort       *SortConfig      `json:"sort,omitempty"`
+
+	// SpecVersion 协议版本判别键；v2 路径必填且值为 2，缺失或其他值按 v1 平铺协议处理。
+	SpecVersion *int `json:"spec_version,omitempty"`
 }
 
 // ChartUpdateRequest PUT /api/charts/{id} 请求体（handler 匿名 struct：name/dataset_id/ chart_type/config）。全量覆盖语义：未提供的可填字段以零值写库。
@@ -838,7 +890,7 @@ type GetTableDataParams struct {
 type CreateChartJSONRequestBody = ChartCreateRequest
 
 // QueryChartJSONRequestBody defines body for QueryChart for application/json ContentType.
-type QueryChartJSONRequestBody = ChartQueryRequest
+type QueryChartJSONRequestBody = ChartSpecQueryRequest
 
 // UpdateChartJSONRequestBody defines body for UpdateChart for application/json ContentType.
 type UpdateChartJSONRequestBody = ChartUpdateRequest

@@ -17,7 +17,7 @@ info:
     data 在错误或无数据时统一归一化为空对象 `{}` / 空数组 `[]`，不会出现 null。
   version: 0.1.0
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:23352
     description: 本地开发后端
 tags:
   - name: health
@@ -636,10 +636,12 @@ paths:
     post:
       tags:
         - charts
-      summary: 图表语义查询（旧协议）
+      summary: 图表语义查询（v1 平铺 / v2 槽位协议，spec_version 判别）
       description: |
-        请求体为 entity.ChartQueryRequest（字段级核对清单见 ChartQueryRequest schema
-        注释；Batch 3 将迁移到 ChartSpec/QuerySpec 协议，见 components 中的内部建模）。
+        请求体为 ChartSpecQueryRequest（entity.ChartQueryRequest 超集，同一 schema 描述
+        v1/v2 两种协议）：spec_version 缺失或 !=2 时走 v1 平铺协议（dims/metrics，
+        形状同 ChartQueryRequest）；spec_version=2 时走 v2 槽位协议
+        （dimension_groups/metric_groups，槽位名与 binding_id 保留进查询 AST）。
         成功 data 为 ChartDataResult：{ data, select_sql, count_sql }，其中 data 的
         形状由 chart_type 决定（table/pie/axis/scatter 四族，另加 pivot，详见
         ChartDataResult 描述）。select_sql 成功时恒返回；count_sql 仅 table +
@@ -650,7 +652,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChartQueryRequest'
+              $ref: '#/components/schemas/ChartSpecQueryRequest'
       responses:
         '200':
           description: HTTP 恒 200；业务结果由 Envelope.code 表达
@@ -1640,7 +1642,11 @@ components:
     #   仅程序内可达），按产品决策暂不接线到任何请求协议。
     ChartQueryRequest:
       type: object
-      description: POST /api/charts/query 请求体（entity.ChartQueryRequest，旧协议）。
+      description: >-
+        v1 平铺协议请求体形状（entity.ChartQueryRequest 的 v1 字段子集）。
+        POST /api/charts/query 现绑定其超集 ChartSpecQueryRequest；本 schema
+        保留作 v1 形状的文档参考（frontend api/index.ts 仍以其为类型打底），
+        不再被任何 path 直接引用。
       required:
         - dataset_id
         - chart_type
@@ -1669,6 +1675,62 @@ components:
           items:
             $ref: '#/components/schemas/Filter'
           description: 过滤条件（entity.Filter）；键为 operator（非 op），含前端未使用的 id 键。
+        pagination:
+          $ref: '#/components/schemas/ChartPagination'
+        sort:
+          $ref: '#/components/schemas/SortConfig'
+    # ChartSpecQueryRequest：POST /api/charts/query 请求体（v1/v2 超集）。
+    # 与 handler 的 chartQueryIn / entity.ChartQueryRequest 对称（裁定2：同一个超集
+    # struct 承载两种协议，不是两个独立 schema 竞争同一路由）。
+    ChartSpecQueryRequest:
+      type: object
+      description: >-
+        POST /api/charts/query 请求体（entity.ChartQueryRequest 超集，同一 schema
+        描述 v1/v2 两种协议，按 spec_version 判别）。spec_version 缺失或 !=2：
+        v1 平铺协议，消费 dims/metrics（形状同 ChartQueryRequest）；spec_version=2：
+        v2 槽位协议，消费 dimension_groups/metric_groups（槽位名与 binding_id
+        经 ChartSpecFromRequestV2 保留进 QuerySpec/QueryAST）。filters/pagination/sort
+        两协议共用。
+      required:
+        - dataset_id
+        - chart_type
+      properties:
+        dataset_id:
+          type: integer
+        chart_type:
+          type: string
+          description: >-
+            决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse；
+            bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse；
+            pivot -> ChartPivotResponse。
+        spec_version:
+          type: integer
+          description: 协议版本判别键；v2 路径必填且值为 2，缺失或其他值按 v1 平铺协议处理。
+        dims:
+          type: array
+          items:
+            type: string
+          description: v1 平铺维度列（spec_version 缺失或 !=2 时使用）。
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartMetricConfig'
+          description: v1 平铺指标数组（spec_version 缺失或 !=2 时使用）。
+        dimension_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartDimensionGroup'
+          description: v2 维度槽位组（spec_version=2 时使用）；name 为槽位名（x_axis / color_group / rows 等）。
+        metric_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartMetricGroup'
+          description: v2 指标槽位组（spec_version=2 时使用）；name 为槽位名（values / primary_values 等）。
+        filters:
+          type: array
+          items:
+            $ref: '#/components/schemas/Filter'
+          description: 过滤条件（entity.Filter）；键为 operator（非 op），v1/v2 共用。
         pagination:
           $ref: '#/components/schemas/ChartPagination'
         sort:
@@ -1830,6 +1892,208 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DataRow'
+    # ---- 预声明的后续任务响应形状（plan §3.2/§3.3/§3.4）----
+    # 本组 schema 当前不被任何 processor 返回，仅为 Task 2-1（pivot v2）、
+    # Task 3-1（histogram）、3-3（radar）、3-4/3-5（boxplot）、1-5（kpi）
+    # 提前钉死字段名，避免各任务自行发明产生漂移。命名沿用 Chart*Response
+    # 前缀约定，描述中注明对应的未来 query 包 Go struct。
+    ChartPivotResponseV2:
+      type: object
+      description: >-
+        透视表 v2 响应（plan §3.2 Go struct PivotResponse，Task 2-1 实现后替代
+        ChartPivotResponse 的平铺形状）：交叉表头 + 含小计的数据行 + 可选合计行。
+        当前仅声明，无 processor 返回。
+      required:
+        - row_headers
+        - col_headers
+        - metric_names
+        - cells
+        - grand_total
+      properties:
+        row_headers:
+          type: array
+          items:
+            type: string
+          description: 行维度列名。
+        col_headers:
+          type: array
+          items:
+            type: string
+          description: 列维度值（交叉后的列）。
+        metric_names:
+          type: array
+          items:
+            type: string
+          description: 指标别名。
+        cells:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartPivotRow'
+          description: 数据行（含小计行）。
+        grand_total:
+          allOf:
+            - $ref: '#/components/schemas/ChartPivotRow'
+          nullable: true
+          description: 合计行；null 表示未请求（Go *PivotRow，键恒在）。
+    ChartPivotRow:
+      type: object
+      description: 透视表 v2 数据行（plan §3.2 Go struct PivotRow）。
+      required:
+        - row_key
+        - is_subtotal
+        - values
+      properties:
+        row_key:
+          type: array
+          items:
+            type: string
+          description: 行维度值。
+        is_subtotal:
+          type: boolean
+          description: 是否小计行。
+        values:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+          description: colHeader+metricAlias → 值。
+    ChartHistogramResponse:
+      type: object
+      description: >-
+        直方图响应（plan §3.3 Go struct HistogramResponse，Task 3-1 实现）。
+        当前仅声明，无 processor 返回。
+      required:
+        - bins
+      properties:
+        bins:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartHistogramBin'
+    ChartHistogramBin:
+      type: object
+      description: 直方图分箱（plan §3.3 Go struct HistogramBin）。
+      required:
+        - bin_start
+        - bin_end
+        - count
+      properties:
+        bin_start:
+          type: number
+          format: double
+        bin_end:
+          type: number
+          format: double
+        count:
+          type: integer
+          format: int64
+    ChartBoxplotResponse:
+      type: object
+      description: >-
+        箱线图响应（plan §3.3 Go struct BoxplotResponse，Task 3-5 实现）。
+        outliers 为展示截断（LIMIT 1000），outlier_total 为截断前总数。
+        当前仅声明，无 processor 返回。
+      required:
+        - whisker_low
+        - q1
+        - median
+        - q3
+        - whisker_high
+        - outliers
+        - outlier_total
+        - truncated
+      properties:
+        whisker_low:
+          type: number
+          format: double
+        q1:
+          type: number
+          format: double
+        median:
+          type: number
+          format: double
+        q3:
+          type: number
+          format: double
+        whisker_high:
+          type: number
+          format: double
+        outliers:
+          type: array
+          items:
+            type: number
+            format: double
+        outlier_total:
+          type: integer
+          format: int64
+          description: 截断前的离群点总数。
+        truncated:
+          type: boolean
+          description: outliers 是否被展示截断。
+    ChartRadarResponse:
+      type: object
+      description: >-
+        雷达图响应（plan §3.3 Go struct RadarResponse，Task 3-3 实现）。
+        当前仅声明，无 processor 返回。
+      required:
+        - indicators
+        - series
+      properties:
+        indicators:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartRadarIndicator'
+          description: 维度值列表。
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChartRadarSeries'
+    ChartRadarIndicator:
+      type: object
+      description: 雷达图指示器（plan §3.3 Go struct RadarIndicator）。
+      required:
+        - name
+        - max
+      properties:
+        name:
+          type: string
+        max:
+          type: number
+          format: double
+          description: 该维度的最大值（用于 ECharts radar indicator.max）。
+    ChartRadarSeries:
+      type: object
+      description: 雷达图系列（plan §3.3 Go struct RadarSeries）。
+      required:
+        - name
+        - values
+      properties:
+        name:
+          type: string
+        values:
+          type: array
+          items:
+            type: number
+            format: double
+          description: 与 indicators 等长的值序列。
+    ChartKpiResponse:
+      type: object
+      description: >-
+        KPI 单值卡响应（plan §3.4 Go struct KpiResponse，Task 1-5 实现）。
+        unit/format 为 Go omitempty，缺省时不出现在 JSON。当前仅声明，
+        无 processor 返回。
+      required:
+        - value
+        - label
+      properties:
+        value:
+          type: number
+          format: double
+        label:
+          type: string
+        unit:
+          type: string
+        format:
+          type: string
     Share:
       type: object
       description: >-
@@ -1961,11 +2225,10 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/Share'
-    # ---- ChartSpec / QuerySpec：内部建模首版（backend/internal/query/chart_spec.go）----
-    # 为 Batch 3 的 chart_spec 协议铺路。当前对外 API（POST /api/charts/query 请求体）
-    # 仍是 ChartQueryRequest 旧字段；service 层经 query.ChartSpecFromRequest /
-    # QuerySpecFromRequest 适配器把旧请求转成这两个规格后进入查询链路，
-    # 因此本组 schema 不出现在任何 paths 的 requestBody/response 引用中。
+    # ---- ChartSpec / QuerySpec：内部建模（backend/internal/query/chart_spec.go）----
+    # ChartSpecQueryRequest（POST /api/charts/query v2 协议）的 dimension_groups/
+    # metric_groups 直接引用 ChartDimensionGroup/ChartMetricGroup；ChartSpec/QuerySpec
+    # 本体仍是 service 层内部规格，不出现在任何 paths 的 requestBody/response 引用中。
     ChartSpec:
       type: object
       description: >-
@@ -2027,6 +2290,9 @@ components:
         granularity:
           type: string
           description: 时间粒度（day / week / month 等）；执行前按方言校验（ValidateGranularity）。
+        binding_id:
+          type: string
+          description: 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。
     ChartMetricGroup:
       type: object
       description: 指标组（query.MetricGroup）。
@@ -2064,6 +2330,9 @@ components:
           type: string
         format:
           type: string
+        binding_id:
+          type: string
+          description: 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。
     QuerySpec:
       type: object
       description: >-
@@ -2105,6 +2374,12 @@ components:
           type: string
         granularity:
           type: string
+        group_name:
+          type: string
+          description: 来源槽位/组名（v2 协议 DimensionGroup.Name，如 x_axis / color_group）；v1 路径为空（Go omitempty）。
+        binding_id:
+          type: string
+          description: 来源绑定实例标识（v2 协议 DimensionField.BindingID）；v1 路径为空（Go omitempty）。
     MetricExpr:
       type: object
       description: 结构化指标表达式（query.MetricExpr2；命名避开 ast.go 的 MetricExpr）。
@@ -2123,6 +2398,12 @@ components:
           type: string
         format:
           type: string
+        group_name:
+          type: string
+          description: 来源槽位/组名（v2 协议 MetricGroup.Name，如 values / primary_values）；v1 路径为空（Go omitempty）。
+        binding_id:
+          type: string
+          description: 来源绑定实例标识（v2 协议 MetricField.BindingID）；v1 路径为空（Go omitempty）。
     FilterConfig:
       type: object
       description: >-
