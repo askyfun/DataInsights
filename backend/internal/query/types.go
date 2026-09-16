@@ -11,6 +11,13 @@ const (
 	ChartTypeArea    ChartType = "area"
 	ChartTypeScatter ChartType = "scatter"
 	ChartTypePivot   ChartType = "pivot"
+
+	ChartTypeCombo     ChartType = "combo"
+	ChartTypeHistogram ChartType = "histogram"
+	ChartTypeBoxplot   ChartType = "boxplot"
+	ChartTypeFunnel    ChartType = "funnel"
+	ChartTypeRadar     ChartType = "radar"
+	ChartTypeKpi       ChartType = "kpi"
 )
 
 // AggregationType 聚合函数类型
@@ -22,6 +29,10 @@ const (
 	AggCount AggregationType = "count"
 	AggMax   AggregationType = "max"
 	AggMin   AggregationType = "min"
+
+	// AggCountDistinct 的 SQL 生成（COUNT(DISTINCT ...)）在 Task 1-6 实现，
+	// 当前 GetAggFunc() 尚未处理该值，会走 default 分支，调用方在 Task 1-6 之前不应依赖它。
+	AggCountDistinct AggregationType = "count_distinct"
 )
 
 // FilterOperator 过滤条件操作符
