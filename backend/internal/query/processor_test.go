@@ -502,6 +502,48 @@ func TestGetProcessor_Combo(t *testing.T) {
 	}
 }
 
+// TestGetProcessor_Funnel 验证 funnel（漏斗图，R-59）经显式 case 复用 *PieProcessor。
+// 单纯类型断言无法区分“显式 case”与“pie case 复用”，因此额外对返回的 processor
+// 做一次真实处理：funnel 形状的单维度 + 单指标行应产出 *PieResponse，且**保持输入行
+// 顺序**——降序由前端 composeChartQueryRequest 注入的 ORDER BY 决定，processor 不重排。
+func TestGetProcessor_Funnel(t *testing.T) {
+	processor := GetProcessor(ChartTypeFunnel)
+	if processor == nil {
+		t.Fatal("expected non-nil processor for funnel")
+	}
+	pieProcessor, ok := processor.(*PieProcessor)
+	if !ok {
+		t.Fatalf("expected *PieProcessor for funnel, got %T", processor)
+	}
+
+	// 输入刻意乱序（非降序），证明 processor 保序、不负责排序
+	rows := []map[string]any{
+		{"stage": "购买", "value": 30.0},
+		{"stage": "访问", "value": 100.0},
+		{"stage": "加购", "value": 60.0},
+	}
+	metrics := []MetricConfig{{Field: "value", Agg: AggSum}}
+	resp, err := pieProcessor.Process(rows, []string{"stage"}, metrics, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	pieResp, ok := resp.(*PieResponse)
+	if !ok {
+		t.Fatalf("expected *PieResponse for funnel, got %T", resp)
+	}
+	if len(pieResp.Data) != 3 {
+		t.Fatalf("expected 3 funnel items, got %d", len(pieResp.Data))
+	}
+	wantNames := []string{"购买", "访问", "加购"}
+	wantValues := []float64{30, 100, 60}
+	for i, item := range pieResp.Data {
+		if item.Name != wantNames[i] || item.Value != wantValues[i] {
+			t.Errorf("item %d = {%q %v}, want {%q %v}（processor 必须保持输入行顺序）",
+				i, item.Name, item.Value, wantNames[i], wantValues[i])
+		}
+	}
+}
+
 // TestScatterProcessor_TwoMetrics 验证散点图使用 metrics[0] 作为 X、metrics[1] 作为 Y
 func TestScatterProcessor_TwoMetrics(t *testing.T) {
 	p := &ScatterProcessor{}

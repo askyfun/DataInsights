@@ -558,6 +558,10 @@ func GetProcessor(chartType ChartType) Processor {
 		return &TableProcessor{}
 	case ChartTypePie:
 		return NewPieProcessor()
+	case ChartTypeFunnel:
+		// funnel（漏斗图，R-59）复用 PieProcessor：返回 PieResponse{name,value}，
+		// 降序由前端 composeChartQueryRequest 注入的 ORDER BY 决定（PieProcessor 保序）。
+		return NewPieProcessor()
 	case ChartTypeBar, ChartTypeLine, ChartTypeArea:
 		return &AxisProcessor{}
 	case ChartTypeCombo:
