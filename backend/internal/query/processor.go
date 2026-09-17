@@ -584,6 +584,10 @@ func GetProcessor(chartType ChartType) Processor {
 		// RadarProcessor 按 ast.GroupName 解析 indicators/series_group 槽位
 		// （v1 平铺请求回退按位置推断），把结果行重塑成雷达形状。
 		return &RadarProcessor{}
+	case ChartTypeBoxplot:
+		// boxplot（R-52）的真实路径是 executor 的三次查询分支（executeBoxplot →
+		// BoxplotProcessor.Assemble）；显式 case 避免误落 AxisProcessor 兜底。
+		return &BoxplotProcessor{}
 	default:
 		return &AxisProcessor{}
 	}

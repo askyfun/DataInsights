@@ -231,3 +231,54 @@ func (p *RadarProcessor) Process(rows []map[string]any, dims []string, metrics [
 
 	return &RadarResponse{Indicators: indicators, Series: seriesList}, nil
 }
+
+// BoxplotProcessor 箱线图处理器（R-52，plan §3.3）。
+// boxplot 是多查询编排（stats → Go 端算 fence → outliers list + outliers count），
+// 三段结果只在 executor 内同时可得，通用 Process 签名（只见单次 rows）表达不了，
+// 因此组装走专门的 Assemble，由 executor 的 executeBoxplot 调用（对齐 HistogramProcessor
+// 的 ProcessBins 组织方式）。GetProcessor 返回本类型只为避免误落 AxisProcessor 兜底。
+type BoxplotProcessor struct{}
+
+// Process 通用 Processor 接口实现：boxplot 不走该入口（见类型注释），显式报错而非静默
+// 产出错误形状。
+func (p *BoxplotProcessor) Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error) {
+	return nil, fmt.Errorf("boxplot requires the multi-query executor path (BoxplotProcessor.Assemble)")
+}
+
+// Assemble 把 stats 行 + outliers 行 + outlier 总数组装成 BoxplotResponse。
+//   - statsRow 为空或 q1/median/q3 均非数值（空数据集下 MIN/percentile/MAX 全 NULL）
+//     → 返回退化结构（五值 0、空 outliers、total 0、truncated false），不报错；
+//   - outliers 从每行的 boxOutlierValueAlias（"val"）列读取，非数值跳过（防御，正常不发生）；
+//   - truncated = outlierTotal > len(outliers)（outliers list 查询 LIMIT 1000 截断，total 是截断前计数）。
+func (p *BoxplotProcessor) Assemble(
+	statsRow map[string]any, outlierRows []map[string]any, outlierTotal int64,
+) (*BoxplotResponse, error) {
+	resp := &BoxplotResponse{Outliers: []float64{}}
+	if statsRow == nil {
+		return resp, nil // 空数据：退化箱
+	}
+	q1, q1OK := toFloat64(statsRow[boxQ1Alias])
+	med, medOK := toFloat64(statsRow[boxMedianAlias])
+	q3, q3OK := toFloat64(statsRow[boxQ3Alias])
+	if !q1OK && !medOK && !q3OK {
+		// 空数据集：percentile/MIN/MAX 全 NULL。三轴皆无值即判空，产退化结构。
+		return resp, nil
+	}
+	resp.Q1 = q1
+	resp.Median = med
+	resp.Q3 = q3
+	// whisker_low/high 用全局 MIN/MAX（plan 字面口径）；NULL（空/非数值）落 0。
+	resp.WhiskerLow, _ = toFloat64(statsRow[boxWhiskerLowAlias])
+	resp.WhiskerHigh, _ = toFloat64(statsRow[boxWhiskerHighAlias])
+
+	outliers := make([]float64, 0, len(outlierRows))
+	for _, row := range outlierRows {
+		if v, ok := toFloat64(row[boxOutlierValueAlias]); ok {
+			outliers = append(outliers, v)
+		}
+	}
+	resp.Outliers = outliers
+	resp.OutlierTotal = outlierTotal
+	resp.Truncated = outlierTotal > int64(len(outliers))
+	return resp, nil
+}

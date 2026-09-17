@@ -229,6 +229,22 @@ type RadarSeries struct {
 	Values []float64 `json:"values"`
 }
 
+// BoxplotResponse 箱线图响应（R-52，plan §3.3）：executor 三查询（stats + outliers list +
+// outliers count）编排 + BoxplotProcessor.Assemble 产出。字段与 openapi ChartBoxplotResponse
+// schema 逐字对应。**whisker_low/whisker_high 是全局 MIN/MAX**（plan 字面口径，非 Tukey
+// 钳位到 fence 的须），outliers 用 IQR*1.5 fence 独立查询、最多展示 1000 个；
+// outlier_total 是截断前的真实总数，truncated = outlier_total > len(outliers)。
+type BoxplotResponse struct {
+	WhiskerLow   float64   `json:"whisker_low"`
+	Q1           float64   `json:"q1"`
+	Median       float64   `json:"median"`
+	Q3           float64   `json:"q3"`
+	WhiskerHigh  float64   `json:"whisker_high"`
+	Outliers     []float64 `json:"outliers"`
+	OutlierTotal int64     `json:"outlier_total"`
+	Truncated    bool      `json:"truncated"`
+}
+
 // ResolveAlias 解析字段别名
 func (m *MetricConfig) ResolveAlias() string {
 	if m.Alias != "" {

@@ -125,6 +125,14 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		return e.executeHistogram(ctx, dialect, ast, req)
 	}
 
+	// boxplot 分支（R-52）：三查询编排（stats → Go 端算 fence → outliers list LIMIT 1000 +
+	// outliers count），与 histogram 两阶段同族。executor 内做 percentile 能力前置门（boxplot
+	// stats SQL 内部使用 percentile_cont，AST metric.Agg 不是 AggMedian，故 3-4 的通用
+	// AstRequiresPercentile 门不会命中，本分支必须自行 gate）。
+	if req.ChartType == ChartTypeBoxplot {
+		return e.executeBoxplot(ctx, dialect, ast, req)
+	}
+
 	// percentile（R-54）前置门：AST 含 median 指标时**先探 caps、不支持就在建 SQL 前显式错**，
 	// 不给 DB 报语法错误或静默近似的机会（plan §4.2 明确规则）。无 median 指标时不查 caps，零开销。
 	// builder 层硬编码 percentile_cont 依赖此处的契约不变式（见 renderMetricSelect 注释）。
@@ -350,4 +358,110 @@ func (e *Executor) ExecuteRawQuery(ctx context.Context, sql string) ([]map[strin
 // Close 关闭连接
 func (e *Executor) Close() error {
 	return e.conn.Close()
+}
+
+// executeBoxplot 执行箱线图三查询编排（R-52）：
+//  1. **前置门**：先探 dialect capabilities，若 PercentileStrategy 不支持 percentile_cont
+//     → 立即返回明确 error（plan §4.2 + 行569 文案，boxplot stats SQL 内部使用了 percentile_cont，
+//     不支持的 dialect 走不到建 SQL 那一步）。CH/MySQL/StarRocks 现状（Task 3-0 保守裁定
+//     strategy="unsupported"）都走这条 error 分支，不会拿到近似值或 DB 语法错。
+//  2. **stats**：`SELECT MIN, percentile_cont(0.25), percentile_cont(0.5), percentile_cont(0.75), MAX`。
+//     空/全 NULL 结果 → 退化 BoxplotResponse（五值 0、空 outliers、total 0、truncated false），
+//     不跑后两查询（避免对无意义数据发多余 SQL）。
+//  3. **fence（Go 端算）**：`iqr = q3-q1; lower = q1 - 1.5*iqr; upper = q3 + 1.5*iqr`。
+//  4. **outliers list** + **outliers count**：两次独立查询共享同一 fence WHERE 谓词，
+//     全部参数化传入，绝不 fmt 拼裸浮点（防注入 + 浮点字符串化方言差异）。
+//     list 受 LIMIT 1000 截断（boxOutlierDisplayMax 常量），count 给真实总数与 truncated 判定。
+//  5. **Assemble**：BoxplotProcessor.Assemble 纯函数装配（可独立单测）。
+func (e *Executor) executeBoxplot(
+	ctx context.Context, dialect DialectType, ast *QueryAST, req *ChartQueryRequest,
+) (ExecutorResult, error) {
+	if len(req.Metrics) == 0 || req.Metrics[0].Field == "" {
+		return ExecutorResult{}, fmt.Errorf("boxplot requires a value field (metrics[0])")
+	}
+	valueField := req.Metrics[0].Field
+
+	// 前置门：boxplot stats 内部使用 percentile_cont，dialect 不支持时必须显式失败。
+	caps, err := e.conn.Capabilities(ctx)
+	if err != nil {
+		return ExecutorResult{}, fmt.Errorf("boxplot capability probe failed: %w", err)
+	}
+	if perr := CheckPercentileSupport(caps); perr != nil {
+		strategy := "unknown"
+		if caps != nil {
+			strategy = caps.PercentileStrategy
+		}
+		return ExecutorResult{}, fmt.Errorf(
+			"当前数据源不支持箱线图（需要 percentile 能力，策略 %q）：%w", strategy, perr)
+	}
+
+	statsSQL, statsArgs, berr := BuildBoxplotStatsQuery(dialect, ast, valueField, caps)
+	if berr != nil {
+		return ExecutorResult{}, fmt.Errorf("boxplot stats SQL: %w", berr)
+	}
+	slog.Debug("executing boxplot stats query", "sql", statsSQL, "args", statsArgs)
+	statsResult, err := e.conn.Execute(ctx, statsSQL, statsArgs...)
+	if err != nil {
+		return ExecutorResult{}, fmt.Errorf("boxplot stats query failed: %v", err)
+	}
+
+	// 空/退化：stats 无行或 q1/median/q3 全 NULL → 直接产退化结构，不跑后两查询。
+	var statsRow map[string]any
+	if len(statsResult.Rows) > 0 {
+		statsRow = statsResult.Rows[0]
+	}
+	if isEmptyBoxplotStats(statsRow) {
+		empty := &BoxplotResponse{Outliers: []float64{}}
+		return ExecutorResult{
+			Data:         empty,
+			GeneratedSQL: GeneratedSQL{Select: statsSQL},
+		}, nil
+	}
+
+	q1, _ := toFloat64(statsRow[boxQ1Alias])
+	q3, _ := toFloat64(statsRow[boxQ3Alias])
+	iqr := q3 - q1
+	lower := q1 - boxIQRMultiplierConst*iqr
+	upper := q3 + boxIQRMultiplierConst*iqr
+
+	outlierSQL, outlierArgs := BuildBoxplotOutliersQuery(dialect, ast, valueField, lower, upper)
+	slog.Debug("executing boxplot outliers list query", "sql", outlierSQL, "args", outlierArgs)
+	outlierResult, err := e.conn.Execute(ctx, outlierSQL, outlierArgs...)
+	if err != nil {
+		return ExecutorResult{}, fmt.Errorf("boxplot outliers list query failed: %v", err)
+	}
+
+	countSQL, countArgs := BuildBoxplotOutlierCountQuery(dialect, ast, valueField, lower, upper)
+	slog.Debug("executing boxplot outliers count query", "sql", countSQL, "args", countArgs)
+	countResult, err := e.conn.Execute(ctx, countSQL, countArgs...)
+	if err != nil {
+		return ExecutorResult{}, fmt.Errorf("boxplot outliers count query failed: %v", err)
+	}
+	var outlierTotal int64
+	if len(countResult.Rows) > 0 {
+		if f, ok := toFloat64(countResult.Rows[0][boxOutlierCountAlias]); ok {
+			outlierTotal = int64(f)
+		}
+	}
+
+	resp, err := (&BoxplotProcessor{}).Assemble(statsRow, outlierResult.Rows, outlierTotal)
+	if err != nil {
+		return ExecutorResult{}, fmt.Errorf("boxplot assemble failed: %v", err)
+	}
+	return ExecutorResult{
+		Data:         resp,
+		GeneratedSQL: GeneratedSQL{Select: statsSQL},
+	}, nil
+}
+
+// isEmptyBoxplotStats 判 stats 行是否代表空数据集：nil 或 q1/median/q3 三键都不可转数值
+// （PG 上空集聚合返回 1 行、percentile_cont 与 MIN/MAX 均为 NULL；toFloat64 对 NULL 返回 false）。
+func isEmptyBoxplotStats(row map[string]any) bool {
+	if row == nil {
+		return true
+	}
+	_, q1OK := toFloat64(row[boxQ1Alias])
+	_, medOK := toFloat64(row[boxMedianAlias])
+	_, q3OK := toFloat64(row[boxQ3Alias])
+	return !q1OK && !medOK && !q3OK
 }
