@@ -108,7 +108,14 @@ export type TableDataResult = G['TableDataResult'];
 export type FieldDistribution = G['FieldDistribution'];
 
 // Charts API types
-export type ChartQueryAggregation = 'sum' | 'avg' | 'count' | 'max' | 'min' | 'count_distinct';
+export type ChartQueryAggregation =
+  | 'sum'
+  | 'avg'
+  | 'count'
+  | 'max'
+  | 'min'
+  | 'count_distinct'
+  | 'median';
 
 export type ChartQueryMetric = Omit<G['ChartMetricConfig'], 'agg'> & {
   agg: ChartQueryAggregation;
