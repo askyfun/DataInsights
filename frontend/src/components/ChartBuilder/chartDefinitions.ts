@@ -2,6 +2,7 @@ import {
   AppstoreOutlined,
   AreaChartOutlined,
   BarChartOutlined,
+  BoxPlotOutlined,
   DashboardOutlined,
   DotChartOutlined,
   FundOutlined,
@@ -408,6 +409,29 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         kind: 'metric',
         label: '数值',
         emptyText: '拖拽数值指标到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+    ],
+  },
+  boxplot: {
+    type: 'boxplot',
+    label: '箱线图',
+    // boxplot（R-52）走后端 executeBoxplot 三查询 + BoxplotProcessor.Assemble：
+    // 返回 BoxplotResponse{whisker_low,q1,median,q3,whisker_high,outliers,outlier_total,truncated}，
+    // 前端 buildChartOption 用 ECharts boxplot（五数概括）+ scatter（离群点）渲染。
+    resultShape: 'boxplot',
+    // BoxPlotOutlined 是 @ant-design/icons 的箱线图图标，语义精确。
+    icon: BoxPlotOutlined,
+    // boxplot 消费 ECharts 调色板；不消费 smooth/stack/orientation/donut/tableRowSize。
+    styleKeys: ['colors'],
+    fieldGroups: [
+      {
+        // 单个 metric 槽位、maxFields:1，对齐后端取 Metrics[0].Field 算分位/离群点。
+        id: 'value',
+        kind: 'metric',
+        label: '数值',
+        emptyText: '拖拽要求分布的数值字段到此，或点击+添加',
         minGroups: 1,
         maxFields: 1,
       },

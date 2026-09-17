@@ -217,7 +217,8 @@ export interface ChartConfig {
     | 'kpi'
     | 'histogram'
     | 'funnel'
-    | 'radar';
+    | 'radar'
+    | 'boxplot';
   xAxisField: string | null;
   yAxisFields: string[];
   title: string;

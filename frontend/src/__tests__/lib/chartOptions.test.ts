@@ -93,6 +93,17 @@ const radarPayload = {
   ],
 };
 
+const boxplotPayload = {
+  whisker_low: -50,
+  q1: 2.75,
+  median: 5.5,
+  q3: 8.25,
+  whisker_high: 100,
+  outliers: [-50, 100],
+  outlier_total: 2,
+  truncated: false,
+};
+
 describe('buildChartOption：结构化聚合响应（正常路径）', () => {
   it('bar：x 类目来自 x_axis，series 原样保留名称与数据', () => {
     const option = view<AxisOptionView>(
@@ -583,6 +594,21 @@ describe('isEmptyPayload：结构化联合与裸行两臂统一判空', () => {
     // → 雷达图永远渲染空（与 histogram 修复的对称断言）。
     expect(isEmptyPayload({ indicators: [], series: [] })).toBe(true);
     expect(isEmptyPayload(radarPayload)).toBe(false);
+    // boxplot（R-52）：结构体恒存在、0 是合法分位值 → 命中 'q1' 臂即按可渲染处理（落末尾
+    // true 会让箱线图永远空白）；退化零值结构也渲染贴零箱而非空白。
+    expect(isEmptyPayload(boxplotPayload)).toBe(false);
+    expect(
+      isEmptyPayload({
+        whisker_low: 0,
+        q1: 0,
+        median: 0,
+        q3: 0,
+        whisker_high: 0,
+        outliers: [],
+        outlier_total: 0,
+        truncated: false,
+      })
+    ).toBe(false);
   });
 });
 
@@ -1207,5 +1233,75 @@ describe('buildChartOption：radar 雷达图（R-62）', () => {
         { title: '', dimensions: ['ind'], metrics: ['v'] }
       )
     ).toBeNull();
+  });
+});
+
+describe('buildChartOption：boxplot 箱线图（R-52）', () => {
+  interface BoxplotOptionView {
+    xAxis?: { type?: string };
+    yAxis?: { type?: string; data?: string[] };
+    series: { type: string; data: unknown[]; name?: string }[];
+    color?: string[];
+  }
+
+  it('BoxplotResponse 渲染为 boxplot 系列（五数概括 [min,q1,median,q3,max]）+ scatter 离群点系列', () => {
+    const option = view<BoxplotOptionView>(
+      buildChartOption(
+        'boxplot',
+        boxplotPayload,
+        baseStyle,
+        {},
+        { title: '', dimensions: [], metrics: ['amount'] }
+      )
+    );
+    // 水平 value 轴承载统计值；类目轴单条箱（名取 metrics[0] 列名）
+    expect(option.xAxis?.type).toBe('value');
+    expect(option.yAxis?.type).toBe('category');
+    expect(option.yAxis?.data).toEqual(['amount']);
+    // series[0] = boxplot：数据项即五数概括
+    expect(option.series[0].type).toBe('boxplot');
+    expect(option.series[0].data).toEqual([[-50, 2.75, 5.5, 8.25, 100]]);
+    // series[1] = scatter：离群点 [值, 类目索引0]
+    expect(option.series[1].type).toBe('scatter');
+    expect(option.series[1].data).toEqual([
+      [-50, 0],
+      [100, 0],
+    ]);
+  });
+
+  it('style.colors 生效：palette 透传到 option.color', () => {
+    const option = view<BoxplotOptionView>(
+      buildChartOption(
+        'boxplot',
+        boxplotPayload,
+        { ...baseStyle, colors: ['#123456'] },
+        {},
+        { title: '', dimensions: [], metrics: ['amount'] }
+      )
+    );
+    expect(option.color).toEqual(['#123456']);
+  });
+
+  it('退化零值结构（后端空数据集）不拦截 → 渲染贴零箱而非 null', () => {
+    const option = view<BoxplotOptionView>(
+      buildChartOption(
+        'boxplot',
+        {
+          whisker_low: 0,
+          q1: 0,
+          median: 0,
+          q3: 0,
+          whisker_high: 0,
+          outliers: [],
+          outlier_total: 0,
+          truncated: false,
+        },
+        baseStyle,
+        {},
+        { title: '', dimensions: [], metrics: ['amount'] }
+      )
+    );
+    expect(option.series[0].data).toEqual([[0, 0, 0, 0, 0]]);
+    expect(option.series[1].data).toEqual([]);
   });
 });

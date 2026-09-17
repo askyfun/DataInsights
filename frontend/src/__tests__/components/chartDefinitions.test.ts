@@ -2,6 +2,7 @@ import {
   AppstoreOutlined,
   AreaChartOutlined,
   BarChartOutlined,
+  BoxPlotOutlined,
   DashboardOutlined,
   DotChartOutlined,
   FundOutlined,
@@ -48,6 +49,7 @@ const EXPECTED_RESULT_SHAPE: Record<BuilderChartType, ResultShape> = {
   histogram: 'histogram',
   funnel: 'pie',
   radar: 'radar',
+  boxplot: 'boxplot',
 };
 
 /** 期望的 chartType → icon 组件映射，须与迁移前 ChartBuilder.tsx 的硬编码逐项一致。 */
@@ -64,6 +66,7 @@ const EXPECTED_ICON: Record<BuilderChartType, ChartDefinition['icon']> = {
   histogram: StockOutlined,
   funnel: FunnelPlotOutlined,
   radar: RadarChartOutlined,
+  boxplot: BoxPlotOutlined,
 };
 
 const CHART_TYPES = Object.keys(chartDefinitions) as BuilderChartType[];

@@ -16,6 +16,7 @@
 import type { EChartsOption } from 'echarts';
 import type {
   AxisResponse,
+  BoxplotResponse,
   ChartDataResponse,
   HistogramResponse,
   PieResponse,
@@ -55,6 +56,12 @@ export function isEmptyPayload(data: ChartDataResponse): boolean {
   // → 雷达图永远渲染空。indicators 空即视为无轴可画（等价于无数据）。
   if ('indicators' in data) {
     return data.indicators.length === 0;
+  }
+  // boxplot（R-52）：{whisker_low,q1,median,q3,whisker_high,outliers,...} 结构体恒存在，
+  // 后端对空数据集也返回退化零值结构而非 null。0 是合法分位值、无法据五数概括判空，
+  // 只要命中 boxplot 形状就按"有内容可画"处理（宁可渲染贴零的箱，也不整图空白）。
+  if ('q1' in data) {
+    return false;
   }
   return true;
 }
@@ -420,6 +427,38 @@ export function buildChartOption(
             {
               type: 'radar' as const,
               data: radar.series.map((s) => ({ name: s.name, value: s.values })),
+            },
+          ],
+          color: palette,
+        };
+      }
+
+      case 'boxplot': {
+        // 'q1' 判别已将该臂收窄为 BoxplotResponse（空/退化已由 isEmptyPayload 放行渲染贴零箱）。
+        if (!('q1' in data) || !('outliers' in data)) {
+          return null;
+        }
+        const box: BoxplotResponse = data;
+        const boxName = labelOf(context.metrics[0] ?? 'value');
+        return {
+          ...commonOptions,
+          tooltip: { trigger: 'item' as const },
+          // 单箱：水平 value 轴承载统计值，类目轴只一条（箱名）。
+          xAxis: { type: 'value' as const, scale: true },
+          yAxis: { type: 'category' as const, data: [boxName] },
+          series: [
+            {
+              // ECharts boxplot 数据项即五数概括 [min, Q1, median, Q3, max]。
+              name: boxName,
+              type: 'boxplot' as const,
+              data: [[box.whisker_low, box.q1, box.median, box.q3, box.whisker_high]],
+            },
+            {
+              // 离群点按 [值, 类目索引0] 落在同一箱的水平线上（唯一类目在索引 0）。
+              name: '离群点',
+              type: 'scatter' as const,
+              data: box.outliers.map((o) => [o, 0]),
+              symbolSize: 8,
             },
           ],
           color: palette,
