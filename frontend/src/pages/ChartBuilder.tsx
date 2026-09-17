@@ -23,6 +23,7 @@ import {
   Drawer,
   Empty,
   Input,
+  InputNumber,
   Layout,
   Modal,
   message,
@@ -211,7 +212,7 @@ const findBindingIdByOutputName = (
   return undefined;
 };
 
-interface ChartQueryRequestInput {
+export interface ChartQueryRequestInput {
   datasetId: number;
   chartType: ChartConfig['chartType'];
   queryConfig: QueryConfig;
@@ -219,6 +220,8 @@ interface ChartQueryRequestInput {
   metricAggregations: Record<string, string>;
   metricAliases: Record<string, string>;
   tablePagination: { page: number; pageSize: number };
+  /** 图表查询选项（持久化 camelCase 模型）；histogram 从中取 binCount 发 wire bin_count。 */
+  queryOptions: ChartQueryOptions;
   /** 返回对象是否可携带 sort 键（仅当 queryConfig.sort 存在且 bindingId 在活动组内可解析时实际携带）。历史上两个自动查询 effect 传 false（从不发送 sort，R-50 bug）；Task 1-7 起三个调用点统一为 true。 */
   includeSort: boolean;
 }
@@ -244,7 +247,9 @@ const DUAL_AXIS_METRIC_SLOTS = new Set(['primary_values', 'secondary_values']);
  * metrics[] 中丢失）。其余情况（color_group 为空的 bar/line/area，或 table/pie/scatter/pivot
  * 根本没有这些槽位）继续发出 v1 平铺格式（dims/metrics），请求形状与本任务改动前完全一致。
  */
-const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequest | null => {
+export const composeChartQueryRequest = (
+  input: ChartQueryRequestInput
+): ChartQueryRequest | null => {
   const {
     datasetId,
     chartType,
@@ -253,6 +258,7 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
     metricAggregations,
     metricAliases,
     tablePagination,
+    queryOptions,
     includeSort,
   } = input;
 
@@ -327,6 +333,12 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
     sortWireField !== undefined && queryConfig.sort
       ? { sort: { field: sortWireField, order: queryConfig.sort.order } }
       : {};
+
+  // histogram（R-57）专属 query_options：wire 用 snake_case bin_count，缺省 20（与后端
+  // HistogramProcessor 默认一致）；持久化文档的 camelCase binCount → wire 的翻译只发生在
+  // 这里。其余图型不带 query_options 键，请求形状与本任务改动前完全一致。
+  const queryOptionsPayload =
+    chartType === 'histogram' ? { query_options: { bin_count: queryOptions.binCount ?? 20 } } : {};
 
   if (requiresSlotProtocol) {
     // v2 槽位协议：dimension_groups/metric_groups 携带真实槽位名与 binding_id
@@ -429,6 +441,7 @@ const composeChartQueryRequest = (input: ChartQueryRequestInput): ChartQueryRequ
     metrics,
     filters: filtersPayload,
     ...sortPayload,
+    ...queryOptionsPayload,
     pagination: paginationPayload,
   };
 };
@@ -634,6 +647,9 @@ interface ConfigPanelProps {
   onMetricUnitChange: (bindingId: string, unit: string) => void;
   onMetricFormatChange: (bindingId: string, format: string) => void;
   onChartStyleChange: (style: Partial<ChartStyleConfig>) => void;
+  /** 图表查询选项（histogram 的 binCount 在此读写）。 */
+  queryOptions: ChartQueryOptions;
+  onQueryOptionsChange: (options: Partial<ChartQueryOptions>) => void;
 }
 
 const chartTypeOptions = Object.values(chartDefinitions).map((def) => ({
@@ -655,6 +671,8 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onMetricUnitChange,
   onMetricFormatChange,
   onChartStyleChange,
+  queryOptions,
+  onQueryOptionsChange,
 }) => {
   // styleKeys 决定当前图型显示哪些样式控件（Task 0-4 声明、本任务首次真正接线）。
   // 7 种图型现在都应显式声明 styleKeys（见 chartDefinitions.ts），undefined 理论上
@@ -711,6 +729,22 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 <ColorPicker
                   value={chartStyle.colors[0] || '#1677ff'}
                   onChange={(color) => onChartStyleChange({ colors: [color.toHexString()] })}
+                />
+              </div>
+            </div>
+          )}
+
+          {config.chartType === 'histogram' && (
+            <div>
+              <Text strong>分箱数量</Text>
+              <div style={{ marginTop: 4 }}>
+                <InputNumber
+                  style={{ width: '100%' }}
+                  min={1}
+                  max={1000}
+                  precision={0}
+                  value={queryOptions.binCount ?? 20}
+                  onChange={(value) => onQueryOptionsChange({ binCount: value ?? undefined })}
                 />
               </div>
             </div>
@@ -1138,6 +1172,7 @@ const ChartBuilder: React.FC = () => {
         metricAggregations,
         metricAliases,
         tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
+        queryOptions: chartQueryOptions,
         includeSort: true,
       });
     },
@@ -1150,6 +1185,7 @@ const ChartBuilder: React.FC = () => {
       tablePagination.page,
       tablePagination.pageSize,
       chartBuilderFields,
+      chartQueryOptions,
     ]
   );
 
@@ -1240,6 +1276,7 @@ const ChartBuilder: React.FC = () => {
       metricAggregations: state.metricAggregations,
       metricAliases: state.metricAliases,
       tablePagination: state.tablePagination,
+      queryOptions: state.chartQueryOptions,
       includeSort: true,
     });
     if (request) {
@@ -1259,6 +1296,7 @@ const ChartBuilder: React.FC = () => {
       metricAggregations,
       metricAliases,
       tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
+      queryOptions: chartQueryOptions,
       includeSort: true,
     });
     if (request) {
@@ -1275,6 +1313,7 @@ const ChartBuilder: React.FC = () => {
     chartBuilderFields,
     tablePagination.page,
     tablePagination.pageSize,
+    chartQueryOptions,
   ]);
 
   useEffect(() => {
@@ -1765,6 +1804,10 @@ const ChartBuilder: React.FC = () => {
             onMetricUnitChange={setMetricUnit}
             onMetricFormatChange={setMetricFormat}
             onChartStyleChange={setChartStyle}
+            queryOptions={chartQueryOptions}
+            onQueryOptionsChange={(options) =>
+              setChartQueryOptionsState({ ...chartQueryOptions, ...options })
+            }
             onConfigChange={(config) => {
               if (config.chartType) {
                 handleChartTypeChange(config.chartType);
@@ -1821,6 +1864,10 @@ const ChartBuilder: React.FC = () => {
             onMetricUnitChange={setMetricUnit}
             onMetricFormatChange={setMetricFormat}
             onChartStyleChange={setChartStyle}
+            queryOptions={chartQueryOptions}
+            onQueryOptionsChange={(options) =>
+              setChartQueryOptionsState({ ...chartQueryOptions, ...options })
+            }
             onConfigChange={(config) => {
               if (config.chartType) {
                 handleChartTypeChange(config.chartType);

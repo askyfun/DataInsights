@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isHistogramPayload } from '@/api';
 import { API_CODE, apiClient, del, get, post, put } from '@/lib/api/client';
 
 describe('API Client', () => {
@@ -25,5 +26,15 @@ describe('API Client', () => {
       `http://${window.location.hostname || 'localhost'}:8080`
     );
     expect(apiClient.defaults.baseURL).not.toContain('}');
+  });
+});
+
+describe('isHistogramPayload', () => {
+  it('按形状判别：bins 数组 true；table/裸数组/null false', () => {
+    expect(isHistogramPayload({ bins: [] })).toBe(true);
+    expect(isHistogramPayload({ bins: [{ bin_start: 0, bin_end: 1, count: 2 }] })).toBe(true);
+    expect(isHistogramPayload({ columns: ['a'], data: [] })).toBe(false);
+    expect(isHistogramPayload([])).toBe(false);
+    expect(isHistogramPayload(null)).toBe(false);
   });
 });

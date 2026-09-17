@@ -150,6 +150,10 @@ export type ChartQueryRequest = Omit<G['ChartSpecQueryRequest'], 'dims' | 'metri
   dims?: string[];
   metrics?: ChartQueryMetric[];
   filters: ChartQueryFilter[];
+  // 查询选项扩展袋（如 histogram 的 { bin_count }）。生成物 ChartSpecQueryRequest 早于
+  // openapi 的 query_options 改动（裁定 A：不重新生成 gen_types.ts），故在手写薄层补齐，
+  // 形状与生成的 ChartSpec.query_options（additionalProperties: true）一致。
+  query_options?: { [key: string]: unknown };
 };
 
 export type ChartDimensionGroup = G['ChartDimensionGroup'];
@@ -171,6 +175,10 @@ export type PivotResponseV2 = G['ChartPivotResponseV2'];
 
 export type PivotRow = G['ChartPivotRow'];
 
+export type HistogramResponse = G['ChartHistogramResponse'];
+
+export type HistogramBin = G['ChartHistogramBin'];
+
 export type ChartDataResponse =
   | G['ChartTableResponse']
   | G['ChartPieResponse']
@@ -179,6 +187,7 @@ export type ChartDataResponse =
   | G['ChartPivotResponse']
   | G['ChartPivotResponseV2']
   | G['ChartKpiResponse']
+  | G['ChartHistogramResponse']
   | unknown[];
 
 // pivot v2 交叉表负载判别：按响应形状（cells + col_headers + row_headers 均为数组）
@@ -195,6 +204,14 @@ export function isPivotV2Payload(x: unknown): x is PivotResponseV2 {
     Array.isArray(x.col_headers) &&
     'row_headers' in x &&
     Array.isArray(x.row_headers)
+  );
+}
+
+// histogram 负载判别（R-57）：按响应形状（bins 为数组）判别，而非 chartType——
+// {bins} 与其余结构化响应（x_axis/data/columns/value）形状互斥，可安全区分。
+export function isHistogramPayload(x: unknown): x is HistogramResponse {
+  return (
+    typeof x === 'object' && x !== null && !Array.isArray(x) && 'bins' in x && Array.isArray(x.bins)
   );
 }
 

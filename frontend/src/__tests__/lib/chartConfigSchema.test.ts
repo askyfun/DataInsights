@@ -202,6 +202,30 @@ describe('migrateChartConfig：旧结构 → v2', () => {
     expect(doc.chartType).toBe('pivot');
     expect(doc.title).toBe('');
   });
+
+  it('chartType histogram 合法（R-57）：迁移不回退，queryOptions.binCount 透传', () => {
+    const v2Raw = JSON.stringify({
+      version: 2,
+      chartType: 'histogram',
+      title: '金额分布',
+      query: {
+        dimensionGroups: [],
+        metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-0', field: 'gmv' }] }],
+        filters: [],
+      },
+      fieldMeta: {},
+      style: {},
+      queryOptions: { binCount: 15 },
+    });
+    const v2Doc = migrateChartConfig(v2Raw, 'bar', FIELDS);
+
+    expect(v2Doc.chartType).toBe('histogram');
+    expect(v2Doc.queryOptions).toEqual({ binCount: 15 });
+
+    // v1 文档同样接受 histogram（CHART_TYPES 白名单命中，不回落 fallbackType）
+    const v1Raw = JSON.stringify({ version: 1, chartType: 'histogram' });
+    expect(migrateChartConfig(v1Raw, 'bar', FIELDS).chartType).toBe('histogram');
+  });
 });
 
 describe('migrateChartConfig：损坏输入', () => {

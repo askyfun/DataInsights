@@ -121,6 +121,7 @@ const resetChartBuilderState = () => {
     autoQuery: true,
     metricAggregations: {},
     metricAliases: {},
+    chartQueryOptions: {},
     chartQueryResponse: null,
     tablePagination: { page: 1, pageSize: 10, total: 0 },
     tableColumns: [],
@@ -1336,5 +1337,112 @@ describe('ChartBuilder', () => {
     const series = echartsOptionCapture.current?.series ?? [];
     expect(series[0]).toMatchObject({ name: 'revenue', type: 'bar', yAxisIndex: 0 });
     expect(series[1]).toMatchObject({ name: '增长率', type: 'line', yAxisIndex: 1 });
+  });
+
+  it('histogram：恢复的 binCount 以 wire query_options.bin_count 发出，bins 渲染为 bar（R-57）', async () => {
+    mockGetColumns.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: [
+          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
+          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+        ],
+      })
+    );
+
+    // 已保存的 histogram 图表：单个 value 指标槽位 + 持久化 camelCase queryOptions.binCount
+    mockGetChartById.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          id: 1,
+          name: 'Revenue Distribution',
+          dataset_id: 1,
+          chart_type: 'histogram',
+          config: JSON.stringify({
+            version: 2,
+            chartType: 'histogram',
+            title: 'Revenue Distribution',
+            query: {
+              dimensionGroups: [],
+              metricGroups: [
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-0', field: 'revenue' }] },
+              ],
+              filters: [],
+              limit: 1000,
+            },
+            fieldMeta: {},
+            style: {},
+            queryOptions: { binCount: 15 },
+          }),
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      })
+    );
+
+    // histogram 响应是 { bins }（ChartHistogramResponse），其余图型回落表格负载
+    mockExecuteChartQuery.mockImplementation((request) =>
+      Promise.resolve(
+        mockAxiosResponse({
+          code: 20000,
+          msg: 'ok',
+          trace: '',
+          data:
+            request.chart_type === 'histogram'
+              ? {
+                  data: {
+                    bins: [
+                      { bin_start: 0, bin_end: 10, count: 3 },
+                      { bin_start: 10, bin_end: 20, count: 5 },
+                    ],
+                  },
+                  select_sql: 'select width_bucket(revenue, 0, 20, 15), count(*) from sales',
+                }
+              : {
+                  data: {
+                    columns: ['region'],
+                    data: [{ region: 'East' }],
+                    pagination: { page: 1, page_size: 10, total: 1, total_pages: 1 },
+                  },
+                  select_sql: 'select region from sales',
+                  count_sql: 'select count(*) from sales',
+                },
+        })
+      )
+    );
+
+    renderChartBuilder();
+
+    // 请求侧：恢复的 binCount=15 翻译为 wire snake_case bin_count，走 v1 平铺路径
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.chart_type).toBe('histogram');
+      expect(lastRequest?.query_options).toEqual({ bin_count: 15 });
+    });
+    const request =
+      mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+    expect(request?.spec_version).toBeUndefined();
+    expect(request?.dims).toEqual([]);
+    expect(request?.metrics).toEqual([{ field: 'revenue', agg: 'sum', alias: 'revenue' }]);
+
+    // 配置侧：histogram 专属的「分箱数量」InputNumber 出现在 ConfigPanel
+    await waitFor(() => {
+      expect(screen.getByText('分箱数量')).toBeTruthy();
+    });
+
+    // 渲染侧：bins 负载经共享 buildChartOption 产出单条 bar series（裁定 C：无专属分支）
+    await waitFor(() => {
+      expect(echartsOptionCapture.current?.series).toHaveLength(1);
+    });
+    expect(echartsOptionCapture.current?.series?.[0]).toMatchObject({
+      name: 'revenue',
+      type: 'bar',
+    });
   });
 });

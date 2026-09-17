@@ -205,7 +205,17 @@ export interface FilterCondition {
 
 // 图表配置接口
 export interface ChartConfig {
-  chartType: 'table' | 'line' | 'bar' | 'pie' | 'area' | 'scatter' | 'pivot' | 'combo' | 'kpi';
+  chartType:
+    | 'table'
+    | 'line'
+    | 'bar'
+    | 'pie'
+    | 'area'
+    | 'scatter'
+    | 'pivot'
+    | 'combo'
+    | 'kpi'
+    | 'histogram';
   xAxisField: string | null;
   yAxisFields: string[];
   title: string;
@@ -225,6 +235,8 @@ export interface ChartStyleConfig {
 
 export interface ChartQueryOptions {
   pieMergeOtherBelowRatio?: number;
+  /** 直方图分箱数量（R-57）；请求 wire 上以 snake_case bin_count 发送，缺省 20。 */
+  binCount?: number;
 }
 
 // 查询配置 - 支持多维度组和多指标组

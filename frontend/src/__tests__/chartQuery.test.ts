@@ -5,6 +5,7 @@ import { chartsApi } from '@/api';
 import type { ApiResponse } from '@/lib/api/client';
 import type { ChartType } from '@/lib/chartConfigSchema';
 import { buildChartOption } from '@/lib/chartOptions';
+import { composeChartQueryRequest } from '@/pages/ChartBuilder';
 import { useStore } from '@/store';
 
 /**
@@ -209,5 +210,65 @@ describe('ChartType includes area', () => {
   it('should accept all expected chart types', () => {
     const types: ChartType[] = ['line', 'bar', 'pie', 'scatter', 'table', 'area'];
     expect(types).toHaveLength(6);
+  });
+});
+
+describe('composeChartQueryRequest：histogram 的 query_options.bin_count 发射（R-57）', () => {
+  const histogramFields = [
+    { id: 'f-1', name: 'amount', type: 'metric' as const, dataType: 'number' },
+  ];
+  const histogramQueryConfig = {
+    dimensionGroups: [],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] }],
+    filters: [],
+  };
+  const baseInput = {
+    datasetId: 1,
+    queryConfig: histogramQueryConfig,
+    fields: histogramFields,
+    metricAggregations: {},
+    metricAliases: {},
+    tablePagination: { page: 1, pageSize: 10 },
+    includeSort: true,
+  };
+
+  it('histogram + binCount=15：wire 携带 snake_case query_options.bin_count，走 v1 平铺路径', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      chartType: 'histogram',
+      queryOptions: { binCount: 15 },
+    });
+
+    expect(request).not.toBeNull();
+    expect(request?.query_options).toEqual({ bin_count: 15 });
+    expect(request?.spec_version).toBeUndefined();
+    expect(request?.dims).toEqual([]);
+    expect(request?.metrics).toEqual([{ field: 'amount', agg: 'sum', alias: 'amount' }]);
+  });
+
+  it('histogram + binCount 未设：bin_count 缺省 20', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      chartType: 'histogram',
+      queryOptions: {},
+    });
+
+    expect(request?.query_options).toEqual({ bin_count: 20 });
+  });
+
+  it('非 histogram（bar）：请求不携带 query_options 键（不污染其它图型）', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      chartType: 'bar',
+      queryConfig: {
+        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-1', field: 'f-1' }] }],
+        metricGroups: [],
+        filters: [],
+      },
+      queryOptions: { binCount: 15 },
+    });
+
+    expect(request).not.toBeNull();
+    expect(request).not.toHaveProperty('query_options');
   });
 });

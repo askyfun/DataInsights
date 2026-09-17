@@ -7,6 +7,7 @@ import {
   FundOutlined,
   LineChartOutlined,
   PieChartOutlined,
+  StockOutlined,
   TableOutlined,
 } from '@ant-design/icons';
 import { describe, expect, it } from 'vitest';
@@ -42,6 +43,7 @@ const EXPECTED_RESULT_SHAPE: Record<BuilderChartType, ResultShape> = {
   pivot: 'pivot',
   combo: 'axis',
   kpi: 'kpi',
+  histogram: 'histogram',
 };
 
 /** 期望的 chartType → icon 组件映射，须与迁移前 ChartBuilder.tsx 的硬编码逐项一致。 */
@@ -55,6 +57,7 @@ const EXPECTED_ICON: Record<BuilderChartType, ChartDefinition['icon']> = {
   pivot: AppstoreOutlined,
   combo: FundOutlined,
   kpi: DashboardOutlined,
+  histogram: StockOutlined,
 };
 
 const CHART_TYPES = Object.keys(chartDefinitions) as BuilderChartType[];
@@ -72,5 +75,25 @@ describe('chartDefinitions resultShape/icon', () => {
 
     expect(definition.resultShape).toBe(EXPECTED_RESULT_SHAPE[chartType]);
     expect(definition.icon).toBe(EXPECTED_ICON[chartType]);
+  });
+});
+
+describe('chartDefinitions histogram（R-57）', () => {
+  it('单个 value 指标槽位、maxFields 1、无维度槽位（对齐后端 Metrics[0].Field）', () => {
+    const definition = chartDefinitions.histogram;
+
+    expect(definition.type).toBe('histogram');
+    expect(definition.label).toBe('直方图');
+    expect(definition.styleKeys).toEqual(['colors']);
+    expect(definition.fieldGroups).toEqual([
+      {
+        id: 'value',
+        kind: 'metric',
+        label: '数值',
+        emptyText: '拖拽要分箱的数值字段到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+    ]);
   });
 });

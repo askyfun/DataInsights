@@ -73,6 +73,14 @@ const scatterPayload = {
   ],
 };
 
+const histogramPayload = {
+  bins: [
+    { bin_start: 0, bin_end: 10, count: 3 },
+    { bin_start: 10, bin_end: 20, count: 5 },
+    { bin_start: 20, bin_end: 30, count: 0 },
+  ],
+};
+
 describe('buildChartOption：结构化聚合响应（正常路径）', () => {
   it('bar：x 类目来自 x_axis，series 原样保留名称与数据', () => {
     const option = view<AxisOptionView>(
@@ -556,6 +564,9 @@ describe('isEmptyPayload：结构化联合与裸行两臂统一判空', () => {
     expect(isEmptyPayload({ data: [] })).toBe(true);
     expect(isEmptyPayload(piePayload)).toBe(false);
     expect(isEmptyPayload(scatterPayload)).toBe(false);
+    // histogram（R-57）：{bins} 形状曾落到末尾 return true → 直方图永远渲染空
+    expect(isEmptyPayload({ bins: [] })).toBe(true);
+    expect(isEmptyPayload(histogramPayload)).toBe(false);
   });
 });
 
@@ -970,5 +981,66 @@ describe('buildChartOption：combo 双轴组合图（R-58）', () => {
     ).toBeNull();
     // 负载形状不匹配（pie 负载无 x_axis）
     expect(buildChartOption('combo', piePayload, baseStyle, {}, comboContext)).toBeNull();
+  });
+});
+
+describe('buildChartOption：histogram 直方图（R-57）', () => {
+  it('bins 渲染为 bar：类目为箱区间、series data 为各箱 count（isEmptyPayload 缺 bins 臂时此断言必失败）', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'histogram',
+        histogramPayload,
+        baseStyle,
+        {},
+        {
+          title: 'Distribution',
+          dimensions: [],
+          metrics: ['amount'],
+        }
+      )
+    );
+    expect(option.title.text).toBe('Distribution');
+    expect(option.xAxis.type).toBe('category');
+    expect(option.xAxis.data).toEqual(['0 ~ 10', '10 ~ 20', '20 ~ 30']);
+    expect(option.yAxis.type).toBe('value');
+    expect(option.series).toEqual([{ name: 'amount', type: 'bar', data: [3, 5, 0] }]);
+  });
+
+  it('消费 style.colors 调色板', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'histogram',
+        histogramPayload,
+        { ...baseStyle, colors: ['#ff0000'] },
+        {},
+        { title: '', dimensions: [], metrics: ['amount'] }
+      )
+    );
+    expect(option.color).toEqual(['#ff0000']);
+  });
+
+  it('bins 为空返回 null（渲染空状态而非空图）', () => {
+    expect(
+      buildChartOption(
+        'histogram',
+        { bins: [] },
+        baseStyle,
+        {},
+        { title: '', dimensions: [], metrics: ['amount'] }
+      )
+    ).toBeNull();
+  });
+
+  it('context.metrics 缺失时 series 名回退 count', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'histogram',
+        histogramPayload,
+        baseStyle,
+        {},
+        { title: '', dimensions: [], metrics: [] }
+      )
+    );
+    expect(option.series[0].name).toBe('count');
   });
 });

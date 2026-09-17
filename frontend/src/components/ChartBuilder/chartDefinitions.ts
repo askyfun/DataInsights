@@ -7,6 +7,7 @@ import {
   FundOutlined,
   LineChartOutlined,
   PieChartOutlined,
+  StockOutlined,
   TableOutlined,
 } from '@ant-design/icons';
 import type { ComponentType } from 'react';
@@ -312,6 +313,27 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         kind: 'metric',
         label: '指标',
         emptyText: '拖拽指标到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+    ],
+  },
+  histogram: {
+    type: 'histogram',
+    label: '直方图',
+    // histogram（R-57）：后端 HistogramProcessor 返回 { bins: [{bin_start,bin_end,count}] }，
+    // 前端 buildChartOption 用 ECharts bar 渲染分箱分布。
+    resultShape: 'histogram',
+    icon: StockOutlined,
+    // 用 bar 渲染，消费 colors 调色板；不消费 smooth/stack/orientation/donut/tableRowSize。
+    styleKeys: ['colors'],
+    fieldGroups: [
+      {
+        // 单个 metric 槽位、maxFields:1，对齐后端取 Metrics[0].Field 分箱、每箱 COUNT(*)。
+        id: 'value',
+        kind: 'metric',
+        label: '数值',
+        emptyText: '拖拽要分箱的数值字段到此，或点击+添加',
         minGroups: 1,
         maxFields: 1,
       },

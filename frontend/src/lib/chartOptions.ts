@@ -14,7 +14,13 @@
  * 运行时不加载 zustand store，可在无 React/store 环境下直接调用与测试。
  */
 import type { EChartsOption } from 'echarts';
-import type { AxisResponse, ChartDataResponse, PieResponse, ScatterResponse } from '../api';
+import type {
+  AxisResponse,
+  ChartDataResponse,
+  HistogramResponse,
+  PieResponse,
+  ScatterResponse,
+} from '../api';
 import type { ChartStyleConfig } from '../store';
 import type { ChartType } from './chartConfigSchema';
 
@@ -38,6 +44,11 @@ export function isEmptyPayload(data: ChartDataResponse): boolean {
   }
   if ('data' in data) {
     return data.data.length === 0;
+  }
+  // histogram（R-57）：{bins} 形状不命中上面任何一臂，缺了这条会落到末尾 return true，
+  // buildChartOption 直接返回 null → 直方图永远渲染空。
+  if ('bins' in data) {
+    return data.bins.length === 0;
   }
   return true;
 }
@@ -319,6 +330,32 @@ export function buildChartOption(
             })),
             style.stack
           ),
+          color: palette,
+        };
+      }
+
+      case 'histogram': {
+        // 'bins' 判别已将该臂收窄为 HistogramResponse（空 bins 已被 isEmptyPayload 拦下）。
+        if (!('bins' in data)) {
+          return null;
+        }
+        const histogram: HistogramResponse = data;
+        return {
+          ...commonOptions,
+          xAxis: {
+            type: 'category' as const,
+            data: histogram.bins.map((bin) => `${bin.bin_start} ~ ${bin.bin_end}`),
+            axisLabel: categoryAxisLabel(histogram.bins.length),
+          },
+          yAxis: { type: 'value' as const },
+          series: [
+            {
+              // value 槽位列名在 context.metrics[0]；缺失（防御）回退 'count'
+              name: labelOf(context.metrics[0] ?? 'count'),
+              type: 'bar' as const,
+              data: histogram.bins.map((bin) => bin.count),
+            },
+          ],
           color: palette,
         };
       }
