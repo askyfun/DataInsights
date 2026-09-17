@@ -19,6 +19,7 @@ import type {
   ChartDataResponse,
   HistogramResponse,
   PieResponse,
+  RadarResponse,
   ScatterResponse,
 } from '../api';
 import type { ChartStyleConfig } from '../store';
@@ -49,6 +50,11 @@ export function isEmptyPayload(data: ChartDataResponse): boolean {
   // buildChartOption 直接返回 null → 直方图永远渲染空。
   if ('bins' in data) {
     return data.bins.length === 0;
+  }
+  // radar（R-62）：{indicators, series} 形状同款问题——不命中任何一臂就落末尾 return true
+  // → 雷达图永远渲染空。indicators 空即视为无轴可画（等价于无数据）。
+  if ('indicators' in data) {
+    return data.indicators.length === 0;
   }
   return true;
 }
@@ -381,6 +387,39 @@ export function buildChartOption(
               name: labelOf(context.metrics[0] ?? 'count'),
               type: 'bar' as const,
               data: histogram.bins.map((bin) => bin.count),
+            },
+          ],
+          color: palette,
+        };
+      }
+
+      case 'radar': {
+        // 'indicators' 判别已将该臂收窄为 RadarResponse（空 indicators 已被 isEmptyPayload 拦下）。
+        if (!('indicators' in data) || !('series' in data)) {
+          return null;
+        }
+        const radar: RadarResponse = data;
+        if (radar.indicators.length === 0) {
+          return null;
+        }
+        return {
+          ...commonOptions,
+          tooltip: { trigger: 'item' as const },
+          legend: {
+            data: radar.series.map((s) => s.name),
+            orient: 'vertical' as const,
+            left: 'left',
+          },
+          // 后端 RadarResponse 的 indicator.name / series.name 已是最终展示值
+          // （indicator=维度值、series 无 series_group 时=value 别名 / 有 series_group 时=分组值），
+          // 不再二次 labelOf——context.dimensions/metrics 是列名，语义与轴/系列名不同。
+          radar: {
+            indicator: radar.indicators.map((i) => ({ name: i.name, max: i.max })),
+          },
+          series: [
+            {
+              type: 'radar' as const,
+              data: radar.series.map((s) => ({ name: s.name, value: s.values })),
             },
           ],
           color: palette,

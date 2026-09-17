@@ -179,6 +179,12 @@ export type HistogramResponse = G['ChartHistogramResponse'];
 
 export type HistogramBin = G['ChartHistogramBin'];
 
+export type RadarResponse = G['ChartRadarResponse'];
+
+export type RadarIndicator = G['ChartRadarIndicator'];
+
+export type RadarSeries = G['ChartRadarSeries'];
+
 export type ChartDataResponse =
   | G['ChartTableResponse']
   | G['ChartPieResponse']
@@ -188,6 +194,7 @@ export type ChartDataResponse =
   | G['ChartPivotResponseV2']
   | G['ChartKpiResponse']
   | G['ChartHistogramResponse']
+  | G['ChartRadarResponse']
   | unknown[];
 
 // pivot v2 交叉表负载判别：按响应形状（cells + col_headers + row_headers 均为数组）
@@ -213,6 +220,16 @@ export function isHistogramPayload(x: unknown): x is HistogramResponse {
   return (
     typeof x === 'object' && x !== null && !Array.isArray(x) && 'bins' in x && Array.isArray(x.bins)
   );
+}
+
+// radar 负载判别（R-62）：按响应形状（indicators 与 series 均为数组）判别，而非 chartType。
+// 两键共在是 RadarResponse 独有——其他结构化响应只用到其中至多一个键。
+export function isRadarPayload(x: unknown): x is RadarResponse {
+  if (typeof x !== 'object' || x === null || Array.isArray(x)) {
+    return false;
+  }
+  const raw = x as { indicators?: unknown; series?: unknown };
+  return Array.isArray(raw.indicators) && Array.isArray(raw.series);
 }
 
 // NOT G['ChartQueryResponse'] (that is the Envelope wrapper): the bare wire

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isHistogramPayload } from '@/api';
+import { isHistogramPayload, isRadarPayload } from '@/api';
 import { API_CODE, apiClient, del, get, post, put } from '@/lib/api/client';
 
 describe('API Client', () => {
@@ -36,5 +36,26 @@ describe('isHistogramPayload', () => {
     expect(isHistogramPayload({ columns: ['a'], data: [] })).toBe(false);
     expect(isHistogramPayload([])).toBe(false);
     expect(isHistogramPayload(null)).toBe(false);
+  });
+});
+
+describe('isRadarPayload', () => {
+  it('按形状判别：indicators+series 双数组 true；单 indicators/histogram/pie/裸数组/null false', () => {
+    // 正例：完整 radar 负载
+    expect(
+      isRadarPayload({
+        indicators: [{ name: 'A', max: 10 }],
+        series: [{ name: 'p1', values: [5] }],
+      })
+    ).toBe(true);
+    // 空数组仍是合法形状（processor 兜底会产出空切片）
+    expect(isRadarPayload({ indicators: [], series: [] })).toBe(true);
+    // 反例：单 indicators 无 series（形状不完整）
+    expect(isRadarPayload({ indicators: [{ name: 'A', max: 1 }] })).toBe(false);
+    // 反例：histogram {bins} / pie {data} / table {columns,data} / 裸数组 / null
+    expect(isRadarPayload({ bins: [] })).toBe(false);
+    expect(isRadarPayload({ data: [] })).toBe(false);
+    expect(isRadarPayload([])).toBe(false);
+    expect(isRadarPayload(null)).toBe(false);
   });
 });

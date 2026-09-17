@@ -372,3 +372,79 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
     expect(request).not.toHaveProperty('sort');
   });
 });
+
+describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）', () => {
+  // radar 的 indicators / series_group 是**具名维度槽位**，后端 resolveRadarSlots 靠
+  // ast.GroupName 区分二者；v1 平铺请求 GroupName 为空，无法解析——前端主动走 v2。
+  const radarFields = [
+    { id: 'f-1', name: 'attr', type: 'dimension' as const, dataType: 'string' },
+    { id: 'f-2', name: 'score', type: 'metric' as const, dataType: 'number' },
+    { id: 'f-3', name: 'team', type: 'dimension' as const, dataType: 'string' },
+  ];
+  const radarQueryConfig = {
+    dimensionGroups: [
+      { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] },
+      { id: 'dim-group-2', bindings: [] as { bindingId: string; field: string }[] },
+    ],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] }],
+    filters: [],
+  };
+  const baseInput = {
+    datasetId: 1,
+    chartType: 'radar' as const,
+    queryConfig: radarQueryConfig,
+    fields: radarFields,
+    metricAggregations: {},
+    metricAliases: {},
+    tablePagination: { page: 1, pageSize: 10 },
+    queryOptions: {},
+    includeSort: true,
+  };
+
+  it('radar 无 series_group 绑定：走 v2、dimension_groups 含 name=indicators、metric_groups 含 name=values', () => {
+    const request = composeChartQueryRequest(baseInput);
+    expect(request).not.toBeNull();
+    expect(request?.spec_version).toBe(2);
+    // v2 请求不带 v1 的 dims/metrics 平铺字段（否则后端会误按 v1 处理）。
+    expect(request).not.toHaveProperty('dims');
+    const dimNames = (request?.dimension_groups ?? []).map((g) => g.name);
+    expect(dimNames).toContain('indicators');
+    const metricNames = (request?.metric_groups ?? []).map((g) => g.name);
+    expect(metricNames).toContain('values');
+    // indicators 组携带 attr 字段与 binding_id；后端按 GroupName + binding_id 解析槽位。
+    const indicatorGroup = request?.dimension_groups?.find((g) => g.name === 'indicators');
+    expect(indicatorGroup?.fields).toEqual([{ field: 'attr', binding_id: 'b-0' }]);
+  });
+
+  it('radar 带 series_group 绑定：dimension_groups 额外含 name=series_group 条目', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      queryConfig: {
+        ...radarQueryConfig,
+        dimensionGroups: [
+          { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] },
+          { id: 'dim-group-2', bindings: [{ bindingId: 'b-2', field: 'f-3' }] },
+        ],
+      },
+    });
+    const dimNames = (request?.dimension_groups ?? []).map((g) => g.name);
+    expect(dimNames).toEqual(expect.arrayContaining(['indicators', 'series_group']));
+    const seriesGroup = request?.dimension_groups?.find((g) => g.name === 'series_group');
+    expect(seriesGroup?.fields).toEqual([{ field: 'team', binding_id: 'b-2' }]);
+  });
+
+  it('非 radar 图型（bar 无 color_group）仍走 v1：不受 radar v2 触发污染', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      chartType: 'bar',
+      queryConfig: {
+        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] }],
+        metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] }],
+        filters: [],
+      },
+    });
+    // bar 无 color_group 且无双轴槽位 → v1 平铺路径，spec_version 缺省。
+    expect(request).not.toHaveProperty('spec_version');
+    expect(request).toHaveProperty('dims');
+  });
+});

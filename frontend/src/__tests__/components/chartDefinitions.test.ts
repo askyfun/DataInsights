@@ -8,6 +8,7 @@ import {
   FunnelPlotOutlined,
   LineChartOutlined,
   PieChartOutlined,
+  RadarChartOutlined,
   StockOutlined,
   TableOutlined,
 } from '@ant-design/icons';
@@ -46,6 +47,7 @@ const EXPECTED_RESULT_SHAPE: Record<BuilderChartType, ResultShape> = {
   kpi: 'kpi',
   histogram: 'histogram',
   funnel: 'pie',
+  radar: 'radar',
 };
 
 /** 期望的 chartType → icon 组件映射，须与迁移前 ChartBuilder.tsx 的硬编码逐项一致。 */
@@ -61,6 +63,7 @@ const EXPECTED_ICON: Record<BuilderChartType, ChartDefinition['icon']> = {
   kpi: DashboardOutlined,
   histogram: StockOutlined,
   funnel: FunnelPlotOutlined,
+  radar: RadarChartOutlined,
 };
 
 const CHART_TYPES = Object.keys(chartDefinitions) as BuilderChartType[];

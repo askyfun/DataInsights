@@ -8,6 +8,7 @@ import {
   FunnelPlotOutlined,
   LineChartOutlined,
   PieChartOutlined,
+  RadarChartOutlined,
   StockOutlined,
   TableOutlined,
 } from '@ant-design/icons';
@@ -363,6 +364,47 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
       {
         // 数值指标：单值；查询期强制按该值降序（composeChartQueryRequest，裁定 F）。
         id: 'value',
+        kind: 'metric',
+        label: '数值',
+        emptyText: '拖拽数值指标到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+    ],
+  },
+  radar: {
+    type: 'radar',
+    label: '雷达图',
+    // radar（R-62）走后端 RadarProcessor：SQL 是 GROUP BY indicators[, series_group] +
+    // AGG(value)，处理器重塑为 RadarResponse{indicators:[{name,max}], series:[{name,values}]}。
+    resultShape: 'radar',
+    // RadarChartOutlined 是 @ant-design/icons 的雷达图图标，语义精确。
+    icon: RadarChartOutlined,
+    // radar 消费 ECharts 调色板（每条系列一色）；不消费 smooth/stack/orientation/donut/tableRowSize。
+    styleKeys: ['colors'],
+    fieldGroups: [
+      {
+        // 指标维度：雷达轴（每个维度值一条轴），单字段。
+        id: 'indicators',
+        kind: 'dimension',
+        label: '指标维度',
+        emptyText: '拖拽指标维度到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+      {
+        // 系列分组（可选）：按此维度的每个值拆成一条系列；缺省时只一条（名取 value 别名）。
+        id: 'series_group',
+        kind: 'dimension',
+        label: '系列分组',
+        emptyText: '拖拽系列分组维度到此（可选）',
+        minGroups: 0,
+        maxFields: 1,
+        optional: true,
+      },
+      {
+        // 数值指标：单值；多条系列由 series_group 拆分而非多指标（与后端 Metrics[0] 对齐）。
+        id: 'values',
         kind: 'metric',
         label: '数值',
         emptyText: '拖拽数值指标到此，或点击+添加',

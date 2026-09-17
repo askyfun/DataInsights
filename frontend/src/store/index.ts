@@ -216,7 +216,8 @@ export interface ChartConfig {
     | 'combo'
     | 'kpi'
     | 'histogram'
-    | 'funnel';
+    | 'funnel'
+    | 'radar';
   xAxisField: string | null;
   yAxisFields: string[];
   title: string;

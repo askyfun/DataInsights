@@ -81,6 +81,18 @@ const histogramPayload = {
   ],
 };
 
+const radarPayload = {
+  indicators: [
+    { name: 'speed', max: 90 },
+    { name: 'power', max: 70 },
+    { name: 'range', max: 100 },
+  ],
+  series: [
+    { name: 'p1', values: [80, 65, 90] },
+    { name: 'p2', values: [50, 70, 30] },
+  ],
+};
+
 describe('buildChartOption：结构化聚合响应（正常路径）', () => {
   it('bar：x 类目来自 x_axis，series 原样保留名称与数据', () => {
     const option = view<AxisOptionView>(
@@ -567,6 +579,10 @@ describe('isEmptyPayload：结构化联合与裸行两臂统一判空', () => {
     // histogram（R-57）：{bins} 形状曾落到末尾 return true → 直方图永远渲染空
     expect(isEmptyPayload({ bins: [] })).toBe(true);
     expect(isEmptyPayload(histogramPayload)).toBe(false);
+    // radar（R-62）：{indicators,series} 形状同款问题——缺 'indicators' 臂则落末尾 true
+    // → 雷达图永远渲染空（与 histogram 修复的对称断言）。
+    expect(isEmptyPayload({ indicators: [], series: [] })).toBe(true);
+    expect(isEmptyPayload(radarPayload)).toBe(false);
   });
 });
 
@@ -1119,6 +1135,76 @@ describe('buildChartOption：funnel 漏斗图（R-59）', () => {
           dimensions: [],
           metrics: ['cnt'],
         }
+      )
+    ).toBeNull();
+  });
+});
+
+describe('buildChartOption：radar 雷达图（R-62）', () => {
+  interface RadarOptionView {
+    legend?: { data?: string[]; orient?: string; left?: string };
+    radar?: {
+      indicator: { name: string; max: number }[];
+    };
+    series: {
+      type: string;
+      data: { name: string; value: number[] }[];
+    }[];
+    color?: string[];
+  }
+
+  it('RadarResponse 渲染为 ECharts radar：radar.indicator 与 indicators 同序、单条 series.type=radar、series.data 每项 {name,value}', () => {
+    const option = view<RadarOptionView>(
+      buildChartOption(
+        'radar',
+        radarPayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['ind'],
+          metrics: ['v'],
+        }
+      )
+    );
+    // radar.indicator 与后端 indicators 同序同值（轴名 + max 直接透传）
+    expect(option.radar?.indicator).toEqual([
+      { name: 'speed', max: 90 },
+      { name: 'power', max: 70 },
+      { name: 'range', max: 100 },
+    ]);
+    // 单一 ECharts series 承载所有雷达多边形，type='radar'，data 每项 {name, value}
+    expect(option.series).toHaveLength(1);
+    expect(option.series[0].type).toBe('radar');
+    expect(option.series[0].data).toEqual([
+      { name: 'p1', value: [80, 65, 90] },
+      { name: 'p2', value: [50, 70, 30] },
+    ]);
+    // legend.data 展示各系列名（多系列场景的图例区分）
+    expect(option.legend?.data).toEqual(['p1', 'p2']);
+  });
+
+  it('style.colors 生效：palette 透传到 option.color', () => {
+    const option = view<RadarOptionView>(
+      buildChartOption(
+        'radar',
+        radarPayload,
+        { ...baseStyle, colors: ['#ff0000', '#00ff00'] },
+        {},
+        { title: '', dimensions: ['ind'], metrics: ['v'] }
+      )
+    );
+    expect(option.color).toEqual(['#ff0000', '#00ff00']);
+  });
+
+  it('indicators 为空 → isEmptyPayload 拦截 → 返回 null（若 isEmptyPayload 缺 indicators 臂，本用例通过与否即回归探针）', () => {
+    expect(
+      buildChartOption(
+        'radar',
+        { indicators: [], series: [] },
+        baseStyle,
+        {},
+        { title: '', dimensions: ['ind'], metrics: ['v'] }
       )
     ).toBeNull();
   });

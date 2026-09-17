@@ -235,6 +235,14 @@ export interface ChartQueryRequestInput {
 const DUAL_AXIS_METRIC_SLOTS = new Set(['primary_values', 'secondary_values']);
 
 /**
+ * radar（R-62）的两个维度槽位名（与 chartDefinitions.ts 的 fieldGroups[].id 对齐）。
+ * 只要图型定义了其中之一就必须走 v2 槽位协议——后端 resolveRadarSlots 按 ast.GroupName
+ * 区分 indicators 与 series_group；v1 平铺的 GroupName 为空，只能位置回退（后端仍支持，
+ * 但前端主动走 v2 更严谨，也避免同一列在两个槽位时的位置歧义）。
+ */
+const RADAR_DIMENSION_SLOTS = new Set(['indicators', 'series_group']);
+
+/**
  * 图表查询请求的唯一构造出口（纯函数，所有输入经参数传入）。
  * 调用场景：手动执行查询（含排序/翻页覆盖）与两个自动查询 effect 共用。
  * 主要逻辑：按图表定义裁剪字段组、字段 id 映射回列名、组装 filters/pagination；
@@ -295,11 +303,14 @@ export const composeChartQueryRequest = (
       ? (activeGroups.dimensionGroups[colorGroupDefIndex]?.bindings ?? [])
       : [];
 
-  // v2 触发条件：color_group 非空（bar/line/area）**或** 图型带 combo 的双轴指标槽位。
-  // 后者保证 combo 即使 color_group 为空也走 v2，主/次轴槽位名不丢失（详见函数 doc）。
+  // v2 触发条件：color_group 非空（bar/line/area）**或** 图型带 combo 双轴指标槽位
+  // **或** 图型带 radar 具名维度槽位（indicators/series_group）。
+  // combo 即使 color_group 为空也走 v2，主/次轴槽位名不丢失；radar 同理——后端按
+  // ast.GroupName 解析槽位，v1 平铺请求会丢 indicators/series_group 的区分。详见函数 doc。
   const requiresSlotProtocol =
     colorGroupBindings.length > 0 ||
-    metricDefs.some((group) => DUAL_AXIS_METRIC_SLOTS.has(group.id));
+    metricDefs.some((group) => DUAL_AXIS_METRIC_SLOTS.has(group.id)) ||
+    dimensionDefs.some((group) => RADAR_DIMENSION_SLOTS.has(group.id));
 
   // sort wire payload（Task 1-7/R-50）：queryConfig.sort 以 bindingId 引用排序目标。
   // - v2 槽位协议：field 直接发送 bindingId（组内携带 binding_id，后端 resolveSortAlias

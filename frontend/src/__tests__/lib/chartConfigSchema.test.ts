@@ -252,6 +252,34 @@ describe('migrateChartConfig：旧结构 → v2', () => {
     const v1Raw = JSON.stringify({ version: 1, chartType: 'funnel' });
     expect(migrateChartConfig(v1Raw, 'bar', FIELDS).chartType).toBe('funnel');
   });
+
+  it('chartType radar 合法（R-62）：迁移不回退', () => {
+    const v2Raw = JSON.stringify({
+      version: 2,
+      chartType: 'radar',
+      title: '能力雷达',
+      query: {
+        dimensionGroups: [
+          { id: 'indicators', bindings: [{ bindingId: 'b-0', field: 'attr' }] },
+          { id: 'series_group', bindings: [{ bindingId: 'b-1', field: 'team' }] },
+        ],
+        metricGroups: [{ id: 'values', bindings: [{ bindingId: 'b-2', field: 'score' }] }],
+        filters: [],
+      },
+      fieldMeta: {},
+      style: {},
+      queryOptions: {},
+    });
+    const v2Doc = migrateChartConfig(v2Raw, 'bar', FIELDS);
+
+    expect(v2Doc.chartType).toBe('radar');
+    expect(v2Doc.query.dimensionGroups.map((g) => g.id)).toEqual(['indicators', 'series_group']);
+    expect(v2Doc.query.metricGroups[0].bindings).toEqual([{ bindingId: 'b-2', field: 'score' }]);
+
+    // v1 文档同样接受 radar（CHART_TYPES 白名单命中，不回落 fallbackType）
+    const v1Raw = JSON.stringify({ version: 1, chartType: 'radar' });
+    expect(migrateChartConfig(v1Raw, 'bar', FIELDS).chartType).toBe('radar');
+  });
 });
 
 describe('migrateChartConfig：损坏输入', () => {
