@@ -4,6 +4,7 @@ import {
   BarChartOutlined,
   DashboardOutlined,
   DotChartOutlined,
+  FilterOutlined,
   FundOutlined,
   LineChartOutlined,
   PieChartOutlined,
@@ -334,6 +335,37 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         kind: 'metric',
         label: '数值',
         emptyText: '拖拽要分箱的数值字段到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+    ],
+  },
+  funnel: {
+    type: 'funnel',
+    label: '漏斗图',
+    // funnel（R-59）复用 pie 形状：后端 GetProcessor(funnel) → PieProcessor，
+    // 返回 PieResponse{data:[{name,value}]}；前端 buildChartOption 渲染为 ECharts funnel。
+    resultShape: 'pie',
+    // FunnelPlotOutlined 在 @ant-design/icons v6.3.4 不存在，用漏斗形滤镜图标（裁定 E）。
+    icon: FilterOutlined,
+    // funnel 消费 ECharts 调色板；不消费 smooth/stack/orientation/donut/tableRowSize。
+    styleKeys: ['colors'],
+    fieldGroups: [
+      {
+        // 阶段维度：有序、单字段（漏斗每层一个阶段）。
+        id: 'stages',
+        kind: 'dimension',
+        label: '阶段',
+        emptyText: '拖拽阶段维度到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+      {
+        // 数值指标：单值；查询期强制按该值降序（composeChartQueryRequest，裁定 F）。
+        id: 'value',
+        kind: 'metric',
+        label: '数值',
+        emptyText: '拖拽数值指标到此，或点击+添加',
         minGroups: 1,
         maxFields: 1,
       },

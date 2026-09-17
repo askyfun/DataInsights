@@ -272,3 +272,86 @@ describe('composeChartQueryRequest：histogram 的 query_options.bin_count 发�
     expect(request).not.toHaveProperty('query_options');
   });
 });
+
+describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收行767）', () => {
+  const funnelFields = [
+    { id: 'f-1', name: 'stage', type: 'dimension' as const, dataType: 'string' },
+    { id: 'f-2', name: 'cnt', type: 'metric' as const, dataType: 'number' },
+  ];
+  const funnelQueryConfig = {
+    dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] }],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] }],
+    filters: [],
+  };
+  const baseInput = {
+    datasetId: 1,
+    chartType: 'funnel' as const,
+    queryConfig: funnelQueryConfig,
+    fields: funnelFields,
+    metricAggregations: {},
+    metricAliases: {},
+    tablePagination: { page: 1, pageSize: 10 },
+    queryOptions: {},
+    includeSort: true,
+  };
+
+  it('funnel：v1 平铺形状（dims=[stages]、metrics=[value]）+ 强制 sort value desc', () => {
+    const request = composeChartQueryRequest(baseInput);
+
+    expect(request).not.toBeNull();
+    expect(request?.spec_version).toBeUndefined();
+    expect(request?.dims).toEqual(['stage']);
+    expect(request?.metrics).toEqual([{ field: 'cnt', agg: 'sum', alias: 'cnt' }]);
+    expect(request?.sort).toEqual({ field: 'cnt', order: 'desc' });
+  });
+
+  it('value 输出名走 metricAliases 覆盖（与 v1 sortWireField 同口径）', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      metricAliases: { 'b-1': 'total_cnt' },
+    });
+
+    expect(request?.sort).toEqual({ field: 'total_cnt', order: 'desc' });
+    expect(request?.metrics).toEqual([{ field: 'cnt', agg: 'sum', alias: 'total_cnt' }]);
+  });
+
+  it('覆盖性：用户此前设的 sort（stages asc）被无条件覆盖为 value desc', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      queryConfig: { ...funnelQueryConfig, sort: { bindingId: 'b-0', order: 'asc' as const } },
+    });
+
+    expect(request?.sort).toEqual({ field: 'cnt', order: 'desc' });
+  });
+
+  it('includeSort:false 不影响强制降序（funnel 恒发 value desc sort）', () => {
+    const request = composeChartQueryRequest({ ...baseInput, includeSort: false });
+
+    expect(request?.sort).toEqual({ field: 'cnt', order: 'desc' });
+  });
+
+  it('value 绑定缺失（防御）：不注入 sort，但请求照常发出', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      queryConfig: { ...funnelQueryConfig, metricGroups: [{ id: 'metric-group-1', bindings: [] }] },
+    });
+
+    expect(request).not.toBeNull();
+    expect(request).not.toHaveProperty('sort');
+  });
+
+  it('非 funnel（bar）+ 无 queryConfig.sort：请求不含 sort 键（既有行为未污染）', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      chartType: 'bar',
+      queryConfig: {
+        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] }],
+        metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] }],
+        filters: [],
+      },
+    });
+
+    expect(request).not.toBeNull();
+    expect(request).not.toHaveProperty('sort');
+  });
+});

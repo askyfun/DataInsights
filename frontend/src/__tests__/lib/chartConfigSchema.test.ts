@@ -196,7 +196,9 @@ describe('migrateChartConfig：旧结构 → v2', () => {
   });
 
   it('缺失/非法 chartType 回退 fallbackType，缺失 title 回退空串', () => {
-    const raw = JSON.stringify({ chartType: 'funnel', queryConfig: {} });
+    // 注意：'funnel' 曾是本用例的非法示例，R-59 起已入 CHART_TYPES 白名单，
+    // 改用仍未实现的 'sunburst' 作为非法值。
+    const raw = JSON.stringify({ chartType: 'sunburst', queryConfig: {} });
     const doc = migrateChartConfig(raw, 'pivot', FIELDS);
 
     expect(doc.chartType).toBe('pivot');
@@ -225,6 +227,30 @@ describe('migrateChartConfig：旧结构 → v2', () => {
     // v1 文档同样接受 histogram（CHART_TYPES 白名单命中，不回落 fallbackType）
     const v1Raw = JSON.stringify({ version: 1, chartType: 'histogram' });
     expect(migrateChartConfig(v1Raw, 'bar', FIELDS).chartType).toBe('histogram');
+  });
+
+  it('chartType funnel 合法（R-59）：迁移不回退', () => {
+    const v2Raw = JSON.stringify({
+      version: 2,
+      chartType: 'funnel',
+      title: '转化漏斗',
+      query: {
+        dimensionGroups: [{ id: 'stages', bindings: [{ bindingId: 'b-0', field: 'stage' }] }],
+        metricGroups: [{ id: 'value', bindings: [{ bindingId: 'b-1', field: 'cnt' }] }],
+        filters: [],
+      },
+      fieldMeta: {},
+      style: {},
+      queryOptions: {},
+    });
+    const v2Doc = migrateChartConfig(v2Raw, 'bar', FIELDS);
+
+    expect(v2Doc.chartType).toBe('funnel');
+    expect(v2Doc.query.metricGroups[0].bindings).toEqual([{ bindingId: 'b-1', field: 'cnt' }]);
+
+    // v1 文档同样接受 funnel（CHART_TYPES 白名单命中，不回落 fallbackType）
+    const v1Raw = JSON.stringify({ version: 1, chartType: 'funnel' });
+    expect(migrateChartConfig(v1Raw, 'bar', FIELDS).chartType).toBe('funnel');
   });
 });
 

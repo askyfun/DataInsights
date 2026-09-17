@@ -297,6 +297,33 @@ export function buildChartOption(
         };
       }
 
+      case 'funnel': {
+        // funnel（漏斗图，R-59）复用 PieResponse（后端 GetProcessor(funnel) → PieProcessor），
+        // 渲染为 ECharts funnel。查询已强制按 value 降序（composeChartQueryRequest），
+        // series.sort:'descending' 是防御性兜底：即便数据未排好也按值降序展示。
+        const valueField = context.metrics[0];
+        if (!valueField || context.dimensions.length === 0 || !('data' in data)) {
+          return null;
+        }
+        const pie = data as PieResponse;
+        return {
+          ...commonOptions,
+          tooltip: { trigger: 'item' as const, formatter: '{b}: {c}' },
+          legend: { orient: 'vertical' as const, left: 'left' },
+          series: [
+            {
+              name: labelOf(valueField),
+              type: 'funnel' as const,
+              sort: 'descending' as const,
+              gap: 2,
+              label: { position: 'inside' as const, formatter: '{b}: {c}' },
+              data: pie.data.map((item) => ({ name: item.name, value: item.value })),
+            },
+          ],
+          color: palette,
+        };
+      }
+
       case 'line':
       case 'bar':
       case 'area': {

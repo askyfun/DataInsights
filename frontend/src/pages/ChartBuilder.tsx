@@ -329,10 +329,32 @@ export const composeChartQueryRequest = (
       ? metricAliases[sortBinding.binding.bindingId] || columnName
       : columnName;
   })();
+  // funnel（漏斗图，R-59）强制降序（plan §3.3，验收行767，裁定 F）：sort 恒为 value
+  // 槽位输出名的 desc，无条件覆盖 includeSort 与 queryConfig.sort（用户没有 funnel 的
+  // sort UI，但持久化文档恢复可能带任意 sort）。funnel 走 v1 平铺路径，输出名与 v1
+  // sortWireField 同口径：metricAliases[bindingId] || 列名。value 绑定缺失/列名查不到
+  // （异常防御）时不注入 sort，请求照常发（funnel 仍渲染，只是顺序不保证）。
+  const funnelSortPayload = (() => {
+    if (chartType !== 'funnel') {
+      return undefined;
+    }
+    const valueBinding = activeGroups.metricGroups[0]?.bindings[0];
+    const columnName = valueBinding ? fieldMap.get(valueBinding.field)?.name : undefined;
+    if (!valueBinding || columnName === undefined) {
+      return undefined;
+    }
+    return {
+      sort: {
+        field: metricAliases[valueBinding.bindingId] || columnName,
+        order: 'desc' as const,
+      },
+    };
+  })();
   const sortPayload =
-    sortWireField !== undefined && queryConfig.sort
+    funnelSortPayload ??
+    (sortWireField !== undefined && queryConfig.sort
       ? { sort: { field: sortWireField, order: queryConfig.sort.order } }
-      : {};
+      : {});
 
   // histogram（R-57）专属 query_options：wire 用 snake_case bin_count，缺省 20（与后端
   // HistogramProcessor 默认一致）；持久化文档的 camelCase binCount → wire 的翻译只发生在

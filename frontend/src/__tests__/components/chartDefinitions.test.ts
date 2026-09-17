@@ -4,6 +4,7 @@ import {
   BarChartOutlined,
   DashboardOutlined,
   DotChartOutlined,
+  FilterOutlined,
   FundOutlined,
   LineChartOutlined,
   PieChartOutlined,
@@ -44,6 +45,7 @@ const EXPECTED_RESULT_SHAPE: Record<BuilderChartType, ResultShape> = {
   combo: 'axis',
   kpi: 'kpi',
   histogram: 'histogram',
+  funnel: 'pie',
 };
 
 /** 期望的 chartType → icon 组件映射，须与迁移前 ChartBuilder.tsx 的硬编码逐项一致。 */
@@ -58,6 +60,7 @@ const EXPECTED_ICON: Record<BuilderChartType, ChartDefinition['icon']> = {
   combo: FundOutlined,
   kpi: DashboardOutlined,
   histogram: StockOutlined,
+  funnel: FilterOutlined,
 };
 
 const CHART_TYPES = Object.keys(chartDefinitions) as BuilderChartType[];
@@ -91,6 +94,35 @@ describe('chartDefinitions histogram（R-57）', () => {
         kind: 'metric',
         label: '数值',
         emptyText: '拖拽要分箱的数值字段到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+    ]);
+  });
+});
+
+describe('chartDefinitions funnel（R-59）', () => {
+  it('复用 pie 形状，stages(维度,1) + value(指标,1) 两槽位', () => {
+    const definition = chartDefinitions.funnel;
+
+    expect(definition.type).toBe('funnel');
+    expect(definition.label).toBe('漏斗图');
+    expect(definition.resultShape).toBe('pie');
+    expect(definition.styleKeys).toEqual(['colors']);
+    expect(definition.fieldGroups).toEqual([
+      {
+        id: 'stages',
+        kind: 'dimension',
+        label: '阶段',
+        emptyText: '拖拽阶段维度到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+      {
+        id: 'value',
+        kind: 'metric',
+        label: '数值',
+        emptyText: '拖拽数值指标到此，或点击+添加',
         minGroups: 1,
         maxFields: 1,
       },

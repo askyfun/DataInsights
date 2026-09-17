@@ -215,7 +215,8 @@ export interface ChartConfig {
     | 'pivot'
     | 'combo'
     | 'kpi'
-    | 'histogram';
+    | 'histogram'
+    | 'funnel';
   xAxisField: string | null;
   yAxisFields: string[];
   title: string;

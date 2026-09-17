@@ -1044,3 +1044,82 @@ describe('buildChartOption：histogram 直方图（R-57）', () => {
     expect(option.series[0].name).toBe('count');
   });
 });
+
+describe('buildChartOption：funnel 漏斗图（R-59）', () => {
+  // funnel option 的测试视图：series[0].sort/gap/label.position 是 funnel 与 pie 的关键差异
+  interface FunnelOptionView {
+    tooltip: { trigger: string; formatter?: string };
+    legend?: { orient: string; left: string };
+    series: {
+      name?: string;
+      type: string;
+      sort?: string;
+      gap?: number;
+      label?: { position?: string; formatter?: string };
+      data: { name: string; value: unknown }[];
+    }[];
+    color?: string[];
+  }
+
+  const funnelContext = { title: '转化漏斗', dimensions: ['stage'], metrics: ['cnt'] };
+
+  it('PieResponse 负载渲染为 funnel 系列（非 pie、非 null），强制 sort:descending', () => {
+    const option = view<FunnelOptionView>(
+      buildChartOption('funnel', piePayload, baseStyle, {}, funnelContext)
+    );
+    expect(option.series[0].type).toBe('funnel');
+    expect(option.series[0].sort).toBe('descending');
+    expect(option.series[0].gap).toBe(2);
+    expect(option.series[0].label).toEqual({ position: 'inside', formatter: '{b}: {c}' });
+    expect(option.series[0].name).toBe('cnt');
+    // {name,value} 原样映射（percentage 等额外键不带入 series data）
+    expect(option.series[0].data).toEqual([
+      { name: 'Apple', value: 30 },
+      { name: 'Banana', value: 50 },
+    ]);
+    expect(option.tooltip).toEqual({ trigger: 'item', formatter: '{b}: {c}' });
+    expect(option.legend).toEqual({ orient: 'vertical', left: 'left' });
+  });
+
+  it('消费 style.colors 调色板', () => {
+    const option = view<FunnelOptionView>(
+      buildChartOption(
+        'funnel',
+        piePayload,
+        { ...baseStyle, colors: ['#ff0000'] },
+        {},
+        funnelContext
+      )
+    );
+    expect(option.color).toEqual(['#ff0000']);
+  });
+
+  it('指标/维度缺失时返回 null（渲染空状态而非空图）', () => {
+    expect(
+      buildChartOption(
+        'funnel',
+        piePayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['stage'],
+          metrics: [],
+        }
+      )
+    ).toBeNull();
+    expect(
+      buildChartOption(
+        'funnel',
+        piePayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: [],
+          metrics: ['cnt'],
+        }
+      )
+    ).toBeNull();
+  });
+});

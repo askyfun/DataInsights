@@ -41,7 +41,8 @@ export type ChartType =
   | 'pivot'
   | 'combo'
   | 'kpi'
-  | 'histogram';
+  | 'histogram'
+  | 'funnel';
 
 export interface ChartMeta {
   label?: string;
@@ -109,6 +110,7 @@ const CHART_TYPES: readonly string[] = [
   'combo',
   'kpi',
   'histogram',
+  'funnel',
 ];
 
 /** 旧平铺 Record → fieldMeta 键的映射 */
