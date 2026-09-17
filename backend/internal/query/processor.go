@@ -579,6 +579,11 @@ func GetProcessor(chartType ChartType) Processor {
 		// histogram 的真实路径是 executor 的两阶段分支（executeHistogram →
 		// HistogramProcessor.ProcessBins）；显式 case 避免误落 AxisProcessor 兜底。
 		return &HistogramProcessor{}
+	case ChartTypeRadar:
+		// radar（R-62）走 executor 的通用路径（SQL 就是一条普通 GROUP BY + AGG），
+		// RadarProcessor 按 ast.GroupName 解析 indicators/series_group 槽位
+		// （v1 平铺请求回退按位置推断），把结果行重塑成雷达形状。
+		return &RadarProcessor{}
 	default:
 		return &AxisProcessor{}
 	}

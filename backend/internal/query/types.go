@@ -200,6 +200,29 @@ type HistogramBin struct {
 	Count    int64   `json:"count"`
 }
 
+// RadarResponse 雷达图响应（R-62，plan §3.3）：indicators 为各雷达轴（indicators 维度的
+// 值，按首次出现顺序），series 为各系列（按 series_group 维度值拆分；无 series_group 时
+// 单系列，名取 value 指标别名）。字段与 api/openapi.yaml 的 ChartRadarResponse schema
+// 逐一对应，由 RadarProcessor 从普通 GROUP BY 结果行重塑产出。
+type RadarResponse struct {
+	Indicators []RadarIndicator `json:"indicators"`
+	Series     []RadarSeries    `json:"series"`
+}
+
+// RadarIndicator 雷达轴：Name=维度值，Max=该轴跨所有系列的真实聚合最大值
+// （直接喂给 ECharts 的 radar.indicator.max）。与 openapi ChartRadarIndicator 对应。
+type RadarIndicator struct {
+	Name string  `json:"name"`
+	Max  float64 `json:"max"`
+}
+
+// RadarSeries 雷达系列：Name=系列名，Values 与 Indicators 等长同序
+// （该系列在某轴无数据时补 0.0，保证多边形闭合）。与 openapi ChartRadarSeries 对应。
+type RadarSeries struct {
+	Name   string    `json:"name"`
+	Values []float64 `json:"values"`
+}
+
 // ResolveAlias 解析字段别名
 func (m *MetricConfig) ResolveAlias() string {
 	if m.Alias != "" {
