@@ -4,8 +4,8 @@ import {
   BarChartOutlined,
   DashboardOutlined,
   DotChartOutlined,
-  FilterOutlined,
   FundOutlined,
+  FunnelPlotOutlined,
   LineChartOutlined,
   PieChartOutlined,
   StockOutlined,
@@ -60,7 +60,7 @@ const EXPECTED_ICON: Record<BuilderChartType, ChartDefinition['icon']> = {
   combo: FundOutlined,
   kpi: DashboardOutlined,
   histogram: StockOutlined,
-  funnel: FilterOutlined,
+  funnel: FunnelPlotOutlined,
 };
 
 const CHART_TYPES = Object.keys(chartDefinitions) as BuilderChartType[];

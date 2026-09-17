@@ -4,8 +4,8 @@ import {
   BarChartOutlined,
   DashboardOutlined,
   DotChartOutlined,
-  FilterOutlined,
   FundOutlined,
+  FunnelPlotOutlined,
   LineChartOutlined,
   PieChartOutlined,
   StockOutlined,
@@ -346,8 +346,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     // funnel（R-59）复用 pie 形状：后端 GetProcessor(funnel) → PieProcessor，
     // 返回 PieResponse{data:[{name,value}]}；前端 buildChartOption 渲染为 ECharts funnel。
     resultShape: 'pie',
-    // FunnelPlotOutlined 在 @ant-design/icons v6.3.4 不存在，用漏斗形滤镜图标（裁定 E）。
-    icon: FilterOutlined,
+    // FunnelPlotOutlined 是 @ant-design/icons 的漏斗形图标，语义与 funnel 图型精确对应。
+    icon: FunnelPlotOutlined,
     // funnel 消费 ECharts 调色板；不消费 smooth/stack/orientation/donut/tableRowSize。
     styleKeys: ['colors'],
     fieldGroups: [

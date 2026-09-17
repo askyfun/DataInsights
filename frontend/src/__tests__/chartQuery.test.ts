@@ -340,6 +340,23 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
     expect(request).not.toHaveProperty('sort');
   });
 
+  it('value 绑定缺失 + 恢复的用户 sort 并存：不泄露 sort（funnelSortPayload 返回空而非回退）', () => {
+    // 退化角落：value 绑定查不到（funnelSortPayload 无法算出强制降序）但持久化恢复带了
+    // 一个仍可解析的用户 sort（stages b-0 asc）。若 funnelSortPayload 返回 undefined，下方
+    // `?? ` 会回退到原始 sort 表达式、把 stages asc 泄露进请求；返回 {} 则彻底不带 sort。
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      queryConfig: {
+        ...funnelQueryConfig,
+        metricGroups: [{ id: 'metric-group-1', bindings: [] }],
+        sort: { bindingId: 'b-0', order: 'asc' as const },
+      },
+    });
+
+    expect(request).not.toBeNull();
+    expect(request).not.toHaveProperty('sort');
+  });
+
   it('非 funnel（bar）+ 无 queryConfig.sort：请求不含 sort 键（既有行为未污染）', () => {
     const request = composeChartQueryRequest({
       ...baseInput,

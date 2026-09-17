@@ -333,7 +333,8 @@ export const composeChartQueryRequest = (
   // 槽位输出名的 desc，无条件覆盖 includeSort 与 queryConfig.sort（用户没有 funnel 的
   // sort UI，但持久化文档恢复可能带任意 sort）。funnel 走 v1 平铺路径，输出名与 v1
   // sortWireField 同口径：metricAliases[bindingId] || 列名。value 绑定缺失/列名查不到
-  // （异常防御）时不注入 sort，请求照常发（funnel 仍渲染，只是顺序不保证）。
+  // （异常防御）时返回**空 payload**（不带 sort）——而非 undefined，否则下方 `??` 会回退到
+  // 原始 sort 表达式、把恢复的用户 sort 泄露进请求，违反"funnel 用户不可覆盖"不变量。
   const funnelSortPayload = (() => {
     if (chartType !== 'funnel') {
       return undefined;
@@ -341,7 +342,7 @@ export const composeChartQueryRequest = (
     const valueBinding = activeGroups.metricGroups[0]?.bindings[0];
     const columnName = valueBinding ? fieldMap.get(valueBinding.field)?.name : undefined;
     if (!valueBinding || columnName === undefined) {
-      return undefined;
+      return {};
     }
     return {
       sort: {
