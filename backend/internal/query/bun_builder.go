@@ -250,6 +250,18 @@ func (qb *BunQueryBuilder) renderMetricSelect(metric MetricExpr) string {
 		// "COUNT(DISTINCT(field)" 畸形 SQL），单独生成。
 		return fmt.Sprintf("COUNT(DISTINCT %s) AS %s", safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 	}
+	if metric.Agg == AggMedian {
+		// AggMedian 是有序集聚合形态 percentile_cont(0.5) WITHIN GROUP (ORDER BY field)，
+		// 也不套通用模板。**契约不变式**：executor 在建 SQL 前已用 percentile.CheckPercentileSupport
+		// 门挡过——caps.PercentileStrategy=="percentile_cont" 才会走到这里，其他策略在
+		// executor 层就返回明确 error（plan §4.2）。builder 拿不到运行时 caps，因此这里
+		// 按 percentile_cont 硬编码 SQL 形态；若绕过 executor 的 invariant 直接调用 builder
+		// 且 DB 不支持 percentile_cont，会得到响亮的 SQL 语法错误，不会静默近似。
+		// FieldExpr 走 safeIdentifier（与 count_distinct 分支同口径，防注入），
+		// 别名走 quoteResultAlias（引号规则与其他 metric 一致）。
+		return fmt.Sprintf("percentile_cont(0.5) WITHIN GROUP (ORDER BY %s) AS %s",
+			safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
+	}
 	aggFunc := metric.Agg.GetAggFunc()
 	return fmt.Sprintf("%s(%s) AS %s", aggFunc, safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 }

@@ -33,6 +33,12 @@ const (
 	// AggCountDistinct 生成 COUNT(DISTINCT field)：buildSelectParts 对该值走专用分支
 	// （不套用通用 "%s(%s)" 模板），GetAggFunc() 返回防御性的 "COUNT(DISTINCT"（见其注释）。
 	AggCountDistinct AggregationType = "count_distinct"
+
+	// AggMedian（R-54）生成 percentile_cont(0.5) WITHIN GROUP (ORDER BY field)：SQL 标准
+	// 的有序集聚合形态，不套用通用 "%s(%s)" 模板。renderMetricSelect 走专门分支，
+	// GetAggFunc() 返回防御性的 "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY"（无右括号），
+	// 误用通用模板会立刻产出明显畸形 SQL 而被测试抓住——同 AggCountDistinct 的防御哲学。
+	AggMedian AggregationType = "median"
 )
 
 // FilterOperator 过滤条件操作符
@@ -251,6 +257,12 @@ func (a AggregationType) GetAggFunc() string {
 		// 信号——若将来有新调用点误用通用模板，会立刻产出明显畸形 SQL 而在测试中暴露，
 		// 而不是静默降级成 SUM。
 		return "COUNT(DISTINCT"
+	case AggMedian:
+		// percentile_cont(0.5) WITHIN GROUP (ORDER BY field) 是有序集聚合形态，不套
+		// 通用 "%s(%s)" 模板；renderMetricSelect 走专门分支，正常不会到达此处。返回
+		// 故意不闭合的 "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY"，误用即产畸形 SQL
+		// 被测试抓住（同 AggCountDistinct 的防御信号）。
+		return "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY"
 	default:
 		return "SUM"
 	}

@@ -125,6 +125,19 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		return e.executeHistogram(ctx, dialect, ast, req)
 	}
 
+	// percentile（R-54）前置门：AST 含 median 指标时**先探 caps、不支持就在建 SQL 前显式错**，
+	// 不给 DB 报语法错误或静默近似的机会（plan §4.2 明确规则）。无 median 指标时不查 caps，零开销。
+	// builder 层硬编码 percentile_cont 依赖此处的契约不变式（见 renderMetricSelect 注释）。
+	if AstRequiresPercentile(ast) {
+		pcaps, perr := e.conn.Capabilities(ctx)
+		if perr != nil {
+			return ExecutorResult{}, fmt.Errorf("percentile capability probe failed: %w", perr)
+		}
+		if cerr := CheckPercentileSupport(pcaps); cerr != nil {
+			return ExecutorResult{}, cerr
+		}
+	}
+
 	sql, countSQL, args := BuildQueryStringWithBun(dialect, ast)
 	slog.Debug("generated SQL", "select", sql, "count", countSQL, "args", args)
 
