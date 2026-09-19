@@ -20,6 +20,7 @@ import dayjs, { Dayjs } from 'dayjs';
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Share, sharesApi } from '../api';
+import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
@@ -205,14 +206,10 @@ const SharePage: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <Card
-        title={
-          <Space>
-            <ShareAltOutlined />
-            <span>{intl.formatMessage({ id: 'share.title' })}</span>
-          </Space>
-        }
+    <div className="dr-page">
+      <PageHeader
+        icon={<ShareAltOutlined />}
+        title={intl.formatMessage({ id: 'share.title' })}
         extra={
           <Button
             type="primary"
@@ -222,16 +219,20 @@ const SharePage: React.FC = () => {
             {intl.formatMessage({ id: 'share.create' })}
           </Button>
         }
-      >
+      />
+
+      <Card>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <div className="dr-state">
             <Spin />
           </div>
         ) : shares.length === 0 ? (
-          <Empty
-            description={intl.formatMessage({ id: 'share.noShares' })}
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          />
+          <div className="dr-state">
+            <Empty
+              description={intl.formatMessage({ id: 'share.noShares' })}
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
+          </div>
         ) : (
           <Table
             columns={columns}

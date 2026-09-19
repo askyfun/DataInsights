@@ -33,10 +33,11 @@ import { useIntl } from 'react-intl';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { DatasetColumn } from '../api';
 import { DatasetPreview, datasetsApi } from '../api';
+import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
-const { Title, Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 const DatasetDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -277,7 +278,8 @@ const DatasetDetailPage: React.FC = () => {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 verticalAlign: 'bottom',
-                color: record.role === 'dimension' ? '#1890ff' : '#722ed1',
+                // 与图表构建页的字段语义同源：维度蓝 / 指标绿
+                color: record.role === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)',
               }}
             >
               {name}
@@ -368,7 +370,9 @@ const DatasetDetailPage: React.FC = () => {
             handleColumnRoleChange(record.name, checked ? 'metric' : 'dimension')
           }
           style={{
-            backgroundColor: role === 'metric' ? '#722ed1' : '#1890ff',
+            // 只在「指标」态染色（指标绿）；「维度」态交回 antd 默认灰，
+            // 否则内联色会把两个状态涂成同一个颜色、状态差异反而丢失。
+            backgroundColor: role === 'metric' ? 'var(--dr-metric)' : undefined,
           }}
         />
       ),
@@ -425,16 +429,20 @@ const DatasetDetailPage: React.FC = () => {
 
   if (datasetLoading) {
     return (
-      <div style={{ padding: '24px' }}>
-        <Spin tip={intl.formatMessage({ id: 'common.loading' })} />
+      <div className="dr-page">
+        <div className="dr-state">
+          <Spin tip={intl.formatMessage({ id: 'common.loading' })} />
+        </div>
       </div>
     );
   }
 
   if (!currentDataset && !dataset) {
     return (
-      <div style={{ padding: '24px' }}>
-        <Spin tip={intl.formatMessage({ id: 'common.loading' })} />
+      <div className="dr-page">
+        <div className="dr-state">
+          <Spin tip={intl.formatMessage({ id: 'common.loading' })} />
+        </div>
       </div>
     );
   }
@@ -442,42 +450,25 @@ const DatasetDetailPage: React.FC = () => {
   const displayDataset = dataset || currentDataset;
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card>
-        <Breadcrumb
-          style={{ marginBottom: '16px' }}
-          items={[
-            {
-              title: <Link to="/datasets">{intl.formatMessage({ id: 'nav.datasets' })}</Link>,
-            },
-            {
-              title: displayDataset?.name,
-            },
-          ]}
-        />
-
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginBottom: '16px',
-          }}
-        >
-          <div>
-            <Space align="center" size={8}>
-              <AppstoreOutlined style={{ fontSize: '20px', color: '#1890ff' }} />
-              <Title level={4} style={{ margin: 0 }}>
-                {displayDataset?.name}
-              </Title>
-            </Space>
-            {displayDataset?.description && (
-              <Paragraph type="secondary" style={{ margin: '4px 0 0' }}>
-                {displayDataset.description}
-              </Paragraph>
-            )}
-          </div>
-          <Space>
+    <div className="dr-page">
+      <PageHeader
+        icon={<AppstoreOutlined />}
+        breadcrumb={
+          <Breadcrumb
+            items={[
+              {
+                title: <Link to="/datasets">{intl.formatMessage({ id: 'nav.datasets' })}</Link>,
+              },
+              {
+                title: displayDataset?.name,
+              },
+            ]}
+          />
+        }
+        title={displayDataset?.name}
+        description={displayDataset?.description}
+        extra={
+          <>
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/datasets')}>
               {intl.formatMessage({ id: 'common.back' })}
             </Button>
@@ -492,9 +483,11 @@ const DatasetDetailPage: React.FC = () => {
             <Button icon={<DeleteOutlined />} danger onClick={handleDelete}>
               {intl.formatMessage({ id: 'common.delete' })}
             </Button>
-          </Space>
-        </div>
+          </>
+        }
+      />
 
+      <Card>
         {/* 紧凑元信息条：数据源 / 来源 / 字段数 / 创建时间 / 分片 */}
         <div
           style={{
@@ -503,15 +496,15 @@ const DatasetDetailPage: React.FC = () => {
             alignItems: 'center',
             padding: '8px 12px',
             marginBottom: '16px',
-            background: 'rgba(0, 0, 0, 0.02)',
-            border: '1px solid rgba(0, 0, 0, 0.06)',
+            background: 'var(--dr-sunken)',
+            border: '1px solid var(--dr-border)',
             borderRadius: 6,
             fontSize: 13,
             gap: 20,
           }}
         >
           <span>
-            <DatabaseOutlined style={{ marginRight: 6, color: '#8c8c8c' }} />
+            <DatabaseOutlined style={{ marginRight: 6, color: 'var(--dr-text-3)' }} />
             {intl.formatMessage({ id: 'dataset.detail.datasource' })}：
             {displayDataset?.datasource_id ? (
               <Link to={`/datasources/${displayDataset.datasource_id}`}>
@@ -523,7 +516,7 @@ const DatasetDetailPage: React.FC = () => {
           </span>
 
           <span>
-            <TableOutlined style={{ marginRight: 6, color: '#8c8c8c' }} />
+            <TableOutlined style={{ marginRight: 6, color: 'var(--dr-text-3)' }} />
             {intl.formatMessage({ id: 'dataset.detail.source' })}：
             {displayDataset?.query_type === 'table' ? (
               <>

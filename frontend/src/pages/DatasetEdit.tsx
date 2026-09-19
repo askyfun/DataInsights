@@ -1,4 +1,5 @@
 import {
+  AppstoreOutlined,
   ArrowLeftOutlined,
   DatabaseOutlined,
   SaveOutlined,
@@ -23,6 +24,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DatasetColumn, DatasetFormData, datasetsApi, datasourcesApi, TableInfo } from '../api';
+import PageHeader from '../components/PageHeader';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -231,26 +233,18 @@ const DatasetEditPage: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '24px',
-          }}
-        >
-          <Space>
-            <Button icon={<ArrowLeftOutlined />} onClick={handleCancel}>
-              {intl.formatMessage({ id: 'common.back' })}
-            </Button>
-            <Title level={3} style={{ margin: 0 }}>
-              {intl.formatMessage({ id: 'dataset.edit.title' })}
-            </Title>
-          </Space>
-        </div>
+    <div className="dr-page">
+      <PageHeader
+        icon={<AppstoreOutlined />}
+        title={intl.formatMessage({ id: 'dataset.edit.title' })}
+        extra={
+          <Button icon={<ArrowLeftOutlined />} onClick={handleCancel}>
+            {intl.formatMessage({ id: 'common.back' })}
+          </Button>
+        }
+      />
 
+      <Card>
         <Form
           form={form}
           layout="vertical"
@@ -420,7 +414,9 @@ const DatasetEditPage: React.FC = () => {
         </Form>
 
         {/* Fields Section */}
-        <div style={{ marginTop: '32px', borderTop: '1px solid #f0f0f0', paddingTop: '24px' }}>
+        <div
+          style={{ marginTop: '32px', borderTop: '1px solid var(--dr-border)', paddingTop: '24px' }}
+        >
           <Title level={4}>{intl.formatMessage({ id: 'dataset.fields.title' })}</Title>
           <Text type="secondary" style={{ display: 'block', marginBottom: '16px' }}>
             {intl.formatMessage({ id: 'dataset.fields.description' })}

@@ -79,7 +79,7 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
             width: 6,
             height: 6,
             borderRadius: '50%',
-            backgroundColor: field.type === 'dimension' ? '#1677ff' : '#52c41a',
+            backgroundColor: field.type === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)',
           }}
         />
         {field.name}

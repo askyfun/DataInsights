@@ -4,6 +4,55 @@
   box-sizing: border-box;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   DataRay 表面系统（Surface System）
+
+   核心诊断：本产品的"简陋感"不是来自"白色太多"，而是来自**面与面之间没有明度差**。
+   页签画布是白的、卡片是白的、卡头也是白的，唯一的边界线索（1px 描边）还被
+   各页的局部 CSS 摘掉过 —— 于是整页退化成"一张白纸上的几行字"。
+
+   修法：补齐一套**明度阶梯**，而不是加留白。
+     L0 画布（灰） → L1 面板（白） → L2 下沉（极浅灰）
+   白面板浮在灰画布上，"浮起来"由两件事共同定义：**描边**（边界）+ **投影**（高度），
+   缺任一个都会退回扁平的白色矩形。彩度只留给语义色，不做装饰着色。
+
+   跨页一致性靠两条纪律：
+     ① 任何两块相邻的面，必须存在明度差**或**边界线，不能两者皆无。
+     ② 同一语义只能有一个色值（品牌蓝恒 #1677ff，不允许第二处 #1890ff）。
+
+   为什么 token 放 :root：三处消费者跨页面作用域 —— 页面骨架、portal 出去的
+   Drawer/Modal、以及 ShareView 里复用的图表组件。放页面作用域会让后两者取不到。
+   ───────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* 三层灰：全部中性偏冷，避免暖灰（#f5f5f5 系）与冷灰（#f8f9fa 系）混用 */
+  --dr-canvas: #f4f5f7; /* L0 画布：页面底、表头底 */
+  --dr-surface: #ffffff; /* L1 面板：卡片、浮层 */
+  --dr-sunken: #f7f8fa; /* L2 下沉：拖放区、占位、分段容器、代码块 */
+
+  --dr-border: #e6e8eb; /* 常规发丝线：卡片描边、卡头下缘 */
+  --dr-border-strong: #d9dde3; /* 需要被看见的线：表头下缘、虚线框 */
+
+  --dr-text-1: #1f2328; /* 标题、数值 */
+  --dr-text-2: #57606a; /* 正文 */
+  --dr-text-3: #8c95a1; /* 计数、辅助、图标 */
+  --dr-text-4: #b0b7c3; /* 占位图形、最次要提示 */
+
+  --dr-accent: #1677ff; /* 唯一强调色 */
+  --dr-accent-soft: #f0f6ff; /* 强调色的浅底：悬停、选中行 */
+
+  --dr-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04); /* 卡片"贴地"级 */
+
+  /* 语义色三件套：分组 / 槽位 / 字段类型的唯一来源，全站不允许分叉 */
+  --dr-dim: #1677ff; /* 维度 */
+  --dr-metric: #52c41a; /* 指标 */
+  --dr-filter: #fa8c16; /* 过滤 */
+  --dr-date: #722ed1; /* 日期维度 */
+
+  --dr-gap-page: 16px; /* 页容器内边距（原 24，按"一屏塞更多"收 1/3） */
+  --dr-gap-block: 12px; /* 页头与卡片、卡片与卡片之间 */
+  --dr-radius-sm: 6px; /* 控件圆角（与 antd 默认一致，故不再单独定义容器圆角） */
+}
+
 body {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
@@ -25,7 +74,7 @@ body {
 
 /* Focus visible styles for accessibility */
 :focus-visible {
-  outline: 2px solid #1677ff;
+  outline: 2px solid var(--dr-accent);
   outline-offset: 2px;
 }
 
@@ -34,7 +83,7 @@ body {
   position: absolute;
   top: -40px;
   left: 0;
-  background: #1677ff;
+  background: var(--dr-accent);
   color: white;
   padding: 8px 16px;
   z-index: 1000;
@@ -45,7 +94,175 @@ body {
   top: 0;
 }
 
-/* Excel-like compact table style */
+/* ─────────────────────────────────────────────────────────────────────────────
+   页面骨架
+
+   所有页面统一为这个结构 —— 页头在**画布上**，卡片只承载内容：
+
+     .dr-page（灰画布）
+       ├── .dr-page-header（无卡片：图标块 + 标题 + 描述 + 右侧操作）
+       └── .ant-card（白面板承载表格 / 表单 / 图表）
+
+   把标题从卡里提到卡外，是这次"白底白卡"改观的关键一步：标题不再漂在白色里，
+   而是坐在灰画布上，与下方白卡形成明确的前后关系。
+   ───────────────────────────────────────────────────────────────────────────── */
+.dr-page {
+  min-height: 100%;
+  padding: var(--dr-gap-page);
+  background: var(--dr-canvas);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dr-gap-block);
+}
+
+/* 居中态：加载 / 空 / 结果页。高度锚定视口，避免不同状态之间跳动。 */
+.dr-page--center {
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 200px);
+  gap: var(--dr-gap-page);
+}
+
+.dr-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  /* 行间距 6px 小于列间距 16px：面包屑换行到标题上方时不该产生段落级留白 */
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  /* 左右各 2px：与下方卡片的描边视觉对齐，标题不至于比卡片更贴边 */
+  padding: 2px 2px 0;
+}
+
+.dr-page-header__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0; /* 允许标题省略号截断，否则 flex 子项撑破容器 */
+}
+
+/* 图标块：白底 + 描边 + 品牌蓝图标，与顶栏品牌标记同族语汇。
+   作用是给页头一个视觉锚点 —— 否则"一行黑字 + 一张白卡"依旧没有层次。 */
+.dr-page-header__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface);
+  border: 1px solid var(--dr-border);
+  box-shadow: var(--dr-shadow-card);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dr-accent);
+  font-size: 15px;
+  flex: 0 0 auto;
+}
+
+.dr-page-header__text {
+  min-width: 0;
+}
+
+.dr-page-header__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--dr-text-1);
+  line-height: 1.4;
+  margin: 0;
+  display: block;
+}
+
+.dr-page-header__desc {
+  font-size: 12px;
+  color: var(--dr-text-3);
+  line-height: 1.5;
+  margin: 2px 0 0;
+  display: block;
+}
+
+.dr-page-header__extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* 面包屑占满整行：靠 flex-basis 换行，避免多包一层 DOM */
+.dr-page-header__crumb {
+  flex-basis: 100%;
+}
+
+/* 卡片内的工具条（搜索框 / 分段按钮 / 刷新等），与表格同卡时贴在表格上方。 */
+.dr-card-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+/* 加载态与空态的公共容器：两者高度必须一致 —— 否则请求返回后容器会跳一下。 */
+.dr-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  gap: 8px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   面板与文本
+
+   描边定义边界、投影定义高度 —— 两者同时存在卡片才算"浮起来"。
+   antd 6 的 Card 默认 headerBg 是 transparent，卡头无边框时会完全融进卡体，
+   故卡头下缘线必须显式给。
+   ───────────────────────────────────────────────────────────────────────────── */
+.ant-card {
+  border: 1px solid var(--dr-border);
+  box-shadow: var(--dr-shadow-card);
+}
+
+.ant-card-head {
+  border-bottom: 1px solid var(--dr-border);
+}
+
+.ant-card-head-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dr-text-1);
+}
+
+.ant-card-extra {
+  font-size: 12px;
+  color: var(--dr-text-3);
+}
+
+/* antd 默认标题是 rgba(0,0,0,.88) 的纯黑，在冷灰阶上偏"脏"。统一到 text-1。 */
+.ant-typography,
+h1.ant-typography,
+h2.ant-typography,
+h3.ant-typography,
+h4.ant-typography,
+h5.ant-typography {
+  color: var(--dr-text-1);
+}
+
+.ant-typography.ant-typography-secondary {
+  color: var(--dr-text-3);
+}
+
+.ant-breadcrumb {
+  font-size: 12px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   数据表格
+
+   密集数据页的表格沿用"紧凑 + 斑马纹"，但色值全部收进冷灰阶：
+   表头底色由暖灰 #f0f2f5 改为画布色，下边线由 2px 暖灰改为 1px 冷灰 ——
+   2px 线在卡片这种小面积里太重，会和卡头下缘线打架。
+   ───────────────────────────────────────────────────────────────────────────── */
 .ant-table-wrapper .ant-table-thead > tr > th,
 .ant-table-wrapper .ant-table-tbody > tr > td {
   padding: 4px 8px !important;
@@ -53,31 +270,30 @@ body {
   line-height: 1.4;
 }
 
-/* Zebra striping with subtle shadow */
+.ant-table-wrapper .ant-table-thead > tr > th {
+  background-color: var(--dr-canvas) !important;
+  color: var(--dr-text-2);
+  font-weight: 600;
+  border-bottom: 1px solid var(--dr-border-strong) !important;
+}
+
+/* 斑马纹：靠行底色差异分档，上下各一条极淡内阴影勾出行的边界。 */
 .ant-table-wrapper .ant-table-tbody > tr:nth-child(even) > td {
-  background-color: #f8f9fa;
+  background-color: var(--dr-sunken);
   box-shadow:
-    inset 0 1px 0 rgba(0, 0, 0, 0.04),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+    inset 0 1px 0 rgba(16, 24, 40, 0.04),
+    inset 0 -1px 0 rgba(16, 24, 40, 0.04);
 }
 
 .ant-table-wrapper .ant-table-tbody > tr:nth-child(odd) > td {
-  background-color: #ffffff;
+  background-color: var(--dr-surface);
 }
 
-/* Remove Ant Design's default row hover background change — keep it subtle */
+/* 行悬停：antd 默认的 #e6f4ff 与品牌蓝不同源，统一到 accent 的浅底。 */
 .ant-table-wrapper .ant-table-tbody > tr:hover > td {
-  background-color: #e8f0fe !important;
+  background-color: var(--dr-accent-soft) !important;
 }
 
-/* Excel-like header */
-.ant-table-wrapper .ant-table-thead > tr > th {
-  background-color: #f0f2f5 !important;
-  font-weight: 600;
-  border-bottom: 2px solid #d9d9d9;
-}
-
-/* Tighten table container */
 .ant-table-wrapper .ant-table {
   font-size: 13px;
 }
@@ -91,6 +307,10 @@ body {
 @media (max-width: 767px) {
   body {
     font-size: 14px;
+  }
+
+  .dr-page {
+    padding: 12px;
   }
 
   .ant-table-wrapper {
@@ -205,63 +425,13 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   图表构建页 · 表面系统（page-scoped design tokens）
+   图表构建页 · 页面特例
 
-   原规则把 antd 卡片唯一的层级线索（1px 描边）摘掉，三栏于是变成「白 + 白 + 白」，
-   只剩两条 1px 分栏线。这就是"全是白、颜色单调、显得简陋"的根因：
-   页面只有 #fff / #fafafa 两个明度值，且面与面之间没有边界，只剩线。
-
-   修法不是简单把边框加回来，而是补齐一套**明度阶梯**：
-     L0 画布（灰）  →  L1 卡片（白）  →  L2 下沉面（极浅灰）
-   白卡片浮在灰画布上，边界靠"描边 + 投影"两件事共同定义 —— 缺任一个都会退回
-   扁平的白色矩形。彩度则集中在语义色上（分组色条 / 字段类型点 / 主操作），
-   不做装饰性着色。
-
-   为什么放页面作用域而不是 main.tsx 全局 token：本页三栏是自绘的（Sider/Content
-   都是内联样式），全局 token 管不到；先在本页定性，撑得住再提升为全局。
-   改动半径 = 0 个其他页面。
+   token 已提升到 :root，卡片规则已提升为全局，本页只保留两条与"三栏工作台"
+   形态绑定的覆盖。三栏底色由 ChartBuilder.tsx 的内联样式消费 --dr-canvas。
    ───────────────────────────────────────────────────────────────────────────── */
-.chart-builder-page {
-  --dr-canvas: #f4f5f7; /* L0 画布：一切非卡片区域 */
-  --dr-surface: #ffffff; /* L1 面板：卡片、浮层 */
-  --dr-sunken: #f7f8fa; /* L2 下沉：拖放区、占位区、分段容器 */
-  --dr-border: #e6e8eb; /* 常规发丝线 */
-  --dr-border-strong: #d9dde3; /* 需要被看见的线：卡头下缘、表头下缘、虚线框 */
-  --dr-text-1: #1f2328; /* 标题、数值 */
-  --dr-text-2: #57606a; /* 正文 */
-  --dr-text-3: #8c95a1; /* 计数、辅助 */
-  --dr-text-4: #b0b7c3; /* 占位图形、次要提示 */
-  --dr-accent: #1677ff;
-  --dr-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
-}
 
-/* 卡片：白面浮在灰画布上。 */
-.chart-builder-page .ant-card {
-  border: 1px solid var(--dr-border);
-  box-shadow: var(--dr-shadow-card);
-}
-
-/* 卡头：本页唯一的"标题带"。
-   保持白底而不染灰 —— 灰卡头会和灰画布同色，反而更糊。层次改由这两件事建立：
-   ① 1px 下缘线把「卡头 / 卡体」分开；② 13px/600 深色标题与 #8c95a1 的辅助文字拉开对比。
-   （antd 6 的 Card 默认 headerBg 是 transparent，卡片一旦无边框，卡头会完全融进卡体。） */
-.chart-builder-page .ant-card-head {
-  border-bottom: 1px solid var(--dr-border);
-}
-
-.chart-builder-page .ant-card-head-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--dr-text-1);
-}
-
-.chart-builder-page .ant-card-extra {
-  font-size: 12px;
-  color: var(--dr-text-3);
-}
-
-/* 表头：全局用的是 Excel 风（#f0f2f5 底 + 2px #d9d9d9 下边线），
-   在预览卡这种小面积里 2px 线太重、会和卡头下缘线打架。本页收细为 1px。 */
+/* 预览卡里的表格面积小，用比全局更浅的下沉色，避免表头压过卡头。 */
 .chart-builder-page .ant-table-wrapper .ant-table-thead > tr > th {
   background: var(--dr-sunken) !important;
   border-bottom: 1px solid var(--dr-border-strong) !important;

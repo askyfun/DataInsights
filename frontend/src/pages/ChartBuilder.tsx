@@ -803,14 +803,14 @@ const FieldListPanel: React.FC<FieldListPanelProps> = ({ fields, loading }) => {
       {/* 原为 Divider 分隔两组：带色条的分组标题本身就是更强的分隔符，
           去掉 Divider 省下 ~17px 纵向空白（本页约定：留白只服务于"看得清"）。 */}
       <div style={{ marginBottom: 10 }}>
-        <FieldGroupHeader label="维度" count={dimensions.length} color="#1677ff" />
+        <FieldGroupHeader label="维度" count={dimensions.length} color="var(--dr-dim)" />
         {dimensions.map((field) => (
           <DraggableField key={field.id} field={field} />
         ))}
       </div>
 
       <div>
-        <FieldGroupHeader label="指标" count={metrics.length} color="#52c41a" />
+        <FieldGroupHeader label="指标" count={metrics.length} color="var(--dr-metric)" />
         {metrics.map((field) => (
           <DraggableField key={field.id} field={field} />
         ))}
@@ -1159,7 +1159,7 @@ const QueryStatusBadge: React.FC<{
   hasData: boolean;
   chartTypeLabel: string;
 }> = ({ loading, hasData, chartTypeLabel }) => {
-  const dotColor = loading ? 'var(--dr-accent)' : hasData ? '#52c41a' : '#c9ced6';
+  const dotColor = loading ? 'var(--dr-accent)' : hasData ? 'var(--dr-metric)' : 'var(--dr-text-4)';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
       <span
@@ -2043,7 +2043,7 @@ const ChartBuilder: React.FC = () => {
       return (
         <Header
           style={{
-            background: '#fff',
+            background: 'var(--dr-surface)',
             padding: '8px 12px',
             display: 'flex',
             alignItems: 'center',
@@ -2470,10 +2470,11 @@ const ChartBuilder: React.FC = () => {
             <Text strong>数据查询:</Text>
             <pre
               style={{
-                // Modal 是 portal 到 body 的，取不到 .chart-builder-page 上的 CSS 变量，
-                // 故这里与 --dr-sunken / --dr-border 取同值但写成字面量。
-                background: '#f7f8fa',
-                border: '1px solid #e6e8eb',
+                // --dr-* token 定义在 :root 上，portal 到 body 的 Modal 同样继承得到，
+                // 故这里可以直接消费变量（早期版本把 token 挂在 .chart-builder-page 上，
+                // 那时才必须写字面量）。
+                background: 'var(--dr-sunken)',
+                border: '1px solid var(--dr-border)',
                 padding: 12,
                 borderRadius: 6,
                 overflow: 'auto',
@@ -2491,8 +2492,8 @@ const ChartBuilder: React.FC = () => {
                 </Text>
                 <pre
                   style={{
-                    background: '#f7f8fa',
-                    border: '1px solid #e6e8eb',
+                    background: 'var(--dr-sunken)',
+                    border: '1px solid var(--dr-border)',
                     padding: 12,
                     borderRadius: 6,
                     overflow: 'auto',

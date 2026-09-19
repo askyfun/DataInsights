@@ -10,11 +10,13 @@ import { Button, Card, message, Popconfirm, Space, Table, Tag, Typography } from
 import { useEffect } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
+import { chartDefinitions } from '../components/ChartBuilder/chartDefinitions';
+import PageHeader from '../components/PageHeader';
 import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const ChartsPage: React.FC = () => {
   const intl = useIntl();
@@ -82,6 +84,11 @@ const ChartsPage: React.FC = () => {
     }
   };
 
+  // 图型名与图表构建页共用同一来源（chartDefinitions），同一种图型不应在两处叫两个名字。
+  // 未知图型（后端已支持而前端未同步）回落显示原始值，不静默吞成空白。
+  const getChartTypeLabel = (chartType: string) =>
+    chartDefinitions[chartType as ChartType]?.label ?? chartType;
+
   // Get chart type tag color
   const getChartTypeColor = (chartType: string) => {
     switch (chartType) {
@@ -127,7 +134,7 @@ const ChartsPage: React.FC = () => {
       key: 'chart_type',
       render: (chartType: string) => (
         <Tag color={getChartTypeColor(chartType)}>
-          {getChartTypeIcon(chartType)} {chartType.toUpperCase()}
+          {getChartTypeIcon(chartType)} {getChartTypeLabel(chartType)}
         </Tag>
       ),
     },
@@ -179,23 +186,13 @@ const ChartsPage: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '16px',
-          }}
-        >
-          <div>
-            <Title level={3} style={{ margin: 0 }}>
-              {intl.formatMessage({ id: 'chart.charts' })}
-            </Title>
-            <Text type="secondary">{intl.formatMessage({ id: 'chart.manageCharts' })}</Text>
-          </div>
-          <Space>
+    <div className="dr-page">
+      <PageHeader
+        icon={<BarChartOutlined />}
+        title={intl.formatMessage({ id: 'chart.charts' })}
+        description={intl.formatMessage({ id: 'chart.manageCharts' })}
+        extra={
+          <>
             <Button icon={<ReloadOutlined />} onClick={() => fetchCharts()} loading={chartsLoading}>
               {intl.formatMessage({ id: 'common.refresh' })}
             </Button>
@@ -209,9 +206,11 @@ const ChartsPage: React.FC = () => {
             >
               {intl.formatMessage({ id: 'chart.add' })}
             </Button>
-          </Space>
-        </div>
+          </>
+        }
+      />
 
+      <Card>
         <Table
           columns={columns}
           dataSource={Array.isArray(charts) ? charts : []}

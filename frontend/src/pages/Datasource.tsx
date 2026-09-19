@@ -26,10 +26,11 @@ import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { DatasourceFormData, DatasourceType } from '../api';
+import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const DatasourcePage: React.FC = () => {
   const intl = useIntl();
@@ -232,25 +233,13 @@ const DatasourcePage: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '16px',
-          }}
-        >
-          <div>
-            <Title level={3} style={{ margin: 0 }}>
-              {intl.formatMessage({ id: 'datasource.dataSources' })}
-            </Title>
-            <Text type="secondary">
-              {intl.formatMessage({ id: 'datasource.manageConnections' })}
-            </Text>
-          </div>
-          <Space>
+    <div className="dr-page">
+      <PageHeader
+        icon={<DatabaseOutlined />}
+        title={intl.formatMessage({ id: 'datasource.dataSources' })}
+        description={intl.formatMessage({ id: 'datasource.manageConnections' })}
+        extra={
+          <>
             <Button
               icon={<ReloadOutlined />}
               onClick={() => fetchDatasources()}
@@ -269,9 +258,11 @@ const DatasourcePage: React.FC = () => {
             >
               {intl.formatMessage({ id: 'datasource.add' })}
             </Button>
-          </Space>
-        </div>
+          </>
+        }
+      />
 
+      <Card>
         <Table
           columns={columns}
           dataSource={Array.isArray(datasources) ? datasources : []}

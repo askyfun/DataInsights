@@ -24,9 +24,10 @@ import { useIntl } from 'react-intl';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { ColumnInfo, TableDataResult, TableInfo } from '../api';
 import { datasourcesApi } from '../api';
+import PageHeader from '../components/PageHeader';
 import { useStore } from '../store';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const getTypeInfo = (type: string) => {
   const typeMap: Record<string, { label: string; color: string }> = {
@@ -238,66 +239,51 @@ const DatasourceDetailPage: React.FC = () => {
 
   if (!datasource) {
     return (
-      <div style={{ padding: '24px' }}>
-        <Space orientation="vertical" align="center">
-          <Spin />
-          <Text type="secondary">{intl.formatMessage({ id: 'datasource.detail.loading' })}</Text>
-        </Space>
+      <div className="dr-page dr-page--center">
+        <Spin />
+        <Text type="secondary">{intl.formatMessage({ id: 'datasource.detail.loading' })}</Text>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card>
-        <Breadcrumb
-          style={{ marginBottom: '16px' }}
-          items={[
-            {
-              title: (
-                <Link to="/datasources">
-                  {intl.formatMessage({ id: 'datasource.detail.dataSources' })}
-                </Link>
-              ),
-            },
-            {
-              title: datasource.name,
-            },
-          ]}
-        />
-
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '24px',
-          }}
-        >
-          <div>
-            <Space>
-              <DatabaseOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-              <Title level={3} style={{ margin: 0 }}>
-                {datasource.name}
-              </Title>
-              <Tag color={getTypeInfo(datasource.type).color}>
-                {getTypeInfo(datasource.type).label}
-              </Tag>
-            </Space>
-            <Text type="secondary">
-              {datasource.host}:{datasource.port} / {datasource.database_name}
-            </Text>
-          </div>
-          <Space>
+    <div className="dr-page">
+      <PageHeader
+        icon={<DatabaseOutlined />}
+        breadcrumb={
+          <Breadcrumb
+            items={[
+              {
+                title: (
+                  <Link to="/datasources">
+                    {intl.formatMessage({ id: 'datasource.detail.dataSources' })}
+                  </Link>
+                ),
+              },
+              {
+                title: datasource.name,
+              },
+            ]}
+          />
+        }
+        title={datasource.name}
+        description={`${datasource.host}:${datasource.port} / ${datasource.database_name}`}
+        extra={
+          <>
+            <Tag color={getTypeInfo(datasource.type).color}>
+              {getTypeInfo(datasource.type).label}
+            </Tag>
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/datasources')}>
               {intl.formatMessage({ id: 'datasource.detail.back' })}
             </Button>
             <Button icon={<ReloadOutlined />} onClick={loadTables} loading={tablesLoading}>
               {intl.formatMessage({ id: 'datasource.detail.refreshTables' })}
             </Button>
-          </Space>
-        </div>
+          </>
+        }
+      />
 
+      <Card>
         <div style={{ marginBottom: '24px' }}>
           <Text strong style={{ marginBottom: '8px', display: 'block' }}>
             {intl.formatMessage({ id: 'datasource.detail.tablesCount' }, { count: tables.length })}

@@ -138,11 +138,11 @@ const PivotTable: React.FC<PivotTableProps> = ({ data, loading, columnLabels }) 
   return (
     <div className="pivot-table-v2">
       <style>{`
-        /* 冷调灰阶：与全局斑马纹（#f8f9fa）同族。原为 #fafafa / #f0f0f0（暖调），
+        /* 冷调灰阶：与全局斑马纹（--dr-sunken）同族。原为 #fafafa / #f0f0f0（暖调），
            和表体一起会显出轻微的"发黄"，与页面其余灰面不同源。
-           本组件在 ShareView 下也会渲染（不在 .chart-builder-page 内），故不走 CSS 变量。 */
-        .pivot-table-v2 .pivot-subtotal-row > td { font-weight: 600; background: #f7f8fa; }
-        .pivot-table-v2 .pivot-grand-total-row > td { font-weight: 700; background: #eef1f5; }
+           token 挂在 :root 上，故本组件在 ShareView 下渲染时同样取得到值。 */
+        .pivot-table-v2 .pivot-subtotal-row > td { font-weight: 600; background: var(--dr-sunken); }
+        .pivot-table-v2 .pivot-grand-total-row > td { font-weight: 700; background: var(--dr-canvas); }
       `}</style>
       <Table
         dataSource={dataSource}

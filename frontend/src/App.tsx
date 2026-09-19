@@ -7,10 +7,11 @@ import {
   GlobalOutlined,
   MenuOutlined,
 } from '@ant-design/icons';
-import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
+import { Button, Card, Drawer, Empty, Layout, Menu, Select, Space, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import PageHeader from './components/PageHeader';
 import { useLocale } from './i18n/useLocale';
 import ChartBuilder from './pages/ChartBuilder';
 import ChartsPage from './pages/Charts';
@@ -93,7 +94,7 @@ const App: React.FC = () => {
           top: 0,
           zIndex: 100,
           background: '#fff',
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: '1px solid var(--dr-border)',
         }}
       >
         {isMobile && (
@@ -182,12 +183,28 @@ const App: React.FC = () => {
 
       <Layout>
         <Layout style={{ padding: '0' }}>
-          <Content id="main-content" style={{ background: '#fff', minHeight: 280 }}>
+          {/* 画布底色放在外壳而非各页：页面内容不足一屏时，下方露出的也是画布灰
+              而不是白，页面骨架的"白面板浮在灰画布上"才不会在底部断掉。
+              图表构建页自带三栏自绘底色，会完整覆盖这一层。 */}
+          <Content id="main-content" style={{ background: 'var(--dr-canvas)', minHeight: 280 }}>
             <Routes>
               <Route
                 path="/"
                 element={
-                  <div style={{ padding: 24 }}>{intl.formatMessage({ id: 'home.welcome' })}</div>
+                  <div className="dr-page">
+                    <PageHeader
+                      icon={<DashboardOutlined />}
+                      title={intl.formatMessage({ id: 'nav.dashboard' })}
+                    />
+                    <Card>
+                      <div className="dr-state">
+                        <Empty
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description={intl.formatMessage({ id: 'home.welcome' })}
+                        />
+                      </div>
+                    </Card>
+                  </div>
                 }
               />
               <Route path="/datasources" element={<DatasourcePage />} />
@@ -204,7 +221,20 @@ const App: React.FC = () => {
           </Content>
         </Layout>
       </Layout>
-      <Footer style={{ textAlign: 'center' }}>DataRay ©2026 Created with React + Ant Design</Footer>
+      {/* 页脚融进画布：antd Footer 默认底色是暖灰 #f5f5f5，与冷灰画布不同源，
+          会在地部多出一道色带。改为透明 + 一条上边线，只留"内容到此结束"的语义。 */}
+      <Footer
+        style={{
+          textAlign: 'center',
+          background: 'transparent',
+          borderTop: '1px solid var(--dr-border)',
+          color: 'var(--dr-text-3)',
+          fontSize: 12,
+          padding: '16px',
+        }}
+      >
+        DataRay ©2026 Created with React + Ant Design
+      </Footer>
     </Layout>
   );
 };

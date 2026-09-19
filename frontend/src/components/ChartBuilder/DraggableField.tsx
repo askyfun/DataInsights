@@ -30,13 +30,14 @@ export const fieldTagColor = (field: ChartField): 'blue' | 'purple' | 'green' =>
 };
 
 /**
- * 语义色的 HEX 形态。antd 的 Tag 只吃预设色名，而圆点 / 色条需要具体色值；
+ * 语义色的变量形态。antd 的 Tag 只吃预设色名，而圆点 / 色条需要具体色值；
  * 两者同源登记在这里，避免同一个"维度=蓝"的规则散成两份色谱。
+ * 变量定义在 styles/index.css 的 :root 上，ChartBuilder 与 ShareView 都取得到。
  */
-const FIELD_ACCENT_HEX: Record<'blue' | 'purple' | 'green', string> = {
-  blue: '#1677ff',
-  purple: '#722ed1',
-  green: '#52c41a',
+const FIELD_ACCENT: Record<'blue' | 'purple' | 'green', string> = {
+  blue: 'var(--dr-dim)',
+  purple: 'var(--dr-date)',
+  green: 'var(--dr-metric)',
 };
 
 /**
@@ -99,7 +100,7 @@ const DraggableField: React.FC<DraggableFieldProps> = ({ field }) => {
           borderRadius: '6px',
           cursor: 'grab',
           opacity: isDragging ? 0.5 : 1,
-          backgroundColor: hovered ? '#eef4fe' : 'transparent',
+          backgroundColor: hovered ? 'var(--dr-accent-soft)' : 'transparent',
           transition: 'background-color 0.2s ease',
         }}
         {...listeners}
@@ -112,7 +113,7 @@ const DraggableField: React.FC<DraggableFieldProps> = ({ field }) => {
             height: 5,
             borderRadius: '50%',
             flexShrink: 0,
-            backgroundColor: FIELD_ACCENT_HEX[fieldTagColor(field)],
+            backgroundColor: FIELD_ACCENT[fieldTagColor(field)],
           }}
         />
         <span

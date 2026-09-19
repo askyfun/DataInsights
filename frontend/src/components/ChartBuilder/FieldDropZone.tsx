@@ -178,7 +178,7 @@ const FieldPillInline: React.FC<FieldPillInlineProps> = ({
         borderRadius: '5px',
         cursor: 'grab',
         opacity: isDragging ? 0.4 : 1,
-        outline: isOver ? '2px solid #1677ff' : 'none',
+        outline: isOver ? '2px solid var(--dr-accent)' : 'none',
         outlineOffset: '1px',
       }}
     >
@@ -280,7 +280,7 @@ const FieldDropZone: React.FC<FieldDropZoneProps> = ({
             width: 6,
             height: 6,
             borderRadius: '50%',
-            backgroundColor: field.type === 'dimension' ? '#1677ff' : '#52c41a',
+            backgroundColor: field.type === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)',
           }}
         />
         {field.name}

@@ -1,4 +1,5 @@
 import {
+  AppstoreOutlined,
   ArrowLeftOutlined,
   ArrowRightOutlined,
   DatabaseOutlined,
@@ -42,6 +43,7 @@ import {
   TableInfo,
 } from '../api';
 import { toStandardType } from '../api/datatypes';
+import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
@@ -331,7 +333,7 @@ const DatasetPage: React.FC = () => {
         {
           type: 'bar',
           data: data,
-          itemStyle: { color: '#1890ff' },
+          itemStyle: { color: 'var(--dr-accent)' },
           barWidth: '60%',
         },
       ],
@@ -670,23 +672,13 @@ const DatasetPage: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '16px',
-          }}
-        >
-          <div>
-            <Title level={3} style={{ margin: 0 }}>
-              {intl.formatMessage({ id: 'dataset.datasets' })}
-            </Title>
-            <Text type="secondary">{intl.formatMessage({ id: 'dataset.manageDatasets' })}</Text>
-          </div>
-          <Space>
+    <div className="dr-page">
+      <PageHeader
+        icon={<AppstoreOutlined />}
+        title={intl.formatMessage({ id: 'dataset.datasets' })}
+        description={intl.formatMessage({ id: 'dataset.manageDatasets' })}
+        extra={
+          <>
             <Button
               icon={<ReloadOutlined />}
               onClick={() => fetchDatasets()}
@@ -706,16 +698,20 @@ const DatasetPage: React.FC = () => {
             >
               {intl.formatMessage({ id: 'dataset.add' })}
             </Button>
-          </Space>
-        </div>
+          </>
+        }
+      />
 
-        <Input.Search
-          placeholder={intl.formatMessage({ id: 'dataset.searchPlaceholder' })}
-          allowClear
-          style={{ marginBottom: 16, width: 300 }}
-          onChange={(e) => setSearchText(e.target.value)}
-          value={searchText}
-        />
+      <Card>
+        <div className="dr-card-toolbar">
+          <Input.Search
+            placeholder={intl.formatMessage({ id: 'dataset.searchPlaceholder' })}
+            allowClear
+            style={{ width: 300 }}
+            onChange={(e) => setSearchText(e.target.value)}
+            value={searchText}
+          />
+        </div>
 
         <Table
           columns={columns}
@@ -930,7 +926,7 @@ const DatasetPage: React.FC = () => {
                         display: 'flex',
                         gap: 16,
                         fontSize: 12,
-                        color: '#666',
+                        color: 'var(--dr-text-3)',
                       }}
                     >
                       <span>
@@ -1038,7 +1034,10 @@ const DatasetPage: React.FC = () => {
                       )}
                       <Text
                         strong={!!record.expr}
-                        style={{ color: record.role === 'dimension' ? '#1890ff' : '#722ed1' }}
+                        // 与图表构建页的字段语义同源：维度蓝 / 指标绿
+                        style={{
+                          color: record.role === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)',
+                        }}
                       >
                         {name}
                       </Text>
@@ -1096,7 +1095,9 @@ const DatasetPage: React.FC = () => {
                         handleColumnRoleChange(record.name, checked ? 'metric' : 'dimension')
                       }
                       style={{
-                        backgroundColor: role === 'metric' ? '#722ed1' : '#1890ff',
+                        // 只在「指标」态染色（指标绿）；「维度」态交回 antd 默认灰，
+                        // 否则内联色会把两个状态涂成同一个颜色、状态差异反而丢失。
+                        backgroundColor: role === 'metric' ? 'var(--dr-metric)' : undefined,
                       }}
                     />
                   ),

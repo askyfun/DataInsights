@@ -38,13 +38,14 @@ export interface QueryConfigRowProps {
 }
 
 /**
- * 槽位语义色。维度蓝与 dropZoneStyles 的 ZONE_PALETTE 必须同值：色条、标签、
- * 落点高亮指的其实是同一个"维度"，色值分叉会让同一概念出现两种蓝。
+ * 槽位语义色。走全站语义色变量（:root 的 --dr-dim / --dr-metric / --dr-filter），
+ * 与 dropZoneStyles 的 ZONE_PALETTE 同源：色条、标签、落点高亮指的其实是同一个"维度"，
+ * 色值分叉会让同一概念出现两种蓝。
  */
 const ROW_CONFIG: Record<DropZoneType, { label: string; color: string }> = {
-  dimension: { label: '维度', color: '#1677ff' },
-  metric: { label: '指标', color: '#52c41a' },
-  filter: { label: '过滤', color: '#fa8c16' },
+  dimension: { label: '维度', color: 'var(--dr-dim)' },
+  metric: { label: '指标', color: 'var(--dr-metric)' },
+  filter: { label: '过滤', color: 'var(--dr-filter)' },
 };
 
 const QueryConfigRow: React.FC<QueryConfigRowProps> = ({

@@ -14,6 +14,7 @@ import { chartDefinitions } from '../components/ChartBuilder/chartDefinitions';
 import KpiCard from '../components/ChartBuilder/KpiCard';
 import PivotTable from '../components/ChartBuilder/PivotTable';
 import TableChart from '../components/ChartBuilder/TableChart';
+import PageHeader from '../components/PageHeader';
 import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../lib/chartOptions';
 
@@ -203,15 +204,7 @@ const ShareView: React.FC = () => {
   // Loading state
   if (loading) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '100vh',
-          background: '#f0f2f5',
-        }}
-      >
+      <div className="dr-page dr-page--center">
         <Spin size="large" />
       </div>
     );
@@ -220,16 +213,7 @@ const ShareView: React.FC = () => {
   // Expired share
   if (shareInfo?.expires_at && new Date(shareInfo.expires_at) < new Date()) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '100vh',
-          background: '#f0f2f5',
-          padding: 24,
-        }}
-      >
+      <div className="dr-page dr-page--center">
         <Result
           status="warning"
           title="Share Expired"
@@ -242,16 +226,7 @@ const ShareView: React.FC = () => {
   // Password input
   if (needsPassword) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '100vh',
-          background: '#f0f2f5',
-          padding: 24,
-        }}
-      >
+      <div className="dr-page dr-page--center">
         <Card style={{ width: 400, textAlign: 'center' }}>
           <div style={{ marginBottom: 24 }}>
             <LockOutlined style={{ fontSize: 48, color: '#faad14' }} />
@@ -311,30 +286,18 @@ const ShareView: React.FC = () => {
   const kpiMeta = kpiBindingId ? chartDoc?.fieldMeta[kpiBindingId] : undefined;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f0f2f5', padding: 24 }}>
-      <Card>
-        {/* Header */}
-        <div
-          style={{
-            marginBottom: 24,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <Space>
-            {chart && getChartTypeIcon(chart.chart_type)}
-            <Title level={4} style={{ margin: 0 }}>
-              {chart?.name || 'Shared Chart'}
-            </Title>
-          </Space>
-          <Space>
-            <Tag icon={<ShareAltOutlined />} color="blue">
-              Shared View
-            </Tag>
-          </Space>
-        </div>
+    <div className="dr-page">
+      <PageHeader
+        icon={chart ? getChartTypeIcon(chart.chart_type) : undefined}
+        title={chart?.name || 'Shared Chart'}
+        extra={
+          <Tag icon={<ShareAltOutlined />} color="blue">
+            Shared View
+          </Tag>
+        }
+      />
 
+      <Card>
         {/* Chart */}
         {chartDataLoading ? (
           <div style={{ textAlign: 'center', padding: '100px 0' }}>
