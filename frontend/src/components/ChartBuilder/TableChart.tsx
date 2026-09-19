@@ -19,8 +19,16 @@ interface TableChartProps {
     pageSize: number;
     total: number;
   };
+  /**
+   * 当前生效的排序列（输出列名）与方向，由外部（queryConfig.sort）驱动。
+   * 传入即进入受控模式：表头箭头只反映这里的状态，不会自己变——服务端排序必须由
+   * 父组件回写状态才算生效，否则箭头会与数据不一致。
+   */
+  sortField?: string;
+  sortOrder?: 'asc' | 'desc';
   onPageChange?: (page: number, pageSize: number) => void;
-  onSortChange?: (sort: { field: string; order: 'asc' | 'desc' }) => void;
+  /** 传 null 表示用户取消了排序（第三次点击表头）。未传 onSortChange 时不渲染排序箭头。 */
+  onSortChange?: (sort: { field: string; order: 'asc' | 'desc' } | null) => void;
 }
 
 const TableChart: React.FC<TableChartProps> = ({
@@ -32,6 +40,8 @@ const TableChart: React.FC<TableChartProps> = ({
   metricNames,
   rowSize = 'small',
   pagination,
+  sortField,
+  sortOrder,
   onPageChange,
   onSortChange,
 }) => {
@@ -76,23 +86,58 @@ const TableChart: React.FC<TableChartProps> = ({
       title: columnLabels?.[key] || key,
       dataIndex: key,
       key,
-      sorter: true,
+      // 没有排序回调时（如分享页只读表格）不挂 sorter：避免渲染一个点了没反应的表头箭头。
+      sorter: Boolean(onSortChange),
+      // 受控排序：只有当前生效的排序列显示箭头状态，其余列恒为 null。
+      sortOrder: onSortChange && key === sortField ? toAntdSortOrder(sortOrder) : null,
       ellipsis: true,
     }));
-  }, [columnLabels, data, propColumns, dimensionNames, metricNames]);
+  }, [
+    columnLabels,
+    data,
+    propColumns,
+    dimensionNames,
+    metricNames,
+    onSortChange,
+    sortField,
+    sortOrder,
+  ]);
 
-  const handleTableChange: TableProps<any>['onChange'] = (tablePagination, _filters, sorter) => {
-    if (onPageChange && tablePagination) {
-      onPageChange(tablePagination.current || 1, tablePagination.pageSize || 10);
+  const handleTableChange: TableProps<any>['onChange'] = (
+    tablePagination,
+    _filters,
+    sorter,
+    extra
+  ) => {
+    // 分页：仅当页码/每页条数真的变了才回调。antd 的 onChange 在点击表头排序时也会触发，
+    // 以前无条件回调会额外发一次不带 sort 的查询，与排序请求竞态、可能用旧结果覆盖新结果。
+    if (onPageChange && pagination) {
+      const nextPage = tablePagination?.current || 1;
+      const nextPageSize = tablePagination?.pageSize || 10;
+      if (nextPage !== pagination.page || nextPageSize !== pagination.pageSize) {
+        onPageChange(nextPage, nextPageSize);
+      }
     }
 
     if (onSortChange && sorter && !Array.isArray(sorter)) {
-      const sortField = sorter.field as string | undefined;
-      const sortOrder =
-        sorter.order === 'ascend' ? 'asc' : sorter.order === 'descend' ? 'desc' : undefined;
+      const clickedField = sorter.field as string | undefined;
+      const nextOrder =
+        sorter.order === 'ascend' ? 'asc' : sorter.order === 'descend' ? 'desc' : null;
 
-      if (sortField && sortOrder) {
-        onSortChange({ field: sortField, order: sortOrder });
+      if (nextOrder === null && extra?.action === 'sort') {
+        // 取消排序（第三次点击表头）：antd 走的是 legacy 兼容分支，回传的 sorter
+        // 不带 field，无从判断点的是哪一列；但同一时刻只可能有一列处于排序态，
+        // 因此"取消"必然作用于当前 sortField。
+        if (sortField) {
+          onSortChange(null);
+        }
+        return;
+      }
+
+      // 与当前受控状态相同则不下发，避免重复查询。
+      const isSameAsCurrent = clickedField === sortField && nextOrder === (sortOrder ?? null);
+      if (clickedField && nextOrder && !isSameAsCurrent) {
+        onSortChange({ field: clickedField, order: nextOrder });
       }
     }
   };
@@ -146,6 +191,13 @@ const TableChart: React.FC<TableChartProps> = ({
       onChange={handleTableChange}
     />
   );
+};
+
+/** asc/desc（wire 口径）→ antd 的 ascend/descend；缺省 null 表示无排序。 */
+const toAntdSortOrder = (order?: 'asc' | 'desc'): 'ascend' | 'descend' | null => {
+  if (order === 'asc') return 'ascend';
+  if (order === 'desc') return 'descend';
+  return null;
 };
 
 export default TableChart;

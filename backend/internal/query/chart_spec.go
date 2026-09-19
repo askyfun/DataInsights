@@ -76,44 +76,6 @@ type MetricExpr2 struct {
 	BindingID string          `json:"binding_id,omitempty"` // 来源绑定实例标识（v2 协议；v1 路径为空）
 }
 
-// ChartSpecFromRequest 将旧的 ChartQueryRequest 转换为 ChartSpec（兼容 adapter）。
-// 旧请求的 dims/metrics 映射为默认组。
-func ChartSpecFromRequest(req *ChartQueryRequest) *ChartSpec {
-	spec := &ChartSpec{
-		ChartType:    req.ChartType,
-		Style:        make(map[string]any),
-		QueryOptions: make(map[string]any),
-	}
-
-	// 维度 → 默认维度组
-	if len(req.Dims) > 0 {
-		fields := make([]DimensionField, len(req.Dims))
-		for i, d := range req.Dims {
-			fields[i] = DimensionField{Field: d}
-		}
-		spec.DimensionGroups = []DimensionGroup{
-			{Name: defaultDimGroupName(req.ChartType), Label: "维度", Fields: fields},
-		}
-	}
-
-	// 指标 → 默认指标组
-	if len(req.Metrics) > 0 {
-		fields := make([]MetricField, len(req.Metrics))
-		for i, m := range req.Metrics {
-			fields[i] = MetricField{
-				Field: m.Field,
-				Agg:   m.Agg,
-				Alias: m.Alias,
-			}
-		}
-		spec.MetricGroups = []MetricGroup{
-			{Name: defaultMetricGroupName(req.ChartType), Label: "指标", Fields: fields},
-		}
-	}
-
-	return spec
-}
-
 // QuerySpecFromRequest 将旧的 ChartQueryRequest 转换为 QuerySpec（兼容 adapter）。
 func QuerySpecFromRequest(req *ChartQueryRequest) *QuerySpec {
 	spec := &QuerySpec{
@@ -138,9 +100,8 @@ func QuerySpecFromRequest(req *ChartQueryRequest) *QuerySpec {
 }
 
 // ChartSpecFromRequestV2 将 v2 协议请求（spec_version=2，携带显式槽位组）转换为
-// ChartSpec。与 ChartSpecFromRequest（v1 适配器，按 chartType 猜默认组名）不同，
-// 这里直接原样映射 req.DimensionGroups/MetricGroups 的组名（槽位名）与字段绑定
-// （含 BindingID），不做任何降级猜测。
+// ChartSpec。这里直接原样映射 req.DimensionGroups/MetricGroups 的组名（槽位名）
+// 与字段绑定（含 BindingID），不做任何降级猜测。
 // 调用场景：service 层 executeQueryOnConn 判别 spec_version=2 后进入本适配器。
 func ChartSpecFromRequestV2(req *entity.ChartQueryRequest) *ChartSpec {
 	spec := &ChartSpec{
@@ -243,28 +204,4 @@ func QuerySpecToBuildArgs(spec *QuerySpec) (dims []string, metrics []MetricConfi
 	}
 
 	return
-}
-
-// defaultDimGroupName 根据图表类型返回默认维度组名
-func defaultDimGroupName(chartType ChartType) string {
-	switch chartType {
-	case ChartTypePivot:
-		return "rows"
-	case ChartTypePie:
-		return "category"
-	case ChartTypeScatter:
-		return "dims"
-	default:
-		return "x_axis"
-	}
-}
-
-// defaultMetricGroupName 根据图表类型返回默认指标组名
-func defaultMetricGroupName(chartType ChartType) string {
-	switch chartType {
-	case ChartTypeScatter:
-		return "values"
-	default:
-		return "values"
-	}
 }

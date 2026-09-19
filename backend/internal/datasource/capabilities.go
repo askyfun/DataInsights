@@ -6,6 +6,6 @@ type DialectCapabilities struct {
 	SupportsGroupingSets    bool
 	SupportsPercentileCont  bool
 	SupportsWindowFunctions bool
-	// PercentileStrategy 取值："percentile_cont" | "quantilesExactInclusive" | "window_ntile" | "unsupported"
+	// PercentileStrategy 取值："percentile_cont"（PG）| "percentile_cont_args_first"（StarRocks）| "quantilesExactInclusive" | "window_ntile" | "unsupported"
 	PercentileStrategy string
 }

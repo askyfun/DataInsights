@@ -2,10 +2,10 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   BuildOutlined,
+  DashboardOutlined,
   DatabaseOutlined,
   GlobalOutlined,
   MenuOutlined,
-  ShareAltOutlined,
 } from '@ant-design/icons';
 import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
 import { useEffect, useState } from 'react';
@@ -51,19 +51,9 @@ const App: React.FC = () => {
 
   const menuItems = [
     {
-      key: '/chart-builder',
-      icon: <BuildOutlined />,
-      label: <Link to="/chart-builder">{intl.formatMessage({ id: 'nav.chartBuilder' })}</Link>,
-    },
-    {
-      key: '/datasources',
-      icon: <DatabaseOutlined />,
-      label: <Link to="/datasources">{intl.formatMessage({ id: 'nav.datasources' })}</Link>,
-    },
-    {
-      key: '/datasets',
-      icon: <AppstoreOutlined />,
-      label: <Link to="/datasets">{intl.formatMessage({ id: 'nav.datasets' })}</Link>,
+      key: '/',
+      icon: <DashboardOutlined />,
+      label: <Link to="/">{intl.formatMessage({ id: 'nav.dashboard' })}</Link>,
     },
     {
       key: '/charts',
@@ -71,9 +61,19 @@ const App: React.FC = () => {
       label: <Link to="/charts">{intl.formatMessage({ id: 'nav.charts' })}</Link>,
     },
     {
-      key: '/shares',
-      icon: <ShareAltOutlined />,
-      label: <Link to="/shares">{intl.formatMessage({ id: 'nav.shares' })}</Link>,
+      key: '/chart-builder',
+      icon: <BuildOutlined />,
+      label: <Link to="/chart-builder">{intl.formatMessage({ id: 'nav.chartBuilder' })}</Link>,
+    },
+    {
+      key: '/datasets',
+      icon: <AppstoreOutlined />,
+      label: <Link to="/datasets">{intl.formatMessage({ id: 'nav.datasets' })}</Link>,
+    },
+    {
+      key: '/datasources',
+      icon: <DatabaseOutlined />,
+      label: <Link to="/datasources">{intl.formatMessage({ id: 'nav.datasources' })}</Link>,
     },
   ];
 
@@ -92,12 +92,14 @@ const App: React.FC = () => {
           position: 'sticky',
           top: 0,
           zIndex: 100,
+          background: '#fff',
+          borderBottom: '1px solid #f0f0f0',
         }}
       >
         {isMobile && (
           <Button
             type="text"
-            icon={<MenuOutlined style={{ color: 'white', fontSize: 18 }} />}
+            icon={<MenuOutlined style={{ fontSize: 18 }} />}
             onClick={() => setMobileMenuOpen(true)}
             style={{ marginRight: 12 }}
             aria-label="打开菜单"
@@ -106,7 +108,7 @@ const App: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', marginRight: isMobile ? 8 : 32 }}>
           <div className="demo-logo" />
           {!isMobile && (
-            <Title level={4} style={{ color: 'white', margin: 0, marginLeft: 12 }}>
+            <Title level={4} style={{ margin: 0, marginLeft: 12 }}>
               DataRay
             </Title>
           )}
@@ -115,7 +117,7 @@ const App: React.FC = () => {
           <>
             <Menu
               mode="horizontal"
-              defaultSelectedKeys={['/datasources']}
+              defaultSelectedKeys={['/']}
               selectedKeys={[location.pathname]}
               items={menuItems}
               style={{
@@ -125,10 +127,9 @@ const App: React.FC = () => {
                 border: 'none',
                 lineHeight: '46px',
               }}
-              theme="dark"
             />
             <Space style={{ marginLeft: 16 }}>
-              <GlobalOutlined style={{ color: 'white' }} />
+              <GlobalOutlined />
               <Select
                 value={locale}
                 onChange={(value) => setLocale(value)}
@@ -148,23 +149,22 @@ const App: React.FC = () => {
         title={
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div className="demo-logo" />
-            <span style={{ color: 'white', marginLeft: 12, fontWeight: 'bold' }}>DataRay</span>
+            <span style={{ marginLeft: 12, fontWeight: 'bold' }}>DataRay</span>
           </div>
         }
         placement="left"
         onClose={() => setMobileMenuOpen(false)}
         open={mobileMenuOpen}
-        width={280}
-        styles={{ body: { padding: 0 }, header: { background: '#001529' } }}
+        size={280}
+        styles={{ body: { padding: 0 } }}
       >
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
           items={menuItems}
           style={{ border: 'none' }}
-          theme="dark"
         />
-        <div style={{ padding: '16px', borderTop: '1px solid #303030' }}>
+        <div style={{ padding: '16px', borderTop: '1px solid #f0f0f0' }}>
           <Space>
             <GlobalOutlined />
             <Select

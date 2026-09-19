@@ -166,9 +166,12 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 
 			countResult, err := e.conn.Execute(ctx, countSQL, args...)
 			if err == nil && len(countResult.Rows) > 0 {
-				// 有 GROUP BY 时，countResult 返回每个分组的计数
-				// 总数应该是分组的数量（行数），而不是所有计数的总和
-				total = len(countResult.Rows)
+				// countSQL 的形状是 `SELECT COUNT(*) AS _total FROM (...) AS _count_query`，
+				// 无论有无 GROUP BY 都只返回一行，总数必须取该行的 _total 值。
+				// 曾按 len(Rows) 取总数：聚合查询下恒为 1，分页器永远只有一页。
+				if count, ok := toFloat64(countResult.Rows[0]["_total"]); ok {
+					total = int(count)
+				}
 			}
 		}
 

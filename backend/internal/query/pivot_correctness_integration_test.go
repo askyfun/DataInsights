@@ -30,8 +30,8 @@ import (
 // 的 query_sql，全程只对 PG 跑 SELECT，无需清理、无副作用。凭证只从 TEST_DATABASE_URL 读取。
 
 // openPivotTestConn 用生产 PostgreSQL 驱动连接 TEST_DATABASE_URL 指向的真实库。
-// 未设置 TEST_DATABASE_URL 时跳过（照抄 queryrecord/store_integration_test.go 约定）；
-// 与那边不同：本测试不跑 migrations——它不需要任何 app schema，inline VALUES 自带数据。
+// 未设置 TEST_DATABASE_URL 时跳过；
+// 本测试不跑 migrations——它不需要任何 app schema，inline VALUES 自带数据。
 func openPivotTestConn(t *testing.T) datasource.Connection {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")

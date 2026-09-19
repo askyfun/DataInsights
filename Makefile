@@ -51,9 +51,17 @@ install-backend:
 	@echo "$(YELLOW)安装后端依赖...$(NC)"
 	cd backend && go mod download
 
-# 开发模式运行
-dev: dev-backend dev-frontend
-	@echo "$(GREEN)前后端已启动，前端: http://localhost:3000，后端: http://localhost:8080$(NC)"
+# air 启动后端热重载（dev 与 dev-backend 共用）
+AIR_CMD = air --build.cmd "go build -o server ./cmd" --build.entrypoint "./server"
+
+# 开发模式运行：前后端并行拉起，任一侧退出即整体退出
+dev:
+	@echo "$(GREEN)启动前后端开发服务器，前端: http://localhost:23351，后端: http://localhost:23352$(NC)"
+	@bash -c 'set -m; \
+	 (cd backend && $(AIR_CMD)) < /dev/null & be=$$!; \
+	 (cd frontend && pnpm dev) < /dev/null & fe=$$!; \
+	 trap "kill -TERM -$$be -$$fe 2>/dev/null" INT TERM EXIT; \
+	 while kill -0 $$be 2>/dev/null && kill -0 $$fe 2>/dev/null; do sleep 2; done'
 
 # 前端开发服务器
 dev-frontend:
@@ -63,7 +71,7 @@ dev-frontend:
 # 后端开发服务器
 dev-backend:
 	@echo "$(YELLOW)启动后端开发服务器...$(NC)"
-	cd backend && air --build.cmd "go build -o server ./cmd" --build.entrypoint "./server"
+	cd backend && $(AIR_CMD)
 # 	cd backend && go run cmd/main.go -f etc/config.toml
 
 # 构建

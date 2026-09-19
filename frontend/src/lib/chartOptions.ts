@@ -27,7 +27,7 @@ import type { ChartStyleConfig } from '../store';
 import type { ChartType } from './chartConfigSchema';
 
 /** ChartStyleConfig 默认值（持久化 style 缺失/形状非法时的兜底） */
-export const DEFAULT_CHART_STYLE: ChartStyleConfig = {
+const DEFAULT_CHART_STYLE: ChartStyleConfig = {
   colors: [],
   smooth: false,
   tableRowSize: 'small',
@@ -225,7 +225,12 @@ export function buildChartOption(
   }
 
   const labelOf = (name: string) => labels[name] || name;
+  // echarts 6 起，setOption 显式传入 `color: undefined` 会在 option 合并时覆盖掉
+  // 默认调色板（实测 model.get('color') 变 undefined），导致所有系列无填充色——
+  // 图例/坐标轴正常但扇区/柱体完全透明。因此空 colors 时必须完全不带 color 键，
+  // 由 colorOf() 按 palette 有无返回片段对象（不能用 `color: undefined`）。
   const palette = style.colors.length > 0 ? style.colors : undefined;
+  const colorOf = (): { color?: string[] } => (palette ? { color: palette } : {});
 
   const commonOptions = {
     title: {
@@ -306,7 +311,7 @@ export function buildChartOption(
               label: { formatter: '{b}: {d}%' },
             },
           ],
-          color: palette,
+          ...colorOf(),
         };
       }
 
@@ -333,7 +338,7 @@ export function buildChartOption(
               data: pie.data.map((item) => ({ name: item.name, value: item.value })),
             },
           ],
-          color: palette,
+          ...colorOf(),
         };
       }
 
@@ -370,7 +375,7 @@ export function buildChartOption(
             })),
             style.stack
           ),
-          color: palette,
+          ...colorOf(),
         };
       }
 
@@ -380,14 +385,16 @@ export function buildChartOption(
           return null;
         }
         const histogram: HistogramResponse = data;
+        // 直方图用纵向条（类目轴在 y、自上而下排列），与柱状图（类目沿 x 横向展开、
+        // 易联想到时间轴）在视觉语义上区分：柱状图看趋势，直方图看分布。
         return {
           ...commonOptions,
-          xAxis: {
+          xAxis: { type: 'value' as const },
+          yAxis: {
             type: 'category' as const,
             data: histogram.bins.map((bin) => `${bin.bin_start} ~ ${bin.bin_end}`),
-            axisLabel: categoryAxisLabel(histogram.bins.length),
+            inverse: true,
           },
-          yAxis: { type: 'value' as const },
           series: [
             {
               // value 槽位列名在 context.metrics[0]；缺失（防御）回退 'count'
@@ -396,7 +403,7 @@ export function buildChartOption(
               data: histogram.bins.map((bin) => bin.count),
             },
           ],
-          color: palette,
+          ...colorOf(),
         };
       }
 
@@ -418,7 +425,7 @@ export function buildChartOption(
             left: 'left',
           },
           // 后端 RadarResponse 的 indicator.name / series.name 已是最终展示值
-          // （indicator=维度值、series 无 series_group 时=value 别名 / 有 series_group 时=分组值），
+          // （indicator=维度值、series=value 别名；历史请求带 series_group 时=分组值），
           // 不再二次 labelOf——context.dimensions/metrics 是列名，语义与轴/系列名不同。
           radar: {
             indicator: radar.indicators.map((i) => ({ name: i.name, max: i.max })),
@@ -429,7 +436,7 @@ export function buildChartOption(
               data: radar.series.map((s) => ({ name: s.name, value: s.values })),
             },
           ],
-          color: palette,
+          ...colorOf(),
         };
       }
 
@@ -461,7 +468,7 @@ export function buildChartOption(
               symbolSize: 8,
             },
           ],
-          color: palette,
+          ...colorOf(),
         };
       }
 
@@ -475,11 +482,11 @@ export function buildChartOption(
         }
         // 'x_axis' 判别已将该臂收窄为 ChartAxisResponse。
         const axis: AxisResponse = data;
-        // series→slot 映射：无 color_group 时后端 AxisProcessor 逐指标产出一条 series，
+        // series→slot 映射：后端 AxisProcessor 逐指标产出一条 series，
         // name = metric.ResolveAlias()（默认等于列名）。据 metricSlots 建立「指标列名 →
         // yAxisIndex」映射（primary_values→0、secondary_values→1），再按 series.name 反查。
-        // metricSlots 缺失（防御）或 name 反查不到（用户设了别名，或 color_group 非空产出
-        // "别名 - 颜色值" 复合名——本任务的 combo 渲染分支不精确支持 color_group）时，
+        // metricSlots 缺失（防御）或 name 反查不到（用户设了别名；或历史图表残留第二个维度组，
+        // 后端按 dims[1:] 拆系列产出"别名 - 维度值"复合名——combo 渲染分支不精确支持该形态）时，
         // 一律回落 yAxisIndex 0（主轴），保证不抛异常、图仍渲染（退化限制见 task 报告）。
         const slotAxisIndex = new Map<string, number>();
         for (const metricSlot of context.metricSlots ?? []) {
@@ -514,7 +521,7 @@ export function buildChartOption(
               data: s.data.map(toOptionValue),
             };
           }),
-          color: palette,
+          ...colorOf(),
         };
       }
 
@@ -576,7 +583,7 @@ export function buildChartOption(
           })),
           style.stack
         ),
-        color: palette,
+        ...colorOf(),
       };
 
     case 'pie': {
@@ -598,7 +605,7 @@ export function buildChartOption(
             label: { formatter: '{b}: {d}%' },
           },
         ],
-        color: palette,
+        ...colorOf(),
       };
     }
 

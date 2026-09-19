@@ -1,12 +1,19 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.14/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
   "files": {
-    "includes": ["**", "!dist", "!src/idls/gen_types.ts"]
+    "includes": [
+      "**",
+      "!dist",
+      "!src/idls/gen_types.ts",
+      "!**/.mimosa",
+      "!vite.config.js",
+      "!vite.config.d.ts"
+    ]
   },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "suspicious": {
         "noExplicitAny": "off"
       },
@@ -24,6 +31,18 @@
     "indentWidth": 2,
     "lineWidth": 100
   },
+  "overrides": [
+    {
+      "includes": ["src/styles/index.css"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noImportantStyles": "off"
+          }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "single",

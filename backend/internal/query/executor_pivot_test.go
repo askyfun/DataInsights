@@ -258,7 +258,7 @@ func TestExecutor_Pivot_FallbackWhenNoColumnsSlot(t *testing.T) {
 	}
 	executor := NewExecutor(conn, dataset, ds)
 
-	// 模拟 v1 适配器：ChartSpecFromRequest 的 defaultDimGroupName 把 pivot 所有维度标成 "rows"
+	// 模拟 v1 适配器：默认组名规则把 pivot 所有维度标成 "rows"
 	spec := &QuerySpec{
 		Dimensions: []DimensionExpr{
 			{Field: "region", GroupName: SlotRows},

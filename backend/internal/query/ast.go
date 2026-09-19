@@ -266,14 +266,12 @@ func (qb *QueryBuilder) getFieldExpr(field string) string {
 	return field
 }
 
+// isAggregateFunction 判断字段表达式本身是否已是聚合形态（来自列映射，如
+// "SUM(amount)"）。必须匹配"函数名 + ("，不能用 HasPrefix：min_price、
+// summary_count 这类普通列名会以 min/sum 开头，前缀匹配会误判为聚合表达式，
+// 导致 renderMetricSelect 跳过聚合、生成裸列 SQL（scatter/无维度图型直接报错）。
+var aggregateFuncPattern = regexp.MustCompile(`^(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT|JSON_ARRAYAGG|JSON_OBJECTAGG)\s*\(`)
+
 func isAggregateFunction(expr string) bool {
-	upper := strings.ToUpper(expr)
-	return strings.HasPrefix(upper, "COUNT") ||
-		strings.HasPrefix(upper, "SUM") ||
-		strings.HasPrefix(upper, "AVG") ||
-		strings.HasPrefix(upper, "MIN") ||
-		strings.HasPrefix(upper, "MAX") ||
-		strings.HasPrefix(upper, "GROUP_CONCAT") ||
-		strings.HasPrefix(upper, "JSON_ARRAYAGG") ||
-		strings.HasPrefix(upper, "JSON_OBJECTAGG")
+	return aggregateFuncPattern.MatchString(strings.TrimSpace(strings.ToUpper(expr)))
 }

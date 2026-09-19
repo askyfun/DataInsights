@@ -15,10 +15,10 @@
 ## 技术栈
 
 ### 前端
-- React 18 + TypeScript
-- Ant Design 5.x
-- ECharts 5.x
-- Zustand 4.x
+- React 19 + TypeScript
+- Ant Design 6.x
+- ECharts 6.x
+- Zustand 5.x
 - @dnd-kit 拖拽交互
 - Vite 构建工具
 
@@ -38,8 +38,8 @@ docker-compose up --build
 ```
 
 服务启动后：
-- 前端: http://localhost:3000
-- 后端 API: http://localhost:8080
+- 前端: http://localhost:23351
+- 后端 API: http://localhost:23352
 
 ### 本地开发
 
@@ -66,7 +66,7 @@ pnpm dev
 ```yaml
 Name: dataray
 Host: 0.0.0.0
-Port: 8080
+Port: 23352
 
 Database:
   Url: postgres://user:password@localhost:5432/dbname?sslmode=disable

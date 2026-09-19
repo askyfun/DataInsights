@@ -4,12 +4,12 @@ This document defines coding standards and conventions for AI assistants working
 
 ## Tech Stack
 
-- React 18 + TypeScript
-- Ant Design 5.x
-- ECharts 5.x
-- Zustand 4.x
+- React 19 + TypeScript
+- Ant Design 6.x
+- ECharts 6.x
+- Zustand 5.x
 - @dnd-kit (drag and drop)
-- Vite 6
+- Vite 8
 - Biome (linting + formatting)
 - Vitest (testing)
 

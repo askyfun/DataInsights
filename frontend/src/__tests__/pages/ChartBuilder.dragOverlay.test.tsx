@@ -127,7 +127,11 @@ describe('ChartBuilder drag overlay', () => {
         code: 20000,
         msg: 'ok',
         trace: '',
-        data: [{ name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' }],
+        data: [
+          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
+          { name: 'city', expr: 'city', type: 'string', comment: '', role: 'dimension' },
+          { name: 'revenue', expr: 'revenue', type: 'integer', comment: '', role: 'metric' },
+        ],
       })
     );
     mockGetChartById.mockResolvedValue(
@@ -221,5 +225,194 @@ describe('ChartBuilder drag overlay', () => {
     expect(useStore.getState().queryConfig.dimensionGroups[1]?.bindings).toEqual([
       { bindingId: 'b-0', field: 'region' },
     ]);
+  });
+
+  /**
+   * 查询配置区内部的"搬字段"：拖起的是已有字段标签（binding-source），不是左侧字段。
+   * 这三条用例锁死三条真实路径：透视表行维度↔列维度、组内换序、跨 kind 拒绝。
+   */
+  describe('配置区字段标签互相拖拽', () => {
+    const bindingDrag = (bindingId: string, kind: 'dimension' | 'metric', groupIndex: number) => ({
+      active: {
+        data: {
+          current: {
+            type: 'binding-source',
+            bindingId,
+            kind,
+            groupIndex,
+            label: bindingId,
+            color: 'blue',
+          },
+        },
+      },
+    });
+
+    const seedPivotRows = () => {
+      fireEvent.click(screen.getByRole('button', { name: /透视表/ }));
+      act(() => {
+        const state = useStore.getState();
+        const fields = state.chartBuilderFields;
+        state.addDimensionField(fields[0], 0); // region → b-0 @ 行维度
+        state.addDimensionField(fields[1], 0); // city   → b-1 @ 行维度
+        state.addMetricField(fields[2], 0); // revenue → b-2 @ 值指标
+      });
+    };
+
+    it('把行维度拖到列维度：绑定换组而不是复制', async () => {
+      renderChartBuilder();
+      await waitFor(() => {
+        expect(useStore.getState().chartBuilderFields).toHaveLength(3);
+      });
+      seedPivotRows();
+
+      act(() => {
+        dndCallbacks.onDragEnd?.({
+          ...bindingDrag('b-0', 'dimension', 0),
+          over: { data: { current: { type: 'dimension', groupIndex: 1 } } },
+        });
+      });
+
+      const groups = useStore.getState().queryConfig.dimensionGroups;
+      expect(groups[0].bindings).toEqual([{ bindingId: 'b-1', field: 'city' }]);
+      expect(groups[1].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
+    });
+
+    it('落在同组另一个字段标签上时组内换序', async () => {
+      renderChartBuilder();
+      await waitFor(() => {
+        expect(useStore.getState().chartBuilderFields).toHaveLength(3);
+      });
+      seedPivotRows();
+
+      act(() => {
+        dndCallbacks.onDragEnd?.({
+          ...bindingDrag('b-1', 'dimension', 0),
+          over: {
+            data: {
+              current: {
+                type: 'binding-slot',
+                kind: 'dimension',
+                groupIndex: 0,
+                index: 0,
+                bindingId: 'b-0',
+              },
+            },
+          },
+        });
+      });
+
+      expect(
+        useStore.getState().queryConfig.dimensionGroups[0].bindings.map((b) => b.bindingId)
+      ).toEqual(['b-1', 'b-0']);
+    });
+
+    it('维度拖进指标组被拒绝，两边状态都不变', async () => {
+      renderChartBuilder();
+      await waitFor(() => {
+        expect(useStore.getState().chartBuilderFields).toHaveLength(3);
+      });
+      seedPivotRows();
+
+      act(() => {
+        dndCallbacks.onDragEnd?.({
+          ...bindingDrag('b-0', 'dimension', 0),
+          over: { data: { current: { type: 'metric', groupIndex: 0 } } },
+        });
+      });
+
+      const config = useStore.getState().queryConfig;
+      expect(config.dimensionGroups[0].bindings.map((b) => b.bindingId)).toEqual(['b-0', 'b-1']);
+      expect(config.metricGroups[0].bindings.map((b) => b.bindingId)).toEqual(['b-2']);
+    });
+
+    it('指标组之间移动（值指标组之间）', async () => {
+      renderChartBuilder();
+      await waitFor(() => {
+        expect(useStore.getState().chartBuilderFields).toHaveLength(3);
+      });
+      seedPivotRows();
+      act(() => {
+        useStore.getState().addMetricGroup();
+      });
+
+      act(() => {
+        dndCallbacks.onDragEnd?.({
+          ...bindingDrag('b-2', 'metric', 0),
+          over: { data: { current: { type: 'metric', groupIndex: 1 } } },
+        });
+      });
+
+      const metricGroups = useStore.getState().queryConfig.metricGroups;
+      expect(metricGroups[0].bindings).toEqual([]);
+      expect(metricGroups[1].bindings).toEqual([{ bindingId: 'b-2', field: 'revenue' }]);
+    });
+  });
+
+  /**
+   * 过滤字段组：从左侧字段列表拖入即在过滤区追加一条条件。
+   * 与维度/指标组共用同一套落点协议（data.type === 'filter'），这里锁死两件事：
+   * 条件按列名记录、多条件恒为「且」（logic 恒 and），且同一字段可重复加入。
+   */
+  describe('过滤字段组拖入', () => {
+    const fieldDrag = (name: string) => {
+      const field = useStore.getState().chartBuilderFields.find((item) => item.name === name);
+      if (!field) {
+        throw new Error(`字段 ${name} 尚未加载`);
+      }
+      return {
+        active: { data: { current: { type: 'field', field, fieldType: field.type } } },
+      };
+    };
+
+    const dropIntoFilterZone = () => ({
+      over: { data: { current: { type: 'filter', groupIndex: 0 } } },
+    });
+
+    it('拖入维度字段即新增一条「且」条件', async () => {
+      renderChartBuilder();
+      await waitFor(() => {
+        expect(useStore.getState().chartBuilderFields).toHaveLength(3);
+      });
+
+      act(() => {
+        dndCallbacks.onDragEnd?.({ ...fieldDrag('region'), ...dropIntoFilterZone() });
+      });
+
+      const filters = useStore.getState().queryConfig.filters;
+      expect(filters).toHaveLength(1);
+      expect(filters[0]).toMatchObject({ field: 'region', operator: 'eq', logic: 'and' });
+    });
+
+    it('拖入指标字段同样成立（维度与指标都可参与过滤）', async () => {
+      renderChartBuilder();
+      await waitFor(() => {
+        expect(useStore.getState().chartBuilderFields).toHaveLength(3);
+      });
+
+      act(() => {
+        dndCallbacks.onDragEnd?.({ ...fieldDrag('revenue'), ...dropIntoFilterZone() });
+      });
+
+      expect(useStore.getState().queryConfig.filters[0]).toMatchObject({
+        field: 'revenue',
+        logic: 'and',
+      });
+    });
+
+    it('同一字段连续拖两次得到两条独立条件（区间筛选）', async () => {
+      renderChartBuilder();
+      await waitFor(() => {
+        expect(useStore.getState().chartBuilderFields).toHaveLength(3);
+      });
+
+      act(() => {
+        dndCallbacks.onDragEnd?.({ ...fieldDrag('revenue'), ...dropIntoFilterZone() });
+        dndCallbacks.onDragEnd?.({ ...fieldDrag('revenue'), ...dropIntoFilterZone() });
+      });
+
+      const filters = useStore.getState().queryConfig.filters;
+      expect(filters.map((filter) => filter.field)).toEqual(['revenue', 'revenue']);
+      expect(filters[0].id).not.toBe(filters[1].id);
+    });
   });
 });

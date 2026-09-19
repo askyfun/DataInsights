@@ -38,6 +38,7 @@ interface AxisOptionView {
 interface PieOptionView {
   tooltip: { trigger: string; formatter?: string };
   legend?: { orient: string; left: string };
+  color?: string[];
   series: {
     name?: string;
     type: string;
@@ -228,6 +229,31 @@ describe('buildChartOption：结构化聚合响应（正常路径）', () => {
       ],
       label: { formatter: '{b}: {d}%' },
     });
+  });
+
+  it('回归：style.colors 为空时 option 不得携带显式 color 键（echarts 6 会用 undefined 覆盖默认调色板，系列全透明）', () => {
+    const option = view<PieOptionView>(
+      buildChartOption(
+        'pie',
+        piePayload,
+        baseStyle,
+        {},
+        { title: '', dimensions: ['product'], metrics: ['revenue'] }
+      )
+    );
+    expect(baseStyle.colors).toEqual([]);
+    expect('color' in option).toBe(false);
+    // 设置了 colors 时则原样携带
+    const withPalette = view<PieOptionView>(
+      buildChartOption(
+        'pie',
+        piePayload,
+        { ...baseStyle, colors: ['#111111'] },
+        {},
+        { title: '', dimensions: ['product'], metrics: ['revenue'] }
+      )
+    );
+    expect(withPalette.color).toEqual(['#111111']);
   });
 
   it('scatter：二元组数组原样透传，X/Y 轴名取指标显示名', () => {
@@ -898,7 +924,7 @@ interface ComboOptionView {
 }
 
 describe('buildChartOption：combo 双轴组合图（R-58）', () => {
-  // 后端 AxisProcessor 无 color_group 时逐指标产出一条 series，name=ResolveAlias()（默认列名）
+  // 后端 AxisProcessor 逐指标产出一条 series，name=ResolveAlias()（默认列名）
   const comboPayload = {
     x_axis: ['2024-01', '2024-02'],
     series: [
@@ -973,8 +999,9 @@ describe('buildChartOption：combo 双轴组合图（R-58）', () => {
     expect(option.series[1]).toMatchObject({ type: 'bar', yAxisIndex: 0 });
   });
 
-  it('color_group 非空的复合 series 名（"别名 - 颜色值"）反查不到槽位：退化到 yAxisIndex 0', () => {
-    // 本任务的 combo 渲染分支不精确支持 color_group，复合名不匹配列名 → 统一落主轴（不崩溃）
+  it('复合 series 名（"别名 - 维度值"）反查不到槽位：退化到 yAxisIndex 0', () => {
+    // 历史图表残留第二个维度组时，后端按 dims[1:] 拆系列产出复合名；
+    // combo 渲染分支不精确支持该形态，复合名不匹配列名 → 统一落主轴（不崩溃）
     const colorGroupPayload = {
       x_axis: ['2024-01'],
       series: [
@@ -1042,9 +1069,13 @@ describe('buildChartOption：histogram 直方图（R-57）', () => {
       )
     );
     expect(option.title.text).toBe('Distribution');
-    expect(option.xAxis.type).toBe('category');
-    expect(option.xAxis.data).toEqual(['0 ~ 10', '10 ~ 20', '20 ~ 30']);
-    expect(option.yAxis.type).toBe('value');
+    // 直方图为横向条形：类目轴（箱区间）在 y 且 inverse 自上而下，数值轴在 x
+    expect(option.xAxis.type).toBe('value');
+    expect(option.yAxis).toEqual({
+      type: 'category',
+      data: ['0 ~ 10', '10 ~ 20', '20 ~ 30'],
+      inverse: true,
+    });
     expect(option.series).toEqual([{ name: 'amount', type: 'bar', data: [3, 5, 0] }]);
   });
 

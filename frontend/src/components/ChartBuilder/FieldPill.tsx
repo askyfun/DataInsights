@@ -1,5 +1,5 @@
-import { CloseOutlined, HolderOutlined, SettingOutlined } from '@ant-design/icons';
-import { Dropdown, Menu, Tag } from 'antd';
+import { CloseOutlined, SettingOutlined } from '@ant-design/icons';
+import { Dropdown, Tag } from 'antd';
 import React from 'react';
 import type { ChartField } from '@/store';
 
@@ -73,15 +73,11 @@ const FieldPill: React.FC<FieldPillProps> = ({
     onAggregationChange?.(value);
   };
 
-  const aggregationMenu = (
-    <Menu
-      items={AGGREGATION_OPTIONS.map((opt) => ({
-        key: opt.value,
-        label: opt.label,
-        onClick: () => handleAggregationMenuClick(opt.value),
-      }))}
-    />
-  );
+  const aggregationItems = AGGREGATION_OPTIONS.map((opt) => ({
+    key: opt.value,
+    label: opt.label,
+    onClick: () => handleAggregationMenuClick(opt.value),
+  }));
 
   const content = (
     <Tag
@@ -91,24 +87,19 @@ const FieldPill: React.FC<FieldPillProps> = ({
         display: 'inline-flex',
         alignItems: 'center',
         gap: '4px',
-        padding: '4px 8px',
-        margin: '2px',
-        borderRadius: '12px',
-        cursor: 'pointer',
+        padding: '0 5px',
+        margin: 0,
+        borderRadius: '5px',
+        cursor: 'grab',
         opacity: sortable?.isDragging ? 0.4 : 1,
         ...sortable?.style,
       }}
       ref={sortable?.setNodeRef}
       {...(sortable?.attributes || {})}
+      {...(sortable?.listeners || {})}
     >
-      {sortable && (
-        <span ref={sortable.setActivatorNodeRef} {...(sortable.listeners || {})}>
-          <HolderOutlined style={{ fontSize: '12px', opacity: 0.5, cursor: 'grab' }} />
-        </span>
-      )}
-
       {fieldType === 'metric' ? (
-        <Dropdown overlay={aggregationMenu} trigger={['click']}>
+        <Dropdown menu={{ items: aggregationItems }} trigger={['click']}>
           <span style={{ fontWeight: 500 }}>{getDisplayText()}</span>
         </Dropdown>
       ) : (

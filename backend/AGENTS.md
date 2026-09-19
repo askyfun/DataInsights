@@ -70,7 +70,6 @@ handler → service → domain/entity
 - `bun_builder.go` — 使用 bun 框架的 SQL 构建器
 - `executor.go` — 查询执行器，编排 Builder → 数据源执行 → Processor
 - `processor.go` — 结果处理器（Table, Pie, Axis, Scatter, Pivot）
-- `sanitizer.go` — SQL 注入防护
 - `dialect.go` — SQL 方言适配
 - `ast.go` — SQL AST 节点
 
@@ -86,7 +85,7 @@ handler → service → domain/entity
 ```bash
 cd backend
 go mod download
-go run ./cmd/main.go -f etc/config.toml   # 启动服务，端口 8080
+go run ./cmd/main.go -f etc/config.toml   # 启动服务，端口 23352
 go test ./...                              # 运行所有测试
 go test -v ./path/to/pkg -run TestName     # 运行单个测试
 go test -race ./...                        # 带竞态检测运行测试

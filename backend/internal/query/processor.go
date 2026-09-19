@@ -18,8 +18,12 @@ type Processor interface {
 	Process(rows []map[string]any, dims []string, metrics []MetricConfig, ast *QueryAST) (ChartQueryResponse, error)
 }
 
-// bar/line/area 的维度槽位名（v2 协议 dimension_groups[].name，
-// 与 frontend/src/components/ChartBuilder/chartDefinitions.ts 的 fieldGroups[].id 对齐）。
+// bar/line/area 的维度槽位名（v2 协议 dimension_groups[].name）。
+//
+// 注意：前端自 2026-09-19 起不再产出 color_group 槽位（该字段组已下线），
+// 但这里必须保留——① v2 API 契约（api/openapi.yaml）仍声明该槽位名；
+// ② 历史/外部请求仍可能携带；③ 去掉后 resolveAxisSlots 的槽位感知分支与
+// 相关测试会整片失效，而 dims[1:] 位置拆系列逻辑本就要继续支持。
 const (
 	SlotXAxis      = "x_axis"
 	SlotColorGroup = "color_group"
@@ -356,7 +360,7 @@ func resolveAxisSlots(dims []string, ast *QueryAST) (xAxisDims []string, colorGr
 	if len(xAxisDims) == 0 || len(colorGroupDims) == 0 {
 		// 裁定B：前端只在 color_group 真正非空时才发 v2 wire 格式，因此真正的 v2
 		// bar/line/area 请求必然带 color_group 槽位。缺少 color_group 说明这是 v1
-		// 请求（defaultDimGroupName 会把所有维度标成 "x_axis"）或 color_group 为空的
+		// 请求（v1 默认组名规则会把所有维度标成 "x_axis"）或 color_group 为空的
 		// v2 请求，两者都必须走旧的位置推断逻辑（dims[0]=X 轴，dims[1:]=series 拆分），
 		// 避免多维度 v1 请求被误拼成复合 X 轴。
 		return nil, nil, false

@@ -873,7 +873,7 @@ func TestAxisProcessor_SlotAware_XAxisOnly(t *testing.T) {
 }
 
 // TestAxisProcessor_SlotAware_XAxisOnlyMultiDimFallback 复现向后兼容性 bug：v1 平铺协议的
-// 多维度 bar/line/area 请求经 ChartSpecFromRequest 的 defaultDimGroupName 会把**所有**维度
+// 多维度 bar/line/area 请求按 v1 默认组名规则会把**所有**维度
 // 标成 GroupName="x_axis"（没有 color_group 维度）。此时必须回退到旧的位置推断逻辑
 // （X 轴 = dims[0]，series 按 dims[1:] 拆分），而不是走槽位感知路径把所有维度拼成复合 X 轴。
 func TestAxisProcessor_SlotAware_XAxisOnlyMultiDimFallback(t *testing.T) {
@@ -886,7 +886,7 @@ func TestAxisProcessor_SlotAware_XAxisOnlyMultiDimFallback(t *testing.T) {
 	}
 	metrics := []MetricConfig{{Field: "sales", Agg: AggSum}}
 	dims := []string{"date", "city"}
-	// 模拟 v1 请求：defaultDimGroupName 对 bar/line/area 一律返回 "x_axis"
+	// 模拟 v1 请求：默认组名规则对 bar/line/area 一律返回 "x_axis"
 	ast := slotAST(dims, []string{SlotXAxis, SlotXAxis})
 
 	resp, err := p.Process(rows, dims, metrics, ast)

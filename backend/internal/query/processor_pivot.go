@@ -46,7 +46,7 @@ func pivotColMarkerAlias(j int) string {
 // QuerySpec 分别平铺而来，按索引一一对应，额外校验 Field 名对齐）。
 // 返回 ok=false 的情况（调用方必须回退到旧的行透传路径）：
 //   - v1 平铺协议：ast 为 nil / 无 DimensionExprs / GroupName 全为空或 "rows"
-//     （ChartSpecFromRequest 的 defaultDimGroupName 把 pivot 所有维度标成 "rows"，没有 columns 组）；
+//     （v1 默认组名规则把 pivot 所有维度标成 "rows"，没有 columns 组）；
 //   - 数量或字段名不匹配（防御性兜底）；
 //   - 出现 rows/columns 之外的未知槽位名；
 //   - rows 或 columns 任一槽位为空（缺列维度时交叉表退化为无意义形状）。

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { IntlProvider } from 'react-intl';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DatasourceDetailPage from '../../pages/DatasourceDetail';
@@ -52,9 +53,11 @@ const mockColumns = [
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/datasources/1']}>
-      <Routes>
-        <Route path="/datasources/:id" element={<DatasourceDetailPage />} />
-      </Routes>
+      <IntlProvider locale="en" messages={{}}>
+        <Routes>
+          <Route path="/datasources/:id" element={<DatasourceDetailPage />} />
+        </Routes>
+      </IntlProvider>
     </MemoryRouter>
   );
 }
@@ -139,7 +142,7 @@ describe('DatasourceDetailPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/Total: 0 rows/)).toBeInTheDocument();
+      // antd Table 空数据时不渲染分页条，因此没有 "0 rows" 文本可断言
       expect(screen.getAllByText('No data').length).toBeGreaterThan(0);
     });
   });

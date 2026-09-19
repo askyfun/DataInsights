@@ -17,7 +17,7 @@ DataRay 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构�
 
 ### 技术栈
 
-- **前端**: React 18 + TypeScript + Ant Design 5.x + ECharts 5.x + Zustand 4.x + @dnd-kit + Vite 6 + Biome（lint/格式化） + Vitest（测试）
+- **前端**: React 19 + TypeScript + Ant Design 6.x + ECharts 6.x + Zustand 5.x + @dnd-kit + Vite 8 + Biome（lint/格式化） + Vitest（测试）
 - **后端**: Go 1.26 + Gin + bun ORM + PostgreSQL + Sentry
 - **部署**: Docker + docker-compose
 
@@ -59,7 +59,7 @@ frontend/src/
 ```bash
 # 前端
 cd frontend && pnpm install
-pnpm dev               # 开发服务器，端口 3000
+pnpm dev               # 开发服务器，端口 23351
 pnpm build             # tsc + vite 构建
 pnpm format            # biome 格式化
 pnpm lint              # biome lint 检查
@@ -69,7 +69,7 @@ pnpm build:check       # biome check + vitest（提交前验证）
 
 # 后端
 cd backend && go mod download
-go run ./cmd/main.go -f etc/config.toml   # 开发服务器，端口 8080
+go run ./cmd/main.go -f etc/config.toml   # 开发服务器，端口 23352
 go test ./...                              # 运行所有测试
 go test -v ./path/to/pkg -run TestName     # 运行单个测试
 go test -race ./...                        # 带竞态检测运行测试
@@ -192,8 +192,8 @@ make clean             # 清理 dist、node_modules、backend/bin
 ## 配置
 
 - 后端配置: `backend/etc/config.toml`（TOML 格式）
-- 前端 API 基础 URL: `frontend/src/lib/api/client.ts`（默认 `http://localhost:8080`）
-- Docker compose: `docker-compose.yml` — PostgreSQL（端口 5432）、后端（8080）、前端（3000）
+- 前端 API 基础 URL: `frontend/src/lib/api/client.ts`（默认 `http://localhost:23352`）
+- Docker compose: `docker-compose.yml` — PostgreSQL（端口 5432）、后端（23352）、前端（23351）
 
 ## 开发资源
 

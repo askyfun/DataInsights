@@ -46,6 +46,28 @@ func TestBuildPercentileExpr_Strategies(t *testing.T) {
 			wantExpr: `percentile_cont(0.75) WITHIN GROUP (ORDER BY x)`,
 		},
 		{
+			// StarRocks 2026-09-19 实测：percentile_cont(field, p)（参数列在前，无 WITHIN GROUP）。
+			name:     "percentile_cont_args_first p=0.5 中位数",
+			field:    `min_price`,
+			p:        0.5,
+			caps:     &datasource.DialectCapabilities{PercentileStrategy: "percentile_cont_args_first"},
+			wantExpr: `percentile_cont(min_price, 0.5)`,
+		},
+		{
+			name:     "percentile_cont_args_first p=0.25 Q1",
+			field:    `x`,
+			p:        0.25,
+			caps:     &datasource.DialectCapabilities{PercentileStrategy: "percentile_cont_args_first"},
+			wantExpr: `percentile_cont(x, 0.25)`,
+		},
+		{
+			name:     "percentile_cont_args_first p=0.75 Q3",
+			field:    `x`,
+			p:        0.75,
+			caps:     &datasource.DialectCapabilities{PercentileStrategy: "percentile_cont_args_first"},
+			wantExpr: `percentile_cont(x, 0.75)`,
+		},
+		{
 			name:     "percentile_cont p=0（下界合法）",
 			field:    `x`,
 			p:        0,

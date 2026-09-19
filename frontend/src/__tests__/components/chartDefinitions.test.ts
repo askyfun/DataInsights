@@ -87,6 +87,44 @@ describe('chartDefinitions resultShape/icon', () => {
   });
 });
 
+/**
+ * 分组维度槽位下线（2026-09-19）。
+ *
+ * 「颜色分组」（bar/line/area/combo）与「系列分组」（radar）是同一概念——按某维度的
+ * 每个值把数据拆成多条系列（等价于 Excel 透视图的「图例字段」）。命名混乱导致理解成本高，
+ * 产品裁定整体下线：这五个图型各自只保留一个维度槽位。
+ *
+ * 后端仍支持 v2 协议里的 color_group / series_group 槽位名，且后端 AxisProcessor 的
+ * dims[1:] 位置拆系列逻辑不变——历史图表由 normalizeQueryConfigForChartType 合并进
+ * 保留槽位，字段不丢（见 normalizeQueryConfigForChartType.test.ts）。
+ */
+describe('chartDefinitions 分组维度槽位下线（2026-09-19）', () => {
+  const GROUPED_CHART_TYPES = ['bar', 'line', 'area', 'combo', 'radar'] as const;
+
+  it.each(GROUPED_CHART_TYPES)('%s 不再声明 color_group / series_group 槽位', (chartType) => {
+    const ids = chartDefinitions[chartType].fieldGroups.map((group) => group.id);
+
+    expect(ids).not.toContain('color_group');
+    expect(ids).not.toContain('series_group');
+  });
+
+  it.each(['bar', 'line', 'area', 'combo'] as const)('%s 只剩 X 轴一个维度槽位', (chartType) => {
+    const dimensionIds = chartDefinitions[chartType].fieldGroups
+      .filter((group) => group.kind === 'dimension')
+      .map((group) => group.id);
+
+    expect(dimensionIds).toEqual(['x_axis']);
+  });
+
+  it('radar 只剩指标维度一个维度槽位', () => {
+    const dimensionIds = chartDefinitions.radar.fieldGroups
+      .filter((group) => group.kind === 'dimension')
+      .map((group) => group.id);
+
+    expect(dimensionIds).toEqual(['indicators']);
+  });
+});
+
 describe('chartDefinitions histogram（R-57）', () => {
   it('单个 value 指标槽位、maxFields 1、无维度槽位（对齐后端 Metrics[0].Field）', () => {
     const definition = chartDefinitions.histogram;

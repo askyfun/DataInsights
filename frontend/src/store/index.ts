@@ -55,6 +55,21 @@ const omitBindingMeta = (
   return next;
 };
 
+/**
+ * 生成过滤条件 id。
+ * 调用场景：从字段列表把同一个字段连续拖入过滤区（区间筛选会拖两次），
+ * 或点「+」快速追加多条条件。
+ * 主要逻辑：优先用 crypto.randomUUID（全局唯一）；环境不支持时回退到
+ * 时间戳 + 随机后缀——旧实现只用 Date.now()，同一毫秒内连加两条会撞 id，
+ * 撞号会让按 id 更新/删除误伤另一条条件。
+ */
+const createFilterId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `filter-${crypto.randomUUID()}`;
+  }
+  return `filter-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
 /** 五个按 bindingId 索引的元数据 Record（整组删除/取消选中路径批量清理时的输入输出形状） */
 interface BindingMetaRecords {
   dimensionLabels: Record<string, string>;
@@ -120,6 +135,34 @@ export interface BoundField {
   binding: BindingInstance;
   field: ChartField;
 }
+
+/**
+ * 绑定所在位置：拖拽源（从哪里拖起）。
+ * 维度组与指标组各有一份组下标空间，kind 用于区分，避免两套下标串味。
+ */
+export interface BindingLocation {
+  kind: 'dimension' | 'metric';
+  groupIndex: number;
+  bindingId: string;
+}
+
+/**
+ * moveBinding 的结果：
+ * - moved：已完成移动/换序；
+ * - rejected：目标组已有同名列（单组内不允许重复列，与 addDimensionField 同口径）；
+ * - noop：源绑定/目标组不存在、跨 kind、或落在原位等无需改状态的情况。
+ */
+export type MoveBindingResult = 'moved' | 'rejected' | 'noop';
+
+/** 拖拽落点：目标字段组 + 目标下标（省略下标 = 追加到该组末尾）。 */
+export interface BindingDropTarget {
+  kind: 'dimension' | 'metric';
+  groupIndex: number;
+  index?: number;
+}
+
+/** 把目标下标钳制到 [0, max]（拖拽落点来自 DOM 位置，越界不报错只收敛）。 */
+const clampIndex = (index: number, max: number): number => Math.max(0, Math.min(index, max));
 
 /**
  * 生成下一个全局唯一 bindingId（形如 b-N，顺序递增）。
@@ -291,7 +334,6 @@ export interface AppState {
   // Selected items
   selectedDatasourceId: number | null;
   selectedDatasetId: number | null;
-  selectedChartId: number | null;
 
   // Actions - Datasources
   fetchDatasources: () => Promise<void>;
@@ -312,13 +354,11 @@ export interface AppState {
   addChart: (data: ChartFormData) => Promise<Chart>;
   updateChart: (id: number, data: Partial<ChartFormData>) => Promise<Chart>;
   deleteChart: (id: number) => Promise<void>;
-  setSelectedChart: (id: number | null) => void;
 
   // Actions - Chart Builder
   fetchDatasetFields: (datasetId: number) => Promise<void>;
   setChartBuilderConfig: (config: Partial<ChartConfig>) => void;
   fetchChartData: (chartId: number) => Promise<void>;
-  fetchQueryData: (datasetId: number, config: QueryConfig) => Promise<void>;
   resetChartBuilder: () => void;
   setQueryConfig: (config: Partial<QueryConfig>) => void;
   addDimensionGroup: (group?: FieldGroup) => void;
@@ -330,7 +370,12 @@ export interface AppState {
     groupId: string,
     selectedFields: string[]
   ) => void;
-  addFilter: (filter?: FilterCondition) => void;
+  /**
+   * 追加一条过滤条件（多条件恒为「且」）。
+   * 只传 field 即可：id/operator/value/logic 由 store 补默认值，
+   * 避免调用方各自造 id 撞号。
+   */
+  addFilter: (filter?: Partial<FilterCondition>) => void;
   removeFilter: (id: string) => void;
   updateFilter: (id: string, filter: Partial<FilterCondition>) => void;
   addDimensionField: (field: ChartField, groupIndex?: number) => void;
@@ -339,6 +384,16 @@ export interface AppState {
   addMetricField: (field: ChartField, groupIndex?: number) => void;
   removeMetricField: (bindingId: string, groupIndex?: number) => void;
   reorderMetricField: (oldIndex: number, newIndex: number, groupIndex?: number) => void;
+  /**
+   * 在字段组之间移动绑定，或组内换序（拖拽查询配置区的字段标签）。
+   * 返回结果供调用方决定是否提示（moved/noop 静默，rejected 提示目标组已存在同名列）。
+   */
+  moveBinding: (source: BindingLocation, target: BindingDropTarget) => MoveBindingResult;
+  /**
+   * 交换两个维度组的绑定内容（组 id 保持不变，槽位名按组下标解释）。
+   * 调用场景：透视表「行列切换」快捷按钮——rows 与 columns 就是维度组 0/1。
+   */
+  swapDimensionGroups: (indexA: number, indexB: number) => void;
   setDimensionLabel: (bindingId: string, label: string) => void;
   setDimensionLabels: (labels: Record<string, string>) => void;
   setMetricAggregation: (bindingId: string, aggregation: string) => void;
@@ -358,10 +413,15 @@ export interface AppState {
 
   // Actions - Shares
   createShare: (data: ShareFormData) => Promise<string>;
-
-  // Clear errors
-  clearError: () => void;
 }
+
+/**
+ * 图表查询请求序号：每次 executeChartQuery 自增，响应回来时若已不是最新序号就丢弃。
+ * 调用场景：一次交互可能连发多个请求（排序/翻页/自动查询），HTTP 完成顺序不确定；
+ * 没有这层守卫时，先发出的旧请求后到达会覆盖新结果（典型表现：点了表头排序、数据
+ * 却仍按未排序结果显示）。
+ */
+let chartQuerySeq = 0;
 
 // Create store
 export const useStore = create<AppState>((set) => ({
@@ -416,7 +476,6 @@ export const useStore = create<AppState>((set) => ({
   // Selected items
   selectedDatasourceId: null,
   selectedDatasetId: null,
-  selectedChartId: null,
 
   // Datasources actions
   fetchDatasources: async () => {
@@ -542,12 +601,7 @@ export const useStore = create<AppState>((set) => ({
     await chartsApi.delete(id);
     set((state) => ({
       charts: state.charts.filter((c) => c.id !== id),
-      selectedChartId: state.selectedChartId === id ? null : state.selectedChartId,
     }));
-  },
-
-  setSelectedChart: (id: number | null) => {
-    set({ selectedChartId: id });
   },
 
   // Shares actions
@@ -735,14 +789,15 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  addFilter: (filter?: FilterCondition) => {
+  addFilter: (filter) => {
     set((state) => {
-      const newFilter = filter || {
-        id: `filter-${Date.now()}`,
+      const newFilter: FilterCondition = {
+        id: createFilterId(),
         field: '',
         operator: 'eq',
         value: '',
         logic: 'and',
+        ...filter,
       };
       return {
         queryConfig: {
@@ -915,12 +970,113 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
+  /**
+   * 把某个绑定移到目标字段组的目标位置（同组内即换序）。
+   * 调用场景：拖拽查询配置区的字段标签——维度组之间（透视表行/列维度）、指标组之间
+   * （主/次轴指标）以及组内换序，三条路径共用这一个出口。
+   * 主要逻辑：按 (kind, groupIndex) 定位源组与目标组；同组走 arrayMove，跨组则从源组
+   * 摘除后 splice 插入目标组。bindingId 原样保留，因此该绑定的别名/聚合/单位/格式等
+   * 元数据随字段一起搬走。跨 kind、组不存在、源绑定不存在一律不变更状态；
+   * 目标组已有同名列则拒绝（与 addDimensionField 的单组去重口径一致）。
+   */
+  moveBinding: (source, target) => {
+    if (source.kind !== target.kind) {
+      return 'noop';
+    }
+
+    let result: MoveBindingResult = 'noop';
+
+    set((state) => {
+      const groups =
+        source.kind === 'dimension'
+          ? state.queryConfig.dimensionGroups
+          : state.queryConfig.metricGroups;
+      const fromGroup = groups[source.groupIndex];
+      const toGroup = groups[target.groupIndex];
+      if (!fromGroup || !toGroup) return state;
+
+      const fromIndex = fromGroup.bindings.findIndex((b) => b.bindingId === source.bindingId);
+      if (fromIndex < 0) return state;
+
+      const binding = fromGroup.bindings[fromIndex];
+      const sameGroup = source.groupIndex === target.groupIndex;
+
+      // 同组内落在原位（或落在本组空白处）时顺序不变，静默返回，不制造无意义更新。
+      if (sameGroup && (target.index === undefined || target.index === fromIndex)) return state;
+
+      if (
+        toGroup.bindings.some((b) => b.field === binding.field && b.bindingId !== binding.bindingId)
+      ) {
+        result = 'rejected';
+        return state;
+      }
+
+      const nextGroups = [...groups];
+      if (sameGroup) {
+        nextGroups[source.groupIndex] = {
+          ...fromGroup,
+          bindings: arrayMove(
+            fromGroup.bindings,
+            fromIndex,
+            clampIndex(target.index as number, fromGroup.bindings.length - 1)
+          ),
+        };
+      } else {
+        const toBindings = [...toGroup.bindings];
+        toBindings.splice(
+          target.index === undefined
+            ? toBindings.length
+            : clampIndex(target.index, toBindings.length),
+          0,
+          binding
+        );
+        nextGroups[source.groupIndex] = {
+          ...fromGroup,
+          bindings: fromGroup.bindings.filter((b) => b.bindingId !== binding.bindingId),
+        };
+        nextGroups[target.groupIndex] = { ...toGroup, bindings: toBindings };
+      }
+
+      result = 'moved';
+      return {
+        queryConfig: {
+          ...state.queryConfig,
+          ...(source.kind === 'dimension'
+            ? { dimensionGroups: nextGroups }
+            : { metricGroups: nextGroups }),
+        },
+      };
+    });
+
+    return result;
+  },
+
+  /**
+   * 交换两个维度组的 bindings 数组。
+   * 主要逻辑：只换 bindings，不换组自身的 id/label——槽位语义（rows/columns）由组下标决定，
+   * 组 id 保持稳定可让 React key 与持久化文档不抖动。下标越界或相同则不动。
+   */
+  swapDimensionGroups: (indexA, indexB) => {
+    set((state) => {
+      const groups = state.queryConfig.dimensionGroups;
+      if (indexA === indexB) return state;
+      const groupA = groups[indexA];
+      const groupB = groups[indexB];
+      if (!groupA || !groupB) return state;
+
+      const nextGroups = [...groups];
+      nextGroups[indexA] = { ...groupA, bindings: groupB.bindings };
+      nextGroups[indexB] = { ...groupB, bindings: groupA.bindings };
+
+      return { queryConfig: { ...state.queryConfig, dimensionGroups: nextGroups } };
+    });
+  },
+
   setDimensionLabel: (bindingId: string, label: string) => {
     set((state) => ({
       dimensionLabels: { ...state.dimensionLabels, [bindingId]: label },
     }));
   },
-
   setDimensionLabels: (labels: Record<string, string>) => {
     set({ dimensionLabels: labels });
   },
@@ -983,17 +1139,8 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({ autoQuery: !state.autoQuery }));
   },
 
-  fetchQueryData: async (datasetId: number, config: QueryConfig) => {
-    set({ chartDataLoading: true });
-    try {
-      const response = await chartsApi.executeQuery(datasetId, config);
-      set({ chartData: response.data.data, chartDataLoading: false });
-    } catch (_error: any) {
-      set({ chartData: [], chartDataLoading: false });
-    }
-  },
-
   executeChartQuery: async (request: ChartQueryRequest) => {
+    const seq = ++chartQuerySeq;
     set({ chartDataLoading: true });
     try {
       const response = await chartsApi.executeChartQuery(request);
@@ -1002,6 +1149,9 @@ export const useStore = create<AppState>((set) => ({
       // chartType 拆平铺行；table/pivot 额外提取 columns（两者都有）与
       // 分页（仅 table 有）供 TableChart 使用。
       const chartData = result?.data ?? [];
+
+      // 过期响应（期间又发起了更新的查询）一律不落地，避免旧结果覆盖新结果。
+      if (seq !== chartQuerySeq) return;
 
       if (!Array.isArray(chartData) && 'columns' in chartData) {
         const tablePatch =
@@ -1025,6 +1175,7 @@ export const useStore = create<AppState>((set) => ({
         set({ chartData, chartQueryResponse: result, chartDataLoading: false });
       }
     } catch (error: any) {
+      if (seq !== chartQuerySeq) return;
       console.error('Chart query failed:', error);
       // 查询失败必须对用户可见：后端 400（如空筛选字段）此前被静默吞掉，
       // 预览直接变空而没有任何提示。
@@ -1035,15 +1186,6 @@ export const useStore = create<AppState>((set) => ({
 
   setTablePagination: (pagination: { page: number; pageSize: number; total: number }) => {
     set({ tablePagination: pagination });
-  },
-
-  // Clear errors
-  clearError: () => {
-    set({
-      datasourcesError: null,
-      datasetsError: null,
-      chartsError: null,
-    });
   },
 }));
 

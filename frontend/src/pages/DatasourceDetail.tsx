@@ -239,7 +239,7 @@ const DatasourceDetailPage: React.FC = () => {
   if (!datasource) {
     return (
       <div style={{ padding: '24px' }}>
-        <Space direction="vertical" align="center">
+        <Space orientation="vertical" align="center">
           <Spin />
           <Text type="secondary">{intl.formatMessage({ id: 'datasource.detail.loading' })}</Text>
         </Space>
@@ -315,7 +315,7 @@ const DatasourceDetailPage: React.FC = () => {
                 if (isLoading) {
                   return (
                     <div style={{ padding: '16px', textAlign: 'center' }}>
-                      <Space direction="vertical" align="center">
+                      <Space orientation="vertical" align="center">
                         <Spin />
                         <Text type="secondary">
                           {intl.formatMessage({ id: 'datasource.detail.loadingColumns' })}

@@ -26,7 +26,7 @@ func ParseDialect(s string) DialectType {
 }
 
 // BuildQueryStringWithBun 构建带占位符的 SQL 并返回参数化 args。
-// 值经 args 传给驱动，不落入 SQL 文本；sanitizer 仅作为旧路径兜底。
+// 值经 args 传给驱动，不落入 SQL 文本。
 func BuildQueryStringWithBun(dialect DialectType, ast *QueryAST) (string, string, []any) {
 	qb := NewBunSQLBuilder(dialect)
 	selectSQL, selectArgs := qb.BuildSelect(ast)

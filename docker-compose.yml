@@ -26,7 +26,7 @@ services:
     environment:
       DATABASE_URL: postgres://dataray:dataray123@postgres:5432/dataray?sslmode=disable
     ports:
-      - "8080:8080"
+      - "23352:23352"
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,7 +37,7 @@ services:
       dockerfile: Dockerfile
     container_name: dataray-frontend
     ports:
-      - "3000:3000"
+      - "23351:23351"
     depends_on:
       - backend
 

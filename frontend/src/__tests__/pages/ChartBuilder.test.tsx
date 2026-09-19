@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { AxiosResponse } from 'axios';
+import type { ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { chartsApi, datasetsApi } from '../../api';
@@ -30,8 +31,8 @@ vi.mock('../../components/ChartBuilder/DraggableField', () => ({
   default: () => <div data-testid="draggable-field" />,
 }));
 
-vi.mock('../../components/ChartBuilder/FilterBuilder', () => ({
-  default: () => <div data-testid="filter-builder" />,
+vi.mock('../../components/ChartBuilder/FilterDropZone', () => ({
+  default: () => <div data-testid="filter-drop-zone" />,
 }));
 
 vi.mock('../../components/ChartBuilder/QueryConfigRow', () => ({
@@ -41,12 +42,14 @@ vi.mock('../../components/ChartBuilder/QueryConfigRow', () => ({
     onAddField,
     availableFields,
     rowType,
+    children,
   }: {
     label: string;
     groupIndex?: number;
     onAddField?: (field: { id: string; name: string; type: 'dimension' | 'metric' }) => void;
     availableFields?: Array<{ id: string; name: string; type: 'dimension' | 'metric' }>;
     rowType: 'dimension' | 'metric' | 'filter';
+    children?: ReactNode;
   }) => (
     <div data-testid="query-config-row">
       <span>{label}</span>
@@ -66,6 +69,7 @@ vi.mock('../../components/ChartBuilder/QueryConfigRow', () => ({
             添加{label}
           </button>
         )}
+      {children}
     </div>
   ),
 }));
@@ -681,13 +685,15 @@ describe('ChartBuilder', () => {
         msg: 'ok',
         trace: '',
         data: [
-          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
-          { name: 'city', expr: 'city', type: 'string', comment: '', role: 'dimension' },
+          { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
           { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+          { name: 'growth', expr: 'growth', type: 'number', comment: '', role: 'metric' },
         ],
       })
     );
 
+    // 用 combo（双轴指标槽位 → 恒走 v2）取代此前的 bar + 第二维度组，
+    // 后者在 color_group 槽位下线后已不再触发槽位协议（见下一条 legacy 用例）。
     mockGetChartById.mockResolvedValueOnce(
       mockAxiosResponse({
         code: 20000,
@@ -695,20 +701,18 @@ describe('ChartBuilder', () => {
         trace: '',
         data: {
           id: 1,
-          name: 'Stacked Bar',
+          name: 'Combo',
           dataset_id: 1,
-          chart_type: 'bar',
+          chart_type: 'combo',
           config: JSON.stringify({
             version: 2,
-            chartType: 'bar',
-            title: 'Stacked Bar',
+            chartType: 'combo',
+            title: 'Combo',
             query: {
-              dimensionGroups: [
-                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'region' }] },
-                { id: 'dim-group-2', bindings: [{ bindingId: 'b-1', field: 'city' }] },
-              ],
+              dimensionGroups: [{ id: 'x_axis', bindings: [{ bindingId: 'b-0', field: 'month' }] }],
               metricGroups: [
-                { id: 'metric-group-1', bindings: [{ bindingId: 'b-2', field: 'revenue' }] },
+                { id: 'primary_values', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+                { id: 'secondary_values', bindings: [{ bindingId: 'b-2', field: 'growth' }] },
               ],
               filters: [],
               limit: 1000,
@@ -726,19 +730,19 @@ describe('ChartBuilder', () => {
     await waitFor(() => {
       const lastRequest =
         mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
-      expect(lastRequest?.chart_type).toBe('bar');
+      expect(lastRequest?.chart_type).toBe('combo');
       expect(lastRequest?.spec_version).toBe(2);
     });
 
-    // color_group 非空 → v2 槽位协议；sort 引用指标 binding b-2
+    // v2 槽位协议：sort 引用主轴指标 binding b-1，wire 上直接发 bindingId
     act(() => {
-      useStore.getState().setQueryConfig({ sort: { bindingId: 'b-2', order: 'desc' } });
+      useStore.getState().setQueryConfig({ sort: { bindingId: 'b-1', order: 'desc' } });
     });
 
     await waitFor(() => {
       const lastRequest =
         mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
-      expect(lastRequest?.sort).toEqual({ field: 'b-2', order: 'desc' });
+      expect(lastRequest?.sort).toEqual({ field: 'b-1', order: 'desc' });
     });
 
     const request =
@@ -784,10 +788,10 @@ describe('ChartBuilder', () => {
       expect(useStore.getState().queryConfig.sort).toEqual({ bindingId: 'b-0', order: 'asc' });
     });
 
-    // 点击排序会依次触发：handlePageChange 重建（antd onChange 的分页副作用，闭包里
-    // 尚无新 sort）→ handleSortChange 直发 → autoQuery effect 重跑。最后两次
-    // （直发 + effect）都必须携带 sort——R-50 修复前 effect 那次从不带 sort，
-    // 会用未排序结果覆盖已排序数据。
+    // 点击排序会依次触发：handleSortChange 直发 → autoQuery effect 重跑。两次都必须
+    // 携带 sort——R-50 修复前 effect 那次从不带 sort，会用未排序结果覆盖已排序数据；
+    // 另有一次"分页副作用"重建请求（闭包里尚无新 sort）曾与之竞态，Task 已从 TableChart
+    // 侧去掉（页码未变不再回调 onPageChange），因此这里不再有第 4 次调用。
     await waitFor(() => {
       const calls = mockExecuteChartQuery.mock.calls;
       expect(calls.length).toBeGreaterThanOrEqual(3);
@@ -1010,7 +1014,7 @@ describe('ChartBuilder', () => {
     expect(savedDoc).not.toHaveProperty('dimensionLabels');
   });
 
-  it('emits a v2 slot-protocol request when color_group is non-empty (裁定B)', async () => {
+  it('历史 bar 图表（旧 color_group 第二个维度组）加载后并入 X 轴：字段不丢、改走 v1', async () => {
     mockGetColumns.mockResolvedValueOnce(
       mockAxiosResponse({
         code: 20000,
@@ -1024,6 +1028,7 @@ describe('ChartBuilder', () => {
       })
     );
 
+    // 2026-09-19 之前的 bar 图表可以带第二个维度组（旧 id: color_group）
     mockGetChartById.mockResolvedValueOnce(
       mockAxiosResponse({
         code: 20000,
@@ -1031,17 +1036,17 @@ describe('ChartBuilder', () => {
         trace: '',
         data: {
           id: 1,
-          name: 'Stacked Bar',
+          name: 'Legacy Bar',
           dataset_id: 1,
           chart_type: 'bar',
           config: JSON.stringify({
             version: 2,
             chartType: 'bar',
-            title: 'Stacked Bar',
+            title: 'Legacy Bar',
             query: {
               dimensionGroups: [
                 { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'region' }] },
-                { id: 'dim-group-2', bindings: [{ bindingId: 'b-1', field: 'city' }] },
+                { id: 'color_group', bindings: [{ bindingId: 'b-1', field: 'city' }] },
               ],
               metricGroups: [
                 { id: 'metric-group-1', bindings: [{ bindingId: 'b-2', field: 'revenue' }] },
@@ -1064,27 +1069,26 @@ describe('ChartBuilder', () => {
       const lastRequest =
         mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
       expect(lastRequest?.chart_type).toBe('bar');
-      expect(lastRequest?.spec_version).toBe(2);
     });
 
+    // bar 已无槽位协议触发条件 → 恒走 v1 平铺
     const request =
       mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
-    expect(request).not.toHaveProperty('dims');
-    expect(request).not.toHaveProperty('metrics');
-    expect(request?.dimension_groups).toEqual([
-      { name: 'x_axis', label: 'X 轴维度', fields: [{ field: 'region', binding_id: 'b-0' }] },
-      { name: 'color_group', label: '颜色分组', fields: [{ field: 'city', binding_id: 'b-1' }] },
-    ]);
-    expect(request?.metric_groups).toEqual([
-      {
-        name: 'values',
-        label: '数值',
-        fields: [{ field: 'revenue', agg: 'sum', alias: 'revenue', binding_id: 'b-2' }],
-      },
+    expect(request?.spec_version).toBeUndefined();
+    expect(request).not.toHaveProperty('dimension_groups');
+    // 关键断言：第二个维度组的字段被搬进 X 轴而不是静默剪掉
+    expect(request?.dims).toEqual(['region', 'city']);
+
+    // store 侧同口径：只剩一组维度、含两个字段、bindingId 原样保留
+    const groups = useStore.getState().queryConfig.dimensionGroups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].bindings).toEqual([
+      { bindingId: 'b-0', field: 'region' },
+      { bindingId: 'b-1', field: 'city' },
     ]);
   });
 
-  it('keeps emitting the v1 flat request when color_group is empty (裁定B, 向后兼容)', async () => {
+  it('emits the v1 flat request for bar (color_group 槽位已下线)', async () => {
     mockGetColumns.mockResolvedValueOnce(
       mockAxiosResponse({
         code: 20000,
@@ -1097,7 +1101,7 @@ describe('ChartBuilder', () => {
       })
     );
 
-    // 模拟本任务之前保存的 bar 图表：只有 x_axis 一个维度组，没有 color_group 组
+    // 只有 x_axis 一个维度组的 bar 图表
     mockGetChartById.mockResolvedValueOnce(
       mockAxiosResponse({
         code: 20000,
@@ -1150,7 +1154,7 @@ describe('ChartBuilder', () => {
     });
   });
 
-  it('emits a v2 slot-protocol request for combo even when color_group is empty (R-58)', async () => {
+  it('emits a v2 slot-protocol request for combo (R-58)', async () => {
     mockGetColumns.mockResolvedValueOnce(
       mockAxiosResponse({
         code: 20000,
@@ -1164,7 +1168,7 @@ describe('ChartBuilder', () => {
       })
     );
 
-    // combo 图表：x_axis=month，主轴指标=revenue，次轴指标=growth，未填 color_group
+    // combo 图表：x_axis=month，主轴指标=revenue，次轴指标=growth
     mockGetChartById.mockResolvedValueOnce(
       mockAxiosResponse({
         code: 20000,
@@ -1212,7 +1216,7 @@ describe('ChartBuilder', () => {
     // combo 天然走 v2：不得回落到 v1 平铺 dims/metrics（否则主/次轴槽位区分丢失）
     expect(request).not.toHaveProperty('dims');
     expect(request).not.toHaveProperty('metrics');
-    // color_group 为空 → 只有一个 x_axis 维度组
+    // 只有一个 x_axis 维度组
     expect(request?.dimension_groups).toEqual([
       { name: 'x_axis', label: 'X 轴维度', fields: [{ field: 'month', binding_id: 'b-0' }] },
     ]);
@@ -1245,8 +1249,7 @@ describe('ChartBuilder', () => {
       })
     );
 
-    // combo：x_axis=month，主轴=revenue（无别名），次轴=growth（用户设了别名「增长率」），
-    // color_group 为空——combo 最常见的配置形态。
+    // combo：x_axis=month，主轴=revenue（无别名），次轴=growth（用户设了别名「增长率」）。
     mockGetChartById.mockResolvedValueOnce(
       mockAxiosResponse({
         code: 20000,
@@ -1443,6 +1446,122 @@ describe('ChartBuilder', () => {
     expect(echartsOptionCapture.current?.series?.[0]).toMatchObject({
       name: 'revenue',
       type: 'bar',
+    });
+  });
+
+  /**
+   * 右侧配置面板的信息层级：标题置顶、设置项逐行。
+   * 这三条用例锁死本轮交互优化的两处诉求——「图表标题放到最上面」与
+   * 「配置不再挤在一行」——避免后续有人把标题卡片挪回面板底部。
+   */
+  describe('配置面板信息层级', () => {
+    it('图表标题卡片排在可视化类型之前', () => {
+      renderNewChartBuilder();
+
+      const titleCardTitle = screen.getByText('图表标题');
+      const chartTypeCardTitle = screen.getByText('可视化类型');
+
+      // compareDocumentPosition 返回 4（DOCUMENT_POSITION_FOLLOWING）表示后者在前者之后
+      const position = titleCardTitle.compareDocumentPosition(chartTypeCardTitle);
+      expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('不再渲染冗余的「当前配置」卡片', () => {
+      renderNewChartBuilder();
+
+      expect(screen.getByText('图表标题')).toBeTruthy();
+      expect(screen.queryByText('当前配置')).toBeNull();
+    });
+
+    it('样式开关按「标签 + 控件」逐行渲染，而不是挤在同一行', async () => {
+      renderNewChartBuilder();
+
+      // 默认表格图型的 styleKeys 为 ['tableRowSize']，必然渲染一行设置
+      await waitFor(() => {
+        expect(screen.getByText('表格行尺寸')).toBeTruthy();
+      });
+
+      const rows = document.querySelectorAll('[data-testid="config-setting-row"]');
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        // 每行恰好两个子节点：左侧标签 + 右侧控件容器
+        expect(row.children).toHaveLength(2);
+      }
+    });
+  });
+
+  /**
+   * 透视表「行列切换」快捷按钮：把行维度组与列维度组整体对调。
+   * 两条路径——只有 pivot 渲染该按钮；点击后绑定整体换位且组 id 不变。
+   */
+  describe('透视表行列切换快捷按钮', () => {
+    const seedPivotRowsColumns = async () => {
+      mockGetColumns.mockResolvedValueOnce(
+        mockAxiosResponse({
+          code: 20000,
+          msg: 'ok',
+          trace: '',
+          data: [
+            { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
+            { name: 'month', expr: 'month', type: 'integer', comment: '', role: 'dimension' },
+            { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+          ],
+        })
+      );
+
+      renderChartBuilder();
+      await waitFor(() => {
+        expect(useStore.getState().chartBuilderFields).toHaveLength(3);
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /透视表/ }));
+      act(() => {
+        const state = useStore.getState();
+        const fields = state.chartBuilderFields;
+        state.addDimensionField(fields[1], 1); // month → 列维度组
+      });
+    };
+
+    it('非透视表不渲染该按钮', () => {
+      renderChartBuilder();
+
+      expect(screen.queryByTestId('pivot-swap-rows-columns')).toBeNull();
+    });
+
+    it('点击后行/列维度的绑定整体对调，组 id 不变', async () => {
+      await seedPivotRowsColumns();
+
+      const before = useStore.getState().queryConfig.dimensionGroups;
+      expect(before[0].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
+      expect(before[1].bindings).toEqual([{ bindingId: 'b-1', field: 'month' }]);
+
+      act(() => {
+        fireEvent.click(screen.getByTestId('pivot-swap-rows-columns'));
+      });
+
+      const after = useStore.getState().queryConfig.dimensionGroups;
+      expect(after[0].bindings).toEqual(before[1].bindings);
+      expect(after[1].bindings).toEqual(before[0].bindings);
+      expect(after.map((group) => group.id)).toEqual(before.map((group) => group.id));
+    });
+
+    it('透视表切成普通表格：列维度字段搬进行维度，不再被静默丢弃', async () => {
+      await seedPivotRowsColumns();
+
+      // 图型按钮的可访问名含图标 aria-label（如 "table 表格"），故用非锚定匹配
+      fireEvent.click(screen.getByRole('button', { name: /表格/ }));
+
+      const groups = useStore.getState().queryConfig.dimensionGroups;
+      expect(groups).toHaveLength(1);
+      expect(groups[0].bindings.map((binding) => binding.field)).toEqual(['region', 'month']);
+
+      // 请求侧同样带上两个维度，证明字段真的进了表格的维度槽位而不是被 slice 掉
+      await waitFor(() => {
+        const lastRequest =
+          mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+        expect(lastRequest?.chart_type).toBe('table');
+        expect(lastRequest?.dims).toEqual(['region', 'month']);
+      });
     });
   });
 });

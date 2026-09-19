@@ -179,3 +179,90 @@ body {
     overflow-y: auto;
   }
 }
+
+/* 顶栏品牌标记。
+   类名 `demo-logo` 一直在 App.tsx 里使用，但从未定义过样式 —— 一直渲染成 0×0 空 div，
+   顶栏左上角只有一个孤立单词，这是"简陋"的第一眼来源。这里补齐最小实现：
+   品牌色圆角方块 + 三道递增柱（柱状图 = 本产品的功能图形）。
+   ⚠️ 占位标记，非正式 logo 资产：正式矢量 logo 到位后整块替换。 */
+.demo-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #1677ff 0%, #3d8bff 100%);
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.demo-logo::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  background:
+    linear-gradient(#fff, #fff) left bottom / 3px 6px no-repeat,
+    linear-gradient(#fff, #fff) center bottom / 3px 9px no-repeat,
+    linear-gradient(#fff, #fff) right bottom / 3px 12px no-repeat;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   图表构建页 · 表面系统（page-scoped design tokens）
+
+   原规则把 antd 卡片唯一的层级线索（1px 描边）摘掉，三栏于是变成「白 + 白 + 白」，
+   只剩两条 1px 分栏线。这就是"全是白、颜色单调、显得简陋"的根因：
+   页面只有 #fff / #fafafa 两个明度值，且面与面之间没有边界，只剩线。
+
+   修法不是简单把边框加回来，而是补齐一套**明度阶梯**：
+     L0 画布（灰）  →  L1 卡片（白）  →  L2 下沉面（极浅灰）
+   白卡片浮在灰画布上，边界靠"描边 + 投影"两件事共同定义 —— 缺任一个都会退回
+   扁平的白色矩形。彩度则集中在语义色上（分组色条 / 字段类型点 / 主操作），
+   不做装饰性着色。
+
+   为什么放页面作用域而不是 main.tsx 全局 token：本页三栏是自绘的（Sider/Content
+   都是内联样式），全局 token 管不到；先在本页定性，撑得住再提升为全局。
+   改动半径 = 0 个其他页面。
+   ───────────────────────────────────────────────────────────────────────────── */
+.chart-builder-page {
+  --dr-canvas: #f4f5f7; /* L0 画布：一切非卡片区域 */
+  --dr-surface: #ffffff; /* L1 面板：卡片、浮层 */
+  --dr-sunken: #f7f8fa; /* L2 下沉：拖放区、占位区、分段容器 */
+  --dr-border: #e6e8eb; /* 常规发丝线 */
+  --dr-border-strong: #d9dde3; /* 需要被看见的线：卡头下缘、表头下缘、虚线框 */
+  --dr-text-1: #1f2328; /* 标题、数值 */
+  --dr-text-2: #57606a; /* 正文 */
+  --dr-text-3: #8c95a1; /* 计数、辅助 */
+  --dr-text-4: #b0b7c3; /* 占位图形、次要提示 */
+  --dr-accent: #1677ff;
+  --dr-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+/* 卡片：白面浮在灰画布上。 */
+.chart-builder-page .ant-card {
+  border: 1px solid var(--dr-border);
+  box-shadow: var(--dr-shadow-card);
+}
+
+/* 卡头：本页唯一的"标题带"。
+   保持白底而不染灰 —— 灰卡头会和灰画布同色，反而更糊。层次改由这两件事建立：
+   ① 1px 下缘线把「卡头 / 卡体」分开；② 13px/600 深色标题与 #8c95a1 的辅助文字拉开对比。
+   （antd 6 的 Card 默认 headerBg 是 transparent，卡片一旦无边框，卡头会完全融进卡体。） */
+.chart-builder-page .ant-card-head {
+  border-bottom: 1px solid var(--dr-border);
+}
+
+.chart-builder-page .ant-card-head-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dr-text-1);
+}
+
+.chart-builder-page .ant-card-extra {
+  font-size: 12px;
+  color: var(--dr-text-3);
+}
+
+/* 表头：全局用的是 Excel 风（#f0f2f5 底 + 2px #d9d9d9 下边线），
+   在预览卡这种小面积里 2px 线太重、会和卡头下缘线打架。本页收细为 1px。 */
+.chart-builder-page .ant-table-wrapper .ant-table-thead > tr > th {
+  background: var(--dr-sunken) !important;
+  border-bottom: 1px solid var(--dr-border-strong) !important;
+}

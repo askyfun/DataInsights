@@ -13,7 +13,6 @@ import {
   Breadcrumb,
   Button,
   Card,
-  Descriptions,
   Form,
   Input,
   Modal,
@@ -26,6 +25,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
@@ -33,17 +33,10 @@ import { useIntl } from 'react-intl';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { DatasetColumn } from '../api';
 import { DatasetPreview, datasetsApi } from '../api';
+import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
 const { Title, Text, Paragraph } = Typography;
-
-const getQueryTypeInfo = (type: string) => {
-  const typeMap: Record<string, { label: string; color: string }> = {
-    table: { label: 'Table', color: 'blue' },
-    sql: { label: 'SQL', color: 'green' },
-  };
-  return typeMap[type] || { label: type, color: 'blue' };
-};
 
 const DatasetDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -135,6 +128,10 @@ const DatasetDetailPage: React.FC = () => {
     setColumns((prev) =>
       prev.map((col) => (col.name === name ? { ...col, type: type as DatasetColumn['type'] } : col))
     );
+  };
+
+  const handleColumnCommentChange = (name: string, comment: string) => {
+    setColumns((prev) => prev.map((col) => (col.name === name ? { ...col, comment } : col)));
   };
 
   const handleSaveColumns = async () => {
@@ -265,28 +262,64 @@ const DatasetDetailPage: React.FC = () => {
       title: intl.formatMessage({ id: 'field.name' }),
       dataIndex: 'name',
       key: 'name',
+      width: 220,
       render: (name: string, record: any) => (
-        <Space>
-          {record.isVirtual && <FunctionOutlined style={{ color: '#722ed1' }} />}
-          <Text
-            strong={record.isVirtual}
-            style={{ color: record.role === 'dimension' ? '#1890ff' : '#722ed1' }}
-          >
-            {name}
-          </Text>
-          {shardKeySet.has(name) && (
-            <Tag color="orange">{intl.formatMessage({ id: 'field.shardKey' })}</Tag>
-          )}
-          {record.isVirtual && (
-            <Tag color="purple">{intl.formatMessage({ id: 'field.virtual' })}</Tag>
-          )}
-          {record.role === 'dimension' && !record.isVirtual && (
-            <Tag color="blue">{intl.formatMessage({ id: 'field.dimension' })}</Tag>
-          )}
-          {record.role === 'metric' && !record.isVirtual && (
-            <Tag color="purple">{intl.formatMessage({ id: 'field.metric' })}</Tag>
-          )}
+        <Space orientation="vertical" size={2} style={{ maxWidth: 200 }}>
+          <Space size={4}>
+            {record.isVirtual && <FunctionOutlined style={{ color: '#722ed1' }} />}
+            <Text
+              strong={record.isVirtual}
+              title={name}
+              style={{
+                display: 'inline-block',
+                maxWidth: 170,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                verticalAlign: 'bottom',
+                color: record.role === 'dimension' ? '#1890ff' : '#722ed1',
+              }}
+            >
+              {name}
+            </Text>
+          </Space>
+          <Space size={4} wrap>
+            {shardKeySet.has(name) && (
+              <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+                {intl.formatMessage({ id: 'field.shardKey' })}
+              </Tag>
+            )}
+            {record.isVirtual && (
+              <Tag color="purple" style={{ marginInlineEnd: 0 }}>
+                {intl.formatMessage({ id: 'field.virtual' })}
+              </Tag>
+            )}
+            {record.role === 'dimension' && !record.isVirtual && (
+              <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+                {intl.formatMessage({ id: 'field.dimension' })}
+              </Tag>
+            )}
+            {record.role === 'metric' && !record.isVirtual && (
+              <Tag color="purple" style={{ marginInlineEnd: 0 }}>
+                {intl.formatMessage({ id: 'field.metric' })}
+              </Tag>
+            )}
+          </Space>
         </Space>
+      ),
+    },
+    {
+      title: intl.formatMessage({ id: 'field.description' }),
+      dataIndex: 'comment',
+      key: 'comment',
+      render: (comment: string, record: any) => (
+        <Input
+          value={comment}
+          placeholder={intl.formatMessage({ id: 'field.descriptionPlaceholder' })}
+          variant="borderless"
+          onChange={(event) => handleColumnCommentChange(record.name, event.target.value)}
+          style={{ width: '100%', paddingInline: 0 }}
+        />
       ),
     },
     {
@@ -427,22 +460,19 @@ const DatasetDetailPage: React.FC = () => {
           style={{
             display: 'flex',
             justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '24px',
+            alignItems: 'flex-start',
+            marginBottom: '16px',
           }}
         >
           <div>
-            <Space>
-              <AppstoreOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-              <Title level={3} style={{ margin: 0 }}>
+            <Space align="center" size={8}>
+              <AppstoreOutlined style={{ fontSize: '20px', color: '#1890ff' }} />
+              <Title level={4} style={{ margin: 0 }}>
                 {displayDataset?.name}
               </Title>
-              <Tag color={getQueryTypeInfo(displayDataset?.query_type).color}>
-                {getQueryTypeInfo(displayDataset?.query_type).label}
-              </Tag>
             </Space>
             {displayDataset?.description && (
-              <Paragraph type="secondary" style={{ marginTop: '8px', marginBottom: 0 }}>
+              <Paragraph type="secondary" style={{ margin: '4px 0 0' }}>
                 {displayDataset.description}
               </Paragraph>
             )}
@@ -465,62 +495,101 @@ const DatasetDetailPage: React.FC = () => {
           </Space>
         </div>
 
-        <Descriptions bordered column={2} style={{ marginBottom: '24px' }}>
-          <Descriptions.Item label={intl.formatMessage({ id: 'dataset.detail.datasource' })}>
-            <Space>
-              <DatabaseOutlined />
-              <Text>{datasource?.name || `-`}</Text>
-            </Space>
-          </Descriptions.Item>
-          <Descriptions.Item label={intl.formatMessage({ id: 'dataset.detail.queryType' })}>
-            {getQueryTypeInfo(displayDataset?.query_type).label}
-          </Descriptions.Item>
-          <Descriptions.Item label={intl.formatMessage({ id: 'dataset.detail.source' })} span={2}>
+        {/* 紧凑元信息条：数据源 / 来源 / 字段数 / 创建时间 / 分片 */}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            padding: '8px 12px',
+            marginBottom: '16px',
+            background: 'rgba(0, 0, 0, 0.02)',
+            border: '1px solid rgba(0, 0, 0, 0.06)',
+            borderRadius: 6,
+            fontSize: 13,
+            gap: 20,
+          }}
+        >
+          <span>
+            <DatabaseOutlined style={{ marginRight: 6, color: '#8c8c8c' }} />
+            {intl.formatMessage({ id: 'dataset.detail.datasource' })}：
+            {displayDataset?.datasource_id ? (
+              <Link to={`/datasources/${displayDataset.datasource_id}`}>
+                {datasource?.name || `#${displayDataset.datasource_id}`}
+              </Link>
+            ) : (
+              <Text type="secondary">—</Text>
+            )}
+          </span>
+
+          <span>
+            <TableOutlined style={{ marginRight: 6, color: '#8c8c8c' }} />
+            {intl.formatMessage({ id: 'dataset.detail.source' })}：
             {displayDataset?.query_type === 'table' ? (
-              <Space>
-                <TableOutlined />
-                <Text code>{displayDataset?.table_name}</Text>
-              </Space>
+              <>
+                <Link to={`/datasources/${displayDataset?.datasource_id}`}>
+                  <Text code>{displayDataset?.table_name || '—'}</Text>
+                </Link>
+                <Tag color="blue" style={{ marginLeft: 6 }}>
+                  {intl.formatMessage({ id: 'dataset.detail.sourceType.physical' })}
+                </Tag>
+              </>
             ) : (
-              <Text code style={{ display: 'block', maxHeight: '100px', overflow: 'auto' }}>
-                {displayDataset?.query_sql}
-              </Text>
+              <>
+                <Tooltip
+                  title={
+                    <pre style={{ margin: 0, maxWidth: 520 }}>{displayDataset?.query_sql}</pre>
+                  }
+                >
+                  <Text
+                    code
+                    style={{
+                      display: 'inline-block',
+                      maxWidth: 320,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      verticalAlign: 'bottom',
+                    }}
+                  >
+                    {displayDataset?.query_sql || '—'}
+                  </Text>
+                </Tooltip>
+                <Tag color="purple" style={{ marginLeft: 6 }}>
+                  {intl.formatMessage({ id: 'dataset.detail.sourceType.sql' })}
+                </Tag>
+              </>
             )}
-          </Descriptions.Item>
-          <Descriptions.Item label={intl.formatMessage({ id: 'dataset.detail.createdAt' })}>
-            {displayDataset?.created_at
-              ? new Date(displayDataset.created_at).toLocaleString()
-              : '-'}
-          </Descriptions.Item>
-          <Descriptions.Item label={intl.formatMessage({ id: 'dataset.detail.fields' })}>
-            {columns.length} {intl.formatMessage({ id: 'dataset.detail.fieldsCount' })}
-          </Descriptions.Item>
-          <Descriptions.Item label={intl.formatMessage({ id: 'dataset.shard.enabled' })}>
-            {displayDataset?.shard_enabled ? (
-              <Tag color="orange">{intl.formatMessage({ id: 'dataset.shard.enabled.yes' })}</Tag>
-            ) : (
-              <Tag>{intl.formatMessage({ id: 'dataset.shard.enabled.no' })}</Tag>
-            )}
-          </Descriptions.Item>
+          </span>
+
+          <span>
+            {intl.formatMessage({ id: 'dataset.detail.fields' })}：{columns.length}
+          </span>
+
+          <span>
+            {intl.formatMessage({ id: 'dataset.detail.createdAt' })}：
+            {formatDateTime(displayDataset?.created_at)}
+          </span>
+
           {displayDataset?.shard_enabled && (
-            <Descriptions.Item label={intl.formatMessage({ id: 'dataset.shard.keys' })}>
-              {(() => {
+            <span>
+              {intl.formatMessage({ id: 'dataset.shard.enabled' })}：{(() => {
                 try {
                   const keys: string[] = JSON.parse(displayDataset.shard_keys || '[]');
                   return keys.length > 0
                     ? keys.map((k) => (
-                        <Tag key={k} color="orange">
+                        <Tag key={k} color="orange" style={{ marginLeft: 4 }}>
                           {k}
                         </Tag>
                       ))
-                    : '-';
+                    : '—';
                 } catch {
-                  return '-';
+                  return '—';
                 }
               })()}
-            </Descriptions.Item>
+            </span>
           )}
-        </Descriptions>
+        </div>
 
         <Tabs
           defaultActiveKey="fields"

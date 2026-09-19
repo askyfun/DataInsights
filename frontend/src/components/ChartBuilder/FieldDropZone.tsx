@@ -2,16 +2,43 @@ import {
   ArrowLeftOutlined,
   ArrowRightOutlined,
   CloseOutlined,
-  HolderOutlined,
   PlusOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { useDroppable } from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { Button, Dropdown, Tag } from 'antd';
 import React, { useState } from 'react';
 import type { BoundField, ChartField } from '@/store';
+import { type DropZoneType, dropZoneId, dropZoneSurfaceStyle } from './dropZoneStyles';
 
-export type DropZoneType = 'dimension' | 'metric' | 'filter';
+export type { DropZoneType };
+
+/**
+ * 拖动查询配置区里的字段标签时挂在 active.data.current 上的载荷。
+ * 调用场景：ChartBuilder 的 onDragStart/onDragEnd 据此识别"配置区内部搬字段"。
+ */
+export interface BindingDragData {
+  type: 'binding-source';
+  bindingId: string;
+  kind: 'dimension' | 'metric';
+  groupIndex: number;
+  /** 拖拽预览文本（已含聚合/别名），避免预览侧再回查 store。 */
+  label: string;
+  /** 预览标签颜色（维度蓝 / 日期紫 / 指标绿）。 */
+  color: string;
+}
+
+/**
+ * 字段标签自身作为落点（插入到该标签之前）时挂在 over.data.current 上的载荷。
+ * 调用场景：组内换序 / 跨组插到指定位置——只有拿到 index 才能精确落位。
+ */
+export interface BindingSlotDropData {
+  type: 'binding-slot';
+  kind: 'dimension' | 'metric';
+  groupIndex: number;
+  index: number;
+  bindingId: string;
+}
 
 export interface FieldDropZoneProps {
   zoneType: DropZoneType;
@@ -41,6 +68,7 @@ const AGGREGATION_OPTIONS = [
 interface FieldPillInlineProps {
   bound: BoundField;
   zoneType: DropZoneType;
+  groupIndex: number;
   aggregations: Record<string, string>;
   aliases: Record<string, string>;
   index: number;
@@ -52,9 +80,25 @@ interface FieldPillInlineProps {
   onMoveRight?: () => void;
 }
 
+/**
+ * 合并 dnd-kit 的 draggable / droppable 两个 ref 到同一个 DOM 节点。
+ * 调用场景：字段标签既要能拖起（拖到别的组），又要能作为落点（插到它前面）。
+ * 主要逻辑：回调 ref 逐个透传节点；卸载时两个 ref 都收到 null。
+ */
+const mergeRefs =
+  (
+    first: (node: HTMLElement | null) => void,
+    second: (node: HTMLElement | null) => void
+  ): ((node: HTMLElement | null) => void) =>
+  (node) => {
+    first(node);
+    second(node);
+  };
+
 const FieldPillInline: React.FC<FieldPillInlineProps> = ({
   bound,
   zoneType,
+  groupIndex,
   aggregations,
   aliases,
   index,
@@ -86,8 +130,58 @@ const FieldPillInline: React.FC<FieldPillInlineProps> = ({
     return field.name;
   };
 
+  const displayText = getDisplayText();
+
+  // 拖起：整个标签都是拖拽把手。PointerSensor 有 5px 位移阈值，因此标签上的
+  // 设置/关闭按钮仍可正常点击，不会误触发拖拽。
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragNodeRef,
+    isDragging,
+  } = useDraggable({
+    id: `binding-${bindingId}`,
+    data: {
+      type: 'binding-source',
+      bindingId,
+      kind: fieldType,
+      groupIndex,
+      label: displayText,
+      color: getColor(),
+    } satisfies BindingDragData,
+  });
+
+  // 落点：插到本标签之前。与所在组的 drop zone（追加到末尾）同层，依靠 dnd-kit
+  // 默认的矩形交集评分（IoU 越大越优先）让内层标签压过外层区域。
+  const { setNodeRef: setSlotNodeRef, isOver } = useDroppable({
+    id: `binding-slot-${bindingId}`,
+    data: {
+      type: 'binding-slot',
+      kind: fieldType,
+      groupIndex,
+      index,
+      bindingId,
+    } satisfies BindingSlotDropData,
+  });
+
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, margin: '2px' }}>
+    <span
+      ref={mergeRefs(setDragNodeRef, setSlotNodeRef)}
+      data-testid={`binding-pill-${bindingId}`}
+      {...listeners}
+      {...attributes}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 2,
+        margin: 0,
+        borderRadius: '5px',
+        cursor: 'grab',
+        opacity: isDragging ? 0.4 : 1,
+        outline: isOver ? '2px solid #1677ff' : 'none',
+        outlineOffset: '1px',
+      }}
+    >
       <Tag
         color={getColor()}
         closable={false}
@@ -95,13 +189,12 @@ const FieldPillInline: React.FC<FieldPillInlineProps> = ({
           display: 'inline-flex',
           alignItems: 'center',
           gap: '4px',
-          padding: '4px 8px',
+          padding: '0 5px',
           margin: 0,
-          borderRadius: '12px',
+          borderRadius: '5px',
         }}
       >
-        <HolderOutlined style={{ fontSize: '12px', opacity: 0.4 }} />
-        <span style={{ fontWeight: 500 }}>{getDisplayText()}</span>
+        <span style={{ fontWeight: 500 }}>{displayText}</span>
         {onOpenSettings && (
           <SettingOutlined
             style={{ fontSize: '12px', opacity: 0.6, cursor: 'pointer' }}
@@ -158,7 +251,7 @@ const FieldDropZone: React.FC<FieldDropZoneProps> = ({
   emptyText,
 }) => {
   const { setNodeRef, isOver } = useDroppable({
-    id: `dropzone-${zoneType}-${groupIndex}`,
+    id: dropZoneId(zoneType, groupIndex),
     data: { type: zoneType, groupIndex },
   });
 
@@ -187,7 +280,7 @@ const FieldDropZone: React.FC<FieldDropZoneProps> = ({
             width: 6,
             height: 6,
             borderRadius: '50%',
-            backgroundColor: field.type === 'dimension' ? '#1890ff' : '#52c41a',
+            backgroundColor: field.type === 'dimension' ? '#1677ff' : '#52c41a',
           }}
         />
         {field.name}
@@ -199,49 +292,8 @@ const FieldDropZone: React.FC<FieldDropZoneProps> = ({
     },
   }));
 
-  const getZoneColor = () => {
-    switch (zoneType) {
-      case 'dimension':
-        return isOver ? '#e6f4ff' : '#fafafa';
-      case 'metric':
-        return isOver ? '#f6ffed' : '#fafafa';
-      case 'filter':
-        return isOver ? '#fff7e6' : '#fafafa';
-      default:
-        return '#fafafa';
-    }
-  };
-
-  const getBorderColor = () => {
-    if (!isOver) return '#d9d9d9';
-    switch (zoneType) {
-      case 'dimension':
-        return '#1890ff';
-      case 'metric':
-        return '#52c41a';
-      case 'filter':
-        return '#fa8c16';
-      default:
-        return '#d9d9d9';
-    }
-  };
-
   return (
-    <div
-      ref={setNodeRef}
-      style={{
-        minHeight: '40px',
-        padding: '6px 10px',
-        backgroundColor: getZoneColor(),
-        border: `1px dashed ${getBorderColor()}`,
-        borderRadius: '6px',
-        transition: 'all 0.2s ease',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        flexWrap: 'wrap',
-      }}
-    >
+    <div ref={setNodeRef} style={dropZoneSurfaceStyle(zoneType, isOver)}>
       {fields.length === 0 ? (
         filteredFields.length > 0 ? (
           <Dropdown
@@ -260,7 +312,7 @@ const FieldDropZone: React.FC<FieldDropZoneProps> = ({
             />
           </Dropdown>
         ) : (
-          <span style={{ color: '#999', fontSize: '13px' }}>
+          <span style={{ color: 'var(--dr-text-3)', fontSize: '13px' }}>
             {emptyText || defaultEmptyText[zoneType]}
           </span>
         )
@@ -271,6 +323,7 @@ const FieldDropZone: React.FC<FieldDropZoneProps> = ({
               key={bound.binding.bindingId}
               bound={bound}
               zoneType={zoneType}
+              groupIndex={groupIndex}
               aggregations={aggregations}
               aliases={aliases}
               index={index}

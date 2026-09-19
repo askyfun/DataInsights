@@ -172,16 +172,14 @@ func (c *starRocksConnection) Execute(ctx context.Context, sql string, args ...a
 }
 
 func (c *starRocksConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
-	// TODO(Task 3-0): 未经真实实例探针验证，当前返回保守默认值（不支持）。
-	// StarRocks 不继承 MySQL 的探针结果，待有可用实例时独立实测：
-	//   - GROUPING SETS：SELECT GROUPING(c) FROM (VALUES (1)) AS t(c) GROUP BY GROUPING SETS ((c), ())
-	//     （按 StarRocks 自身语法调整；不照抄 MySQL 结论）
-	//   - 窗口函数：SELECT PERCENT_RANK() OVER (ORDER BY 1) FROM (SELECT 1) t
-	//   - 百分位：StarRocks 有 percentile_cont 系函数，语义需实测验证后再声明策略。
+	// 2026-09-19 在真实实例（192.168.10.237:9030）实测：percentile_cont(field, p)
+	// 为精确百分位（无 WITHIN GROUP 语法，参数列在前），故声明
+	// "percentile_cont_args_first" 策略（SQL 形态见 query/percentile.go）。
+	// GROUPING SETS / 窗口函数仍未实测，保持保守 false。
 	return &DialectCapabilities{
 		SupportsGroupingSets:    false,
-		SupportsPercentileCont:  false,
+		SupportsPercentileCont:  true,
 		SupportsWindowFunctions: false,
-		PercentileStrategy:      "unsupported",
+		PercentileStrategy:      "percentile_cont_args_first",
 	}, nil
 }

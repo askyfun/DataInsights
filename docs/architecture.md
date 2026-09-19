@@ -8,7 +8,7 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | React 18 + TypeScript + Ant Design 5.x + ECharts 5.x + Zustand 4.x + @dnd-kit + Vite 6 + Sentry |
+| 前端 | React 19 + TypeScript + Ant Design 6.x + ECharts 6.x + Zustand 5.x + @dnd-kit + Vite 8 + Sentry |
 | 后端 | Go 1.26 + Gin + bun ORM + PostgreSQL + Sentry |
 | 部署 | Docker + docker-compose |
 
@@ -51,8 +51,8 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 
 1. **配置文件**: 后端使用 TOML 格式 (`etc/config.toml`)
 2. **CORS**: 后端配置 CORS 中间件允许跨域
-3. **API 基础URL**: 前端默认连接 `http://localhost:8080`，修改 `frontend/src/lib/api/client.ts`
-4. **前端端口**: Vite 默认 3000
+3. **API 基础URL**: 前端默认连接 `http://localhost:23352`，修改 `frontend/src/lib/api/client.ts`
+4. **前端端口**: Vite 默认 23351
 5. **热重载**: 后端开发使用 `air` 工具 (`make dev`)
 
 

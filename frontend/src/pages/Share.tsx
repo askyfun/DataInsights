@@ -20,6 +20,7 @@ import dayjs, { Dayjs } from 'dayjs';
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Share, sharesApi } from '../api';
+import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
 const { Text } = Typography;
@@ -175,7 +176,7 @@ const SharePage: React.FC = () => {
       key: 'created_at',
       render: (createdAt: string) =>
         createdAt ? (
-          <Text type="secondary">{new Date(createdAt).toLocaleString()}</Text>
+          <Text type="secondary">{formatDateTime(createdAt)}</Text>
         ) : (
           <Text type="secondary">-</Text>
         ),
@@ -248,7 +249,7 @@ const SharePage: React.FC = () => {
         open={createModalVisible}
         onCancel={handleCloseLinkModal}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}

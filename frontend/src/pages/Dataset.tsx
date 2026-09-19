@@ -4,7 +4,6 @@ import {
   DatabaseOutlined,
   DeleteOutlined,
   EditOutlined,
-  EyeOutlined,
   FunctionOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -13,8 +12,6 @@ import {
 import {
   Button,
   Card,
-  Descriptions,
-  Drawer,
   Form,
   Input,
   Modal,
@@ -27,12 +24,13 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import * as echarts from 'echarts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { DataType } from '../api';
 import {
   ColumnInfo,
@@ -44,6 +42,7 @@ import {
   TableInfo,
 } from '../api';
 import { toStandardType } from '../api/datatypes';
+import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
 const { Title, Text } = Typography;
@@ -55,7 +54,6 @@ const DatasetPage: React.FC = () => {
   const [editForm] = Form.useForm<DatasetFormData>();
   const [modalVisible, setModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [tablesLoading, setTablesLoading] = useState(false);
@@ -63,7 +61,6 @@ const DatasetPage: React.FC = () => {
   const [queryType, setQueryType] = useState<string>('table');
   const [editingDataset, setEditingDataset] = useState<any>(null);
   const [datasetColumns, setDatasetColumns] = useState<DatasetColumn[]>([]);
-  const [previewData, setPreviewData] = useState<DatasetPreview | null>(null);
   const [searchText, setSearchText] = useState('');
   const [modalPreviewLoading, setModalPreviewLoading] = useState(false);
   const [modalPreviewData, setModalPreviewData] = useState<DatasetPreview | null>(null);
@@ -271,23 +268,6 @@ const DatasetPage: React.FC = () => {
       if (error.errorFields) {
         return;
       }
-      message.error(error.message || intl.formatMessage({ id: 'virtualField.saveFailed' }));
-    } finally {
-      setSavingColumns(false);
-    }
-  };
-
-  const handleDeleteVirtualField = async (fieldName: string) => {
-    if (!editingDataset) return;
-
-    const updatedColumns = (datasetColumns || []).filter((col) => col.name !== fieldName);
-
-    try {
-      setSavingColumns(true);
-      await datasetsApi.updateColumns(editingDataset.id, updatedColumns);
-      setDatasetColumns(updatedColumns);
-      message.success(intl.formatMessage({ id: 'virtualField.fieldDeleted' }));
-    } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'virtualField.saveFailed' }));
     } finally {
       setSavingColumns(false);
@@ -576,10 +556,6 @@ const DatasetPage: React.FC = () => {
     }
   };
 
-  const handleViewDetails = (record: any) => {
-    navigate(`/datasets/${record.id}`);
-  };
-
   const handleColumnRoleChange = (name: string, role: 'dimension' | 'metric') => {
     setDatasetColumns((prev) => prev.map((col) => (col.name === name ? { ...col, role } : col)));
   };
@@ -588,19 +564,6 @@ const DatasetPage: React.FC = () => {
     setDatasetColumns((prev) =>
       prev.map((col) => (col.name === name ? { ...col, type: type as DatasetColumn['type'] } : col))
     );
-  };
-
-  const handleSaveColumns = async () => {
-    if (!editingDataset) return;
-    setSavingColumns(true);
-    try {
-      await datasetsApi.updateColumns(editingDataset.id, datasetColumns);
-      message.success(intl.formatMessage({ id: 'common.success' }));
-    } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
-    } finally {
-      setSavingColumns(false);
-    }
   };
 
   // Get datasource name by id
@@ -632,64 +595,50 @@ const DatasetPage: React.FC = () => {
       title: intl.formatMessage({ id: 'dataset.name' }),
       dataIndex: 'name',
       key: 'name',
-      render: (text: string) => (
-        <Space>
+      render: (text: string, record: any) => (
+        <Link
+          to={`/datasets/${record.id}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
           <DatabaseOutlined />
           <Text strong>{text}</Text>
-        </Space>
+        </Link>
       ),
     },
     {
-      title: intl.formatMessage({ id: 'dataset.datasource' }),
-      dataIndex: 'datasource_id',
-      key: 'datasource_id',
-      render: (id: number) => <Tag color="blue">{getDatasourceName(id)}</Tag>,
-    },
-    {
-      title: intl.formatMessage({ id: 'dataset.queryType' }),
-      dataIndex: 'query_type',
-      key: 'query_type',
-      render: (type: string) => (
-        <Tag color={type === 'table' ? 'green' : 'purple'}>
-          {type === 'table'
-            ? intl.formatMessage({ id: 'dataset.queryType.table' })
-            : intl.formatMessage({ id: 'dataset.customSql' })}
-        </Tag>
-      ),
-    },
-    {
-      title: intl.formatMessage({ id: 'dataset.source' }),
-      dataIndex: 'table_name',
+      title: intl.formatMessage({ id: 'dataset.source.combined' }),
       key: 'source',
-      render: (_: any, record: any) => (
-        <Text code>
-          {record.query_type === 'table'
-            ? record.table_name
-            : `${record.query_sql?.substring(0, 50)}...`}
-        </Text>
-      ),
+      ellipsis: true,
+      render: (_: any, record: any) => {
+        const dsId = record.datasource_id;
+        const sourceLabel = record.query_type === 'table' ? record.table_name : 'SQL';
+        return (
+          <Space size={6}>
+            <Link to={`/datasources/${dsId}`}>{getDatasourceName(dsId)}</Link>
+            <Text type="secondary">/</Text>
+            {record.query_type === 'table' ? (
+              <Text code>{sourceLabel}</Text>
+            ) : (
+              <Tooltip title={record.query_sql}>
+                <Text code>SQL</Text>
+              </Tooltip>
+            )}
+          </Space>
+        );
+      },
     },
     {
       title: intl.formatMessage({ id: 'dataset.createdAt' }),
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (text: string) => (text ? new Date(text).toLocaleString() : '-'),
+      render: (text: string) => formatDateTime(text),
     },
     {
       title: intl.formatMessage({ id: 'dataset.actions' }),
       key: 'actions',
-      width: 180,
+      width: 140,
       render: (_: any, record: any) => (
         <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            aria-label="View dataset details"
-            onClick={() => handleViewDetails(record)}
-          >
-            {intl.formatMessage({ id: 'common.details' })}
-          </Button>
           <Button
             type="link"
             size="small"
@@ -795,7 +744,7 @@ const DatasetPage: React.FC = () => {
         }}
         footer={null}
         width={900}
-        destroyOnClose
+        destroyOnHidden
       >
         <Steps
           current={createStep}
@@ -1383,269 +1332,6 @@ const DatasetPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
-
-      {/* Dataset Details Drawer */}
-      <Drawer
-        title={`${intl.formatMessage({ id: 'dataset.details' })}: ${editingDataset?.name || ''}`}
-        open={detailsModalVisible}
-        onClose={() => {
-          setDetailsModalVisible(false);
-          setEditingDataset(null);
-          setDatasetColumns([]);
-          setPreviewData(null);
-        }}
-        width={900}
-      >
-        <Spin spinning={false}>
-          {editingDataset && (
-            <>
-              <Descriptions bordered column={2} style={{ marginBottom: 24 }}>
-                <Descriptions.Item label={intl.formatMessage({ id: 'dataset.id' })}>
-                  {editingDataset.id}
-                </Descriptions.Item>
-                <Descriptions.Item label={intl.formatMessage({ id: 'dataset.name' })}>
-                  {editingDataset.name}
-                </Descriptions.Item>
-                <Descriptions.Item label={intl.formatMessage({ id: 'dataset.datasource' })}>
-                  {getDatasourceName(editingDataset.datasource_id)}
-                </Descriptions.Item>
-                <Descriptions.Item label={intl.formatMessage({ id: 'dataset.queryType' })}>
-                  <Tag color={editingDataset.query_type === 'table' ? 'green' : 'purple'}>
-                    {editingDataset.query_type === 'table'
-                      ? intl.formatMessage({ id: 'dataset.queryType.table' })
-                      : intl.formatMessage({ id: 'dataset.customSql' })}
-                  </Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label={intl.formatMessage({ id: 'dataset.source' })} span={2}>
-                  <Text code>
-                    {editingDataset.query_type === 'table'
-                      ? editingDataset.table_name
-                      : editingDataset.query_sql}
-                  </Text>
-                </Descriptions.Item>
-                <Descriptions.Item label={intl.formatMessage({ id: 'dataset.createdAt' })}>
-                  {editingDataset.created_at
-                    ? new Date(editingDataset.created_at).toLocaleString()
-                    : '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label={intl.formatMessage({ id: 'dataset.updatedAt' })}>
-                  {editingDataset.updated_at
-                    ? new Date(editingDataset.updated_at).toLocaleString()
-                    : '-'}
-                </Descriptions.Item>
-              </Descriptions>
-
-              <Typography.Title level={5}>
-                {intl.formatMessage({ id: 'dataset.columns' })} ({datasetColumns.length})
-                <Button
-                  type="primary"
-                  size="small"
-                  loading={savingColumns}
-                  onClick={handleSaveColumns}
-                  style={{ marginLeft: 16 }}
-                >
-                  {intl.formatMessage({ id: 'dataset.saveChanges' })}
-                </Button>
-              </Typography.Title>
-              <div style={{ marginBottom: 12 }}>
-                <Button
-                  type="dashed"
-                  icon={<FunctionOutlined />}
-                  onClick={() => handleOpenVirtualFieldModal()}
-                >
-                  {intl.formatMessage({ id: 'virtualField.add' })}
-                </Button>
-              </div>
-              <Table
-                dataSource={[
-                  ...(datasetColumns || [])
-                    .filter((col) => col.role === 'dimension')
-                    .map((col) => ({ ...col, isGroupHeader: true, groupKey: `dimension-header` })),
-                  ...(datasetColumns || []).filter((col) => col.role === 'dimension'),
-                  ...(datasetColumns || [])
-                    .filter((col) => col.role === 'metric')
-                    .map((col) => ({ ...col, isGroupHeader: true, groupKey: `metric-header` })),
-                  ...(datasetColumns || []).filter((col) => col.role === 'metric'),
-                ]}
-                rowKey="groupKey"
-                size="small"
-                pagination={false}
-                columns={[
-                  {
-                    title: intl.formatMessage({ id: 'field.name' }),
-                    dataIndex: 'name',
-                    key: 'name',
-                    render: (name: string, record: any) => {
-                      if (record.isGroupHeader) {
-                        const isDimension = record.role === 'dimension';
-                        return (
-                          <div
-                            style={{
-                              fontWeight: 600,
-                              color: isDimension ? '#1890ff' : '#722ed1',
-                              padding: '4px 0',
-                              fontSize: 13,
-                            }}
-                          >
-                            {isDimension
-                              ? intl.formatMessage({ id: 'field.dimensions' })
-                              : intl.formatMessage({ id: 'field.metrics' })}
-                          </div>
-                        );
-                      }
-                      return (
-                        <Space>
-                          {record.expr && record.expr !== `\`${record.name}\`` && (
-                            <FunctionOutlined style={{ color: '#722ed1' }} />
-                          )}
-                          <Text
-                            strong={!!record.expr}
-                            style={{ color: record.role === 'dimension' ? '#1890ff' : '#722ed1' }}
-                          >
-                            {name}
-                          </Text>
-                          {record.expr && record.expr !== `\`${record.name}\`` && (
-                            <Tag color="purple">{intl.formatMessage({ id: 'field.virtual' })}</Tag>
-                          )}
-                        </Space>
-                      );
-                    },
-                  },
-                  {
-                    title: intl.formatMessage({ id: 'field.type' }),
-                    dataIndex: 'type',
-                    key: 'type',
-                    width: 140,
-                    render: (type: string, record: any) => {
-                      if (record.isGroupHeader) return null;
-                      return (
-                        <Select
-                          value={type}
-                          size="small"
-                          style={{ width: 110 }}
-                          onChange={(value) => handleColumnTypeChange(record.name, value)}
-                        >
-                          <Select.Option value="string">
-                            {intl.formatMessage({ id: 'dataType.string' })}
-                          </Select.Option>
-                          <Select.Option value="int">
-                            {intl.formatMessage({ id: 'dataType.integer' })}
-                          </Select.Option>
-                          <Select.Option value="float">
-                            {intl.formatMessage({ id: 'dataType.float' })}
-                          </Select.Option>
-                          <Select.Option value="date">
-                            {intl.formatMessage({ id: 'dataType.date' })}
-                          </Select.Option>
-                          <Select.Option value="datetime">
-                            {intl.formatMessage({ id: 'dataType.datetime' })}
-                          </Select.Option>
-                          <Select.Option value="boolean">
-                            {intl.formatMessage({ id: 'dataType.boolean' })}
-                          </Select.Option>
-                        </Select>
-                      );
-                    },
-                  },
-                  {
-                    title: intl.formatMessage({ id: 'field.role' }),
-                    dataIndex: 'role',
-                    key: 'role',
-                    width: 120,
-                    render: (role: string, record: any) => {
-                      if (record.isGroupHeader) return null;
-                      return (
-                        <Switch
-                          checked={role === 'metric'}
-                          checkedChildren={intl.formatMessage({ id: 'field.metric' })}
-                          unCheckedChildren={intl.formatMessage({ id: 'field.dimension' })}
-                          size="small"
-                          onChange={(checked) =>
-                            handleColumnRoleChange(record.name, checked ? 'metric' : 'dimension')
-                          }
-                          style={{
-                            backgroundColor: role === 'metric' ? '#722ed1' : '#1890ff',
-                          }}
-                        />
-                      );
-                    },
-                  },
-                  {
-                    title: intl.formatMessage({ id: 'field.expr' }),
-                    dataIndex: 'expr',
-                    key: 'expr',
-                    width: 200,
-                    render: (expr: string, record: any) => {
-                      if (record.isGroupHeader) return null;
-                      return expr ? (
-                        <Text code style={{ fontSize: 12 }}>
-                          {expr}
-                        </Text>
-                      ) : (
-                        '-'
-                      );
-                    },
-                  },
-                  {
-                    title: intl.formatMessage({ id: 'dataset.actions' }),
-                    key: 'actions',
-                    width: 100,
-                    render: (_: any, record: any) => {
-                      if (record.isGroupHeader) return null;
-                      const isVirtual = record.expr && record.expr !== `\`${record.name}\``;
-                      return isVirtual ? (
-                        <Space size="small">
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<EditOutlined />}
-                            onClick={() => handleOpenVirtualFieldModal(record)}
-                          />
-                          <Popconfirm
-                            title={intl.formatMessage({ id: 'virtualField.deleteConfirm' })}
-                            onConfirm={() => handleDeleteVirtualField(record.name)}
-                            okText={intl.formatMessage({ id: 'common.yes' })}
-                            cancelText={intl.formatMessage({ id: 'common.no' })}
-                          >
-                            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-                          </Popconfirm>
-                        </Space>
-                      ) : null;
-                    },
-                  },
-                ]}
-                style={{ marginBottom: 24 }}
-                locale={{
-                  emptyText: intl.formatMessage({ id: 'dataset.noColumnsAvailable' }),
-                }}
-              />
-
-              <Typography.Title level={5}>
-                {intl.formatMessage({ id: 'dataset.preview' })}
-              </Typography.Title>
-              {previewData?.data && previewData.data.length > 0 ? (
-                <Table
-                  dataSource={previewData.data.slice(0, 10)}
-                  rowKey={(record: any, index?: number) =>
-                    record ? String(index ?? Math.random()) : String(Math.random())
-                  }
-                  size="small"
-                  pagination={false}
-                  columns={(previewData.columns || []).map((col: string) => ({
-                    title: col,
-                    dataIndex: col,
-                    key: col,
-                    ellipsis: true,
-                  }))}
-                  scroll={{ x: 'max-content' }}
-                />
-              ) : (
-                <Text type="secondary">{intl.formatMessage({ id: 'dataset.noPreviewData' })}</Text>
-              )}
-            </>
-          )}
-        </Spin>
-      </Drawer>
 
       <Modal
         title={

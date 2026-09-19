@@ -26,6 +26,7 @@ import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { DatasourceFormData, DatasourceType } from '../api';
+import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
 const { Title, Text } = Typography;
@@ -183,7 +184,7 @@ const DatasourcePage: React.FC = () => {
       title: intl.formatMessage({ id: 'datasource.createdAt' }),
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (text: string) => (text ? new Date(text).toLocaleString() : '-'),
+      render: (text: string) => formatDateTime(text),
     },
     {
       title: intl.formatMessage({ id: 'datasource.actions' }),

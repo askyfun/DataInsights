@@ -140,11 +140,11 @@ func requestIDMiddleware() gin.HandlerFunc {
 
 // corsMiddleware returns a middleware that echoes Access-Control-Allow-Origin only
 // for origins in the configured allowlist. An empty allowlist defaults to the local
-// frontend origin (http://localhost:3000). Origins not in the allowlist receive no
+// frontend origin (http://localhost:23351). Origins not in the allowlist receive no
 // CORS headers.
 func corsMiddleware(origins []string) gin.HandlerFunc {
 	if len(origins) == 0 {
-		origins = []string{"http://localhost:3000"}
+		origins = []string{"http://localhost:23351"}
 	}
 	allowed := make(map[string]struct{}, len(origins))
 	for _, o := range origins {

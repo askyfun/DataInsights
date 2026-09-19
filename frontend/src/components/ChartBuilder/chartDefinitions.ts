@@ -42,8 +42,6 @@ export interface ChartFieldGroupDefinition {
   minGroups: number;
   /** 该槽位最多接受几个字段（undefined = 无限）。 */
   maxFields?: number;
-  /** 是否可选槽位（minGroups=0 时自动为 true）。 */
-  optional?: boolean;
 }
 
 export interface ChartDefinition {
@@ -99,15 +97,6 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         minGroups: 1,
       },
       {
-        id: 'color_group',
-        kind: 'dimension',
-        label: '颜色分组',
-        emptyText: '拖拽颜色分组维度到此（可选）',
-        minGroups: 0,
-        maxFields: 1,
-        optional: true,
-      },
-      {
         id: 'values',
         kind: 'metric',
         label: '数值',
@@ -129,15 +118,6 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         label: 'X 轴维度',
         emptyText: '拖拽 X 轴维度到此，或点击+添加',
         minGroups: 1,
-      },
-      {
-        id: 'color_group',
-        kind: 'dimension',
-        label: '颜色分组',
-        emptyText: '拖拽颜色分组维度到此（可选）',
-        minGroups: 0,
-        maxFields: 1,
-        optional: true,
       },
       {
         id: 'values',
@@ -184,15 +164,6 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         label: 'X 轴维度',
         emptyText: '拖拽 X 轴维度到此，或点击+添加',
         minGroups: 1,
-      },
-      {
-        id: 'color_group',
-        kind: 'dimension',
-        label: '颜色分组',
-        emptyText: '拖拽颜色分组维度到此（可选）',
-        minGroups: 0,
-        maxFields: 1,
-        optional: true,
       },
       {
         id: 'values',
@@ -275,15 +246,6 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         emptyText: '拖拽 X 轴维度到此',
         minGroups: 1,
         maxFields: 1,
-      },
-      {
-        id: 'color_group',
-        kind: 'dimension',
-        label: '颜色分组',
-        emptyText: '拖拽颜色分组维度到此（可选）',
-        minGroups: 0,
-        maxFields: 1,
-        optional: true,
       },
       {
         id: 'primary_values',
@@ -376,8 +338,9 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
   radar: {
     type: 'radar',
     label: '雷达图',
-    // radar（R-62）走后端 RadarProcessor：SQL 是 GROUP BY indicators[, series_group] +
-    // AGG(value)，处理器重塑为 RadarResponse{indicators:[{name,max}], series:[{name,values}]}。
+    // radar（R-62）走后端 RadarProcessor：SQL 是 GROUP BY indicators + AGG(value)，
+    // 处理器重塑为 RadarResponse{indicators:[{name,max}], series:[{name,values}]}。
+    // 2026-09-19 起不再提供 series_group 槽位（单系列），但后端仍支持该槽位以兼容历史请求。
     resultShape: 'radar',
     // RadarChartOutlined 是 @ant-design/icons 的雷达图图标，语义精确。
     icon: RadarChartOutlined,
@@ -394,17 +357,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         maxFields: 1,
       },
       {
-        // 系列分组（可选）：按此维度的每个值拆成一条系列；缺省时只一条（名取 value 别名）。
-        id: 'series_group',
-        kind: 'dimension',
-        label: '系列分组',
-        emptyText: '拖拽系列分组维度到此（可选）',
-        minGroups: 0,
-        maxFields: 1,
-        optional: true,
-      },
-      {
-        // 数值指标：单值；多条系列由 series_group 拆分而非多指标（与后端 Metrics[0] 对齐）。
+        // 数值指标：单值，恒产出单条系列（与后端 Metrics[0] 对齐）。
         id: 'values',
         kind: 'metric',
         label: '数值',
@@ -471,29 +424,86 @@ const ensureGroupCount = (
 };
 
 /**
- * 根据图表定义补齐最小字段组数量，避免切换图表类型后缺少必要槽位。
+ * 把超出目标组数的字段组里的绑定搬回保留下来的同类型组，避免切换图表类型时静默剪掉用户已配好的字段。
+ * 调用场景：normalizeQueryConfigForChartType（图表类型切换、配置文档恢复）。
+ * 主要逻辑：前 limit 个组原位保留；其后的组按顺序把绑定并入"最后一个非空保留组"
+ * （保留组全空则并入第 0 组），按列名去重——与 addDimensionField/addMetricField 的单组去重口径一致。
+ * limit 为 0 表示新图型没有这类槽位（kpi/histogram/boxplot/scatter 都没有维度槽位）：
+ * 此时**不裁剪 state**，请求侧本就会把这类组 slice 掉，保留原样可让用户切回旧图型时字段还在。
+ *
+ * 边界：并入目标槽位定义的 maxFields（如 funnel.stages=1）可能被突破。maxFields 目前只是
+ * 声明性字段、无运行时校验，此处刻意不以"超出即丢弃"的方式满足它——丢弃正是本函数要消除的行为。
+ */
+const relocateOverflowBindings = (
+  groups: QueryConfig['dimensionGroups'],
+  limit: number
+): QueryConfig['dimensionGroups'] => {
+  if (groups.length <= limit || limit <= 0) {
+    return groups;
+  }
+
+  const overflow = groups.slice(limit).flatMap((group) => group.bindings ?? []);
+  const kept = groups.slice(0, limit).map((group) => ({ ...group, bindings: [...group.bindings] }));
+
+  if (overflow.length === 0) {
+    return kept;
+  }
+
+  // 落到最后一个非空保留组：与"行维度留原样、列维度并进来"的直觉一致。
+  let targetIndex = 0;
+  for (let index = kept.length - 1; index >= 0; index -= 1) {
+    if (kept[index].bindings.length > 0) {
+      targetIndex = index;
+      break;
+    }
+  }
+
+  const target = kept[targetIndex];
+  const seen = new Set(target.bindings.map((binding) => binding.field));
+  for (const binding of overflow) {
+    if (seen.has(binding.field)) {
+      continue;
+    }
+    seen.add(binding.field);
+    target.bindings.push(binding);
+  }
+
+  return kept;
+};
+
+/**
+ * 根据图表定义补齐最小字段组数量，并把被裁掉的字段搬回同类型保留组。
  * 调用场景：ChartBuilder 切换 chartType 时同步修正 queryConfig。
- * 主要逻辑：按定义统计维度组/指标组所需最小组数，只做补齐，不主动删除已有用户配置。
+ * 主要逻辑：先按定义的组数把溢出的绑定搬进保留下来的同类型组（不再静默丢字段），
+ * 再按定义补齐最小组数——仍不主动删除已有用户配置。
  */
 export const normalizeQueryConfigForChartType = (
   chartType: BuilderChartType,
   queryConfig: QueryConfig
 ): QueryConfig => {
   const definition = chartDefinitions[chartType];
-  const requiredDimensionGroups = definition.fieldGroups
-    .filter((group) => group.kind === 'dimension')
-    .reduce((maxCount, group) => Math.max(maxCount, group.minGroups), 0);
-  const requiredMetricGroups = definition.fieldGroups
-    .filter((group) => group.kind === 'metric')
-    .reduce((maxCount, group) => Math.max(maxCount, group.minGroups), 0);
+  const dimensionDefs = definition.fieldGroups.filter((group) => group.kind === 'dimension');
+  const metricDefs = definition.fieldGroups.filter((group) => group.kind === 'metric');
+  const requiredDimensionGroups = dimensionDefs.reduce(
+    (maxCount, group) => Math.max(maxCount, group.minGroups),
+    0
+  );
+  const requiredMetricGroups = metricDefs.reduce(
+    (maxCount, group) => Math.max(maxCount, group.minGroups),
+    0
+  );
 
   return {
     ...queryConfig,
     dimensionGroups: ensureGroupCount(
-      queryConfig.dimensionGroups,
+      relocateOverflowBindings(queryConfig.dimensionGroups, dimensionDefs.length),
       requiredDimensionGroups,
       'dim-group'
     ),
-    metricGroups: ensureGroupCount(queryConfig.metricGroups, requiredMetricGroups, 'metric-group'),
+    metricGroups: ensureGroupCount(
+      relocateOverflowBindings(queryConfig.metricGroups, metricDefs.length),
+      requiredMetricGroups,
+      'metric-group'
+    ),
   };
 };

@@ -52,12 +52,45 @@ const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
               borderColor: '#e8e8e8',
               rowHoverBg: '#f0f7ff',
             },
+            // 全局卡片内边距收紧（默认 bodyPaddingSM/headerPaddingSM 均为 12，非 small 卡片
+            // bodyPadding/headerPadding 为 24）。屏幕利用率优先：8/16 仍留有节奏，但一张卡片
+            // 四周少掉 8~16px。需要更紧的页面用 styles={{ body: {...} }} 逐处覆盖。
+            Card: {
+              bodyPaddingSM: 8,
+              headerPaddingSM: 8,
+              bodyPadding: 16,
+              headerPadding: 16,
+              // 卡头是 min-height（非固定高），改小不会裁掉 extra 里的按钮；
+              // 默认 = fontSize*lineHeight + paddingXS*2 ≈ 38，对一行标题明显偏高。
+              headerHeightSM: 32,
+            },
+            // 输入类控件横向内边距收紧。默认 11px 来自 paddingSM(12) - lineWidth(1)，
+            // 对 12~13px 的小字号输入框而言过宽（文字离边框太远，配置面板尤其松散）。
+            //   Input / InputNumber：有公开的 paddingInline token，直接改。
+            //   Select：没有公开 token —— inputPaddingHorizontalBase 不在 ComponentToken 里
+            //     （实测覆盖被忽略），它硬编码自组件的 paddingSM。但组件 token 同时接受
+            //     AliasToken，所以在 Select 作用域内就地重定义 paddingSM/paddingXS 即可：
+            //     antd 会把它输出成 `--ant-padding-sm` 挂在 .ant-select-css-var 上，只影响
+            //     Select 自身（不会污染表格/表单等 20 多个消费者的全局 paddingSM）。
+            // 目标：默认尺寸三者文字左侧内缩统一 6px，小尺寸统一 5px。
+            Input: {
+              paddingInline: 6,
+              paddingInlineSM: 5,
+              paddingInlineLG: 8,
+            },
+            InputNumber: {
+              paddingInline: 6,
+              paddingInlineSM: 5,
+              paddingInlineLG: 8,
+            },
+            Select: {
+              paddingSM: 7, // - lineWidth(1) = 6px
+              paddingXS: 6, // - lineWidth(1) = 5px（size="small" 时）
+            },
           },
         }}
       >
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          {children}
-        </BrowserRouter>
+        <BrowserRouter>{children}</BrowserRouter>
       </ConfigProvider>
     </IntlProvider>
   );

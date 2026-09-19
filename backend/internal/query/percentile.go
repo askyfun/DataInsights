@@ -40,6 +40,11 @@ func BuildPercentileExpr(field string, p float64, caps *datasource.DialectCapabi
 		// PG 标准 SQL：percentile_cont(<p> double precision) WITHIN GROUP (ORDER BY <field>)。
 		// %.4g 保证 0.5→"0.5"、0.25→"0.25"、0.75→"0.75"，避免默认 %v 的尾零噪声。
 		return fmt.Sprintf("percentile_cont(%.4g) WITHIN GROUP (ORDER BY %s)", p, field), nil
+	case "percentile_cont_args_first":
+		// StarRocks：percentile_cont(<field>, <p>)——列在前、无 WITHIN GROUP 子句。
+		// 2026-09-19 在真实实例（192.168.10.237:9030）实测验证为精确百分位
+		// （0.5 分位返回 16.585，与 percentile_approx 的近似值 16.584999 明显区分）。
+		return fmt.Sprintf("percentile_cont(%s, %.4g)", field, p), nil
 	case "", "unsupported":
 		return "", fmt.Errorf("percentile aggregation not supported by this data source")
 	case "quantilesExactInclusive", "window_ntile":

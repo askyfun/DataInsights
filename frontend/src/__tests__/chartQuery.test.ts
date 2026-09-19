@@ -374,8 +374,9 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
 });
 
 describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）', () => {
-  // radar 的 indicators / series_group 是**具名维度槽位**，后端 resolveRadarSlots 靠
-  // ast.GroupName 区分二者；v1 平铺请求 GroupName 为空，无法解析——前端主动走 v2。
+  // radar 的 indicators 是**具名维度槽位**，后端 resolveRadarSlots 靠 ast.GroupName 识别它；
+  // v1 平铺请求 GroupName 为空，会被误判——前端主动走 v2。
+  // （series_group 槽位已于 2026-09-19 下线，后端仍保留解析能力以兼容历史请求。）
   const radarFields = [
     { id: 'f-1', name: 'attr', type: 'dimension' as const, dataType: 'string' },
     { id: 'f-2', name: 'score', type: 'metric' as const, dataType: 'number' },
@@ -401,7 +402,7 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
     includeSort: true,
   };
 
-  it('radar 无 series_group 绑定：走 v2、dimension_groups 含 name=indicators、metric_groups 含 name=values', () => {
+  it('radar：走 v2、dimension_groups 含 name=indicators、metric_groups 含 name=values', () => {
     const request = composeChartQueryRequest(baseInput);
     expect(request).not.toBeNull();
     expect(request?.spec_version).toBe(2);
@@ -416,7 +417,11 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
     expect(indicatorGroup?.fields).toEqual([{ field: 'attr', binding_id: 'b-0' }]);
   });
 
-  it('radar 带 series_group 绑定：dimension_groups 额外含 name=series_group 条目', () => {
+  it('radar 残留的第二个维度组已无槽位：只发第一组 indicators（历史文档由 normalize 先行合并）', () => {
+    // series_group 槽位下线后 radar 只剩一个维度槽位，getActiveFieldGroups 按定义数量裁剪，
+    // 因此裸调 composeChartQueryRequest 时第二组上不了 wire。真实加载路径会先经过
+    // normalizeQueryConfigForChartType，把第二组的绑定搬进 indicators（见
+    // normalizeQueryConfigForChartType.test.ts 的 radar 用例），字段不会真的丢。
     const request = composeChartQueryRequest({
       ...baseInput,
       queryConfig: {
@@ -428,12 +433,12 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
       },
     });
     const dimNames = (request?.dimension_groups ?? []).map((g) => g.name);
-    expect(dimNames).toEqual(expect.arrayContaining(['indicators', 'series_group']));
-    const seriesGroup = request?.dimension_groups?.find((g) => g.name === 'series_group');
-    expect(seriesGroup?.fields).toEqual([{ field: 'team', binding_id: 'b-2' }]);
+    expect(dimNames).toEqual(['indicators']);
+    const indicatorGroup = request?.dimension_groups?.find((g) => g.name === 'indicators');
+    expect(indicatorGroup?.fields).toEqual([{ field: 'attr', binding_id: 'b-0' }]);
   });
 
-  it('非 radar 图型（bar 无 color_group）仍走 v1：不受 radar v2 触发污染', () => {
+  it('非 radar 图型（bar）走 v1：不受 radar v2 触发污染', () => {
     const request = composeChartQueryRequest({
       ...baseInput,
       chartType: 'bar',
@@ -443,8 +448,74 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
         filters: [],
       },
     });
-    // bar 无 color_group 且无双轴槽位 → v1 平铺路径，spec_version 缺省。
+    // bar 既无命名维度槽位、也无双轴指标槽位 → v1 平铺路径，spec_version 缺省。
     expect(request).not.toHaveProperty('spec_version');
     expect(request).toHaveProperty('dims');
+  });
+});
+
+describe('composeChartQueryRequest：pivot 强制走 v2 槽位协议', () => {
+  // pivot 的 rows / columns 是**具名维度槽位**，后端 resolvePivotSlots 按 ast.GroupName
+  // 切分行/列维度；v1 平铺请求 GroupName 为空，解析失败会静默回退成"行透传"平表格
+  // ——用户拖了行/列维度却看不到交叉表。
+  const pivotFields = [
+    { id: 'f-1', name: 'region', type: 'dimension' as const, dataType: 'string' },
+    { id: 'f-2', name: 'month', type: 'dimension' as const, dataType: 'int' },
+    { id: 'f-3', name: 'amount', type: 'metric' as const, dataType: 'number' },
+  ];
+  const pivotQueryConfig = {
+    dimensionGroups: [
+      { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] },
+      { id: 'dim-group-2', bindings: [{ bindingId: 'b-1', field: 'f-2' }] },
+    ],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-2', field: 'f-3' }] }],
+    filters: [],
+  };
+  const baseInput = {
+    datasetId: 1,
+    chartType: 'pivot' as const,
+    queryConfig: pivotQueryConfig,
+    fields: pivotFields,
+    metricAggregations: {},
+    metricAliases: {},
+    tablePagination: { page: 1, pageSize: 10 },
+    queryOptions: {},
+    includeSort: true,
+  };
+
+  it('pivot 携带 rows/columns 槽位名与 binding_id，不再走 v1 平铺', () => {
+    const request = composeChartQueryRequest(baseInput);
+
+    expect(request).not.toBeNull();
+    expect(request?.spec_version).toBe(2);
+    expect(request).not.toHaveProperty('dims');
+    const dimNames = (request?.dimension_groups ?? []).map((g) => g.name);
+    expect(dimNames).toEqual(['rows', 'columns']);
+    const rowGroup = request?.dimension_groups?.find((g) => g.name === 'rows');
+    expect(rowGroup?.fields).toEqual([{ field: 'region', binding_id: 'b-0' }]);
+    const colGroup = request?.dimension_groups?.find((g) => g.name === 'columns');
+    expect(colGroup?.fields).toEqual([{ field: 'month', binding_id: 'b-1' }]);
+    const metricGroup = request?.metric_groups?.find((g) => g.name === 'values');
+    expect(metricGroup?.fields).toEqual([
+      { field: 'amount', agg: 'sum', alias: 'amount', binding_id: 'b-2' },
+    ]);
+  });
+
+  it('行/列维度互换后仍按槽位名发出（移动行的效果体现在列槽位上）', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      queryConfig: {
+        ...pivotQueryConfig,
+        dimensionGroups: [
+          { id: 'dim-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] },
+          { id: 'dim-group-2', bindings: [{ bindingId: 'b-0', field: 'f-1' }] },
+        ],
+      },
+    });
+
+    const rowGroup = request?.dimension_groups?.find((g) => g.name === 'rows');
+    expect(rowGroup?.fields).toEqual([{ field: 'month', binding_id: 'b-1' }]);
+    const colGroup = request?.dimension_groups?.find((g) => g.name === 'columns');
+    expect(colGroup?.fields).toEqual([{ field: 'region', binding_id: 'b-0' }]);
   });
 });

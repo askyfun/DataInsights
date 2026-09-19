@@ -10,7 +10,7 @@ DataRay 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构�
 
 ### 技术栈
 
-- **前端**: React 18 + TypeScript + Ant Design 5.x + ECharts 5.x + Zustand 4.x + @dnd-kit + Vite 6 + Biome（lint/格式化） + Vitest（测试）
+- **前端**: React 19 + TypeScript + Ant Design 6.x + ECharts 6.x + Zustand 5.x + @dnd-kit + Vite 8 + Biome（lint/格式化） + Vitest（测试）
 - **后端**: Go 1.26 + Gin + bun ORM + PostgreSQL + Sentry
 - **部署**: Docker + docker-compose
 
@@ -39,13 +39,13 @@ DataRay 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构�
 
 数据库 schema 由 goose 版本化迁移管理（`backend/migrations/00001_init_schema.sql`，通过 `embed.FS` 内嵌），`model.CreateTables` 已删除；事务统一走 `database.WithTx`。
 
-运维与安全已落地：Sentry 通过 `[Sentry] Dsn` 配置接通（sentrygin Repanic）；CORS 按 `[CORS] AllowedOrigins` 配置化（默认 `localhost:3000`）；requestID 中间件返回非全零 ID；datasource 密码 AES-GCM 加密存储，API 响应中 `password` 字段 `json:"-"` 不外泄，share 使用 bcrypt 哈希并对外暴露 `has_password` 契约。
+运维与安全已落地：Sentry 通过 `[Sentry] Dsn` 配置接通（sentrygin Repanic）；CORS 按 `[CORS] AllowedOrigins` 配置化（默认 `localhost:23351`）；requestID 中间件返回非全零 ID；datasource 密码 AES-GCM 加密存储，API 响应中 `password` 字段 `json:"-"` 不外泄，share 使用 bcrypt 哈希并对外暴露 `has_password` 契约。
 
 ### 前端结构
 
 ```
 frontend/src/
-├── api/           # API 客户端（axios）
+├── api/           # API 端点封装（29 个接口，复用 lib/api/client 的单一 axios 实例）
 ├── store/         # Zustand 状态管理
 ├── pages/         # 页面组件
 ├── components/    # 可复用组件
@@ -62,7 +62,7 @@ frontend/src/
 ```bash
 # 前端
 cd frontend && pnpm install
-pnpm dev               # 开发服务器，端口 3000
+pnpm dev               # 开发服务器，端口 23351
 pnpm build             # tsc + vite 构建
 pnpm format            # biome 格式化
 pnpm lint              # biome lint 检查
@@ -72,7 +72,7 @@ pnpm build:check       # biome check + vitest（提交前验证）
 
 # 后端
 cd backend && go mod download
-go run ./cmd/main.go -f etc/config.toml   # 开发服务器，端口 8080
+go run ./cmd/main.go -f etc/config.toml   # 开发服务器，端口 23352
 go test ./...                              # 运行所有测试
 go test -v ./path/to/pkg -run TestName     # 运行单个测试
 go test -race ./...                        # 带竞态检测运行测试
@@ -195,8 +195,9 @@ make clean             # 清理 dist、node_modules、backend/bin
 ## 配置
 
 - 后端配置: `backend/etc/config.toml`（TOML 格式）
-- 前端 API 基础 URL: `frontend/src/lib/api/client.ts`（默认 `http://localhost:8080`）
-- Docker compose: `docker-compose.yml` — PostgreSQL（端口 5432）、后端（8080）、前端（3000）
+- 前端 API 基础 URL: **唯一来源**是 `frontend/src/lib/api/client.ts` 的 `resolveApiBaseURL`（`api/index.ts` 只消费该实例，**不得再 `axios.create`**）。取值规则：`VITE_API_BASE_URL` 已设置则采用（**空字符串 = 同源相对路径 `/api`**，生产由前端镜像的 nginx 反代）；未设置则回退 `http://<当前访问主机名>:23352`（开发默认，后端 `[CORS] AllowedOrigins` 必须包含该主机名的 23351 来源）。
+- 前端生产镜像: `frontend/Dockerfile` 两阶段（`pnpm build` → `nginx:1.27-alpine` 托管 `dist`，`frontend/nginx.conf` 监听 23351 并把 `/api/` 反代到 `backend:23352`，SPA 回落 `index.html`）。对外只需暴露 23351。
+- Docker compose: `docker-compose.yml` — PostgreSQL（端口 5432）、后端（23352）、前端（23351）
 
 ## 开发资源
 

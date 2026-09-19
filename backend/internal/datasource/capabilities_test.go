@@ -47,9 +47,9 @@ func TestCapabilitiesStaticDrivers(t *testing.T) {
 			conn: &starRocksConnection{},
 			want: DialectCapabilities{
 				SupportsGroupingSets:    false,
-				SupportsPercentileCont:  false,
+				SupportsPercentileCont:  true,
 				SupportsWindowFunctions: false,
-				PercentileStrategy:      "unsupported",
+				PercentileStrategy:      "percentile_cont_args_first",
 			},
 		},
 	}

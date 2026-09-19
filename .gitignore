@@ -6,6 +6,7 @@ tmp
 
 # Binaries
 **/server
+backend/server.new
 backend/main
 backend/bin/
 
@@ -42,3 +43,12 @@ chrome_perf_trace.json
 
 # Worktrees
 .worktrees/
+
+# tsc build artifacts & emitted vite config
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# local data & tool state
+datasets/
+.workbuddy/

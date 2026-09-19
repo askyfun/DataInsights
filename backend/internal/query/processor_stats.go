@@ -100,11 +100,14 @@ func histogramBinOptions(opts map[string]any) (binCount int, userBinWidth float6
 	return binCount, userBinWidth
 }
 
-// radar 的维度槽位名（v2 协议 dimension_groups[].name，与
-// frontend/src/components/ChartBuilder/chartDefinitions.ts 的 radar fieldGroups[].id 对齐）。
+// radar 的维度槽位名（v2 协议 dimension_groups[].name）。
+//
+// 注意：前端自 2026-09-19 起不再产出 series_group 槽位（该字段组已下线），雷达恒为单系列。
+// 但 SlotSeriesGroup 与 resolveRadarSlots 的归槽分支必须保留——v2 API 契约仍声明该槽位名、
+// 历史/外部请求仍可能携带；去掉会让历史雷达图静默退化为单系列。
 const (
 	SlotIndicators  = "indicators"   // 雷达轴：每个维度值一条轴（minGroups 1 / maxFields 1）
-	SlotSeriesGroup = "series_group" // 可选的系列拆分维度（minGroups 0 / maxFields 1）
+	SlotSeriesGroup = "series_group" // 兼容保留：历史请求的系列拆分维度（前端已不再产出）
 )
 
 // resolveRadarSlots 解析 radar 的 indicators / series_group 维度槽位，返回它们在结果行
@@ -113,7 +116,7 @@ const (
 //   - v2 路径：按 GroupName 归槽，series_group 可缺省（返回空串表示不拆系列）；
 //     同一槽位出现多个维度时取首个（协议 maxFields=1，多余字段无从命名）。
 //   - v1/位置回退：ast 为 nil、DimensionExprs 与 dims 数量或 Field 名不匹配、或槽位名
-//     不在 indicators/series_group 之内（v1 平铺请求经 ChartSpecFromRequest 会把所有维度
+//     不在 indicators/series_group 之内（v1 平铺请求的默认组名规则会把所有维度
 //     打成默认组名 "x_axis"）时按位置解析：dims[0]=indicators、dims[1]=series_group。
 //     这条回退让后端可以先于前端 v2 接线上线，v1 radar 请求也能产出正确形状。
 //

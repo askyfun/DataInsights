@@ -1,10 +1,14 @@
 import {
+  AppstoreOutlined,
+  BarChartOutlined,
   CodeOutlined,
+  DownOutlined,
   FieldBinaryOutlined,
   FunctionOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import {
   DndContext,
@@ -19,8 +23,8 @@ import {
   Button,
   Card,
   ColorPicker,
-  Divider,
   Drawer,
+  Dropdown,
   Empty,
   Input,
   InputNumber,
@@ -31,6 +35,7 @@ import {
   Space,
   Spin,
   Switch,
+  Tooltip,
   Typography,
 } from 'antd';
 import ReactECharts from 'echarts-for-react';
@@ -51,8 +56,12 @@ import {
   chartDefinitions,
   normalizeQueryConfigForChartType,
 } from '../components/ChartBuilder/chartDefinitions';
-import DraggableField, { FieldDragPreview } from '../components/ChartBuilder/DraggableField';
-import FilterBuilder from '../components/ChartBuilder/FilterBuilder';
+import DraggableField, {
+  FieldDragPreview,
+  fieldTagColor,
+} from '../components/ChartBuilder/DraggableField';
+import { BindingDragData, BindingSlotDropData } from '../components/ChartBuilder/FieldDropZone';
+import FilterDropZone from '../components/ChartBuilder/FilterDropZone';
 import KpiCard from '../components/ChartBuilder/KpiCard';
 import PivotTable from '../components/ChartBuilder/PivotTable';
 import QueryConfigRow from '../components/ChartBuilder/QueryConfigRow';
@@ -111,6 +120,58 @@ const getDraggedField = (value: unknown): ChartField | null => {
   }
   return value.field;
 };
+
+/**
+ * 判断 dnd-kit active data 是否来自查询配置区里的字段标签。
+ * 调用场景：配置区内部的"搬字段"（换组 / 换序）与侧边栏"新加字段"共用同一个 DndContext，
+ * 必须在入口处区分，否则两种拖拽会走错处理分支。
+ */
+const isDragBindingData = (value: unknown): value is BindingDragData => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const data = value as Partial<BindingDragData>;
+  return (
+    data.type === 'binding-source' &&
+    typeof data.bindingId === 'string' &&
+    (data.kind === 'dimension' || data.kind === 'metric') &&
+    typeof data.groupIndex === 'number'
+  );
+};
+
+/** 字段标签自身作为落点的载荷判别（插到该标签之前）。 */
+const isBindingSlotData = (value: unknown): value is BindingSlotDropData => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const data = value as Partial<BindingSlotDropData>;
+  return (
+    data.type === 'binding-slot' &&
+    (data.kind === 'dimension' || data.kind === 'metric') &&
+    typeof data.groupIndex === 'number' &&
+    typeof data.index === 'number'
+  );
+};
+
+/** 字段组区域（维度/指标/筛选）落点载荷判别。 */
+interface ZoneDropData {
+  type: 'dimension' | 'metric' | 'filter';
+  groupIndex?: number;
+}
+
+const isZoneDropData = (value: unknown): value is ZoneDropData => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const data = value as Partial<ZoneDropData>;
+  return data.type === 'dimension' || data.type === 'metric' || data.type === 'filter';
+};
+
+/** 拖拽浮层预览内容（侧边栏字段与配置区字段标签共用）。 */
+interface DragPreview {
+  label: string;
+  color: string;
+}
 
 /**
  * 按当前图表定义裁剪字段组，只保留当前类型实际会渲染的那部分配置。
@@ -212,6 +273,35 @@ const findBindingIdByOutputName = (
   return undefined;
 };
 
+/**
+ * 按绑定 id 反查该绑定在表格输出里的列名（TableChart 的 sortField 输入）。
+ * 调用场景：把 store 的 queryConfig.sort（bindingId 引用）翻译成表头受控排序状态。
+ * 主要逻辑：与 findBindingIdByOutputName 同一套命名口径——指标 = metricAliases[bindingId]
+ * || 列名，维度 = 列名；找不到绑定（已移除）时返回 undefined，表头即视为无排序。
+ */
+const findOutputNameByBindingId = (
+  queryConfig: QueryConfig,
+  fields: ChartField[],
+  metricAliases: Record<string, string>,
+  bindingId: string
+): string | undefined => {
+  const fieldMap = new Map(fields.map((f) => [f.id, f]));
+  for (const group of queryConfig.metricGroups) {
+    for (const binding of group.bindings) {
+      if (binding.bindingId !== bindingId) continue;
+      const columnName = fieldMap.get(binding.field)?.name;
+      return columnName === undefined ? undefined : metricAliases[binding.bindingId] || columnName;
+    }
+  }
+  for (const group of queryConfig.dimensionGroups) {
+    for (const binding of group.bindings) {
+      if (binding.bindingId !== bindingId) continue;
+      return fieldMap.get(binding.field)?.name;
+    }
+  }
+  return undefined;
+};
+
 export interface ChartQueryRequestInput {
   datasetId: number;
   chartType: ChartConfig['chartType'];
@@ -235,12 +325,14 @@ export interface ChartQueryRequestInput {
 const DUAL_AXIS_METRIC_SLOTS = new Set(['primary_values', 'secondary_values']);
 
 /**
- * radar（R-62）的两个维度槽位名（与 chartDefinitions.ts 的 fieldGroups[].id 对齐）。
- * 只要图型定义了其中之一就必须走 v2 槽位协议——后端 resolveRadarSlots 按 ast.GroupName
- * 区分 indicators 与 series_group；v1 平铺的 GroupName 为空，只能位置回退（后端仍支持，
- * 但前端主动走 v2 更严谨，也避免同一列在两个槽位时的位置歧义）。
+ * 必须走 v2 槽位协议的维度槽位名（与 chartDefinitions.ts 的 fieldGroups[].id 对齐）：
+ * radar 的 indicators，以及 pivot 的 rows/columns。
+ * 这些槽位存在语义（雷达轴、交叉表的行/列），v1 平铺的 dims[] 只是无序列表，
+ * 后端 resolveRadarSlots / resolvePivotSlots 按 ast.GroupName 归槽，拿不到槽位名就只能
+ * 退化成"行透传"的平表格——透视表会静默变成一个普通表格。因此只要图型定义了这些槽位，
+ * 就必须发 v2。
  */
-const RADAR_DIMENSION_SLOTS = new Set(['indicators', 'series_group']);
+const SLOT_PROTOCOL_DIMENSION_SLOTS = new Set(['indicators', 'rows', 'columns']);
 
 /**
  * 图表查询请求的唯一构造出口（纯函数，所有输入经参数传入）。
@@ -248,12 +340,15 @@ const RADAR_DIMENSION_SLOTS = new Set(['indicators', 'series_group']);
  * 主要逻辑：按图表定义裁剪字段组、字段 id 映射回列名、组装 filters/pagination；
  * 维度与指标同时为空时返回 null 表示不发起查询。
  *
- * v1/v2 判别（裁定B）：当当前图型定义了 color_group 槽位（bar/line/area）且该槽位非空，
- * **或** 当前图型定义了 combo 的双轴指标槽位（primary_values/secondary_values）时，发出 v2
- * 格式请求（spec_version:2 + dimension_groups/metric_groups，携带真实槽位名与每个字段的
- * binding_id）；combo 即使 color_group 为空也走 v2（否则主/次轴的槽位区分信息会在 v1 平铺
- * metrics[] 中丢失）。其余情况（color_group 为空的 bar/line/area，或 table/pie/scatter/pivot
- * 根本没有这些槽位）继续发出 v1 平铺格式（dims/metrics），请求形状与本任务改动前完全一致。
+ * v1/v2 判别（裁定B）：当当前图型定义了 combo 的双轴指标槽位（primary_values/secondary_values），
+ * **或** 定义了具名维度槽位（radar 的 indicators、pivot 的 rows/columns）时，发出 v2 格式请求
+ * （spec_version:2 + dimension_groups/metric_groups，携带真实槽位名与每个字段的 binding_id）——
+ * 否则主/次轴与行/列的槽位区分信息会在 v1 平铺 dims[]/metrics[] 中丢失。
+ * 其余情况（bar/line/area、table/pie/scatter/kpi/histogram/funnel/boxplot）
+ * 继续发出 v1 平铺格式（dims/metrics）。
+ *
+ * 2026-09-19：bar/line/area 的 color_group 与 radar 的 series_group 槽位已下线，
+ * 因此这两个图型不再有"槽位非空才发 v2"的分支，恒走 v1。
  */
 export const composeChartQueryRequest = (
   input: ChartQueryRequestInput
@@ -291,26 +386,16 @@ export const composeChartQueryRequest = (
         }
       : undefined;
 
-  // color_group 槽位判定：只有 bar/line/area 的 fieldGroups 里定义了 id==='color_group'
-  // 的维度槽位；找到它在"仅维度槽位"序列里的序号，映射到 activeGroups.dimensionGroups
-  // 的同序号（kind-local index，与 getFieldGroupKindIndex 的既有约定一致）。
   const definition = chartDefinitions[chartType];
   const dimensionDefs = definition.fieldGroups.filter((group) => group.kind === 'dimension');
   const metricDefs = definition.fieldGroups.filter((group) => group.kind === 'metric');
-  const colorGroupDefIndex = dimensionDefs.findIndex((group) => group.id === 'color_group');
-  const colorGroupBindings =
-    colorGroupDefIndex >= 0
-      ? (activeGroups.dimensionGroups[colorGroupDefIndex]?.bindings ?? [])
-      : [];
 
-  // v2 触发条件：color_group 非空（bar/line/area）**或** 图型带 combo 双轴指标槽位
-  // **或** 图型带 radar 具名维度槽位（indicators/series_group）。
-  // combo 即使 color_group 为空也走 v2，主/次轴槽位名不丢失；radar 同理——后端按
-  // ast.GroupName 解析槽位，v1 平铺请求会丢 indicators/series_group 的区分。详见函数 doc。
+  // v2 触发条件：图型带 combo 双轴指标槽位，**或** 带具名维度槽位（radar 的 indicators、
+  // pivot 的 rows/columns）。后端按 ast.GroupName 解析槽位，v1 平铺请求会丢槽位区分。
+  // 详见两个常量与 composeChartQueryRequest 的 doc。
   const requiresSlotProtocol =
-    colorGroupBindings.length > 0 ||
     metricDefs.some((group) => DUAL_AXIS_METRIC_SLOTS.has(group.id)) ||
-    dimensionDefs.some((group) => RADAR_DIMENSION_SLOTS.has(group.id));
+    dimensionDefs.some((group) => SLOT_PROTOCOL_DIMENSION_SLOTS.has(group.id));
 
   // sort wire payload（Task 1-7/R-50）：queryConfig.sort 以 bindingId 引用排序目标。
   // - v2 槽位协议：field 直接发送 bindingId（组内携带 binding_id，后端 resolveSortAlias
@@ -439,7 +524,7 @@ export const composeChartQueryRequest = (
     };
   }
 
-  // v1 平铺协议（color_group 为空，或该图型没有 color_group 槽位）：逻辑与改动前完全一致
+  // v1 平铺协议：逻辑与改动前完全一致
   const dimensionFields = activeGroups.dimensionGroups
     .flatMap((group) => group.bindings.map((b) => b.field))
     .map((name) => fieldMap.get(name))
@@ -591,22 +676,63 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '100px 0' }}>
+      <div
+        style={{
+          height: '100%',
+          minHeight: 220,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 12,
+        }}
+      >
         <Spin size="large" />
-        <div style={{ marginTop: 16 }}>
-          <Text type="secondary">加载图表数据中...</Text>
-        </div>
+        <Text style={{ fontSize: 12, color: 'var(--dr-text-3)' }}>加载图表数据中...</Text>
       </div>
     );
   }
 
   if (!chartOption) {
     return (
-      <Empty
-        description="请配置维度和指标以生成图表"
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-        style={{ padding: '100px 0' }}
-      />
+      <div
+        style={{
+          height: '100%',
+          minHeight: 220,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 12,
+        }}
+      >
+        {/* 空态做成"待生成的画布"而不是一张白纸：下沉面 + 虚线框，让这块区域即使
+            什么都没画，也看得出"这里是一块画布"，而不是"没加载出来"。
+            （改动前是一个巨大的空 Empty，整页最大的一片白就在这里。） */}
+        <div
+          style={{
+            width: '100%',
+            maxWidth: 420,
+            minHeight: 150,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            padding: '20px 16px',
+            borderRadius: 8,
+            border: '1px dashed var(--dr-border-strong)',
+            background: 'var(--dr-sunken)',
+          }}
+        >
+          <BarChartOutlined style={{ fontSize: 20, color: 'var(--dr-text-4)' }} />
+          <Text style={{ fontSize: 13, color: 'var(--dr-text-2)' }}>
+            请配置维度和指标以生成图表
+          </Text>
+          <Text style={{ fontSize: 12, color: 'var(--dr-text-3)' }}>
+            从左侧字段列表拖入，或点槽位内的 + 添加
+          </Text>
+        </div>
+      </div>
     );
   }
 
@@ -623,6 +749,35 @@ interface FieldListPanelProps {
   fields: ChartField[];
   loading: boolean;
 }
+
+/**
+ * 字段列表的分组标题：3px 语义色条 + 12px/600 标签。
+ * 调用场景：左栏「可用字段」的维度 / 指标两组。
+ * 主要逻辑：色条与中栏槽位标签共用同一套语义色（维度=蓝 / 指标=绿），
+ * 「维度和指标各是什么颜色」只需学一次，就能在左栏、中栏、字段标签三处复用。
+ * 约束：标签与计数必须留在**同一个元素**里（`维度 (13)`）——拆成两个兄弟元素后
+ * 「维度」会独立成一个文本节点，与中栏的槽位标签文案撞车（测试按文本精确定位）。
+ */
+const FieldGroupHeader: React.FC<{ label: string; count: number; color: string }> = ({
+  label,
+  count,
+  color,
+}) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+    <span
+      style={{
+        width: 3,
+        height: 11,
+        borderRadius: 2,
+        background: color,
+        flexShrink: 0,
+      }}
+    />
+    <Text strong style={{ fontSize: 12, color: 'var(--dr-text-2)' }}>
+      {label} ({count})
+    </Text>
+  </div>
+);
 
 const FieldListPanel: React.FC<FieldListPanelProps> = ({ fields, loading }) => {
   const dimensions = fields.filter((f) => f.type === 'dimension');
@@ -645,21 +800,17 @@ const FieldListPanel: React.FC<FieldListPanelProps> = ({ fields, loading }) => {
 
   return (
     <div>
-      <div style={{ marginBottom: 12 }}>
-        <Text strong type="secondary" style={{ display: 'block', marginBottom: 6 }}>
-          维度 ({dimensions.length})
-        </Text>
+      {/* 原为 Divider 分隔两组：带色条的分组标题本身就是更强的分隔符，
+          去掉 Divider 省下 ~17px 纵向空白（本页约定：留白只服务于"看得清"）。 */}
+      <div style={{ marginBottom: 10 }}>
+        <FieldGroupHeader label="维度" count={dimensions.length} color="#1677ff" />
         {dimensions.map((field) => (
           <DraggableField key={field.id} field={field} />
         ))}
       </div>
 
-      <Divider style={{ margin: '8px 0' }} />
-
       <div>
-        <Text strong type="secondary" style={{ display: 'block', marginBottom: 6 }}>
-          指标 ({metrics.length})
-        </Text>
+        <FieldGroupHeader label="指标" count={metrics.length} color="#52c41a" />
         {metrics.map((field) => (
           <DraggableField key={field.id} field={field} />
         ))}
@@ -692,6 +843,47 @@ const chartTypeOptions = Object.values(chartDefinitions).map((def) => ({
   label: def.label,
 }));
 
+const chartTypeOptionMap = new Map(chartTypeOptions.map((opt) => [opt.type, opt]));
+
+/**
+ * 图型按使用目的分组：每行一个分析意图，行内小图标按钮互为同类替代
+ * （如趋势行内柱/折/面积/组合之间切换），用户先定位行再挑图型。
+ */
+const chartTypeGroups: {
+  label: string;
+  types: Array<(typeof chartTypeOptions)[number]['type']>;
+}[] = [
+  { label: '表格', types: ['table', 'pivot'] },
+  { label: '趋势', types: ['bar', 'line', 'area', 'combo'] },
+  { label: '分布', types: ['pie', 'histogram', 'boxplot'] },
+  { label: '其他', types: ['scatter', 'radar', 'kpi', 'funnel'] },
+];
+
+/**
+ * 配置面板里的单行设置：左侧标签、右侧控件。
+ * 调用场景：图表配置面板的样式/选项区——标签与控件各占固定位置，一行一项，
+ * 避免控件与标签在同一行里挤成一团、看不出哪一项是什么。
+ */
+const SettingRow: React.FC<{ label: string; children: React.ReactNode }> = ({
+  label,
+  children,
+}) => (
+  <div
+    data-testid="config-setting-row"
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      minHeight: 32,
+      padding: '2px 0',
+    }}
+  >
+    <span style={{ fontSize: 13, color: 'var(--dr-text-2)', flex: '0 0 auto' }}>{label}</span>
+    <div style={{ flex: '1 1 auto', display: 'flex', justifyContent: 'flex-end' }}>{children}</div>
+  </div>
+);
+
 const ConfigPanel: React.FC<ConfigPanelProps> = ({
   config,
   onConfigChange,
@@ -714,163 +906,229 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const styleKeys = chartDefinitions[config.chartType].styleKeys;
   const showStyleControl = (key: keyof ChartStyleConfig) => styleKeys?.includes(key) ?? false;
 
+  // 面板最上方只放图表标题：标题是最常改、也最需要一眼看到的信息，
+  // 不应和样式开关混在一起滚到面板底部。
+  const hasStyleSection =
+    showStyleControl('smooth') ||
+    showStyleControl('colors') ||
+    showStyleControl('stack') ||
+    showStyleControl('orientation') ||
+    showStyleControl('donut') ||
+    showStyleControl('tableRowSize') ||
+    config.chartType === 'histogram';
+
   return (
     <div>
-      <Card title="可视化类型" size="small" style={{ marginBottom: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-          {chartTypeOptions.map((opt) => (
-            <Button
-              key={opt.type}
-              type={config.chartType === opt.type ? 'primary' : 'default'}
-              icon={React.createElement(opt.icon)}
-              onClick={() => onConfigChange({ chartType: opt.type })}
-              style={{ height: 40 }}
+      <Card
+        title="图表标题"
+        size="small"
+        style={{ marginBottom: 6 }}
+        styles={{ body: { padding: '4px 6px' } }}
+      >
+        <Input
+          value={config.title}
+          onChange={(e) => onConfigChange({ title: e.target.value })}
+          placeholder="输入图表标题"
+        />
+      </Card>
+
+      <Card
+        title="可视化类型"
+        size="small"
+        style={{ marginBottom: 6 }}
+        styles={{ body: { padding: '4px 6px' } }}
+      >
+        {/* 每行一个分析意图，行内图标按钮互为同类替代（如趋势行内柱/折/面积/组合之间切换）。
+            整行包一层下沉面 + 圆角，读起来是"一组可切换的分段控件"，而不是散落一地的图标网格
+            ——散落的图标需要用户逐个去猜它到底是不是按钮。 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {chartTypeGroups.map((group) => (
+            <div
+              key={group.label}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                padding: '2px 4px 2px 6px',
+                borderRadius: 6,
+                background: 'var(--dr-sunken)',
+              }}
             >
-              {opt.label}
-            </Button>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: 'var(--dr-text-3)',
+                  flex: '0 0 34px',
+                }}
+              >
+                {group.label}
+              </span>
+              {group.types.map((type) => {
+                const opt = chartTypeOptionMap.get(type);
+                if (!opt) {
+                  return null;
+                }
+                const selected = config.chartType === opt.type;
+                return (
+                  <Tooltip
+                    key={opt.type}
+                    title={opt.label}
+                    placement="top"
+                    mouseEnterDelay={0}
+                    mouseLeaveDelay={0}
+                  >
+                    <Button
+                      type={selected ? 'primary' : 'text'}
+                      icon={React.createElement(opt.icon)}
+                      // 图型按钮只有图标，文字挂在 Tooltip 上不进 accessible name：
+                      // 补 aria-label 让读屏与测试都能按名称定位（否则按 role+name 查不到）。
+                      aria-label={opt.label}
+                      onClick={() => onConfigChange({ chartType: opt.type })}
+                      style={{ width: 32, height: 28, padding: 0 }}
+                    />
+                  </Tooltip>
+                );
+              })}
+            </div>
           ))}
         </div>
       </Card>
 
-      <Card title="图表配置" size="small" style={{ marginBottom: 12 }}>
-        <Space orientation="vertical" style={{ width: '100%' }} size="small">
-          <div>
-            <Text strong>图表标题</Text>
-            <Input
-              style={{ width: '100%', marginTop: 4 }}
-              value={config.title}
-              onChange={(e) => onConfigChange({ title: e.target.value })}
-              placeholder="输入图表标题"
-            />
-          </div>
-
-          {showStyleControl('smooth') && (
-            <div>
-              <Text strong>平滑曲线</Text>
-              <div style={{ marginTop: 4 }}>
+      {hasStyleSection && (
+        <Card
+          title="图表配置"
+          size="small"
+          style={{ marginBottom: 6 }}
+          styles={{ body: { padding: '4px 6px' } }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {showStyleControl('smooth') && (
+              <SettingRow label="平滑曲线">
                 <Switch
                   checked={chartStyle.smooth}
                   onChange={(checked) => onChartStyleChange({ smooth: checked })}
                 />
-              </div>
-            </div>
-          )}
+              </SettingRow>
+            )}
 
-          {showStyleControl('colors') && (
-            <div>
-              <Text strong>主色</Text>
-              <div style={{ marginTop: 4 }}>
+            {showStyleControl('colors') && (
+              <SettingRow label="主色">
                 <ColorPicker
                   value={chartStyle.colors[0] || '#1677ff'}
                   onChange={(color) => onChartStyleChange({ colors: [color.toHexString()] })}
                 />
-              </div>
-            </div>
-          )}
+              </SettingRow>
+            )}
 
-          {config.chartType === 'histogram' && (
-            <div>
-              <Text strong>分箱数量</Text>
-              <div style={{ marginTop: 4 }}>
+            {config.chartType === 'histogram' && (
+              <SettingRow label="分箱数量">
                 <InputNumber
-                  style={{ width: '100%' }}
+                  style={{ width: 120 }}
                   min={1}
                   max={1000}
                   precision={0}
                   value={queryOptions.binCount ?? 20}
                   onChange={(value) => onQueryOptionsChange({ binCount: value ?? undefined })}
                 />
-              </div>
-            </div>
-          )}
+              </SettingRow>
+            )}
 
-          {showStyleControl('stack') && (
-            <div>
-              <Text strong>堆叠模式</Text>
-              <Select
-                style={{ width: '100%', marginTop: 4 }}
-                value={chartStyle.stack ?? 'none'}
-                onChange={(value) => onChartStyleChange({ stack: value })}
-                options={[
-                  { value: 'none', label: '不堆叠' },
-                  { value: 'normal', label: '堆叠' },
-                  { value: 'percent', label: '百分比堆叠' },
-                ]}
-              />
-            </div>
-          )}
+            {showStyleControl('stack') && (
+              <SettingRow label="堆叠模式">
+                <Select
+                  style={{ width: 160 }}
+                  value={chartStyle.stack ?? 'none'}
+                  onChange={(value) => onChartStyleChange({ stack: value })}
+                  options={[
+                    { value: 'none', label: '不堆叠' },
+                    { value: 'normal', label: '堆叠' },
+                    { value: 'percent', label: '百分比堆叠' },
+                  ]}
+                />
+              </SettingRow>
+            )}
 
-          {showStyleControl('orientation') && (
-            <div>
-              <Text strong>方向</Text>
-              <Select
-                style={{ width: '100%', marginTop: 4 }}
-                value={chartStyle.orientation ?? 'vertical'}
-                onChange={(value) => onChartStyleChange({ orientation: value })}
-                options={[
-                  { value: 'vertical', label: '纵向' },
-                  { value: 'horizontal', label: '横向' },
-                ]}
-              />
-            </div>
-          )}
+            {showStyleControl('orientation') && (
+              <SettingRow label="方向">
+                <Select
+                  style={{ width: 160 }}
+                  value={chartStyle.orientation ?? 'vertical'}
+                  onChange={(value) => onChartStyleChange({ orientation: value })}
+                  options={[
+                    { value: 'vertical', label: '纵向' },
+                    { value: 'horizontal', label: '横向' },
+                  ]}
+                />
+              </SettingRow>
+            )}
 
-          {showStyleControl('donut') && (
-            <div>
-              <Text strong>环形图</Text>
-              <div style={{ marginTop: 4 }}>
+            {showStyleControl('donut') && (
+              <SettingRow label="环形图">
                 <Switch
                   checked={chartStyle.donut ?? false}
                   onChange={(checked) => onChartStyleChange({ donut: checked })}
                 />
-              </div>
-            </div>
-          )}
+              </SettingRow>
+            )}
 
-          {showStyleControl('tableRowSize') && (
-            <div>
-              <Text strong>表格行尺寸</Text>
-              <Select
-                style={{ width: '100%', marginTop: 4 }}
-                value={chartStyle.tableRowSize}
-                onChange={(value) => onChartStyleChange({ tableRowSize: value })}
-                options={[
-                  { value: 'small', label: '紧凑' },
-                  { value: 'middle', label: '默认' },
-                  { value: 'large', label: '宽松' },
-                ]}
-              />
-            </div>
-          )}
-        </Space>
-      </Card>
+            {showStyleControl('tableRowSize') && (
+              <SettingRow label="表格行尺寸">
+                <Select
+                  style={{ width: 160 }}
+                  value={chartStyle.tableRowSize}
+                  onChange={(value) => onChartStyleChange({ tableRowSize: value })}
+                  options={[
+                    { value: 'small', label: '紧凑' },
+                    { value: 'middle', label: '默认' },
+                    { value: 'large', label: '宽松' },
+                  ]}
+                />
+              </SettingRow>
+            )}
+          </div>
+        </Card>
+      )}
 
       {dimensionFields.length > 0 && (
-        <Card title="维度属性" size="small" style={{ marginBottom: 12 }}>
-          <Space orientation="vertical" style={{ width: '100%' }} size="small">
+        <Card
+          title="维度属性"
+          size="small"
+          style={{ marginBottom: 6 }}
+          styles={{ body: { padding: '4px 6px' } }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {dimensionFields.map((bound) => (
               <div key={bound.binding.bindingId}>
-                <Text strong>{bound.field.name}</Text>
+                <Text strong style={{ fontSize: 13 }}>
+                  {bound.field.name}
+                </Text>
                 <Input
-                  style={{ width: '100%', marginTop: 4 }}
+                  style={{ width: '100%', marginTop: 2 }}
                   value={dimensionLabels[bound.binding.bindingId] || ''}
                   onChange={(e) => onDimensionLabelChange(bound.binding.bindingId, e.target.value)}
                   placeholder="显示名称"
                 />
               </div>
             ))}
-          </Space>
+          </div>
         </Card>
       )}
 
       {metricFields.length > 0 && (
-        <Card title="指标属性" size="small" style={{ marginBottom: 12 }}>
-          <Space orientation="vertical" style={{ width: '100%' }} size="small">
+        <Card
+          title="指标属性"
+          size="small"
+          style={{ marginBottom: 6 }}
+          styles={{ body: { padding: '4px 6px' } }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {metricFields.map((bound) => (
               <div key={bound.binding.bindingId}>
-                <Text strong>{bound.field.name}</Text>
+                <Text strong style={{ fontSize: 13 }}>
+                  {bound.field.name}
+                </Text>
                 <Input
-                  style={{ width: '100%', marginTop: 4, marginBottom: 4 }}
+                  style={{ width: '100%', marginTop: 2, marginBottom: 2 }}
                   value={metricUnits[bound.binding.bindingId] || ''}
                   onChange={(e) => onMetricUnitChange(bound.binding.bindingId, e.target.value)}
                   placeholder="单位，例如 元 / %"
@@ -883,23 +1141,39 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 />
               </div>
             ))}
-          </Space>
+          </div>
         </Card>
       )}
-
-      <Card title="当前配置" size="small" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 12 }}>
-          <div style={{ marginBottom: 6 }}>
-            <Text type="secondary">类型: </Text>
-            <Text strong>{config.chartType.toUpperCase()}</Text>
-          </div>
-          <div style={{ marginBottom: 6 }}>
-            <Text type="secondary">标题: </Text>
-            <Text strong>{config.title}</Text>
-          </div>
-        </div>
-      </Card>
     </div>
+  );
+};
+
+/**
+ * 「预览」卡头右侧的状态指示：一个语义色圆点 + 当前图型名。
+ * 调用场景：预览卡片的 extra。
+ * 主要逻辑：把"有没有数据 / 正在查"从卡体提到卡头 —— 卡体里是图表本身，此前这三种
+ * 状态只能靠读那片空白区域猜。颜色沿用拖放区的语义色：蓝=查询中，绿=有数据，灰=空。
+ */
+const QueryStatusBadge: React.FC<{
+  loading: boolean;
+  hasData: boolean;
+  chartTypeLabel: string;
+}> = ({ loading, hasData, chartTypeLabel }) => {
+  const dotColor = loading ? 'var(--dr-accent)' : hasData ? '#52c41a' : '#c9ced6';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          flexShrink: 0,
+          backgroundColor: dotColor,
+        }}
+      />
+      <span>{chartTypeLabel}</span>
+    </span>
   );
 };
 
@@ -917,8 +1191,30 @@ const ChartBuilder: React.FC = () => {
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
   const [activeDragField, setActiveDragField] = useState<ChartField | null>(null);
+  const [activeDragBinding, setActiveDragBinding] = useState<DragPreview | null>(null);
+  // 左侧字段栏宽度（可拖拽调节）
+  const [leftSiderWidth, setLeftSiderWidth] = useState(150);
+  const [resizeHandleHover, setResizeHandleHover] = useState(false);
   // 编辑态图表详情缓存（id + 请求 Promise），供配置加载 effect 重跑时复用
   const editChartCache = useRef<{ id: number; promise: Promise<Chart> } | null>(null);
+
+  /** 左侧栏右缘拖拽调节宽度：按住手柄水平拖动，宽度限制在 [120, 320]。 */
+  const startLeftSiderResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = leftSiderWidth;
+    const onMove = (ev: MouseEvent) => {
+      setLeftSiderWidth(Math.min(320, Math.max(120, startWidth + ev.clientX - startX)));
+    };
+    const onUp = () => {
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    document.body.style.cursor = 'col-resize';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   const {
     datasets,
@@ -944,6 +1240,8 @@ const ChartBuilder: React.FC = () => {
     addMetricField,
     removeMetricField,
     reorderMetricField,
+    moveBinding,
+    swapDimensionGroups,
     setMetricAggregation,
     setMetricAlias,
     setMetricAggregations,
@@ -973,6 +1271,12 @@ const ChartBuilder: React.FC = () => {
     chartQueryResponse,
   } = useStore();
 
+  /** 桌面端左栏顶部的数据集标识取对象而非 id，免得模板里重复 find。 */
+  const currentDataset = useMemo(
+    () => datasets.find((ds) => ds.id === selectedDatasetId) ?? null,
+    [datasets, selectedDatasetId]
+  );
+
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
@@ -991,42 +1295,102 @@ const ChartBuilder: React.FC = () => {
   );
 
   /**
-   * 记录当前正在拖拽的字段，用于渲染跟随鼠标移动的 overlay 预览。
-   * 调用场景：字段从左侧字段列表开始拖动时。
-   * 主要逻辑：从 active.data.current 提取字段并写入本地状态。
+   * 记录当前正在拖拽的对象，用于渲染跟随鼠标移动的 overlay 预览。
+   * 调用场景：从左侧字段列表拖起字段，或从查询配置区拖起已有字段标签。
+   * 主要逻辑：两种拖拽源都产出同一份 {label, color} 预览；无法识别时清空。
    */
   const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveDragField(getDraggedField(event.active.data.current));
+    const data = event.active.data.current;
+    const field = getDraggedField(data);
+    if (field) {
+      setActiveDragField(field);
+      setActiveDragBinding(null);
+      return;
+    }
+    const binding = isDragBindingData(data) ? { label: data.label, color: data.color } : null;
+    setActiveDragField(null);
+    setActiveDragBinding(binding);
   }, []);
 
   /**
    * 在取消拖拽时清理 overlay 预览状态。
    * 调用场景：用户松手但未命中 drop zone，或拖拽流程被中断。
-   * 主要逻辑：将当前拖拽字段置空，移除浮层预览。
+   * 主要逻辑：把当前拖拽对象置空，移除浮层预览。
    */
   const handleDragCancel = useCallback(() => {
     setActiveDragField(null);
+    setActiveDragBinding(null);
   }, []);
 
   /**
-   * 处理字段拖放完成后的查询配置更新。
-   * 调用场景：字段拖到维度、指标或筛选区域后触发。
-   * 主要逻辑：先清理 overlay，再根据目标区域把字段加入对应查询配置。
+   * 处理拖拽完成后的查询配置更新。
+   * 调用场景：拖拽结束并命中某个落点。
+   * 主要逻辑：分两条互斥路径——
+   *   1) 配置区字段标签（binding-source）：落到别的组即换组、落到同组某个标签前即换序，
+   *      统一交给 store.moveBinding 原子完成；跨 kind 或目标组已有同名列时给出提示。
+   *   2) 左侧字段（field）：按落点类型新增到维度/指标/过滤字段组（原有行为）。
    */
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setActiveDragField(null);
+      setActiveDragBinding(null);
 
       const { active, over } = event;
 
       if (!over) return;
 
+      const overData = over.data.current;
+
+      const draggedBinding = isDragBindingData(active.data.current) ? active.data.current : null;
+      if (draggedBinding) {
+        const source = {
+          kind: draggedBinding.kind,
+          groupIndex: draggedBinding.groupIndex,
+          bindingId: draggedBinding.bindingId,
+        };
+
+        if (isBindingSlotData(overData)) {
+          if (
+            moveBinding(source, {
+              kind: overData.kind,
+              groupIndex: overData.groupIndex,
+              index: overData.index,
+            }) === 'rejected'
+          ) {
+            message.warning('目标区域已存在同名字段');
+          }
+          return;
+        }
+
+        if (isZoneDropData(overData)) {
+          if (overData.type === 'filter') {
+            message.warning('筛选区不接受从查询配置拖入的字段');
+            return;
+          }
+          if (overData.type !== draggedBinding.kind) {
+            message.warning(
+              draggedBinding.kind === 'dimension' ? '维度只能拖到维度区域' : '指标只能拖到指标区域'
+            );
+            return;
+          }
+          if (
+            moveBinding(source, {
+              kind: overData.type,
+              groupIndex: typeof overData.groupIndex === 'number' ? overData.groupIndex : 0,
+            }) === 'rejected'
+          ) {
+            message.warning('目标区域已存在同名字段');
+          }
+        }
+        return;
+      }
+
       const field = getDraggedField(active.data.current);
       if (!field) return;
 
-      const overData = over.data.current;
-      const dropZoneType = overData?.type as 'dimension' | 'metric' | 'filter';
-      const groupIndex = typeof overData?.groupIndex === 'number' ? overData.groupIndex : 0;
+      if (!isZoneDropData(overData)) return;
+      const dropZoneType = overData.type;
+      const groupIndex = typeof overData.groupIndex === 'number' ? overData.groupIndex : 0;
 
       if (dropZoneType === 'dimension') {
         if (field.type === 'dimension') {
@@ -1041,37 +1405,41 @@ const ChartBuilder: React.FC = () => {
           message.warning('请将维度拖入维度区域');
         }
       } else if (dropZoneType === 'filter') {
-        addFilter({
-          id: `filter-${Date.now()}`,
-          field: field.id,
-          operator: 'eq',
-          value: '',
-          logic: 'and',
-        });
+        // 过滤条件按列名记录（与 binding.field 同口径）。同一字段可重复加入——
+        // 区间筛选就是同字段各拖一次 >= 与 <=，因此这里不做去重。
+        addFilter({ field: field.name });
       }
     },
-    [addDimensionField, addMetricField, addFilter]
+    [addDimensionField, addMetricField, addFilter, moveBinding]
+  );
+
+  // 当前图型激活的字段组（getActiveFieldGroups 裁剪）：切图型后 queryConfig 可能残留
+  // 隐藏组的绑定（如柱图 → KPI 卡后 X 轴维度组仍在——目标图型无维度槽位时刻意不裁剪 state），属性面板与保存配置必须
+  // 与查询请求同口径，否则隐藏绑定会隐形泄漏——表现为重复维度列/多余属性条目。
+  const activeQueryConfig = useMemo(
+    () => getActiveFieldGroups(chartBuilderConfig.chartType, queryConfig),
+    [chartBuilderConfig.chartType, queryConfig]
   );
 
   const getDimensionFields = useCallback((): BoundField[] => {
     const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
-    return queryConfig.dimensionGroups.flatMap((g) =>
+    return activeQueryConfig.dimensionGroups.flatMap((g) =>
       g.bindings.flatMap((binding) => {
         const field = fieldMap.get(binding.field);
         return field ? [{ binding, field }] : [];
       })
     );
-  }, [queryConfig.dimensionGroups, chartBuilderFields]);
+  }, [activeQueryConfig.dimensionGroups, chartBuilderFields]);
 
   const getMetricFields = useCallback((): BoundField[] => {
     const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
-    return queryConfig.metricGroups.flatMap((g) =>
+    return activeQueryConfig.metricGroups.flatMap((g) =>
       g.bindings.flatMap((binding) => {
         const field = fieldMap.get(binding.field);
         return field ? [{ binding, field }] : [];
       })
     );
-  }, [queryConfig.metricGroups, chartBuilderFields]);
+  }, [activeQueryConfig.metricGroups, chartBuilderFields]);
 
   /**
    * 按维度组索引读取字段，供定义驱动的查询配置面板复用。
@@ -1192,6 +1560,35 @@ const ChartBuilder: React.FC = () => {
     setMetricAlias,
   ]);
 
+  /**
+   * 透视表「行列切换」快捷按钮：把行维度组（下标 0）与列维度组（下标 1）的绑定整体对调。
+   * 调用场景：查询配置卡片的 extra，仅 pivot 渲染。
+   * 主要逻辑：只对调 bindings，不重建分组，因此 bindingId 与随之携带的别名/单位/格式元数据原样保留；
+   * 两组同时为空时禁用，避免点了没有任何反馈。
+   */
+  const renderPivotSwapButton = () => {
+    if (chartBuilderConfig.chartType !== 'pivot') {
+      return undefined;
+    }
+
+    const [rowsGroup, columnsGroup] = queryConfig.dimensionGroups;
+    const totalBindings = (rowsGroup?.bindings.length ?? 0) + (columnsGroup?.bindings.length ?? 0);
+
+    return (
+      <Tooltip title="把行维度与列维度整体对调">
+        <Button
+          size="small"
+          icon={<SwapOutlined />}
+          disabled={totalBindings === 0}
+          onClick={() => swapDimensionGroups(0, 1)}
+          data-testid="pivot-swap-rows-columns"
+        >
+          行列切换
+        </Button>
+      </Tooltip>
+    );
+  };
+
   // queryConfigOverride：调用方持有比组件闭包更新的 queryConfig 时显式传入
   // （handleSortChange 的 setQueryConfig 尚未触发重渲染），保证 compose 看到最新 sort。
   const buildChartQueryRequest = useCallback(
@@ -1243,7 +1640,19 @@ const ChartBuilder: React.FC = () => {
   );
 
   const handleSortChange = useCallback(
-    (sort: { field: string; order: 'asc' | 'desc' }) => {
+    (sort: { field: string; order: 'asc' | 'desc' } | null) => {
+      // TableChart 回传 null 表示用户取消了排序（第三次点击表头）：清掉 sort 后重查，
+      // 让数据回到后端的自然顺序，而不是留着一个已经点掉的箭头状态。
+      if (!sort) {
+        const cleared: QueryConfig = { ...queryConfig, sort: undefined };
+        setQueryConfig({ sort: undefined });
+        const request = buildChartQueryRequest(cleared);
+        if (request) {
+          executeChartQuery(request);
+        }
+        return;
+      }
+
       // TableChart 回传的是被点击的输出列名（sorter.field）：先反查对应 bindingId
       // 再写入 queryConfig.sort（R-50：sort 引用 bindingId）。列无对应绑定时忽略本次点击。
       const bindingId = findBindingIdByOutputName(
@@ -1483,8 +1892,10 @@ const ChartBuilder: React.FC = () => {
         chartType: chartBuilderConfig.chartType,
         title: chartBuilderConfig.title,
         query: {
-          dimensionGroups: queryConfig.dimensionGroups,
-          metricGroups: queryConfig.metricGroups,
+          // 保存时只序列化当前图型激活的槽位组：隐藏组绑定不落库，否则
+          // ShareView/GetData 的平铺路径会把它们当真实维度发出去（重复列）。
+          dimensionGroups: activeQueryConfig.dimensionGroups,
+          metricGroups: activeQueryConfig.metricGroups,
           filters: queryConfig.filters,
           sort: queryConfig.sort,
           limit: queryConfig.limit,
@@ -1573,6 +1984,19 @@ const ChartBuilder: React.FC = () => {
           metricNames={metricFields.map((bound) => bound.field.name)}
           rowSize={chartStyle.tableRowSize}
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
+          // 排序状态受控：单一事实源是 queryConfig.sort（bindingId 引用），
+          // 表头箭头只反映它，避免"看起来排了、数据没排"的不一致。
+          sortField={
+            queryConfig.sort
+              ? findOutputNameByBindingId(
+                  queryConfig,
+                  chartBuilderFields,
+                  metricAliases,
+                  queryConfig.sort.bindingId
+                )
+              : undefined
+          }
+          sortOrder={queryConfig.sort?.order}
           onPageChange={chartBuilderConfig.chartType === 'table' ? handlePageChange : undefined}
           onSortChange={chartBuilderConfig.chartType === 'table' ? handleSortChange : undefined}
         />
@@ -1624,7 +2048,7 @@ const ChartBuilder: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            borderBottom: '1px solid #f0f0f0',
+            borderBottom: '1px solid var(--dr-border)',
             flexWrap: 'wrap',
             gap: 8,
           }}
@@ -1687,67 +2111,9 @@ const ChartBuilder: React.FC = () => {
       );
     }
 
-    return (
-      <Header
-        style={{
-          background: '#fff',
-          padding: '0 16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          borderBottom: '1px solid #f0f0f0',
-        }}
-      >
-        <Space>
-          <Text strong style={{ fontSize: 16 }}>
-            数据集:
-          </Text>
-          <Select
-            style={{ width: 240 }}
-            placeholder="选择数据集"
-            value={selectedDatasetId}
-            onChange={handleDatasetChange}
-            allowClear
-            options={datasets.map((ds) => ({
-              value: ds.id,
-              label: ds.name,
-            }))}
-          />
-        </Space>
-        <Space>
-          <Space>
-            <Text type="secondary">自动查询</Text>
-            <Switch checked={autoQuery} onChange={toggleAutoQuery} size="small" />
-          </Space>
-          {!autoQuery && (
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={handleExecuteQuery}
-              disabled={!selectedDatasetId}
-            >
-              执行查询
-            </Button>
-          )}
-          {!isEmptyPayload(chartData) && (
-            <Button icon={<CodeOutlined />} onClick={() => setSqlModalVisible(true)}>
-              查看 SQL
-            </Button>
-          )}
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            onClick={handleSave}
-            disabled={!selectedDatasetId}
-          >
-            {editingChartId ? '更新' : '保存'}
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={handleReset}>
-            重置
-          </Button>
-        </Space>
-      </Header>
-    );
+    // 桌面端不再渲染顶部 Header：数据集选择器挪到左侧栏（可用字段上方），
+    // 自动查询/执行/查看 SQL/保存/重置挪到「查询配置」卡片标题行（行列切换右侧）。
+    return null;
   };
 
   const renderContent = () => {
@@ -1755,28 +2121,46 @@ const ChartBuilder: React.FC = () => {
       return (
         <Content
           style={{
-            padding: '12px',
-            background: '#fafafa',
+            padding: '8px',
+            background: 'var(--dr-canvas)',
             display: 'flex',
             flexDirection: 'column',
-            gap: 12,
+            gap: 8,
           }}
         >
-          <Card title="查询配置" size="small" style={{ flex: '0 0 auto' }}>
+          <Card
+            title="查询配置"
+            size="small"
+            style={{ flex: '0 0 auto' }}
+            extra={renderPivotSwapButton()}
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {renderQueryConfigRows()}
 
-              <FilterBuilder
-                fields={chartBuilderFields}
-                filters={queryConfig.filters}
-                onAdd={() => addFilter()}
-                onRemove={removeFilter}
-                onUpdate={updateFilter}
-              />
+              <QueryConfigRow rowType="filter" label="过滤">
+                <FilterDropZone
+                  filters={queryConfig.filters}
+                  availableFields={chartBuilderFields}
+                  onAdd={(field) => addFilter({ field: field.name })}
+                  onRemove={removeFilter}
+                  onUpdate={updateFilter}
+                />
+              </QueryConfigRow>
             </div>
           </Card>
 
-          <Card title="预览" size="small" style={{ flex: 1, minHeight: 300 }}>
+          <Card
+            title="预览"
+            size="small"
+            style={{ flex: 1, minHeight: 300 }}
+            extra={
+              <QueryStatusBadge
+                loading={chartDataLoading}
+                hasData={!isEmptyPayload(chartData)}
+                chartTypeLabel={chartDefinitions[chartBuilderConfig.chartType].label}
+              />
+            }
+          >
             <div style={{ height: 'calc(100vh - 400px)', minHeight: 250 }}>{renderPreview()}</div>
           </Card>
         </Content>
@@ -1786,46 +2170,201 @@ const ChartBuilder: React.FC = () => {
     return (
       <Layout>
         <Sider
-          width={180}
-          style={{ background: '#fff', padding: '12px', borderRight: '1px solid #f0f0f0' }}
+          width={leftSiderWidth}
+          style={{
+            // 画布色（与中栏同源）：白卡片浮在灰底上，三栏结构由"明度差"表达。
+            // 上下 0 与中栏 Content 的 padding:0 对齐（否则三栏顶部错开 8px），
+            // 左右 4px 是卡片的呼吸边。
+            // 竖向分栏线已移除：三栏同底色后，1px 线在两个同色面之间只是"缝"，
+            // 而 4px 留白 + 6px 卡间距已经构成一条 ~14px 的灰色间隔带，足够读出分栏。
+            // （移除也顺带省掉 2px 横向像素。）
+            background: 'var(--dr-canvas)',
+            padding: '0 4px',
+            position: 'relative',
+          }}
         >
-          <Card title="可用字段" size="small">
+          {/* 数据集以纯文本展示（点击弹出选择菜单），避免下拉框截断长名称 */}
+          <Dropdown
+            trigger={['click']}
+            placement="bottomLeft"
+            menu={{
+              items: datasets.map((ds) => ({ key: String(ds.id), label: ds.name })),
+              selectedKeys: selectedDatasetId != null ? [String(selectedDatasetId)] : [],
+              onClick: ({ key }) => handleDatasetChange(Number(key)),
+            }}
+          >
+            <Button
+              // default（描边）而非 text：数据集是本页最重要的输入项，在灰画布上
+              // 必须读起来像"一个可点的控件"，而不是一段飘着的文字。
+              type="default"
+              size="small"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                width: '100%',
+                // 26 = 与拖放区同高，左栏顶部与中栏槽位横向对齐
+                height: 26,
+                marginBottom: 6,
+                padding: '0 6px',
+                borderRadius: 6,
+                background: 'var(--dr-surface)',
+                borderColor: 'var(--dr-border)',
+                boxShadow: 'var(--dr-shadow-card)',
+              }}
+            >
+              {/* 图标与左侧导航的「数据集」保持一致，让这块一眼可辨为数据集 */}
+              <AppstoreOutlined
+                style={{ color: 'var(--dr-text-3)', fontSize: 12, flexShrink: 0 }}
+              />
+              <Text
+                strong={currentDataset != null}
+                type={currentDataset != null ? undefined : 'secondary'}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 12,
+                  textAlign: 'left',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {currentDataset?.name ?? '选择数据集'}
+              </Text>
+              {/* Dropdown 原先没有任何"可展开"的可见提示，补一个朝下箭头作为可供性 */}
+              <DownOutlined
+                style={{ color: 'var(--dr-text-4)', fontSize: 9, flexShrink: 0 }}
+                aria-hidden
+              />
+            </Button>
+          </Dropdown>
+          <Card title="可用字段" size="small" styles={{ body: { padding: '2px 2px 4px' } }}>
             <FieldListPanel fields={chartBuilderFields} loading={chartBuilderFieldsLoading} />
           </Card>
+          {/* 右缘拖拽手柄：按住可调节左侧栏宽度 */}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: 鼠标拖拽调节手柄，非交互控件 */}
+          <div
+            onMouseDown={startLeftSiderResize}
+            onMouseEnter={() => setResizeHandleHover(true)}
+            onMouseLeave={() => setResizeHandleHover(false)}
+            title="拖拽调节宽度"
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              width: 6,
+              height: '100%',
+              cursor: 'col-resize',
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: resizeHandleHover ? 'rgba(22,119,255,0.18)' : 'transparent',
+            }}
+          >
+            <div
+              style={{
+                width: 2,
+                height: 32,
+                borderRadius: 2,
+                backgroundColor: resizeHandleHover ? 'var(--dr-accent)' : 'var(--dr-border-strong)',
+              }}
+            />
+          </div>
         </Sider>
 
         <Content
           style={{
-            padding: '12px',
-            background: '#fafafa',
+            // 页级容器不再留白：中栏卡片直接顶到左右分栏线，横向省 16px、纵向省 16px。
+            // 卡片间距靠 gap 6 分隔，画布色只在缝隙里露出（就是这 6px 让卡片读得出边界）。
+            padding: 0,
+            background: 'var(--dr-canvas)',
             display: 'flex',
             flexDirection: 'column',
-            gap: 12,
+            gap: 6,
           }}
         >
-          <Card title="查询配置" size="small" style={{ flex: '0 0 auto' }}>
+          <Card
+            title="查询配置"
+            size="small"
+            style={{ flex: '0 0 auto' }}
+            styles={{ body: { padding: '4px 6px' } }}
+            extra={
+              <Space size={4} wrap>
+                {renderPivotSwapButton()}
+                <Space size={4}>
+                  <Text type="secondary">自动查询</Text>
+                  <Switch checked={autoQuery} onChange={toggleAutoQuery} size="small" />
+                </Space>
+                {!autoQuery && (
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    onClick={handleExecuteQuery}
+                    disabled={!selectedDatasetId}
+                  >
+                    执行查询
+                  </Button>
+                )}
+                {!isEmptyPayload(chartData) && (
+                  <Button
+                    size="small"
+                    icon={<CodeOutlined />}
+                    onClick={() => setSqlModalVisible(true)}
+                  >
+                    查看 SQL
+                  </Button>
+                )}
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={handleSave}
+                  disabled={!selectedDatasetId}
+                >
+                  {editingChartId ? '更新' : '保存'}
+                </Button>
+                <Button size="small" icon={<ReloadOutlined />} onClick={handleReset}>
+                  重置
+                </Button>
+              </Space>
+            }
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {renderQueryConfigRows()}
 
-              <FilterBuilder
-                fields={chartBuilderFields}
-                filters={queryConfig.filters}
-                onAdd={() => addFilter()}
-                onRemove={removeFilter}
-                onUpdate={updateFilter}
-              />
+              <QueryConfigRow rowType="filter" label="过滤">
+                <FilterDropZone
+                  filters={queryConfig.filters}
+                  availableFields={chartBuilderFields}
+                  onAdd={(field) => addFilter({ field: field.name })}
+                  onRemove={removeFilter}
+                  onUpdate={updateFilter}
+                />
+              </QueryConfigRow>
             </div>
           </Card>
 
-          <Card title="预览" size="small" style={{ flex: 1, minHeight: 400 }}>
-            <div style={{ height: 'calc(100vh - 480px)', minHeight: 300 }}>{renderPreview()}</div>
+          <Card
+            title="预览"
+            size="small"
+            style={{ flex: 1, minHeight: 400 }}
+            styles={{ body: { padding: 4 } }}
+            extra={
+              <QueryStatusBadge
+                loading={chartDataLoading}
+                hasData={!isEmptyPayload(chartData)}
+                chartTypeLabel={chartDefinitions[chartBuilderConfig.chartType].label}
+              />
+            }
+          >
+            <div style={{ height: 'calc(100vh - 380px)', minHeight: 300 }}>{renderPreview()}</div>
           </Card>
         </Content>
 
-        <Sider
-          width={260}
-          style={{ background: '#fff', padding: '12px', borderLeft: '1px solid #f0f0f0' }}
-        >
+        <Sider width={300} style={{ background: 'var(--dr-canvas)', padding: '0 4px' }}>
           <ConfigPanel
             config={chartBuilderConfig}
             dimensionLabels={dimensionLabels}
@@ -1862,7 +2401,7 @@ const ChartBuilder: React.FC = () => {
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}
     >
-      <Layout style={{ minHeight: 'calc(100vh - 120px)' }}>
+      <Layout className="chart-builder-page" style={{ minHeight: 'calc(100vh - 120px)' }}>
         {renderHeader()}
 
         {renderContent()}
@@ -1913,7 +2452,11 @@ const ChartBuilder: React.FC = () => {
         </Drawer>
       </Layout>
       <DragOverlay>
-        {activeDragField ? <FieldDragPreview field={activeDragField} /> : null}
+        {activeDragField ? (
+          <FieldDragPreview label={activeDragField.name} color={fieldTagColor(activeDragField)} />
+        ) : activeDragBinding ? (
+          <FieldDragPreview label={activeDragBinding.label} color={activeDragBinding.color} />
+        ) : null}
       </DragOverlay>
       <Modal
         title="生成的 SQL"
@@ -1927,12 +2470,16 @@ const ChartBuilder: React.FC = () => {
             <Text strong>数据查询:</Text>
             <pre
               style={{
-                background: '#f5f5f5',
+                // Modal 是 portal 到 body 的，取不到 .chart-builder-page 上的 CSS 变量，
+                // 故这里与 --dr-sunken / --dr-border 取同值但写成字面量。
+                background: '#f7f8fa',
+                border: '1px solid #e6e8eb',
                 padding: 12,
-                borderRadius: 4,
+                borderRadius: 6,
                 overflow: 'auto',
                 maxHeight: 300,
                 fontSize: 12,
+                margin: 0,
               }}
             >
               {chartQueryResponse.select_sql || '无'}
@@ -1944,12 +2491,14 @@ const ChartBuilder: React.FC = () => {
                 </Text>
                 <pre
                   style={{
-                    background: '#f5f5f5',
+                    background: '#f7f8fa',
+                    border: '1px solid #e6e8eb',
                     padding: 12,
-                    borderRadius: 4,
+                    borderRadius: 6,
                     overflow: 'auto',
                     maxHeight: 200,
                     fontSize: 12,
+                    margin: 0,
                   }}
                 >
                   {chartQueryResponse.count_sql}

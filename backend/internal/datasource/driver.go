@@ -127,6 +127,30 @@ var TextTypeNames = map[string]bool{
 	"SET":          true,
 }
 
+// NonBinaryNamedTypes MySQL/StarRocks 以 []byte 返回文本表示、但**不是**二进制的类型名称。
+// 不列进来会被 convertValue 当成二进制，JSON 序列化成 base64（StarRocks DECIMAL 实测踩坑：
+// 103.5125 变成 "MTAzLjUxMjUwMDA="）。
+var NonBinaryNamedTypes = map[string]bool{
+	"DECIMAL":    true,
+	"NEWDECIMAL": true,
+	"FLOAT":      true,
+	"DOUBLE":     true,
+	"REAL":       true,
+	"TINYINT":    true,
+	"SMALLINT":   true,
+	"MEDIUMINT":  true,
+	"INT":        true,
+	"INTEGER":    true,
+	"BIGINT":     true,
+	"LARGEINT":   true,
+	"YEAR":       true,
+	"DATE":       true,
+	"TIME":       true,
+	"DATETIME":   true,
+	"TIMESTAMP":  true,
+	"JSON":       true,
+}
+
 // BinaryTypeNames 二进制类型名称
 var BinaryTypeNames = map[string]bool{
 	"TINYBLOB":    true,
@@ -161,7 +185,7 @@ func convertValue(val interface{}, fieldType interface{}) interface{} {
 				upperType += string(c)
 			}
 		}
-		isTextType = TextTypeNames[upperType]
+		isTextType = TextTypeNames[upperType] || NonBinaryNamedTypes[upperType]
 	}
 
 	if isTextType {

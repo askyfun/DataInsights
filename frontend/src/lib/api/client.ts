@@ -1,19 +1,9 @@
 import * as Sentry from '@sentry/react';
-import { message } from 'antd';
 import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import type { components } from '../../idls/gen_types';
 
-export const API_CODE = {
-  SUCCESS: 20000,
-  BAD_REQUEST: 20100,
-  UNAUTHORIZED: 20200,
-  NOT_FOUND: 20300,
-  BUSINESS_ERROR: 20400,
-  THIRD_PARTY_ERROR: 20500,
-  INTERNAL_ERROR: 50000,
-} as const;
-
-export type ApiCode = (typeof API_CODE)[keyof typeof API_CODE];
+// 业务成功码（后端 response 信封约定）。其余非 2xx/业务码由拦截器统一按"非此即错"处理。
+const API_SUCCESS_CODE = 20000;
 
 // Envelope from the OpenAPI schema with data re-tightened per call site.
 // G['Envelope']['code'] (ResponseCode) is the same 7-literal union as ApiCode.
@@ -21,26 +11,28 @@ export type ApiResponse<T = unknown> = Omit<components['schemas']['Envelope'], '
   data: T;
 };
 
-export interface PageResult<T> {
-  items: T[];
-  total: number;
-  page: number;
-  page_size: number;
-  total_pages: number;
+// X-Request-ID 的取值：crypto.randomUUID 只在安全上下文（HTTPS / localhost）可用，
+// 经局域网 IP 明文访问时它是 undefined —— 那时必须退回时间戳方案，否则每个请求都会
+// 在请求拦截器里抛错。
+function generateRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
-const CODE_MSG_MAP: Record<ApiCode, string> = {
-  [API_CODE.SUCCESS]: 'success',
-  [API_CODE.BAD_REQUEST]: '请求参数有误，请检查输入',
-  [API_CODE.UNAUTHORIZED]: '登录状态已失效，请重新登录',
-  [API_CODE.NOT_FOUND]: '请求的资源不存在',
-  [API_CODE.BUSINESS_ERROR]: '操作失败，请稍后重试',
-  [API_CODE.THIRD_PARTY_ERROR]: '服务暂时不可用',
-  [API_CODE.INTERNAL_ERROR]: '服务器内部错误',
-};
-
-function generateRequestId(): string {
-  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+// 全前端唯一的 axios 实例（别再在别处 axios.create）。baseURL 只有这一个来源：
+//   1. VITE_API_BASE_URL 已设置 → 用它；空字符串 = 同源相对路径，生产部署把
+//      /api 交给 nginx 反代到后端，前端因此不需要 CORS 白名单。
+//   2. 未设置 → 开发默认 http://<当前访问主机名>:23352（后端 [CORS] AllowedOrigins
+//      必须包含该主机名的 23351 来源，否则预检不返回 CORS 头）。
+export function resolveApiBaseURL(configured: string | undefined): string {
+  if (typeof configured === 'string') {
+    return configured;
+  }
+  const host =
+    typeof window === 'undefined' ? 'localhost' : window.location.hostname || 'localhost';
+  return `http://${host}:23352`;
 }
 
 function createApiClient(baseURL: string): AxiosInstance {
@@ -54,8 +46,7 @@ function createApiClient(baseURL: string): AxiosInstance {
 
   client.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
-      const requestId = generateRequestId();
-      config.headers.set('X-Request-ID', requestId);
+      config.headers.set('X-Request-ID', generateRequestId());
       return config;
     },
     (error) => {
@@ -63,27 +54,15 @@ function createApiClient(baseURL: string): AxiosInstance {
     }
   );
 
+  // 业务错误只记录并抛出，不在这里弹 toast：调用方（页面/store）自己决定提示文案，
+  // 统一弹窗会导致同一失败被提示两次。
   client.interceptors.response.use(
     (response: AxiosResponse<ApiResponse>) => {
-      const { code, msg } = response.data;
+      const { code, msg } = response.data || {};
 
-      if (code !== API_CODE.SUCCESS) {
-        const displayMsg = CODE_MSG_MAP[code] || msg;
-        message.error(displayMsg);
-
-        if (code === API_CODE.UNAUTHORIZED) {
-          // Handle logout logic here
-        }
-
-        Sentry.captureMessage(`API Error: ${code} - ${msg}`, {
-          extra: {
-            url: response.config.url,
-            method: response.config.method,
-            code,
-          },
-        });
-
-        return Promise.reject(new Error(msg));
+      if (code !== undefined && code !== API_SUCCESS_CODE) {
+        console.error(`API Error [${code}]: ${msg}`);
+        return Promise.reject(new Error(msg || `API Error: ${code}`));
       }
 
       return response;
@@ -97,16 +76,10 @@ function createApiClient(baseURL: string): AxiosInstance {
         'An error occurred';
       console.error('API Error:', errorMsg);
 
+      // Report non-2xx responses to Sentry
       if (status && status >= 400) {
         Sentry.captureMessage(
-          `API Error: ${error.response?.config?.method?.toUpperCase()} ${error.response?.config?.url} returned ${status}: ${errorMsg}`,
-          {
-            extra: {
-              url: error.response?.config?.url,
-              method: error.response?.config?.method,
-              status,
-            },
-          }
+          `API Error: ${error.response?.config?.method?.toUpperCase()} ${error.response?.config?.url} returned ${status}: ${errorMsg}`
         );
       }
 
@@ -117,28 +90,6 @@ function createApiClient(baseURL: string): AxiosInstance {
   return client;
 }
 
-export const apiClient = createApiClient(`http://${window.location.hostname || 'localhost'}:8080`);
+const configuredBaseURL = import.meta.env.VITE_API_BASE_URL;
 
-export function get<T>(url: string, config?: InternalAxiosRequestConfig): Promise<ApiResponse<T>> {
-  return apiClient.get<ApiResponse<T>>(url, config).then((res) => res.data);
-}
-
-export function post<T>(
-  url: string,
-  data?: unknown,
-  config?: InternalAxiosRequestConfig
-): Promise<ApiResponse<T>> {
-  return apiClient.post<ApiResponse<T>>(url, data, config).then((res) => res.data);
-}
-
-export function put<T>(
-  url: string,
-  data?: unknown,
-  config?: InternalAxiosRequestConfig
-): Promise<ApiResponse<T>> {
-  return apiClient.put<ApiResponse<T>>(url, data, config).then((res) => res.data);
-}
-
-export function del<T>(url: string, config?: InternalAxiosRequestConfig): Promise<ApiResponse<T>> {
-  return apiClient.delete<ApiResponse<T>>(url, config).then((res) => res.data);
-}
+export const apiClient: AxiosInstance = createApiClient(resolveApiBaseURL(configuredBaseURL));

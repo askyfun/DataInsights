@@ -81,3 +81,44 @@
 - **"语义统一"类改动要先审存储默认值再定透传规则**：B4 评审组合发现 preview/share 的 `limit` 不对称——store 给所有新图表默认写 `limit:1000`，预览只对 table 发分页、分享对全类型透传 limit，三处各自正确、合起来在 >1000 分组时截断不一致。教训：跨端一致性任务动手前，把"数据在生产端（store 默认值/持久化）的真实形态"拉出来看一眼，别只看消费端代码；"parity"承诺要精确到每个字段的通道规则并写进函数注释。
 - **修复会把潜伏路径变成活路径**：D2 让分享页走聚合管线后，原本不可达的"table 无分页 → TableProcessor 列序随机 + total 误计"分支一夜转正。凡是"让某条 dormant 管线首次被真实使用"的改动，评审必须专门问：这条管线里哪些分支以前从没被执行过，现在会。
 - **像素级渲染验证依赖前台窗口，行为验证不依赖**：IAB rAF=0 时 canvas 永不 paint，但 echarts 实例挂载与否、`.ant-result` 有无、DOM 文案、live curl 的 wire 数值足以证明渲染逻辑正确——把"代码正确性证据"与"肉眼可见证据"分开记录，别让环境限制把验收降级成猜测；rAF 探针（evaluate 数帧）是鉴别节流 vs 回归的最便宜手段。
+
+## `make dev` 起不来排查（2026-09-16）
+
+- **"跑不起来"往往不是一个问题**：这次是两件事叠在一起——① `backend/etc/config.toml`（未被 git 跟踪，纯本地文件）指向的 LAN Postgres `192.168.10.81` 主机已关机，后端 `InitDB` 失败即 `os.Exit(1)`；② 旧 `dev: dev-backend dev-frontend` 是串行 prerequisite，后端进程不退出前端就永远轮不到启动。只修任一个都仍会看到"卡住没反应"，所以先分别验证前后端各自能否起来，再谈根因。
+- **后端连不上库时表现为静默退出**：`dial tcp ...: connect: host is down` 之后没有任何端口监听，容易误判成"air/端口占用"问题。定位手法：`go build -o /tmp/x ./cmd` 后直接前台跑并 `perl -e 'alarm 20; exec @ARGV' ...; echo EXIT=$?` 拿真实退出码（macOS 无 `timeout`），再配合 `lsof -nP -iTCP:8080 -sTCP:LISTEN` 与 `nc -z -G 5 <host> 5432` 区分"进程死了"还是"依赖没起来"。
+- **`make dev` 并行启动要靠 `set -m` + 进程组 kill，直接 `kill $pid` 会留孤儿**：EXIT trap 只对 `pnpm dev` 的父 subshell 发 SIGTERM 时，真正的 vite node 进程会脱离继续占 3000 端口。bash `set -m` 让两个后台任务各自成组，`kill -TERM -<pgid>` 才能连带收掉 pnpm→node；轮询用的 `kill -0` 需 `2>/dev/null`，否则未回收任务会往输出泄漏 "No such process"。
+- **本机 Homebrew postgresql@16 有两个坑**：直接 `pg_ctl start` 在 LANG/LC_ALL 为空的 shell 里会 `FATAL: postmaster became multithreaded during startup`（HINT 让设 LC_ALL），带 `LC_ALL=en_US.UTF-8` 可起；改由 `brew services start postgresql@16` 走 launchd 则不受影响且随登录自启。空集群首次用需自建 `insight` 角色 + `insight-dev` 库，表结构由后端启动时 `database.RunMigrations`（goose embed）自动建，无需手工导 schema。
+- **杀"疑似诊断残留"的进程前必须先确认它属于谁**：`pgrep -f "^air --build"` 命中的旧 pid 82273 其实是用户终端里一直在跑的 `make dev`——它的 `server` 子进程因 DB 挂了早已消失，air 处于空转等待，看起来像僵尸。我 kill 它导致用户的会话被打断（其 make 随即按旧串行逻辑起了个落在 3001 的前端）。教训：清进程前用 `ps -eo pid,ppid,lstart,command` 反查父子链与启动时刻，确认是自己某次 eval 的后代才动手；无法确认归属就先问，别把用户的运行态当垃圾扫掉。
+
+## 数据源页 "Network Error" 排查（2026-09-16）
+
+- **"页面报错了，没有数据"是两个独立问题，先分开再动手**：报错是 CORS（见下），没数据是**连错了数据库**——`config.toml` 的 Url 指向本机 Homebrew 5432 的空库（今天为绕开挂掉的远端而新建），而有数据的 `~/dataray-pgdata`（5433）集群默认不运行。症状叠在一起时容易只修一个就宣布完成；这里先 `curl` 打接口确认后端返回的是 `data:[]`（200 正常）还是网络失败，再决定查哪边。
+- **CORS 拦截的表现是 axios 的 "Network Error"，而后端日志完全正常**：前端 `lib/api/client.ts` 用 `http://${window.location.hostname}:8080` 推导 API 基址（本意是支持任意主机访问），但后端 `[CORS] AllowedOrigins` 是精确白名单。用 `data.localhost:3000` 打开时 Origin 不在名单里 → 中间件不发 `Access-Control-Allow-Origin` → 浏览器丢弃响应，axios 只能报 "Network Error"。最便宜的判定：`curl -s -D - -o /dev/null -H "Origin: http://<host>:3000" http://<host>:8080/api/datasources | grep -i access-control`，出现 `Vary: Origin` 却没有 `Access-Control-Allow-Origin` 就是它，不必去浏览器抓包。注意 `*.localhost` 全部解析到 127.0.0.1、vite 又监听 0.0.0.0，所以任何非 `localhost` 的主机名都会复发——往配置里加一条精确 origin 只是权宜，根治要让中间件放行回环别名。
+- **air 只在源码"内容"变化时重建，改配置/碰 mtime/kill 子进程都不行**：`make dev` 下 air 默认只监视 `.go` 等扩展名，改 `etc/config.toml` 永远不会生效；`touch` 一个 .go 文件（只变 mtime）也不触发；**kill 掉 `server` 子进程 air 不会重新拉起**，只会空转等待（这正是上一节那个"像僵尸的 air"的成因，我这次又复现了一次）。真正有效的触发是往 .go 文件写真实内容——本次临时建 `backend/cmd/air_trigger_tmp.go` 让 air 重建，重启后再删掉它（删除会再触发一次重建，两次都读同一份新配置，结果一致）。另外 air 本身不能 kill：`Makefile` 的包装是 `while kill -0 $be && kill -0 $fe`，air 一死 EXIT trap 会连带把前端一起收掉。
+- **配置生效要显式重启，验证要挑对探针**（同日补充）：`etc/config.toml` 改动 **不会** 让 air 重启后端；对 `.go` 文件 `touch` 也不会（macOS 上 air 走 FSEvents，纯 mtime 变更无写事件），得做"内容不变的真实写入"（`perl -0pi -e '' backend/cmd/main.go`，不产生 diff），判据是 `backend/server` 二进制 mtime 与 pid 同时变化。另：`GET /health` 是裸 handler、不碰数据库，永远 200，不能作为"库连上了"的证据——用 `/api/datasets` 等真实接口，其错误串会直接印出 `user=... database=... host:port`，是确认实际连接目标最便宜的手段。当天开发库最终切到 `postgres://postgres:postgres@192.168.10.70:5432/insight_dev`（该 PG 18 实例上 `insight_dev` 为新建库，注意是下划线，不是本机那套连字符 `insight-dev`）。
+- **`set -m` 并行起 dev 会让 vite 被 SIGTTIN 挂起，必须 `< /dev/null` 断掉 stdin**（同日返工）：把 vite 放后台进程组后，它为自己的"按键盘交互"去读终端 stdin，内核随即以 SIGTTIN 停住整个前端进程组——表现极迷惑：进程活着、端口 `LISTEN`、但请求一律超时无响应（`ps` 里状态是 `T`，不是 `S`）。修复是给两个后台任务都加 `< /dev/null`；验收口径：`lsof -p <vite pid>` 看 fd `0r` 是否 `CHR /dev/null`，并确认进程表里没有 `T`。反面教训：对 `T` 状态的进程直接 `kill -CONT` 唤醒，它读完 stdin 会立刻退出，进而触发我写的 EXIT trap 把后端一起收掉，等于把用户的 dev 环境整个停掉——唤醒挂起的 dev 进程前要先想清楚它恢复后的下一步是什么。
+
+## 全量依赖升级（前端 major 拉最新 + Go 依赖 minor，2026-09-17）
+
+- **升级顺序：先 `pnpm update --latest` 一把装齐，再用 `tsc --noEmit` 当错误清单逐个修**，比边升边修省很多往返。本轮实际破坏点全在类型层可发现：TS7 删了 `tsconfig` 的 `baseUrl`（paths 直接相对配置文件写）；react-router 7 删了 `BrowserRouter future` prop；antd6 `Dropdown.overlay`→`menu={{items}}`、`Space.direction`→`orientation`、`Drawer.width`→`size`、`destroyOnClose`→`destroyOnHidden`（vite8 原生 `cssSideEffectImports` 后 CSS 副作用导入需 `src/vite-env.d.ts` 的 `/// <reference types="vite/client" />`，本仓库一直没有）。
+- **批量全局替换会误伤同名 props**：一次 `width=` 全局 sed 把 Modal 的 `width` 也改成了 antd6 已无的 `size`——Modal 的 `width` 在 v6 未废弃，只有 Drawer 废弃。改法必须先按组件上下文逐处看，替换断言（`assert a in s`）只保底存在性、不保底语义。
+- **测试基建两类隐性依赖**：jest-dom 7 要 `import '@testing-library/jest-dom/vitest'` 才注入 vitest 断言类型（裸导入只剩类型缺失、37 处 TS2339）；jsdom 30 仍无 `ResizeObserver` 而 antd6 的 rc-resize-observer 直接 `ReferenceError`，测试 setup 需自带 stub。
+- **deprecation 警告会伪装成断言失败**：ChartBuilder 有个"禁止 console.error"的用例，antd6 的 Space/Drawer 废弃警告把渲染链路上所有用例连坐打挂——排查时先读断言消息里 warning 原文，它就是待修清单，不用猜。
+- **`make dev` 起的 vite/air 持有的是启动那一刻的依赖树**：升级后必须整组重启（确认进程归属后 TERM `make dev` 包装进程，vite 与 air 的子进程组会被 trap 收掉），否则浏览器冒烟测的还是旧版本。
+
+## Ponytail 死代码清理（2026-09-19）
+
+- **删除项**：后端 `service/queryrecord` 整包、`query/sanitizer.go`、v1 适配器 `ChartSpecFromRequest` + `defaultDimGroupName/defaultMetricGroupName`、误构建二进制 `backend/server.new`；前端 `client.ts` 死常量（API_CODE→私有 API_SUCCESS_CODE、PageResult、ApiCode）、`api/index.ts` 三个负载判别函数（isHistogram/isRadar/isBoxplot，仅测试引用）与 `executeQuery`（v1 死链）、store 死面（fetchQueryData/setSelectedChart/selectedChartId/clearError）、`datatypes.ts` 322→104 行（只留 StandardDataType+toStandardType）；10 处 `new Date().toLocaleString()` 复制粘贴收敛为 `lib/format.ts#formatDateTime`。
+- **审计报告要抽查再动手**：两份 subagent 审计各有误报——`get/post/put/del` 包装层、`generateRequestId`、`ChartConfigQuery/ConfigFieldGroup` 实际都在用或已不存在；`DEFAULT_CHART_STYLE` 只需去 export。每条"死代码"结论都先 grep 全仓确认再删，测试引用不算生产引用但删函数要连测试一起删。
+- **删除后连注释一起清**：`processor*.go`/`dialect.go`/`pivot_correctness_integration_test.go` 里多处注释引用已删符号（ChartSpecFromRequest/defaultDimGroupName/queryrecord 约定/sanitizer 兜底），语义仍有价值就改写措辞、纯历史引用就删句。
+- **dayjs 不删**：antd RangePicker 的 `disabledDate(current: Dayjs)` 类型本身来自 dayjs（antd 强依赖），删直接依赖不减少安装体积还断了类型导入来源。
+- **遗留坏测试顺手修**：`DatasourceDetail.test.tsx` 在 HEAD 上就挂（缺 IntlProvider + 断言已过时的 "Total: 0 rows"——antd 空表不渲染分页条）；`chartOptions.test.ts` 的 PieOptionView 缺 `color?` 字段（工作区未提交改动遗留的 tsc 错误）。`pnpm build`（tsc 全量）此前没人跑过，所以这些一直在逃。
+
+## 过滤器改造为「过滤字段组」（2026-09-19）
+
+- **动手前先核三件事，省掉整轮猜测**：① 拖拽管道**本来就支持**过滤落点（`FieldDropZone` 有 `filter` 分支、`handleDragEnd` 有 `dropZoneType === 'filter'`），旧 `FilterBuilder` 只是没接上；② 后端 `bun_builder.go` 对 `logic` 非 `OR` 一律按 AND → **后端零改动**，前端恒发 `and` 即可；③ 直连 `insight_dev` 核库发现 **14 个已保存图表 `filters` 全空** → 把过滤改成恒「且」不存在历史 OR 语义静默变更的风险。**"这次改动要不要迁移历史数据"必须先用真实库验证，不能靠推理**。
+- **同构交互 ≠ 同构数据结构**：过滤条件不是「绑定」（每条自带操作符与值），复用 `FieldDropZone` 会把组件变成 `if (zoneType === 'filter')` 分支怪；但视觉必须同源，所以复用的是**外壳**（`QueryConfigRow` 新增 `children` 插槽）与**样式常量**（`dropZoneStyles.ts` 的 id/容器/三色板），不是内部实现。`dropZoneId()` 抽成共享函数是刚需——两个组件各写 `dropzone-${type}-${index}` 一旦撞名会互相抢命中。
+- **图型无关的能力不要塞进 `chartDefinitions.fieldGroups`**：过滤是所有图型都有的公共行，写进图型定义会让 14 个定义各重复一项，并把 `FieldGroupKind` 逼成三分支、牵动 `getActiveFieldGroups`/`normalizeQueryConfigForChartType` 的二分逻辑。**"统一到同一套 UI 体系"与"登记到同一份能力清单"是两件事**。
+- **`Date.now()` 造 id 在"连加"场景必炸**：区间筛选就是同字段连拖两次（`>=`、`<=`），同毫秒内两条条件会拿到同一个 id，按 id 更新/删除随即误伤另一条。前端造业务 id 一律 `crypto.randomUUID()` + 时间戳兜底（与 `X-Request-ID` 同一套路）。
+- **纯图标按钮必须补 `aria-label`，否则测试静默失败**：`<Tooltip title={x}><Button icon/></Tooltip>` 里 Tooltip 的 title **不参与 accessible name 计算**，`getByRole('button', { name: /饼图/ })` 直接找不到元素。本次 `ChartBuilder.test.tsx` 有 3 例因此挂了不知多久（改了按钮外观、没人跑测试）。**改 UI 外观时，凡"按钮文字挪进 Tooltip/图标"都要顺手加 aria-label**。
+- **工作区有大量未提交改动时，`git stash` 拿不到干净基线**：想验证"这几个失败是不是我引入的"，stash 回 HEAD 只会得到"6 例失败 + 20 errors"（HEAD 自己就落后于工作区），毫无参考价值。可靠做法是**读根因 + 最小修复实验**——本次给按钮加一行 `aria-label` 后 3 例立刻转绿，因果当场坐实。**先证明"这是既有问题"，再决定修不修；不修就无法证明自己的改动无回归，所以阻挡验证的既有失败要修掉并说明**。

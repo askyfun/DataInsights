@@ -1,8 +1,6 @@
-import * as Sentry from '@sentry/react';
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import type { AxiosResponse } from 'axios';
 import type { components } from '../idls/gen_types';
-import type { ApiResponse } from '../lib/api/client';
-import type { QueryConfig } from '../store';
+import { type ApiResponse, apiClient } from '../lib/api/client';
 import type { StandardDataType } from './datatypes';
 
 // G = generated OpenAPI schema types (src/idls/gen_types.ts). Migration rule:
@@ -148,8 +146,8 @@ export type ChartQuerySort = Omit<G['SortConfig'], 'order'> & {
 
 // Wire truth: POST /api/charts/query binds ChartSpecQueryRequest (v1+v2 superset,
 // see openapi.yaml). dims/metrics stay narrowed onto the handwritten element types
-// but are optional now: the v2 slot protocol (spec_version=2, emitted only when
-// bar/line/area's color_group slot is non-empty, see composeChartQueryRequest) omits
+// but are optional now: the v2 slot protocol (spec_version=2, emitted for combo's
+// dual-axis metric slots and pivot's rows/columns, see composeChartQueryRequest) omits
 // them entirely in favor of dimension_groups/metric_groups. filters stays required —
 // both branches always send it. spec_version/dimension_groups/metric_groups come
 // straight from the generated schema (no union-narrowing needed for those fields).
@@ -224,89 +222,11 @@ export function isPivotV2Payload(x: unknown): x is PivotResponseV2 {
   );
 }
 
-// histogram 负载判别（R-57）：按响应形状（bins 为数组）判别，而非 chartType——
-// {bins} 与其余结构化响应（x_axis/data/columns/value）形状互斥，可安全区分。
-export function isHistogramPayload(x: unknown): x is HistogramResponse {
-  return (
-    typeof x === 'object' && x !== null && !Array.isArray(x) && 'bins' in x && Array.isArray(x.bins)
-  );
-}
-
-// radar 负载判别（R-62）：按响应形状（indicators 与 series 均为数组）判别，而非 chartType。
-// 两键共在是 RadarResponse 独有——其他结构化响应只用到其中至多一个键。
-export function isRadarPayload(x: unknown): x is RadarResponse {
-  if (typeof x !== 'object' || x === null || Array.isArray(x)) {
-    return false;
-  }
-  const raw = x as { indicators?: unknown; series?: unknown };
-  return Array.isArray(raw.indicators) && Array.isArray(raw.series);
-}
-
-// boxplot 负载判别（R-52）：按响应形状（分位三键 q1/median/q3 共在）判别，而非 chartType。
-// 三键共在是 BoxplotResponse 独有——其他结构化响应均不含这些键。
-export function isBoxplotPayload(x: unknown): x is BoxplotResponse {
-  if (typeof x !== 'object' || x === null || Array.isArray(x)) {
-    return false;
-  }
-  const raw = x as { q1?: unknown; median?: unknown; q3?: unknown };
-  return 'q1' in raw && 'median' in raw && 'q3' in raw;
-}
-
 // NOT G['ChartQueryResponse'] (that is the Envelope wrapper): the bare wire
 // payload is G['ChartDataResult'], with data narrowed from unknown to the union.
 export type ChartQueryResponse = Omit<G['ChartDataResult'], 'data'> & {
   data: ChartDataResponse;
 };
-
-// Create single axios instance with proper interceptors
-const apiClient: AxiosInstance = axios.create({
-  baseURL: `http://${window.location.hostname || 'localhost'}:8080`,
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Request interceptor to add X-Request-ID
-apiClient.interceptors.request.use(
-  (config) => {
-    const requestId = crypto.randomUUID();
-    config.headers['X-Request-ID'] = requestId;
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Response interceptor - validates code field from backend
-apiClient.interceptors.response.use(
-  (response) => {
-    const { code, msg } = response.data || {};
-    // Validate response code - reject if not 20000
-    if (code !== undefined && code !== 20000) {
-      console.error(`API Error [${code}]: ${msg}`);
-      return Promise.reject(new Error(msg || `API Error: ${code}`));
-    }
-    return response;
-  },
-  (error) => {
-    const status = error.response?.status;
-    const apiMsg =
-      error.response?.data?.msg ||
-      error.response?.data?.message ||
-      error.message ||
-      'An error occurred';
-    console.error('API Error:', apiMsg);
-
-    // Report non-2xx responses to Sentry
-    if (status && status >= 400) {
-      Sentry.captureMessage(
-        `API Error: ${error.response?.config?.method?.toUpperCase()} ${error.response?.config?.url} returned ${status}: ${apiMsg}`
-      );
-    }
-
-    return Promise.reject(error);
-  }
-);
 
 // Datasources API
 export const datasourcesApi = {
@@ -505,14 +425,6 @@ export const chartsApi = {
   // DataRow[] raw preview — ChartDataResponse covers both arms.
   getChartData: (id: number): Promise<AxiosResponse<ApiResponse<ChartDataResponse>>> => {
     return apiClient.get<ApiResponse<ChartDataResponse>>(`/api/charts/${id}/data`);
-  },
-
-  // Execute query with config
-  executeQuery: (
-    datasetId: number,
-    config: QueryConfig
-  ): Promise<AxiosResponse<ApiResponse<unknown[]>>> => {
-    return apiClient.post<ApiResponse<unknown[]>>(`/api/datasets/${datasetId}/query`, config);
   },
 
   // Execute chart query

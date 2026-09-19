@@ -11,14 +11,14 @@ import (
 func TestCORSAllowsConfiguredOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(corsMiddleware([]string{"http://localhost:3000"}))
+	r.Use(corsMiddleware([]string{"http://localhost:23351"}))
 	r.GET("/ping", func(c *gin.Context) { c.Status(200) })
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Origin", "http://localhost:23351")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3000" {
+	if w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:23351" {
 		t.Fatalf("expected origin echo, got %q", w.Header().Get("Access-Control-Allow-Origin"))
 	}
 
@@ -81,10 +81,10 @@ func TestCORSEmptyOriginsDefaultsToLocalhost(t *testing.T) {
 	r.GET("/ping", func(c *gin.Context) { c.Status(200) })
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Origin", "http://localhost:23351")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:23351" {
 		t.Fatalf("expected default localhost origin, got %q", got)
 	}
 }

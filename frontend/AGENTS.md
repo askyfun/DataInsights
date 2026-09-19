@@ -4,7 +4,7 @@ DataRay 前端应用，拖拽式 BI 可视化分析平台的用户界面。
 
 ## 技术栈
 
-React 18 + TypeScript + Ant Design 5.x + ECharts 5.x + Zustand 4.x + @dnd-kit + Vite 6 + Biome + Vitest
+React 19 + TypeScript + Ant Design 6.x + ECharts 6.x + Zustand 5.x + @dnd-kit + Vite 8 + Biome + Vitest
 
 ## 目录结构
 
@@ -62,7 +62,7 @@ frontend/src/
 
 ### API 层
 
-- `api/index.ts` — 创建 Axios 实例（baseURL: `http://{hostname}:8080`），定义所有 API 模块和 TypeScript 接口
+- `api/index.ts` — 创建 Axios 实例（baseURL: `http://{hostname}:23352`），定义所有 API 模块和 TypeScript 接口
 - `lib/api/client.ts` — 底层工具（request ID 注入、code 20000 验证、Sentry 错误上报）
 - 响应拦截器验证 `code === 20000` 才算成功
 
@@ -94,7 +94,7 @@ frontend/src/
 ```bash
 cd frontend
 npm install              # 安装依赖
-npm run dev              # 开发服务器，端口 3000
+npm run dev              # 开发服务器，端口 23351
 npm run build            # tsc + vite 构建
 npm run test             # vitest 运行测试
 npm run check            # biome lint + 格式化检查
