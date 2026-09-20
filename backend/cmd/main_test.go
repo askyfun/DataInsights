@@ -1,13 +1,19 @@
 package main
 
 import (
+	"context"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
+	"data-insights/internal/config"
+	"data-insights/internal/keystore"
 	"data-insights/internal/response"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 )
 
@@ -104,5 +110,59 @@ func TestRequestIDMiddlewarePreservesIncomingID(t *testing.T) {
 
 	if got := w.Header().Get("X-Request-ID"); got != "abc123" {
 		t.Fatalf("expected preserved id abc123, got %q", got)
+	}
+}
+
+func TestResolveSecurityKeyEnvTakesPriority(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	envHex := "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+	c := &config.Config{}
+	c.Security.SecurityKey = envHex
+
+	key, err := resolveSecurityKey(context.Background(), c, db)
+	if err != nil {
+		t.Fatalf("resolveSecurityKey: %v", err)
+	}
+	if got := hex.EncodeToString(key); got != envHex {
+		t.Fatalf("expected env key %q, got %q", envHex, got)
+	}
+}
+
+func TestResolveSecurityKeyFallbackToStoreWhenEnvEmpty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM bi_setting WHERE key = $1`)).
+		WithArgs(keystore.SettingKey).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"))
+
+	c := &config.Config{} // SecurityKey empty
+	key, err := resolveSecurityKey(context.Background(), c, db)
+	if err != nil {
+		t.Fatalf("resolveSecurityKey: %v", err)
+	}
+	if got := hex.EncodeToString(key); got != "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899" {
+		t.Fatalf("expected store key, got %q", got)
+	}
+}
+
+func TestResolveSecurityKeyMalformedEnvRejected(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	c := &config.Config{}
+	c.Security.SecurityKey = "zzzz"
+	if _, err := resolveSecurityKey(context.Background(), c, db); err == nil {
+		t.Fatalf("expected error for malformed key, got nil")
 	}
 }

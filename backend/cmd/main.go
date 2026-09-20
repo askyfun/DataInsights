@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"data-insights/internal/config"
 	"data-insights/internal/database"
+	"data-insights/internal/keystore"
 	"data-insights/internal/response"
 	"data-insights/internal/webui"
 
@@ -62,12 +64,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	securityKey, err := resolveSecurityKey(c)
-	if err != nil {
-		slog.Error("Invalid Security.SecurityKey: expected 32-byte key as 64 hex chars", "error", err)
-		os.Exit(1)
-	}
-
 	sentryActive := initSentry(c.Sentry.Dsn)
 	if sentryActive {
 		defer sentry.Flush(2 * time.Second)
@@ -81,6 +77,14 @@ func main() {
 
 	if err := database.RunMigrations(db); err != nil {
 		slog.Error("Failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	// Resolve the datasource-password encryption key after the database is up
+	// and migrated, so the SECURITY_KEY fallback can read/write bi_setting.
+	securityKey, err := resolveSecurityKey(context.Background(), c, db.DB)
+	if err != nil {
+		slog.Error("Failed to resolve security key", "error", err)
 		os.Exit(1)
 	}
 
@@ -246,15 +250,34 @@ func initSentry(dsn string) bool {
 	return true
 }
 
-// resolveSecurityKey decodes the configured 32-byte hex security key.
-// An empty value disables encryption (plaintext passthrough) and is reported
-// with a warning; a malformed or wrong-length key is an error.
-func resolveSecurityKey(c *config.Config) ([]byte, error) {
-	if c.Security.SecurityKey == "" {
-		slog.Warn("security key not configured: datasource passwords will be stored as plaintext")
-		return nil, nil
+// resolveSecurityKey returns the runtime bytes-level AES-256-GCM key.
+//
+// Priority: an explicitly configured SECURITY_KEY env var is the primary
+// source and always wins. When it is absent, the key is resolved from the
+// database settings table (bi_setting) — loaded if it exists, or generated
+// fresh and persisted on first boot — so restarts and container rebuilds all
+// converge on the same key and already-encrypted datatasource passwords stay
+// decryptable. A malformed or wrong-length key is an error.
+func resolveSecurityKey(ctx context.Context, c *config.Config, db *sql.DB) ([]byte, error) {
+	if c.Security.SecurityKey != "" {
+		return decodeSecurityKey(c.Security.SecurityKey)
 	}
-	key, err := hex.DecodeString(c.Security.SecurityKey)
+
+	keyHex, created, err := keystore.LoadOrCreate(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	if created {
+		slog.Warn("SECURITY_KEY not configured; generated one and persisted it (see bi_setting)")
+	} else {
+		slog.Info("SECURITY_KEY not configured; using persisted key from bi_setting")
+	}
+	return decodeSecurityKey(keyHex)
+}
+
+// decodeSecurityKey parses a 32-byte (64 hex char) AES key.
+func decodeSecurityKey(hexKey string) ([]byte, error) {
+	key, err := hex.DecodeString(hexKey)
 	if err != nil {
 		return nil, err
 	}
