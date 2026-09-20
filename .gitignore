@@ -58,3 +58,10 @@ frontend/vite.config.d.ts
 # local data & tool state
 datasets/
 .workbuddy/
+
+# ── 防隐私泄露：agent 工具态/本地笔记，永不入库 ──
+.wolf/
+CLAUDE.md
+frontend/CLAUDE.md
+MEMORY.md
+docs/pitfalls.md
