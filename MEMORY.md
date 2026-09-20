@@ -74,7 +74,7 @@
 ## Batch 4 B4-D2 分享取数语义统一经验（2026-09-12）
 
 - **管道内既有 quirk 会被"语义统一"原样复制，别把它当新 bug 修**：executor 生成的 `SUM(amount) AS Revenue`（带大写字母别名）被 Postgres 折叠为 `revenue`，processor 按 `Revenue` 取行值取不到 → axis series 全 null。该缺陷早已存在于 builder 预览（POST /charts/query）；B4-D2 让 GetData 复用同一管道后，分享页与预览"一致地 null"——这正是本任务要的 parity。若要真修得动 query 包（标识符加引号或大小写不敏感取值），属另一张票，勿在统一语义的改动里顺手夹带。
-- **对照实测两个端点的 wire 输出是验证 parity 最便宜的手段**：live :8080 上 `GET /charts/1/data` 与等价 `POST /charts/query` 逐字段比对，比任何单测都直接回答"分享是否等于预览"；重启后端前先确认原进程的启动方式（`ps -o command=` 拿到 `cmd -f etc/config-local.toml`），照原样起回去。
+- **对照实测两个端点的 wire 输出是验证 parity 最便宜的手段**：live :8080 上 `GET /charts/1/data` 与等价 `POST /charts/query` 逐字段比对，比任何单测都直接回答"分享是否等于预览"；重启后端前先确认原进程的启动方式（`ps -o command=` 看启动参数），照原样起回去。
 
 ## Batch 4 收口经验（2026-09-12）
 

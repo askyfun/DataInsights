@@ -1,4 +1,4 @@
-# DataRay Makefile
+# Data Insights Makefile
 
 # 颜色定义
 GREEN := \033[0;32m
@@ -6,11 +6,11 @@ YELLOW := \033[0;33m
 BLUE := \033[0;34m
 NC := \033[0m # No Color
 
-.PHONY: help install dev dev-frontend dev-backend build build-frontend build-backend api-gen docker-up docker-down docker-logs clean
+.PHONY: help install dev dev-frontend dev-backend build build-frontend build-backend api-gen serve docker-build docker-up docker-down docker-logs clean
 
 # 默认目标
 help:
-	@echo "$(BLUE)DataRay 开发命令$(NC)"
+	@echo "$(BLUE)Data Insights 开发命令$(NC)"
 	@echo ""
 	@echo "$(GREEN)安装依赖:$NC"
 	@echo "  make install          安装前后端依赖 (pnpm)"
@@ -31,9 +31,13 @@ help:
 	@echo "  make api-gen          从 api/openapi.yaml 生成双端类型 (Go + TS)"
 	@echo ""
 	@echo "$(GREEN)Docker:$NC"
+	@echo "  make docker-build     构建单镜像（前端+后端编译进同一个镜像）"
 	@echo "  make docker-up        启动 Docker 容器"
 	@echo "  make docker-down      停止 Docker 容器"
 	@echo "  make docker-logs      查看 Docker 日志"
+	@echo ""
+	@echo "$(GREEN)本地验证单进程形态:$NC"
+	@echo "  make serve            构建前端并让后端一并托管，单端口 23352（不用 Docker）"
 	@echo ""
 	@echo "$(GREEN)清理:$NC"
 	@echo "  make clean            清理构建产物"
@@ -72,7 +76,7 @@ dev-frontend:
 dev-backend:
 	@echo "$(YELLOW)启动后端开发服务器...$(NC)"
 	cd backend && $(AIR_CMD)
-# 	cd backend && go run cmd/main.go -f etc/config.toml
+# 	cd backend && go run cmd/main.go
 
 # 构建
 build: build-frontend build-backend
@@ -94,7 +98,11 @@ api-gen:
 	@echo "$(YELLOW)生成前端契约类型 (openapi-typescript)...$(NC)"
 	cd frontend && pnpm api:gen
 
-# Docker
+# Docker：单镜像（前端静态产物 + Go 二进制同进程），构建上下文是仓库根目录
+docker-build:
+	@echo "$(YELLOW)构建 Data Insights 单镜像...$(NC)"
+	docker build -t data-insights .
+
 docker-up:
 	@echo "$(YELLOW)启动 Docker 容器...$(NC)"
 	docker-compose up -d
@@ -105,6 +113,14 @@ docker-down:
 
 docker-logs:
 	docker-compose logs -f
+
+# 不用 Docker 也能验证「单进程同时提供 API 与页面」：先构建前端产物，
+# 再让后端托管 frontend/dist。端口与镜像一致（23352）。
+serve:
+	@echo "$(YELLOW)构建前端产物...$(NC)"
+	cd frontend && pnpm build
+	@echo "$(GREEN)后端托管 frontend/dist，单端口 http://localhost:23352$(NC)"
+	cd backend && STATIC_DIR=../frontend/dist go run ./cmd
 
 # 清理
 clean:

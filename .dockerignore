@@ -1,0 +1,38 @@
+# 构建上下文是仓库根目录（Dockerfile 那一层）。
+#
+# 核心目的有两个：
+#   1. 别把本地产物与依赖塞进上下文（node_modules、dist、二进制），纯拖慢构建；
+#   2. ⚠️ 别把 .env 送进去。Vite 的构建阶段 envDir 指向仓库根，一旦 .env 进了
+#      构建上下文，里面的 VITE_* 会被内联进浏览器产物 —— 那等于把配置烧进镜像。
+
+.git
+.gitignore
+.github
+
+**/node_modules
+**/dist
+**/build
+
+# 本地构建产物与工具目录
+backend/bin/
+backend/tmp/
+backend/.mimosa/
+tmp/
+*.log
+*.out
+
+# 本机编出来的二进制（不带扩展名，必须逐个点名）
+backend/server
+backend/main
+
+# 与构建无关的重资产
+datasets/
+deliverables/
+test-screenshots/
+docs/
+*.png
+
+# 密钥：真实值一律不进镜像
+.env
+.env.*
+!.env.example

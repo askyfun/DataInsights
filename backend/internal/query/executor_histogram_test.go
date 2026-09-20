@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/datasource"
-	"dataray/internal/model"
+	"data-insights/internal/datasource"
+	"data-insights/internal/model"
 )
 
 // histogramMockConnection 按调用次序应答多组行的 Connection mock：histogram 是

@@ -1,45 +1,48 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16
-    container_name: dataray-postgres
+    container_name: data-insights-postgres
     environment:
-      POSTGRES_USER: dataray
-      POSTGRES_PASSWORD: dataray123
-      POSTGRES_DB: dataray
+      POSTGRES_USER: insights
+      POSTGRES_PASSWORD: insights123
+      POSTGRES_DB: insights
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dataray"]
+      test: ["CMD-SHELL", "pg_isready -U insights"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  backend:
+  # 前后端编译进同一个镜像、同一个进程、同一个端口：没有 nginx，也没有第二个容器。
+  # 构建上下文是仓库根目录。
+  app:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
-    container_name: dataray-backend
+      args:
+        # Vite 的 VITE_* 是构建期内联进产物的，只能以 build arg 传入；
+        # 容器起起来之后再给环境变量没有任何作用。
+        # VITE_API_BASE_URL 不传：生产构建默认同源，无需任何配置。
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+    container_name: data-insights-app
+    # 配置全部来自仓库根 .env —— 后端不读任何配置文件（没有 config.toml 这类东西）。
+    # compose 会读同目录的 .env 做插值，这里的 env_file 则把整份变量注入容器。
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgres://dataray:dataray123@postgres:5432/dataray?sslmode=disable
+      # environment 的优先级高于 env_file。compose 网络内的数据库是服务名 postgres，
+      # 而 .env 里的地址是给宿主本地开发用的（localhost），必须在这里覆盖。
+      DATABASE_URL: postgres://insights:insights123@postgres:5432/insights?sslmode=disable
     ports:
+      # 容器内实际监听的端口来自 .env 的 PORT（默认 23352），两边必须一致 ——
+      # 只改 .env 的 PORT 会让映射端口和进程监听端口对不上。
       - "23352:23352"
     depends_on:
       postgres:
         condition: service_healthy
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: dataray-frontend
-    ports:
-      - "23351:23351"
-    depends_on:
-      - backend
 
 volumes:
   postgres_data:

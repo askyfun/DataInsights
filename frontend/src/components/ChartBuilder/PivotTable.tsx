@@ -1,9 +1,8 @@
 import type { TableProps } from 'antd';
-import { Empty, Spin, Table, Typography } from 'antd';
+import { Empty, Table } from 'antd';
 import { useMemo } from 'react';
 import type { PivotResponseV2, PivotRow } from '../../api';
-
-const { Text } = Typography;
+import LoadingPlaceholder from '../LoadingPlaceholder';
 
 // 镜像后端 query.PivotSubtotalColKey / pivotValueKeySep / PivotValueKey（Go 常量无法
 // import，前后端必须逐字一致，否则单元格取值 undefined → 透视表静默全空）。
@@ -115,14 +114,7 @@ const PivotTable: React.FC<PivotTableProps> = ({ data, loading, columnLabels }) 
   };
 
   if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: '100px 0' }}>
-        <Spin size="large" />
-        <div style={{ marginTop: 16 }}>
-          <Text type="secondary">加载数据中...</Text>
-        </div>
-      </div>
-    );
+    return <LoadingPlaceholder text="加载数据中..." />;
   }
 
   if (data.cells.length === 0) {

@@ -387,7 +387,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'field.metricGroup': '指标组 {index}',
     'app.skipToContent': '跳转到主要内容',
     'app.openMenu': '打开菜单',
-    'app.footer': 'DataRay ©2026 使用 React + Ant Design 构建',
+    'app.footer': 'Data Insights ©2026 使用 React + Ant Design 构建',
     'share.title': '分享管理',
     'share.chart': '图表',
     'share.token': '分享码',
@@ -448,7 +448,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'shareView.loadingChart': '加载图表数据中...',
     'shareView.unableToDisplay': '无法显示图表',
     'shareView.unableToDisplayDesc': '图表配置可能无效或没有可用数据。',
-    'home.welcome': '欢迎使用 DataRay',
+    'home.welcome': '欢迎使用 Data Insights',
   },
   'en-US': {
     'nav.dashboard': 'Dashboard',
@@ -836,7 +836,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'field.metricGroup': 'Metric Group {index}',
     'app.skipToContent': 'Skip to main content',
     'app.openMenu': 'Open menu',
-    'app.footer': 'DataRay ©2026 Created with React + Ant Design',
+    'app.footer': 'Data Insights ©2026 Created with React + Ant Design',
     'share.title': 'Share Management',
     'share.chart': 'Chart',
     'share.token': 'Token',
@@ -899,7 +899,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'shareView.unableToDisplay': 'Unable to display chart',
     'shareView.unableToDisplayDesc':
       'The chart configuration may be invalid or no data is available.',
-    'home.welcome': 'Welcome to DataRay',
+    'home.welcome': 'Welcome to Data Insights',
   },
 };
 

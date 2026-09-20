@@ -10,15 +10,23 @@ import App from './App';
 import { cache, messages, useLocale } from './i18n/useLocale';
 import './styles/index.css';
 
-Sentry.init({
-  dsn: 'https://b88f414e4f6248f0e601064aeff0b714@o81376.ingest.us.sentry.io/4510922576560128',
-  integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
-  tracesSampleRate: 1.0,
-  replaysSessionSampleRate: 0.1,
-  replaysOnErrorSampleRate: 1.0,
-  enableLogs: true,
-  tracePropagationTargets: ['localhost', /^\/api\//],
-});
+// Sentry DSN 走构建期环境变量（VITE_SENTRY_DSN），与后端 SENTRY_DSN 同一套口径：
+// DSN 不该硬编码在源码里，谁拿到仓库谁就能往你的配额里灌事件。
+// 未设置则完全不初始化 —— 本地开发与未配置监控的部署不产生任何 Sentry 副作用
+// （client.ts 里的 captureMessage 在未初始化时是 no-op，不需要额外保护）。
+const sentryDsn = import.meta.env.VITE_SENTRY_DSN;
+
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
+    integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
+    tracesSampleRate: 1.0,
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+    enableLogs: true,
+    tracePropagationTargets: ['localhost', /^\/api\//],
+  });
+}
 
 const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { locale } = useLocale();

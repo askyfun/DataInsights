@@ -3,10 +3,10 @@ package handler
 import (
 	"time"
 
-	"dataray/internal/domain/entity"
-	"dataray/internal/response"
-	"dataray/internal/router"
-	"dataray/internal/service/share"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/response"
+	"data-insights/internal/router"
+	"data-insights/internal/service/share"
 
 	"github.com/gin-gonic/gin"
 )

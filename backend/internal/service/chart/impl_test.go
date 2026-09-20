@@ -12,14 +12,14 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"dataray/internal/crypto"
+	"data-insights/internal/crypto"
 
-	"dataray/internal/datasource"
-	"dataray/internal/domain/entity"
-	"dataray/internal/model"
-	"dataray/internal/query"
-	"dataray/internal/response"
-	"dataray/internal/router"
+	"data-insights/internal/datasource"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/model"
+	"data-insights/internal/query"
+	"data-insights/internal/response"
+	"data-insights/internal/router"
 )
 
 // stubConnection 测试连接替身，用于占位、验证 close，以及在 GetData 的

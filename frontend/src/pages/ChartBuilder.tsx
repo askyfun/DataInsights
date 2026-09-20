@@ -5,6 +5,7 @@ import {
   DownOutlined,
   FieldBinaryOutlined,
   FunctionOutlined,
+  LinkOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -20,6 +21,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import {
+  Alert,
   Button,
   Card,
   ColorPicker,
@@ -51,6 +53,8 @@ import {
   ChartQueryAggregation,
   ChartQueryRequest,
   isPivotV2Payload,
+  type QueryRecord,
+  queriesApi,
 } from '../api';
 import {
   chartDefinitions,
@@ -61,6 +65,12 @@ import DraggableField, {
   fieldTagColor,
 } from '../components/ChartBuilder/DraggableField';
 import { BindingDragData, BindingSlotDropData } from '../components/ChartBuilder/FieldDropZone';
+import FieldSettingsModal, {
+  type FieldSettingsValue,
+} from '../components/ChartBuilder/FieldSettingsModal';
+import FilterConfigModal, {
+  type FilterConfigPatch,
+} from '../components/ChartBuilder/FilterConfigModal';
 import FilterDropZone from '../components/ChartBuilder/FilterDropZone';
 import KpiCard from '../components/ChartBuilder/KpiCard';
 import PivotTable from '../components/ChartBuilder/PivotTable';
@@ -68,11 +78,15 @@ import QueryConfigRow from '../components/ChartBuilder/QueryConfigRow';
 import TableChart from '../components/ChartBuilder/TableChart';
 import {
   type ChartConfigDocument,
-  type ChartMeta,
   type ChartType,
   migrateChartConfig,
 } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload } from '../lib/chartOptions';
+import {
+  buildChartConfigDocument,
+  buildQuerySpecDocument,
+  parseQuerySpecDocument,
+} from '../lib/querySpec';
 import {
   BindingInstance,
   BoundField,
@@ -234,6 +248,14 @@ const findSortBinding = (
 };
 
 /**
+ * 指标在 wire（SQL AS 子句 / 响应列名 / 排序键）上的输出列名 = 字段本身的列名。
+ * 别名（显示名）是纯展示配置，永远不进 SQL——后端 safeIdentifier 会拒绝中文等
+ * 标识符（退化成 _invalid_identifier 切断列数据），且查询本就该用原始字段表达式。
+ * 展示名只留在前端的 labels / 列头配置里。
+ */
+const wireAliasOf = (_alias: string | undefined, columnName: string): string => columnName;
+
+/**
  * 按表格输出列名（TableChart sorter.field）反查对应绑定的 bindingId。
  * 调用场景：handleSortChange 把用户点击的排序列翻译回 queryConfig.sort 的引用键。
  * 主要逻辑：输出键与后端行值键一致——指标 = metricAliases[bindingId] || 列名，
@@ -254,7 +276,9 @@ const findBindingIdByOutputName = (
     if (columnName === undefined) {
       return undefined;
     }
-    return kind === 'metric' ? metricAliases[binding.bindingId] || columnName : columnName;
+    return kind === 'metric'
+      ? wireAliasOf(metricAliases[binding.bindingId], columnName)
+      : columnName;
   };
   for (const group of queryConfig.metricGroups) {
     for (const binding of group.bindings) {
@@ -290,7 +314,9 @@ const findOutputNameByBindingId = (
     for (const binding of group.bindings) {
       if (binding.bindingId !== bindingId) continue;
       const columnName = fieldMap.get(binding.field)?.name;
-      return columnName === undefined ? undefined : metricAliases[binding.bindingId] || columnName;
+      return columnName === undefined
+        ? undefined
+        : wireAliasOf(metricAliases[binding.bindingId], columnName);
     }
   }
   for (const group of queryConfig.dimensionGroups) {
@@ -422,7 +448,7 @@ export const composeChartQueryRequest = (
       return sortBinding.binding.bindingId;
     }
     return sortBinding.kind === 'metric'
-      ? metricAliases[sortBinding.binding.bindingId] || columnName
+      ? wireAliasOf(metricAliases[sortBinding.binding.bindingId], columnName)
       : columnName;
   })();
   // funnel（漏斗图，R-59）强制降序（plan §3.3，验收行767，裁定 F）：sort 恒为 value
@@ -442,7 +468,7 @@ export const composeChartQueryRequest = (
     }
     return {
       sort: {
-        field: metricAliases[valueBinding.bindingId] || columnName,
+        field: wireAliasOf(metricAliases[valueBinding.bindingId], columnName),
         order: 'desc' as const,
       },
     };
@@ -492,7 +518,7 @@ export const composeChartQueryRequest = (
           {
             field: chartField.name,
             agg: (metricAggregations[binding.bindingId] || 'sum') as ChartQueryAggregation,
-            alias: metricAliases[binding.bindingId] || chartField.name,
+            alias: wireAliasOf(metricAliases[binding.bindingId], chartField.name),
             binding_id: binding.bindingId,
           },
         ];
@@ -544,7 +570,7 @@ export const composeChartQueryRequest = (
         {
           field: chartField.name,
           agg: (metricAggregations[binding.bindingId] || 'sum') as ChartQueryAggregation,
-          alias: metricAliases[binding.bindingId] || chartField.name,
+          alias: wireAliasOf(metricAliases[binding.bindingId], chartField.name),
         },
       ];
     });
@@ -563,6 +589,28 @@ export const composeChartQueryRequest = (
     ...queryOptionsPayload,
     pagination: paginationPayload,
   };
+};
+
+/**
+ * 从查询结果负载里尽力取出「行数」，供查询记录的结果元信息留痕。
+ *
+ * 各图型返回形状不同（裸数组 / {columns,data} 表格 / pivot v2 的 cells / 轴图表的
+ * series / KPI 单值）。只有前两种的「行数」含义无歧义，其余一律返回 undefined：
+ * 宁可不上报，也不上报一个会被误读成「这次查询只出了一行」的数字。
+ */
+const countResultRows = (payload: unknown): number | undefined => {
+  if (Array.isArray(payload)) {
+    return payload.length;
+  }
+  if (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'data' in payload &&
+    Array.isArray(payload.data)
+  ) {
+    return payload.data.length;
+  }
+  return undefined;
 };
 
 interface ChartCanvasProps {
@@ -661,7 +709,9 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
             .map((def, index) => ({
               slot: def.id,
               metrics: (queryConfig.metricGroups[index]?.bindings ?? [])
-                .map((b) => metricAliases[b.bindingId] || fieldMap.get(b.field)?.name)
+                .map((b) =>
+                  wireAliasOf(metricAliases[b.bindingId], fieldMap.get(b.field)?.name ?? '')
+                )
                 .filter((name): name is string => name !== undefined),
             }))
         : undefined;
@@ -822,15 +872,7 @@ const FieldListPanel: React.FC<FieldListPanelProps> = ({ fields, loading }) => {
 interface ConfigPanelProps {
   config: ChartConfig;
   onConfigChange: (config: Partial<ChartConfig>) => void;
-  dimensionLabels: Record<string, string>;
-  metricUnits: Record<string, string>;
-  metricFormats: Record<string, string>;
   chartStyle: ChartStyleConfig;
-  dimensionFields: BoundField[];
-  metricFields: BoundField[];
-  onDimensionLabelChange: (bindingId: string, label: string) => void;
-  onMetricUnitChange: (bindingId: string, unit: string) => void;
-  onMetricFormatChange: (bindingId: string, format: string) => void;
   onChartStyleChange: (style: Partial<ChartStyleConfig>) => void;
   /** 图表查询选项（histogram 的 binCount 在此读写）。 */
   queryOptions: ChartQueryOptions;
@@ -887,15 +929,7 @@ const SettingRow: React.FC<{ label: string; children: React.ReactNode }> = ({
 const ConfigPanel: React.FC<ConfigPanelProps> = ({
   config,
   onConfigChange,
-  dimensionLabels,
-  metricUnits,
-  metricFormats,
   chartStyle,
-  dimensionFields,
-  metricFields,
-  onDimensionLabelChange,
-  onMetricUnitChange,
-  onMetricFormatChange,
   onChartStyleChange,
   queryOptions,
   onQueryOptionsChange,
@@ -1088,62 +1122,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
           </div>
         </Card>
       )}
-
-      {dimensionFields.length > 0 && (
-        <Card
-          title="维度属性"
-          size="small"
-          style={{ marginBottom: 6 }}
-          styles={{ body: { padding: '4px 6px' } }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {dimensionFields.map((bound) => (
-              <div key={bound.binding.bindingId}>
-                <Text strong style={{ fontSize: 13 }}>
-                  {bound.field.name}
-                </Text>
-                <Input
-                  style={{ width: '100%', marginTop: 2 }}
-                  value={dimensionLabels[bound.binding.bindingId] || ''}
-                  onChange={(e) => onDimensionLabelChange(bound.binding.bindingId, e.target.value)}
-                  placeholder="显示名称"
-                />
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {metricFields.length > 0 && (
-        <Card
-          title="指标属性"
-          size="small"
-          style={{ marginBottom: 6 }}
-          styles={{ body: { padding: '4px 6px' } }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {metricFields.map((bound) => (
-              <div key={bound.binding.bindingId}>
-                <Text strong style={{ fontSize: 13 }}>
-                  {bound.field.name}
-                </Text>
-                <Input
-                  style={{ width: '100%', marginTop: 2, marginBottom: 2 }}
-                  value={metricUnits[bound.binding.bindingId] || ''}
-                  onChange={(e) => onMetricUnitChange(bound.binding.bindingId, e.target.value)}
-                  placeholder="单位，例如 元 / %"
-                />
-                <Input
-                  style={{ width: '100%' }}
-                  value={metricFormats[bound.binding.bindingId] || ''}
-                  onChange={(e) => onMetricFormatChange(bound.binding.bindingId, e.target.value)}
-                  placeholder="格式，例如 0,0.00"
-                />
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   );
 };
@@ -1183,7 +1161,7 @@ const QueryStatusBadge: React.FC<{
  * 主要逻辑：同步 store 状态、处理字段拖放、并在拖拽期间渲染 overlay 预览。
  */
 const ChartBuilder: React.FC = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedDatasetId, setSelectedDatasetId] = useState<number | null>(null);
   const [editingChartId, setEditingChartId] = useState<number | null>(null);
   const [sqlModalVisible, setSqlModalVisible] = useState(false);
@@ -1192,11 +1170,42 @@ const ChartBuilder: React.FC = () => {
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
   const [activeDragField, setActiveDragField] = useState<ChartField | null>(null);
   const [activeDragBinding, setActiveDragBinding] = useState<DragPreview | null>(null);
+  // 过滤配置弹窗：id=正在编辑的条件，isNew=本次拖入/下拉新建（取消时回收）。
+  // 弹窗打开期间自动查询被挂起——输入中途态不进请求，确定才写回 store。
+  const [filterEditing, setFilterEditing] = useState<{ id: string; isNew: boolean } | null>(null);
+  // 字段属性弹窗：芯片扳手按钮打开，收拢原右下角维度/指标属性面板的配置。
+  const [fieldSettings, setFieldSettings] = useState<{
+    kind: 'dimension' | 'metric';
+    bound: BoundField;
+  } | null>(null);
   // 左侧字段栏宽度（可拖拽调节）
   const [leftSiderWidth, setLeftSiderWidth] = useState(150);
   const [resizeHandleHover, setResizeHandleHover] = useState(false);
   // 编辑态图表详情缓存（id + 请求 Promise），供配置加载 effect 重跑时复用
   const editChartCache = useRef<{ id: number; promise: Promise<Chart> } | null>(null);
+  // 当前地址栏短码（= 复制按钮复制的那条链接的 id）
+  const [shareShortId, setShareShortId] = useState<string | null>(null);
+  // 直链还原的降级提示（记录过期 / 短码无效 / 配置版本不识别）
+  const [queryRecordNotice, setQueryRecordNotice] = useState<{
+    kind: 'warning' | 'error';
+    text: string;
+  } | null>(null);
+  /**
+   * 已「结清」的地址栏短码：本次会话自己落库签发的、以及已经还原过一遍的，都记在
+   * 这里。没有它会出现死循环——还原 → 自动查询 → 落库 → 地址栏换成新短码 →
+   * 还原 effect 再触发 → ……
+   *
+   * ⚠️ 记账必须发生在**还原成功之后**。提前到请求之前会让 dev 环境（`main.tsx` 的
+   * StrictMode 会 mount → cleanup → 再 mount）的第二次挂载被自己的标记挡在门外，
+   * 而第一次的响应又被 cleanup 的 cancelled 丢弃 —— 表现为「打开分享链接毫无反应」。
+   */
+  const settledShortIdRef = useRef<string | null>(null);
+  /** 短码 → 在途还原请求：同一短码的并发/重复执行共用一个 GET（hit_count 是真实指标）。 */
+  const inflightRestoreRef = useRef<{ shortId: string; promise: Promise<QueryRecord> } | null>(
+    null
+  );
+  /** 上次成功落库的 spec 快照（JSON 串）：同配置不重复提交，翻页/重查不抖动地址栏。 */
+  const lastPersistedSpecRef = useRef<string | null>(null);
 
   /** 左侧栏右缘拖拽调节宽度：按住手柄水平拖动，宽度限制在 [120, 320]。 */
   const startLeftSiderResize = (e: React.MouseEvent) => {
@@ -1330,6 +1339,54 @@ const ChartBuilder: React.FC = () => {
    *      统一交给 store.moveBinding 原子完成；跨 kind 或目标组已有同名列时给出提示。
    *   2) 左侧字段（field）：按落点类型新增到维度/指标/过滤字段组（原有行为）。
    */
+  // ===== 过滤配置弹窗 =====
+  const editingFilterCondition = filterEditing
+    ? queryConfig.filters.find((f) => f.id === filterEditing.id)
+    : undefined;
+  const editingFilterField = editingFilterCondition
+    ? (chartBuilderFields.find((f) => f.name === editingFilterCondition.field) ?? null)
+    : null;
+
+  /** 拖入 / 下拉选择字段 → 新建一条空条件并打开弹窗；取消时由 isNew 回收。 */
+  const openFilterEditor = useCallback(
+    (field: ChartField) => {
+      addFilter({ field: field.name });
+      const filters = useStore.getState().queryConfig.filters;
+      const last = filters[filters.length - 1];
+      if (last) {
+        setFilterEditing({ id: last.id, isNew: true });
+      }
+    },
+    [addFilter]
+  );
+
+  const handleFilterModalOk = useCallback(
+    (patch: FilterConfigPatch) => {
+      if (!filterEditing) return;
+      updateFilter(filterEditing.id, patch);
+      setFilterEditing(null);
+    },
+    [filterEditing, updateFilter]
+  );
+
+  const handleFilterModalCancel = useCallback(() => {
+    if (filterEditing?.isNew) {
+      removeFilter(filterEditing.id);
+    }
+    setFilterEditing(null);
+  }, [filterEditing, removeFilter]);
+
+  /** 删除条件时若其编辑弹窗正开着，一并关闭，避免残留空弹窗。 */
+  const handleFilterRemove = useCallback(
+    (id: string) => {
+      removeFilter(id);
+      if (filterEditing?.id === id) {
+        setFilterEditing(null);
+      }
+    },
+    [filterEditing, removeFilter]
+  );
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setActiveDragField(null);
@@ -1407,10 +1464,11 @@ const ChartBuilder: React.FC = () => {
       } else if (dropZoneType === 'filter') {
         // 过滤条件按列名记录（与 binding.field 同口径）。同一字段可重复加入——
         // 区间筛选就是同字段各拖一次 >= 与 <=，因此这里不做去重。
-        addFilter({ field: field.name });
+        // 拖入即弹过滤配置弹窗：条件在弹窗里完成输入，确定才生效。
+        openFilterEditor(field);
       }
     },
-    [addDimensionField, addMetricField, addFilter, moveBinding]
+    [addDimensionField, addMetricField, openFilterEditor, moveBinding]
   );
 
   // 当前图型激活的字段组（getActiveFieldGroups 裁剪）：切图型后 queryConfig 可能残留
@@ -1419,6 +1477,78 @@ const ChartBuilder: React.FC = () => {
   const activeQueryConfig = useMemo(
     () => getActiveFieldGroups(chartBuilderConfig.chartType, queryConfig),
     [chartBuilderConfig.chartType, queryConfig]
+  );
+
+  /**
+   * 把一份 v2 图表配置文档灌进 store。`?edit=`（图表库）与 `?q=`（查询记录直链）
+   * 两条还原路径共用同一个出口——两份实现迟早会漏掉 fieldMeta 或 style 其中之一。
+   *
+   * titleFallback 只在文档自身没有标题时兜底：编辑态用图表名，分享态用文档标题本身。
+   */
+  const applyConfigDocument = useCallback(
+    (doc: ChartConfigDocument, titleFallback: string) => {
+      setChartBuilderConfig({
+        chartType: doc.chartType,
+        title: doc.title || titleFallback,
+        xAxisField: null,
+        yAxisFields: [],
+      });
+
+      setQueryConfig(
+        normalizeQueryConfigForChartType(doc.chartType, {
+          dimensionGroups: doc.query.dimensionGroups,
+          metricGroups: doc.query.metricGroups,
+          filters: doc.query.filters as FilterCondition[],
+          sort: doc.query.sort
+            ? {
+                bindingId: doc.query.sort.bindingId,
+                order: doc.query.sort.order === 'desc' ? 'desc' : 'asc',
+              }
+            : undefined,
+          limit: doc.query.limit,
+        })
+      );
+
+      // v2 fieldMeta（键为 bindingId）→ 5 个运行时 Record
+      const restoredLabels: Record<string, string> = {};
+      const restoredAggregations: Record<string, string> = {};
+      const restoredAliases: Record<string, string> = {};
+      const restoredUnits: Record<string, string> = {};
+      const restoredFormats: Record<string, string> = {};
+      for (const [bindingId, meta] of Object.entries(doc.fieldMeta)) {
+        if (meta.label) restoredLabels[bindingId] = meta.label;
+        if (meta.aggregation) restoredAggregations[bindingId] = meta.aggregation;
+        if (meta.alias) restoredAliases[bindingId] = meta.alias;
+        if (meta.unit) restoredUnits[bindingId] = meta.unit;
+        if (meta.format) restoredFormats[bindingId] = meta.format;
+      }
+      setDimensionLabels(restoredLabels);
+      setMetricAggregations(restoredAggregations);
+      setMetricAliases(restoredAliases);
+      setMetricUnits(restoredUnits);
+      setMetricFormats(restoredFormats);
+
+      // 仅在配置携带内容时覆盖，避免空文档抹掉默认样式
+      const restoredStyle = doc.style as ChartStyleConfig;
+      if (restoredStyle && Object.keys(restoredStyle).length > 0) {
+        setChartStyleState(restoredStyle);
+      }
+      const restoredQueryOptions = doc.queryOptions as ChartQueryOptions;
+      if (restoredQueryOptions && Object.keys(restoredQueryOptions).length > 0) {
+        setChartQueryOptionsState(restoredQueryOptions);
+      }
+    },
+    [
+      setChartBuilderConfig,
+      setQueryConfig,
+      setDimensionLabels,
+      setMetricAggregations,
+      setMetricAliases,
+      setMetricUnits,
+      setMetricFormats,
+      setChartStyleState,
+      setChartQueryOptionsState,
+    ]
   );
 
   const getDimensionFields = useCallback((): BoundField[] => {
@@ -1530,16 +1660,7 @@ const ChartBuilder: React.FC = () => {
               ? reorderDimensionField(oldIndex, newIndex, groupIndex)
               : reorderMetricField(oldIndex, newIndex, groupIndex)
           }
-          onOpenSettings={
-            group.kind === 'metric'
-              ? (bound) => {
-                  const alias = prompt('输入字段别名:', bound.field.name);
-                  if (alias !== null) {
-                    setMetricAlias(bound.binding.bindingId, alias);
-                  }
-                }
-              : undefined
-          }
+          onOpenSettings={(bound) => setFieldSettings({ kind: group.kind, bound })}
         />
       );
     });
@@ -1557,7 +1678,6 @@ const ChartBuilder: React.FC = () => {
     reorderDimensionField,
     reorderMetricField,
     setMetricAggregation,
-    setMetricAlias,
   ]);
 
   /**
@@ -1620,12 +1740,103 @@ const ChartBuilder: React.FC = () => {
     ]
   );
 
+  /**
+   * 查询 → 落库 → 地址栏换成短码。这是「地址栏即分享」的唯一写入点。
+   *
+   * 三条刻意的约定：
+   * ① 只在查询**成功**后落库——失败配置不该变成一条能被分享的链接；
+   * ② spec 与上次落库的完全一致就跳过：spec_hash 由后端按内容算，同配置重复提交
+   *    只会拿回同一个短码，跳过纯粹是为了不白发请求；
+   * ③ 落库失败只记控制台——结果已经渲染在屏幕上，少一条分享链接不该把一次成功的
+   *    查询变成失败弹窗。
+   */
+  const runChartQuery = useCallback(
+    async (request: ChartQueryRequest) => {
+      const startedAt = Date.now();
+      const succeeded = await executeChartQuery(request);
+      const durationMs = Date.now() - startedAt;
+      if (!succeeded || !selectedDatasetId) {
+        return;
+      }
+
+      const spec = buildQuerySpecDocument({
+        chartType: chartBuilderConfig.chartType,
+        title: chartBuilderConfig.title,
+        queryConfig,
+        activeQueryConfig,
+        dimensionLabels,
+        metricAggregations,
+        metricAliases,
+        metricUnits,
+        metricFormats,
+        chartStyle,
+        chartQueryOptions,
+      });
+
+      const specKey = JSON.stringify(spec);
+      if (specKey === lastPersistedSpecRef.current) {
+        return;
+      }
+
+      const resultRows = countResultRows(useStore.getState().chartData);
+      try {
+        const response = await queriesApi.save({
+          dataset_id: selectedDatasetId,
+          chart_id: editingChartId ?? 0,
+          spec,
+          source_type: 'build',
+          ...(resultRows === undefined ? {} : { row_count: resultRows }),
+          duration_ms: durationMs,
+        });
+        const shortId = response.data.data.query_id;
+        lastPersistedSpecRef.current = specKey;
+        // 自签发的短码必须记账：否则地址栏一变就会触发 ?q= 还原，还原又触发自动
+        // 查询与落库，形成死循环（见 settledShortIdRef 的说明）。
+        settledShortIdRef.current = shortId;
+        setShareShortId(shortId);
+        // 地址栏只留短码：q 存在时 edit / datasetId 整体失效（PRD §5.2 优先级）。
+        // replace 而不是 push，免得每次改条件都往浏览器历史里塞一条。
+        setSearchParams({ q: shortId }, { replace: true });
+      } catch (error) {
+        console.error('查询记录落库失败：', error);
+      }
+    },
+    [
+      activeQueryConfig,
+      chartBuilderConfig.chartType,
+      chartBuilderConfig.title,
+      chartQueryOptions,
+      chartStyle,
+      dimensionLabels,
+      editingChartId,
+      executeChartQuery,
+      metricAggregations,
+      metricAliases,
+      metricFormats,
+      metricUnits,
+      queryConfig,
+      selectedDatasetId,
+      setSearchParams,
+    ]
+  );
+
+  /** 复制当前地址栏（= 本条查询的分享链接）。 */
+  const handleCopyShareLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      message.success('链接已复制，发给谁谁就能看到同一张图');
+    } catch (error) {
+      console.error('复制链接失败：', error);
+      message.error('复制失败，请手动复制地址栏');
+    }
+  }, []);
+
   const handleExecuteQuery = useCallback(() => {
     const request = buildChartQueryRequest();
     if (request) {
-      executeChartQuery(request);
+      void runChartQuery(request);
     }
-  }, [buildChartQueryRequest, executeChartQuery]);
+  }, [buildChartQueryRequest, runChartQuery]);
 
   const handlePageChange = useCallback(
     (page: number, pageSize: number) => {
@@ -1633,10 +1844,10 @@ const ChartBuilder: React.FC = () => {
       const request = buildChartQueryRequest();
       if (request) {
         request.pagination = { page, page_size: pageSize };
-        executeChartQuery(request);
+        void runChartQuery(request);
       }
     },
-    [buildChartQueryRequest, executeChartQuery, setTablePagination, tablePagination]
+    [buildChartQueryRequest, runChartQuery, setTablePagination, tablePagination]
   );
 
   const handleSortChange = useCallback(
@@ -1648,7 +1859,7 @@ const ChartBuilder: React.FC = () => {
         setQueryConfig({ sort: undefined });
         const request = buildChartQueryRequest(cleared);
         if (request) {
-          executeChartQuery(request);
+          void runChartQuery(request);
         }
         return;
       }
@@ -1667,13 +1878,13 @@ const ChartBuilder: React.FC = () => {
       // 闭包里的 queryConfig 还是旧值（setQueryConfig 尚未触发重渲染），显式传覆盖
       const request = buildChartQueryRequest({ ...queryConfig, sort: nextSort });
       if (request) {
-        executeChartQuery(request);
+        void runChartQuery(request);
       }
     },
     [
       buildChartQueryRequest,
       chartBuilderFields,
-      executeChartQuery,
+      runChartQuery,
       metricAliases,
       queryConfig,
       setQueryConfig,
@@ -1685,6 +1896,11 @@ const ChartBuilder: React.FC = () => {
   }, [fetchDatasets]);
 
   useEffect(() => {
+    // 优先级 q > edit > datasetId（PRD §5.2）：带短码时整条地址栏以记录为准，
+    // 其余参数一律忽略，免得两条还原路径互相覆盖。
+    if (searchParams.get('q')) {
+      return;
+    }
     const editId = searchParams.get('edit');
     const datasetIdParam = searchParams.get('datasetId');
 
@@ -1698,6 +1914,88 @@ const ChartBuilder: React.FC = () => {
       }
     }
   }, [searchParams]);
+
+  /**
+   * `?q=<短码>` 直链还原（R-30'）。记录里存的是完整图表配置文档，因此还原出来
+   * 的界面与发送方逐字段一致——这也是「复制地址栏即分享」的全部实现。
+   *
+   * 只做一次的判定见 settledShortIdRef：自签发的短码与已还原过的短码都不会再进
+   * 这个分支，否则「还原 → 自动查询 → 落库 → 地址栏换短码 → 再还原」会死循环。
+   */
+  useEffect(() => {
+    const shortId = searchParams.get('q');
+    if (!shortId || shortId === settledShortIdRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    const restore = async () => {
+      try {
+        // 同一短码共用一次请求：StrictMode 的二次挂载（以及任何快速重挂载）都会再跑
+        // 一遍本 effect，直接复用即可，既不重复打后端也不影响结果可用性。
+        if (inflightRestoreRef.current?.shortId !== shortId) {
+          inflightRestoreRef.current = {
+            shortId,
+            promise: queriesApi.getByShortId(shortId).then((response) => response.data.data),
+          };
+        }
+        const record = await inflightRestoreRef.current.promise;
+        if (cancelled) {
+          return;
+        }
+        // 记录已被消费才记账（见 settledShortIdRef 的说明）：放在请求之前会把
+        // 重挂载后的第二次执行提前挡掉，还原就再也没机会执行。
+        settledShortIdRef.current = shortId;
+
+        // 记录来自地址栏而不是图表库：保存必须新建，绝不覆盖别人的图表。
+        setEditingChartId(null);
+        setSelectedDatasetId(record.dataset_id);
+        setShareShortId(shortId);
+
+        const document = parseQuerySpecDocument(record.spec);
+        if (!document) {
+          setQueryRecordNotice({
+            kind: 'warning',
+            text: '这条查询记录的配置版本无法识别，已回退为空白查询',
+          });
+          return;
+        }
+        applyConfigDocument(document, document.title);
+        if (record.expired) {
+          // 软过期只影响默认视图排序，直链照常完整还原（R-42 / U-10）：
+          // 条件 100% 可用，只是提醒使用者口径可能已经变了。
+          setQueryRecordNotice({ kind: 'warning', text: '此查询已过期，条件可能已不适用' });
+        }
+      } catch (error: unknown) {
+        // 失败不留缓存，重新进入该链接时照常重试。
+        inflightRestoreRef.current = null;
+        if (cancelled) {
+          return;
+        }
+        console.error('查询记录还原失败：', error);
+        setQueryRecordNotice({
+          kind: 'error',
+          text: error instanceof Error ? error.message : '分享链接无效或已失效',
+        });
+      }
+    };
+    void restore();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, applyConfigDocument]);
+
+  /**
+   * runChartQuery 的最新引用。查询 effect 的依赖列表沿用改动前的口径（图型 / 配置 /
+   * 字段 / 分页 / 选项），**不能**直接依赖 runChartQuery——它还依赖别名、单位、格式、
+   * 样式，挂上去会让「改个单位显示」也触发一次查询，并在查询记录里留下一条谁都没要
+   * 的记录。用户动作回调（执行 / 翻页 / 排序）不受此限制，照常直接依赖。
+   */
+  const runChartQueryRef = useRef(runChartQuery);
+  useEffect(() => {
+    runChartQueryRef.current = runChartQuery;
+  }, [runChartQuery]);
 
   useEffect(() => {
     if (selectedDatasetId) {
@@ -1723,13 +2021,16 @@ const ChartBuilder: React.FC = () => {
       includeSort: true,
     });
     if (request) {
-      executeChartQuery(request);
+      void runChartQueryRef.current(request);
     }
-  }, [selectedDatasetId, executeChartQuery]);
+  }, [selectedDatasetId]);
 
   useEffect(() => {
     if (!autoQuery) return;
     if (!selectedDatasetId) return;
+    // 过滤弹窗打开期间挂起：条件输入是拖拽的中途态，不发起查询。
+    // 关闭弹窗时本 effect 经 filterEditing 依赖重跑，确定/取消都会自然补一次查询。
+    if (filterEditing) return;
 
     const request = composeChartQueryRequest({
       datasetId: selectedDatasetId,
@@ -1743,13 +2044,13 @@ const ChartBuilder: React.FC = () => {
       includeSort: true,
     });
     if (request) {
-      executeChartQuery(request);
+      void runChartQueryRef.current(request);
     }
   }, [
     autoQuery,
     chartBuilderConfig.chartType,
     selectedDatasetId,
-    executeChartQuery,
+    filterEditing,
     queryConfig,
     metricAggregations,
     metricAliases,
@@ -1791,56 +2092,7 @@ const ChartBuilder: React.FC = () => {
             }))
           );
 
-          setChartBuilderConfig({
-            chartType: doc.chartType,
-            title: doc.title || chart.name,
-            xAxisField: null,
-            yAxisFields: [],
-          });
-
-          setQueryConfig(
-            normalizeQueryConfigForChartType(doc.chartType, {
-              dimensionGroups: doc.query.dimensionGroups,
-              metricGroups: doc.query.metricGroups,
-              filters: doc.query.filters as FilterCondition[],
-              sort: doc.query.sort
-                ? {
-                    bindingId: doc.query.sort.bindingId,
-                    order: doc.query.sort.order === 'desc' ? 'desc' : 'asc',
-                  }
-                : undefined,
-              limit: doc.query.limit,
-            })
-          );
-
-          // v2 fieldMeta（键为 bindingId）→ 5 个运行时 Record
-          const restoredLabels: Record<string, string> = {};
-          const restoredAggregations: Record<string, string> = {};
-          const restoredAliases: Record<string, string> = {};
-          const restoredUnits: Record<string, string> = {};
-          const restoredFormats: Record<string, string> = {};
-          for (const [bindingId, meta] of Object.entries(doc.fieldMeta)) {
-            if (meta.label) restoredLabels[bindingId] = meta.label;
-            if (meta.aggregation) restoredAggregations[bindingId] = meta.aggregation;
-            if (meta.alias) restoredAliases[bindingId] = meta.alias;
-            if (meta.unit) restoredUnits[bindingId] = meta.unit;
-            if (meta.format) restoredFormats[bindingId] = meta.format;
-          }
-          setDimensionLabels(restoredLabels);
-          setMetricAggregations(restoredAggregations);
-          setMetricAliases(restoredAliases);
-          setMetricUnits(restoredUnits);
-          setMetricFormats(restoredFormats);
-
-          // 仅在配置携带内容时覆盖，避免空文档抹掉默认样式
-          const restoredStyle = doc.style as ChartStyleConfig;
-          if (restoredStyle && Object.keys(restoredStyle).length > 0) {
-            setChartStyleState(restoredStyle);
-          }
-          const restoredQueryOptions = doc.queryOptions as ChartQueryOptions;
-          if (restoredQueryOptions && Object.keys(restoredQueryOptions).length > 0) {
-            setChartQueryOptionsState(restoredQueryOptions);
-          }
+          applyConfigDocument(doc, chart.name);
         } catch (error) {
           editChartCache.current = null;
           console.error('Failed to load chart config:', error);
@@ -1849,20 +2101,7 @@ const ChartBuilder: React.FC = () => {
     };
 
     loadChartConfig();
-  }, [
-    editingChartId,
-    selectedDatasetId,
-    chartBuilderFields,
-    setChartBuilderConfig,
-    setMetricAggregations,
-    setMetricAliases,
-    setDimensionLabels,
-    setMetricUnits,
-    setMetricFormats,
-    setChartStyleState,
-    setChartQueryOptionsState,
-    setQueryConfig,
-  ]);
+  }, [editingChartId, selectedDatasetId, chartBuilderFields, applyConfigDocument]);
 
   const handleSave = async () => {
     if (!selectedDatasetId) {
@@ -1871,39 +2110,21 @@ const ChartBuilder: React.FC = () => {
     }
 
     try {
-      // v2 持久化文档：字段组是 bindings（bindingId + 列名），5 个 Record 在序列化
-      // 边界收敛为 fieldMeta（键为 bindingId），仅保留非空条目。
-      const fieldMeta: Record<string, ChartMeta> = {};
-      const assignMeta = (record: Record<string, string>, key: keyof ChartMeta) => {
-        for (const [bindingId, value] of Object.entries(record)) {
-          if (value) {
-            fieldMeta[bindingId] = { ...fieldMeta[bindingId], [key]: value };
-          }
-        }
-      };
-      assignMeta(dimensionLabels, 'label');
-      assignMeta(metricAggregations, 'aggregation');
-      assignMeta(metricAliases, 'alias');
-      assignMeta(metricUnits, 'unit');
-      assignMeta(metricFormats, 'format');
-
-      const doc: ChartConfigDocument = {
-        version: 2,
+      // v2 持久化文档：与查询记录（bi_query.spec_json）走同一个构造出口
+      // lib/querySpec.buildChartConfigDocument——两条路径必须还原出逐字段一致的配置。
+      const doc: ChartConfigDocument = buildChartConfigDocument({
         chartType: chartBuilderConfig.chartType,
         title: chartBuilderConfig.title,
-        query: {
-          // 保存时只序列化当前图型激活的槽位组：隐藏组绑定不落库，否则
-          // ShareView/GetData 的平铺路径会把它们当真实维度发出去（重复列）。
-          dimensionGroups: activeQueryConfig.dimensionGroups,
-          metricGroups: activeQueryConfig.metricGroups,
-          filters: queryConfig.filters,
-          sort: queryConfig.sort,
-          limit: queryConfig.limit,
-        },
-        fieldMeta,
-        style: chartStyle,
-        queryOptions: chartQueryOptions,
-      };
+        queryConfig,
+        activeQueryConfig,
+        dimensionLabels,
+        metricAggregations,
+        metricAliases,
+        metricUnits,
+        metricFormats,
+        chartStyle,
+        chartQueryOptions,
+      });
       const configJson = JSON.stringify(doc);
 
       if (editingChartId) {
@@ -1972,16 +2193,38 @@ const ChartBuilder: React.FC = () => {
           data={tableRows}
           loading={chartDataLoading}
           columns={tableColumns}
-          columnLabels={Object.fromEntries(
+          columnLabels={Object.fromEntries([
             // columnLabels 仍按列名索引（TableChart 按列名取行值）；同一列名有多个
             // 维度 binding 时后写入的 label 覆盖先写入的（Task 0-6+0-8 前的已知歧义）。
-            getDimensionFields().map((bound) => [
+            ...getDimensionFields().map((bound) => [
               bound.field.name,
               dimensionLabels[bound.binding.bindingId] || bound.field.name,
-            ])
-          )}
+            ]),
+            // 指标列头：显示名 = 别名 || 列名（别名纯展示），有单位时追加「 (单位)」
+            // ——与图表 label 的拼接规则一致；键仍是 wire 输出列名（= 字段列名）。
+            ...getMetricFields().map((bound) => {
+              const displayName = metricAliases[bound.binding.bindingId] || bound.field.name;
+              const unit = metricUnits[bound.binding.bindingId];
+              return [bound.field.name, unit ? `${displayName} (${unit})` : displayName];
+            }),
+          ])}
           dimensionNames={dimensionFields.map((bound) => bound.field.name)}
-          metricNames={metricFields.map((bound) => bound.field.name)}
+          metricNames={metricFields.map((bound) =>
+            wireAliasOf(metricAliases[bound.binding.bindingId], bound.field.name)
+          )}
+          // 「格式」（如 0,0.00）按输出列名映射给 TableChart 做展示层格式化；
+          // 只传有配置的列，排序仍按原始行值。
+          metricFormats={Object.fromEntries(
+            metricFields
+              .map((bound) => {
+                const outputName = wireAliasOf(
+                  metricAliases[bound.binding.bindingId],
+                  bound.field.name
+                );
+                return [outputName, metricFormats[bound.binding.bindingId]] as const;
+              })
+              .filter(([, format]) => Boolean(format))
+          )}
           rowSize={chartStyle.tableRowSize}
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
           // 排序状态受控：单一事实源是 queryConfig.sort（bindingId 引用），
@@ -2102,6 +2345,14 @@ const ChartBuilder: React.FC = () => {
             />
             <Button
               size="small"
+              icon={<LinkOutlined />}
+              onClick={handleCopyShareLink}
+              disabled={!shareShortId}
+              title="复制链接"
+              aria-label="复制分享链接"
+            />
+            <Button
+              size="small"
               icon={<FunctionOutlined />}
               onClick={() => setRightDrawerOpen(true)}
               title="配置"
@@ -2137,13 +2388,13 @@ const ChartBuilder: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {renderQueryConfigRows()}
 
-              <QueryConfigRow rowType="filter" label="过滤">
+              <QueryConfigRow rowType="filter" label="筛选">
                 <FilterDropZone
                   filters={queryConfig.filters}
                   availableFields={chartBuilderFields}
-                  onAdd={(field) => addFilter({ field: field.name })}
-                  onRemove={removeFilter}
-                  onUpdate={updateFilter}
+                  onAdd={openFilterEditor}
+                  onEdit={(filter) => setFilterEditing({ id: filter.id, isNew: false })}
+                  onRemove={handleFilterRemove}
                 />
               </QueryConfigRow>
             </div>
@@ -2181,6 +2432,9 @@ const ChartBuilder: React.FC = () => {
             background: 'var(--dr-canvas)',
             padding: '0 4px',
             position: 'relative',
+            // antd Sider 默认 transition: all .2s 会把拖宽变成"追鼠标"的动画，
+            // 必须禁掉才跟手（拖宽是逐帧更新，不该有过渡）。
+            transition: 'none',
           }}
         >
           {/* 数据集以纯文本展示（点击弹出选择菜单），避免下拉框截断长名称 */}
@@ -2317,6 +2571,13 @@ const ChartBuilder: React.FC = () => {
                     查看 SQL
                   </Button>
                 )}
+                {shareShortId && (
+                  <Tooltip title="复制地址栏链接：对方打开看到的就是这一屏">
+                    <Button size="small" icon={<LinkOutlined />} onClick={handleCopyShareLink}>
+                      复制链接
+                    </Button>
+                  </Tooltip>
+                )}
                 <Button
                   size="small"
                   type="primary"
@@ -2335,13 +2596,13 @@ const ChartBuilder: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {renderQueryConfigRows()}
 
-              <QueryConfigRow rowType="filter" label="过滤">
+              <QueryConfigRow rowType="filter" label="筛选">
                 <FilterDropZone
                   filters={queryConfig.filters}
                   availableFields={chartBuilderFields}
-                  onAdd={(field) => addFilter({ field: field.name })}
-                  onRemove={removeFilter}
-                  onUpdate={updateFilter}
+                  onAdd={openFilterEditor}
+                  onEdit={(filter) => setFilterEditing({ id: filter.id, isNew: false })}
+                  onRemove={handleFilterRemove}
                 />
               </QueryConfigRow>
             </div>
@@ -2367,15 +2628,7 @@ const ChartBuilder: React.FC = () => {
         <Sider width={300} style={{ background: 'var(--dr-canvas)', padding: '0 4px' }}>
           <ConfigPanel
             config={chartBuilderConfig}
-            dimensionLabels={dimensionLabels}
-            metricUnits={metricUnits}
-            metricFormats={metricFormats}
             chartStyle={chartStyle}
-            dimensionFields={getDimensionFields()}
-            metricFields={getMetricFields()}
-            onDimensionLabelChange={setDimensionLabel}
-            onMetricUnitChange={setMetricUnit}
-            onMetricFormatChange={setMetricFormat}
             onChartStyleChange={setChartStyle}
             queryOptions={chartQueryOptions}
             onQueryOptionsChange={(options) =>
@@ -2404,6 +2657,17 @@ const ChartBuilder: React.FC = () => {
       <Layout className="chart-builder-page" style={{ minHeight: 'calc(100vh - 120px)' }}>
         {renderHeader()}
 
+        {queryRecordNotice && (
+          <Alert
+            type={queryRecordNotice.kind}
+            message={queryRecordNotice.text}
+            showIcon
+            closable
+            onClose={() => setQueryRecordNotice(null)}
+            style={{ margin: '0 6px 6px' }}
+          />
+        )}
+
         {renderContent()}
 
         <Drawer
@@ -2427,15 +2691,7 @@ const ChartBuilder: React.FC = () => {
         >
           <ConfigPanel
             config={chartBuilderConfig}
-            dimensionLabels={dimensionLabels}
-            metricUnits={metricUnits}
-            metricFormats={metricFormats}
             chartStyle={chartStyle}
-            dimensionFields={getDimensionFields()}
-            metricFields={getMetricFields()}
-            onDimensionLabelChange={setDimensionLabel}
-            onMetricUnitChange={setMetricUnit}
-            onMetricFormatChange={setMetricFormat}
             onChartStyleChange={setChartStyle}
             queryOptions={chartQueryOptions}
             onQueryOptionsChange={(options) =>
@@ -2509,6 +2765,47 @@ const ChartBuilder: React.FC = () => {
           </div>
         )}
       </Modal>
+
+      <FilterConfigModal
+        open={filterEditing !== null && editingFilterCondition !== undefined}
+        field={editingFilterField}
+        initial={editingFilterCondition}
+        isNew={filterEditing?.isNew}
+        datasetId={selectedDatasetId}
+        onOk={handleFilterModalOk}
+        onCancel={handleFilterModalCancel}
+      />
+
+      <FieldSettingsModal
+        open={fieldSettings !== null}
+        kind={fieldSettings?.kind ?? 'metric'}
+        field={fieldSettings?.bound.field ?? null}
+        initial={
+          fieldSettings
+            ? {
+                alias:
+                  fieldSettings.kind === 'metric'
+                    ? (metricAliases[fieldSettings.bound.binding.bindingId] ?? '')
+                    : (dimensionLabels[fieldSettings.bound.binding.bindingId] ?? ''),
+                unit: metricUnits[fieldSettings.bound.binding.bindingId] ?? '',
+                format: metricFormats[fieldSettings.bound.binding.bindingId] ?? '',
+              }
+            : { alias: '', unit: '', format: '' }
+        }
+        onOk={(value: FieldSettingsValue) => {
+          if (!fieldSettings) return;
+          const { bindingId } = fieldSettings.bound.binding;
+          if (fieldSettings.kind === 'metric') {
+            setMetricAlias(bindingId, value.alias);
+            setMetricUnit(bindingId, value.unit);
+            setMetricFormat(bindingId, value.format);
+          } else {
+            setDimensionLabel(bindingId, value.alias);
+          }
+          setFieldSettings(null);
+        }}
+        onCancel={() => setFieldSettings(null)}
+      />
     </DndContext>
   );
 };

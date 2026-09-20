@@ -43,6 +43,7 @@ import {
   TableInfo,
 } from '../api';
 import { toStandardType } from '../api/datatypes';
+import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
@@ -949,7 +950,7 @@ const DatasetPage: React.FC = () => {
             )}
 
             <Form.Item>
-              <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <ModalFooter>
                 <Button
                   onClick={() => {
                     setModalVisible(false);
@@ -966,7 +967,7 @@ const DatasetPage: React.FC = () => {
                 >
                   {intl.formatMessage({ id: 'dataset.nextStep' })}
                 </Button>
-              </Space>
+              </ModalFooter>
             </Form.Item>
           </Form>
         ) : (
@@ -1155,7 +1156,7 @@ const DatasetPage: React.FC = () => {
             />
 
             <Form.Item>
-              <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <ModalFooter>
                 <Button
                   onClick={() => {
                     setModalVisible(false);
@@ -1175,7 +1176,7 @@ const DatasetPage: React.FC = () => {
                 >
                   {intl.formatMessage({ id: 'dataset.saveAndSubmit' })}
                 </Button>
-              </Space>
+              </ModalFooter>
             </Form.Item>
           </div>
         )}
@@ -1308,7 +1309,7 @@ const DatasetPage: React.FC = () => {
           )}
 
           <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <ModalFooter>
               <Button
                 onClick={() => {
                   setEditModalVisible(false);
@@ -1329,7 +1330,7 @@ const DatasetPage: React.FC = () => {
               >
                 {intl.formatMessage({ id: 'common.save' })}
               </Button>
-            </Space>
+            </ModalFooter>
           </Form.Item>
         </Form>
       </Modal>
@@ -1415,7 +1416,7 @@ const DatasetPage: React.FC = () => {
           </Form.Item>
 
           <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <ModalFooter>
               <Button
                 onClick={() => {
                   setVirtualFieldModalVisible(false);
@@ -1430,7 +1431,7 @@ const DatasetPage: React.FC = () => {
                   ? intl.formatMessage({ id: 'common.update' })
                   : intl.formatMessage({ id: 'common.add' })}
               </Button>
-            </Space>
+            </ModalFooter>
           </Form.Item>
         </Form>
       </Modal>

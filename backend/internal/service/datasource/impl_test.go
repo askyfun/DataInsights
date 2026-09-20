@@ -10,9 +10,9 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"dataray/internal/crypto"
-	"dataray/internal/domain/entity"
-	"dataray/internal/model"
+	"data-insights/internal/crypto"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/model"
 )
 
 // TestBuildDistributionSQLsSQLDatasetUsesQuerySQL verifies that for SQL-type

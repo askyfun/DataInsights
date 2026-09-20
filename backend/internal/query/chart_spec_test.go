@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"dataray/internal/domain/entity"
+	"data-insights/internal/domain/entity"
 )
 
 func TestChartSpec_Serialization(t *testing.T) {

@@ -305,14 +305,14 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
     expect(request?.sort).toEqual({ field: 'cnt', order: 'desc' });
   });
 
-  it('value 输出名走 metricAliases 覆盖（与 v1 sortWireField 同口径）', () => {
+  it('value 输出名恒为字段列名（别名纯展示，不进 wire）', () => {
     const request = composeChartQueryRequest({
       ...baseInput,
       metricAliases: { 'b-1': 'total_cnt' },
     });
 
-    expect(request?.sort).toEqual({ field: 'total_cnt', order: 'desc' });
-    expect(request?.metrics).toEqual([{ field: 'cnt', agg: 'sum', alias: 'total_cnt' }]);
+    expect(request?.sort).toEqual({ field: 'cnt', order: 'desc' });
+    expect(request?.metrics).toEqual([{ field: 'cnt', agg: 'sum', alias: 'cnt' }]);
   });
 
   it('覆盖性：用户此前设的 sort（stages asc）被无条件覆盖为 value desc', () => {

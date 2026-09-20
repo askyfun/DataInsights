@@ -367,14 +367,18 @@ func (qb *BunQueryBuilder) buildFilterPart(f *FilterExpr, args *[]interface{}) s
 		return fmt.Sprintf("%s IS NULL", field)
 	case FilterIsNotNull:
 		return fmt.Sprintf("%s IS NOT NULL", field)
-	case FilterIn:
+	case FilterIn, FilterNotIn:
 		if vals, ok := f.Value.([]any); ok && len(vals) > 0 {
 			placeholders := make([]string, len(vals))
 			for i := range vals {
 				placeholders[i] = "?"
 				*args = append(*args, vals[i])
 			}
-			return fmt.Sprintf("%s IN (%s)", field, strings.Join(placeholders, ", "))
+			connector := "IN"
+			if f.Op == FilterNotIn {
+				connector = "NOT IN"
+			}
+			return fmt.Sprintf("%s %s (%s)", field, connector, strings.Join(placeholders, ", "))
 		}
 		return ""
 	case FilterBetween:

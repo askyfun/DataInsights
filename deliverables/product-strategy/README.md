@@ -1,7 +1,7 @@
-# DataRay 产品规划文档集
+# Data Insights 产品规划文档集
 
 **最后更新**：2026-09-19
-**主题**：拖拽式 BI 分析平台（DataRay）—— **产品级中长期路线图**
+**主题**：拖拽式 BI 分析平台（Data Insights）—— **产品级中长期路线图**
 **状态**：**路线图已升级为 v4.0（产品级 2–4 季度 · Phase A–D）**；图型扩展轨 Batch 0/1/2 **已落地**；主线（查询记录分享）**端点仍未接线**；**第二轮竞品调研（三阵营 25 家）已并入竞品文档**
 
 ---
@@ -17,10 +17,10 @@
 | 顺序 | 文档 | 作用 |
 |------|------|------|
 | 1️⃣ | **[prd-chart-query-share-2026-09-16.md](./prd-chart-query-share-2026-09-16.md)** | **产品规格单一事实源（契约）**：产品目标 · 用户故事 · 用户洞察 · 查询记录契约 · 软删除契约 · 前端交互契约 · 安全契约（G1/G2/G3）· 需求池 · 验收标准 · Non-goals |
-| 2️⃣ | **[roadmap-dataray-2026-09-16.md](./roadmap-dataray-2026-09-16.md)** | **路线图 v4.0（现行）**：实现进度实测 · **Phase A 收口 / B 可信消费 / C 组织化 / D 智能与分发** · 关键路径 · 人日口径 · **契约冲突清单** · 风险栏 |
-| 3️⃣ | **[decision-log-dataray-2026-09-16.md](./decision-log-dataray-2026-09-16.md)** | **决策台账**：32 项决策（已定 27 / 待决 5）· 不可逆项跟踪 · L0 打破条件 · 已接受风险 |
-| 4️⃣ | [competitive-analysis-dataray-vs-superset-metabase-2026-09-16.md](./competitive-analysis-dataray-vs-superset-metabase-2026-09-16.md) | **竞品分析（两轮 · 三阵营 25 家）**：第一轮是对标 Superset/Metabase 的 12 域差距矩阵与 R-01~R-29 需求池；**第二轮（§十四~§十八）为 2026-09-19 最新定位结论**——开源 9 家 / 国内 11 家 / 国际+AI 原生 8 家 · 拖拽摩擦度排名 · table-stakes 分级 · AI 切入点裁定 |
-| 5️⃣ | [chart-coverage-gap-dataray-2026-09-16.md](./chart-coverage-gap-dataray-2026-09-16.md) | **专题 · 图表能力覆盖**：两轴量化框架（C/I/U + S/D）· 断点 12 种 · 需求池 R-48~R-68 · 地图为何单列触发式 |
+| 2️⃣ | **[roadmap-data-insights-2026-09-16.md](./roadmap-data-insights-2026-09-16.md)** | **路线图 v4.0（现行）**：实现进度实测 · **Phase A 收口 / B 可信消费 / C 组织化 / D 智能与分发** · 关键路径 · 人日口径 · **契约冲突清单** · 风险栏 |
+| 3️⃣ | **[decision-log-data-insights-2026-09-16.md](./decision-log-data-insights-2026-09-16.md)** | **决策台账**：32 项决策（已定 27 / 待决 5）· 不可逆项跟踪 · L0 打破条件 · 已接受风险 |
+| 4️⃣ | [competitive-analysis-data-insights-vs-superset-metabase-2026-09-16.md](./competitive-analysis-data-insights-vs-superset-metabase-2026-09-16.md) | **竞品分析（两轮 · 三阵营 25 家）**：第一轮是对标 Superset/Metabase 的 12 域差距矩阵与 R-01~R-29 需求池；**第二轮（§十四~§十八）为 2026-09-19 最新定位结论**——开源 9 家 / 国内 11 家 / 国际+AI 原生 8 家 · 拖拽摩擦度排名 · table-stakes 分级 · AI 切入点裁定 |
+| 5️⃣ | [chart-coverage-gap-data-insights-2026-09-16.md](./chart-coverage-gap-data-insights-2026-09-16.md) | **专题 · 图表能力覆盖**：两轴量化框架（C/I/U + S/D）· 断点 12 种 · 需求池 R-48~R-68 · 地图为何单列触发式 |
 
 > 冲突判定优先级：**PRD（契约）> roadmap（排期）> decision-log（依据）**。跨文档冲突时以左侧文档为准。
 > ⚠️ **§ 命名说明**：竞品文档文件名保留了第一轮范围（`vs-superset-metabase`），内容已扩至 25 家。**是否重命名待产品负责人裁定**（未擅自执行）。
@@ -36,9 +36,9 @@
 | `prd-chart-query-url-share-...`（PRD v1） | 机制被推翻：「URL 携带压缩状态」→ 服务端落库 + queryId 寻址 |
 | `prd-chart-query-record-...`（PRD v2） | 生命周期条款被 v3 改写；已并入合并定稿 |
 | `prd-chart-query-record-v3-...`（PRD v3 增量） | 增量格式已合并；且"不真删仅限查询记录"已扩展为"都不真删" |
-| `roadmap-update-dataray-experience-first-...` | 排期口径过三轮修订；四域验收、R-04/R-05 当期等结论均已变 |
-| `next-phase-scope-dataray-...` | Phase 0/1 清单在看板移出、机制切换后已重排 |
-| `decision-checklist-dataray-...` | D3 已关闭、D10 已作废；三轮新增决策已超出覆盖范围 |
+| `roadmap-update-data-insights-experience-first-...` | 排期口径过三轮修订；四域验收、R-04/R-05 当期等结论均已变 |
+| `next-phase-scope-data-insights-...` | Phase 0/1 清单在看板移出、机制切换后已重排 |
+| `decision-checklist-data-insights-...` | D3 已关闭、D10 已作废；三轮新增决策已超出覆盖范围 |
 | `chart-coverage-gap-quantification-...`（数析初版） | 未回填覆盖率因子的初版；已并入图表覆盖专题定稿 |
 
 > **路线图 v3.1 → v4.0 未另建归档副本**：v4.0 为就地改写，历史口径由 **git 提交**保存（避免制造第二份「单看一份文档不完整」的僵尸文档）。变更明细见路线图 §9。
@@ -97,7 +97,7 @@
 
 1. **不可逆欠账已拖 3 天**：既有 4 张业务表的 `owner_id` / `tenant_id` 仍未落库。这是低成本埋点（只加字段、不加鉴权），但**晚一天补，存量数据归属就多缺失一天**。
 2. **主线一根没动，而图型已够用**：图型越过断点后**继续加图型的边际收益趋近于零**。当务之急是**端点接线 + 三门禁 + 还欠账**，不是再加一张图。
-3. **差异化窗口有时限**：免登录分享在竞品里**已是标配**（开源 5 家 + 国内 6 家全有），DataRay 的真正优势是「**默认行为 + 不可猜 + 密码/过期 + 零配置**」。但**一旦上账号体系，`?q=` 匿名直链必然退化成「管理员开关 + 合规补丁」**——A/B 阶段要快。
+3. **差异化窗口有时限**：免登录分享在竞品里**已是标配**（开源 5 家 + 国内 6 家全有），Data Insights 的真正优势是「**默认行为 + 不可猜 + 密码/过期 + 零配置**」。但**一旦上账号体系，`?q=` 匿名直链必然退化成「管理员开关 + 合规补丁」**——A/B 阶段要快。
 4. **一处契约冲突需先裁决**：Phase B 的看板 / 跨图联动与 PRD §12 Non-goals **直接冲突**，开工前必须**就地改 PRD**（路线图 §6 已列出全部 7 项冲突）。
 
 ---

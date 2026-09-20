@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"dataray/internal/domain/entity"
-	"dataray/internal/model"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/model"
 
 	"crypto/rand"
 	"encoding/hex"

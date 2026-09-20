@@ -1,4 +1,4 @@
-# DataRay 代码风格指南
+# Data Insights 代码风格指南
 
 ## TypeScript 规范
 
@@ -83,10 +83,10 @@ import (
     "github.com/gin-gonic/gin"
     "github.com/uptrace/bun"
 
-    "dataray/internal/config"
-    "dataray/internal/database"
-    "dataray/internal/middleware"
-    "dataray/internal/model"
+    "data-insights/internal/config"
+    "data-insights/internal/database"
+    "data-insights/internal/middleware"
+    "data-insights/internal/model"
 )
 ```
 

@@ -1,8 +1,8 @@
-# DataRay 前端代码质量提升实施计划
+# Data Insights 前端代码质量提升实施计划
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 参照 Cherry Studio 的工程质量手段，全面提升 DataRay 前端代码质量，包括： Biome 代码检查、Vitest 测试框架、pre-commit 强约束、CLAUDE.md AI 编码规范。
+**Goal:** 参照 Cherry Studio 的工程质量手段，全面提升 Data Insights 前端代码质量，包括： Biome 代码检查、Vitest 测试框架、pre-commit 强约束、CLAUDE.md AI 编码规范。
 
 **Architecture:** 采用 "Biome 强约束 + TypeScript 硬检查 + Vitest 自动化测试 + AI 规范引导" 四位一体方案，与 Cherry Studio 保持一致。
 
@@ -303,9 +303,9 @@ git commit -chore: add pre-commit hooks with build:check
 **Step 1: 创建 CLAUDE.md**
 
 ```markdown
-# DataRay Frontend Coding Standards
+# Data Insights Frontend Coding Standards
 
-This document defines coding standards and conventions for AI assistants working on the DataRay frontend codebase.
+This document defines coding standards and conventions for AI assistants working on the Data Insights frontend codebase.
 
 ## Tech Stack
 
@@ -637,7 +637,7 @@ git commit -docs: update frontend engineering documentation
 
 ### 完成后的工程化水平
 
-| 手段 | Cherry Studio | DataRay (实施前) | DataRay (实施后) |
+| 手段 | Cherry Studio | Data Insights (实施前) | Data Insights (实施后) |
 |------|---------------|-----------------|-----------------|
 | Biome | ✅ | ❌ | ✅ |
 | Vitest | ✅ | ❌ | ✅ |

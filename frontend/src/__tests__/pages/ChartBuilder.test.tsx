@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { AxiosResponse } from 'axios';
-import type { ReactNode } from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { type ReactNode, StrictMode } from 'react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { chartsApi, datasetsApi } from '../../api';
+import type { QueryRecord } from '../../api';
+import { chartsApi, datasetsApi, queriesApi } from '../../api';
 import type { ApiResponse } from '../../lib/api/client';
 import type { ChartConfigDocument } from '../../lib/chartConfigSchema';
 import ChartBuilder from '../../pages/ChartBuilder';
@@ -90,6 +91,13 @@ vi.mock('../../api', async (importOriginal) => {
       create: vi.fn(),
       update: vi.fn(),
     },
+    // 查询记录落库必须打桩：真实实现会走 axios，「地址栏即分享」是查询成功后的
+    // 副作用，不打桩会污染 console.error 断言（Network Error）。
+    queriesApi: {
+      ...actual.queriesApi,
+      save: vi.fn(),
+      getByShortId: vi.fn(),
+    },
   };
 });
 
@@ -98,6 +106,17 @@ const mockGetColumns = vi.mocked(datasetsApi.getColumns);
 const mockGetChartById = vi.mocked(chartsApi.getById);
 const mockExecuteChartQuery = vi.mocked(chartsApi.executeChartQuery);
 const mockUpdateChart = vi.mocked(chartsApi.update);
+const mockSaveQueryRecord = vi.mocked(queriesApi.save);
+const mockGetQueryRecord = vi.mocked(queriesApi.getByShortId);
+
+/**
+ * 把地址栏暴露成可断言的节点。「地址栏即分享」的验收对象就是 location.search，
+ * 没有它只能间接推断，容易写出"改对了地址栏也照样通过"的假测试。
+ */
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-search">{location.search}</div>;
+}
 
 const resetChartBuilderState = () => {
   useStore.setState({
@@ -135,6 +154,7 @@ const resetChartBuilderState = () => {
 const renderChartBuilder = () => {
   return render(
     <MemoryRouter initialEntries={['/chart-builder?edit=1&datasetId=1']}>
+      <LocationProbe />
       <Routes>
         <Route path="/chart-builder" element={<ChartBuilder />} />
       </Routes>
@@ -145,11 +165,30 @@ const renderChartBuilder = () => {
 const renderNewChartBuilder = () => {
   return render(
     <MemoryRouter initialEntries={['/chart-builder?datasetId=1']}>
+      <LocationProbe />
       <Routes>
         <Route path="/chart-builder" element={<ChartBuilder />} />
       </Routes>
     </MemoryRouter>
   );
+};
+
+/**
+ * 以 `?q=<短码>` 直链进入，可附加其他参数以验证优先级。
+ * `strict` 复刻 `main.tsx` 的运行时环境（dev 下 StrictMode 会 mount → cleanup → 再
+ * mount）。直链还原是一次性副作用，恰恰是 StrictMode 双挂载最容易吃掉的动作，
+ * 默认测试环境不带 StrictMode，所以这里必须能显式打开。
+ */
+const renderQueryRecordBuilder = (shortId: string, extraQuery = '', strict = false) => {
+  const tree = (
+    <MemoryRouter initialEntries={[`/chart-builder?q=${shortId}${extraQuery}`]}>
+      <LocationProbe />
+      <Routes>
+        <Route path="/chart-builder" element={<ChartBuilder />} />
+      </Routes>
+    </MemoryRouter>
+  );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 };
 
 describe('ChartBuilder', () => {
@@ -258,6 +297,20 @@ describe('ChartBuilder', () => {
           },
           select_sql: 'select region from sales',
           count_sql: 'select count(*) from sales',
+        },
+      })
+    );
+
+    // 落库默认成功：短码取自后端的 21 位 base58 定长编码。
+    mockSaveQueryRecord.mockResolvedValue(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          query_id: 'CSatF9qXyRoQXFtAA3iZS',
+          created_at: '2026-09-19T12:00:00Z',
+          expires_at: null,
         },
       })
     );
@@ -659,7 +712,7 @@ describe('ChartBuilder', () => {
       expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
     });
 
-    // revenue → 指标组 b-1，别名 gmv；sort 引用 bindingId（新 QueryConfig.sort 形状）
+    // revenue → 指标组 b-1，显示名 gmv（不进 wire）；sort 引用 bindingId
     act(() => {
       const state = useStore.getState();
       state.addMetricField(state.chartBuilderFields[1], 0);
@@ -672,10 +725,11 @@ describe('ChartBuilder', () => {
     });
 
     const request = mockExecuteChartQuery.mock.calls[1][0];
-    // v1 平铺请求：sort.field 是该绑定的输出列名（指标 = 别名 || 列名），
-    // 与改动前直接发送 TableChart sorter.field 的 wire 字节等价
-    expect(request.sort).toEqual({ field: 'gmv', order: 'desc' });
-    expect(request.metrics).toEqual([{ field: 'revenue', agg: 'sum', alias: 'gmv' }]);
+    // v1 平铺请求：sort.field / metrics[].alias 都是输出列名 = 字段列名。
+    // 别名（gmv）是纯展示配置，不再进 wire——中文别名曾把 SQL AS 子句打成
+    // _invalid_identifier 切断列数据。
+    expect(request.sort).toEqual({ field: 'revenue', order: 'desc' });
+    expect(request.metrics).toEqual([{ field: 'revenue', agg: 'sum', alias: 'revenue' }]);
   });
 
   it('sends sort.field as the raw bindingId on v2 slot-protocol requests (裁定B 选择1)', async () => {
@@ -1283,7 +1337,8 @@ describe('ChartBuilder', () => {
       })
     );
 
-    // 后端按 ResolveAlias() 命名 series：growth 带别名 → series 名是「增长率」而非「growth」。
+    // 中文别名「增长率」不进 wire（会被后端 safeIdentifier 拒绝 → _invalid_identifier）：
+    // wire alias 回退列名 growth，纯展示名只留在前端 labels。
     mockExecuteChartQuery.mockImplementation((request) =>
       Promise.resolve(
         mockAxiosResponse({
@@ -1297,7 +1352,7 @@ describe('ChartBuilder', () => {
                     x_axis: ['2024-01', '2024-02'],
                     series: [
                       { name: 'revenue', data: [1000, 2000] },
-                      { name: '增长率', data: [0.1, 0.2] },
+                      { name: 'growth', data: [0.1, 0.2] },
                     ],
                   },
                   select_sql: 'select month, sum(revenue), sum(growth) from sales group by month',
@@ -1317,7 +1372,7 @@ describe('ChartBuilder', () => {
 
     renderChartBuilder();
 
-    // 请求侧：别名随 v2 请求发出（后端据此命名 series），与渲染侧的反查键必须同源。
+    // 请求侧：wire alias = 列名（中文别名不上 wire），与渲染侧的反查键必须同源。
     await waitFor(() => {
       const lastRequest =
         mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
@@ -1328,17 +1383,18 @@ describe('ChartBuilder', () => {
     expect(request?.metric_groups?.[1]).toEqual({
       name: 'secondary_values',
       label: '次轴指标',
-      fields: [{ field: 'growth', agg: 'sum', alias: '增长率', binding_id: 'b-2' }],
+      fields: [{ field: 'growth', agg: 'sum', alias: 'growth', binding_id: 'b-2' }],
     });
 
-    // 渲染侧：alias 命名的次轴 series 必须仍反查到 secondary_values → yAxisIndex 1（line）。
-    // 修复前 metricSlots 只含列名 'growth'，「增长率」反查失败会被防御性兜底静默降级到
+    // 渲染侧：次轴 series 必须仍反查到 secondary_values → yAxisIndex 1（line）。
+    // 修复前 metricSlots 只含列名 'growth'，带别名时反查失败会被防御性兜底静默降级到
     // yAxisIndex 0（bar）——百分比指标画到绝对值主轴刻度上，看似合理实则错误。
     await waitFor(() => {
       expect(echartsOptionCapture.current?.series).toHaveLength(2);
     });
     const series = echartsOptionCapture.current?.series ?? [];
     expect(series[0]).toMatchObject({ name: 'revenue', type: 'bar', yAxisIndex: 0 });
+    // 渲染层显示名走 labels（前端 alias）：wire series 名 growth → 展示「增长率」。
     expect(series[1]).toMatchObject({ name: '增长率', type: 'line', yAxisIndex: 1 });
   });
 
@@ -1563,5 +1619,212 @@ describe('ChartBuilder', () => {
         expect(lastRequest?.dims).toEqual(['region', 'month']);
       });
     });
+  });
+});
+
+/**
+ * 地址栏即分享（R-30′）：查询成功 → 落库 → 地址栏换成 `?q=<短码>`；
+ * 带 `?q=` 进入 → 还原记录里的完整图表配置。这两半必须成对成立，
+ * 只有前半是单向死链，只有后半是永远读不到的记录。
+ */
+describe('ChartBuilder 地址栏即分享', () => {
+  const SHORT_ID = 'CSatF9qXyRoQXFtAA3iZS';
+
+  const sharedDocument = {
+    version: 2,
+    chartType: 'bar',
+    title: '分享来的图表',
+    query: {
+      dimensionGroups: [
+        { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+      ],
+      metricGroups: [
+        { id: 'metric-group-main', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+      ],
+      filters: [],
+      limit: 1000,
+    },
+    fieldMeta: {},
+  };
+
+  // spec 走宽入参：既要造合法信封，也要造 v:99 这种服务端脏数据（类型上不合法，
+  // 但线上确实可能出现，还原路径必须扛得住）——故在此收一次断言。
+  const queryRecord = (
+    overrides: Partial<Omit<QueryRecord, 'spec'>> & { spec?: unknown } = {}
+  ): QueryRecord => {
+    const base: QueryRecord = {
+      query_id: SHORT_ID,
+      spec: { v: 1, document: sharedDocument },
+      dataset_id: 1,
+      chart_id: null,
+      created_at: '2026-09-19T12:00:00Z',
+      expires_at: null,
+      expired: false,
+      hit_count: 1,
+    };
+    return { ...base, ...overrides } as QueryRecord;
+  };
+
+  const resolveQueryRecord = (overrides: Parameters<typeof queryRecord>[0] = {}) => {
+    mockGetQueryRecord.mockResolvedValue(
+      mockAxiosResponse<QueryRecord>({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: queryRecord(overrides),
+      })
+    );
+  };
+
+  /** 把游离的异步收尾跑完再断言，避免 rejected promise 落到下一个用例里。 */
+  const settleAsync = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  };
+
+  it('查询成功后把地址栏换成 ?q=短码，并带上这次查询的度量', async () => {
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search').textContent).toBe(`?q=${SHORT_ID}`);
+    });
+
+    expect(mockSaveQueryRecord).toHaveBeenCalled();
+    const payload = mockSaveQueryRecord.mock.calls[0][0];
+    expect(payload.dataset_id).toBe(1);
+    expect(payload.source_type).toBe('build');
+    expect(payload.spec.v).toBe(1);
+    expect(payload.spec.document).toMatchObject({ version: 2, chartType: 'table' });
+    // 行数取自本次查询响应（桩数据 1 行），不是前端硬编码
+    expect(payload.row_count).toBe(1);
+    expect(typeof payload.duration_ms).toBe('number');
+
+    // 自签发的短码绝不能回头触发还原：否则「还原→查询→落库→还原」死死循环
+    await settleAsync();
+    expect(mockGetQueryRecord).not.toHaveBeenCalled();
+  });
+
+  it('同一份 spec 只落库一次（并发自动查询不重复 POST）', async () => {
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search').textContent).toBe(`?q=${SHORT_ID}`);
+    });
+    await settleAsync();
+
+    expect(mockSaveQueryRecord).toHaveBeenCalledTimes(1);
+  });
+
+  it('查询失败不落库，地址栏保持原样', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // 只让首次查询失败：mockRejectedValue 会让整个用例的查询全挂，
+    // 残留的 rejected promise 还会在下一个用例里冒出来刷 console。
+    mockExecuteChartQuery.mockRejectedValueOnce(new Error('boom'));
+
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalled();
+    });
+    await settleAsync();
+
+    expect(mockSaveQueryRecord).not.toHaveBeenCalled();
+    expect(screen.getByTestId('location-search').textContent).toBe('?edit=1&datasetId=1');
+    errorSpy.mockRestore();
+  });
+
+  it('?q= 直链还原图表配置，并按还原后的配置发起查询', async () => {
+    resolveQueryRecord();
+    renderQueryRecordBuilder(SHORT_ID);
+
+    expect(mockGetQueryRecord).toHaveBeenCalledWith(SHORT_ID);
+
+    await waitFor(() => {
+      expect(useStore.getState().chartBuilderConfig.chartType).toBe('bar');
+    });
+    expect(useStore.getState().chartBuilderConfig.title).toBe('分享来的图表');
+    // 记录里存的维度必须真的回到槽位（而不是只还原了图型外壳）
+    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings[0].field).toBe('region');
+
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.chart_type).toBe('bar');
+      expect(lastRequest?.dims).toEqual(['region']);
+    });
+  });
+
+  it('?q= 优先于 edit / datasetId，不去请求图表详情', async () => {
+    resolveQueryRecord();
+    renderQueryRecordBuilder(SHORT_ID, '&edit=9&datasetId=7');
+
+    await waitFor(() => {
+      expect(useStore.getState().chartBuilderConfig.chartType).toBe('bar');
+    });
+    expect(mockGetChartById).not.toHaveBeenCalled();
+    // 数据集以记录为准，地址栏里的 datasetId=7 必须被忽略
+    expect(useStore.getState().queryConfig.limit).toBe(1000);
+  });
+
+  it('已过期的记录照常完整还原，只多一条提示', async () => {
+    resolveQueryRecord({ expired: true, expires_at: '2026-09-01T00:00:00Z' });
+    renderQueryRecordBuilder(SHORT_ID);
+
+    await waitFor(() => {
+      expect(screen.getByText('此查询已过期，条件可能已不适用')).toBeInTheDocument();
+    });
+    // 过期只影响提示，不影响可用性（R-42 / U-10）
+    expect(useStore.getState().chartBuilderConfig.chartType).toBe('bar');
+  });
+
+  it('记录版本无法识别时回退为空白查询并提示', async () => {
+    resolveQueryRecord({ spec: { v: 99, document: sharedDocument } });
+    renderQueryRecordBuilder(SHORT_ID);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('这条查询记录的配置版本无法识别，已回退为空白查询')
+      ).toBeInTheDocument();
+    });
+    expect(useStore.getState().chartBuilderConfig.chartType).toBe('table');
+  });
+
+  it('短码解析失败时提示分享链接无效', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockGetQueryRecord.mockRejectedValue(new Error('分享链接无效或已失效'));
+
+    renderQueryRecordBuilder(SHORT_ID);
+
+    await waitFor(() => {
+      expect(screen.getByText('分享链接无效或已失效')).toBeInTheDocument();
+    });
+    errorSpy.mockRestore();
+  });
+
+  /**
+   * 回归：dev 下 `main.tsx` 用 StrictMode 包裹，effect 会 mount → cleanup → 再 mount。
+   * 早期实现把「已认领短码」的记账放在请求**之前**，于是第二次挂载直接早退、第一次的
+   * 响应又被 cleanup 的 cancelled 丢弃 —— 后果是后端真的收到了 GET（hit_count 上涨），
+   * 但界面一行都没还原。这正是分享链接「打开没反应」的原因。
+   */
+  it('StrictMode 双挂载下直链还原依然生效，且只请求一次', async () => {
+    resolveQueryRecord();
+    renderQueryRecordBuilder(SHORT_ID, '', true);
+
+    await waitFor(() => {
+      expect(useStore.getState().chartBuilderConfig.chartType).toBe('bar');
+    });
+    expect(useStore.getState().chartBuilderConfig.title).toBe('分享来的图表');
+    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings[0].field).toBe('region');
+    // 还原只是中间态，用户要的是「图出来」：槽位就位后必须按还原后的配置真发一次查询
+    await waitFor(() => {
+      const lastRequest =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(lastRequest?.chart_type).toBe('bar');
+      expect(lastRequest?.dims).toEqual(['region']);
+    });
+    // 重复请求会污染 hit_count 这个真实指标，双挂载不该让它翻倍
+    expect(mockGetQueryRecord).toHaveBeenCalledTimes(1);
   });
 });

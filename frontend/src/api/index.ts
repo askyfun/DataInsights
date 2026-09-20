@@ -130,6 +130,7 @@ export interface ChartQueryFilter {
     | 'lte'
     | 'like'
     | 'in'
+    | 'notIn'
     | 'between'
     | 'isNull'
     | 'isNotNull';
@@ -227,6 +228,28 @@ export function isPivotV2Payload(x: unknown): x is PivotResponseV2 {
 export type ChartQueryResponse = Omit<G['ChartDataResult'], 'data'> & {
   data: ChartDataResponse;
 };
+
+// 查询记录（地址栏即分享）。spec 的信封类型来自生成 schema，但 document 字段要
+// 手工放宽为 unknown：后端只做信封校验与透传（见 openapi 描述），生成的
+// additionalProperties 索引签名会把具名 interface（ChartConfigDocument）挡在门外。
+// 内层图表文档的类型归 lib/querySpec.ts 的 parseQuerySpecDocument 管。
+export type QueryRecordSpec = Omit<G['QueryRecordSpec'], 'document'> & {
+  document: unknown;
+};
+export type QueryRecordSaved = G['QueryRecordSaved'];
+export type QueryRecord = G['QueryRecord'];
+
+export interface QueryRecordSaveRequest {
+  dataset_id: number;
+  /** 0 / 缺省表示草稿查询（落库为 NULL）。 */
+  chart_id?: number;
+  spec: QueryRecordSpec;
+  /** build / share_url；缺省由后端落成 build。 */
+  source_type?: string;
+  /** 缺省 = 未上报：去重命中时后端保留存量值而不是清零。 */
+  row_count?: number;
+  duration_ms?: number;
+}
 
 // Datasources API
 export const datasourcesApi = {
@@ -387,6 +410,17 @@ export const datasetsApi = {
   getPreview: (id: number): Promise<AxiosResponse<ApiResponse<DatasetPreview>>> => {
     return apiClient.get<ApiResponse<DatasetPreview>>(`/api/datasets/${id}/preview`);
   },
+
+  // 取一列的去重候选值（过滤弹窗枚举模式用）：单维度组 + limit 实查，客户端去重。
+  queryDistinct: (
+    id: number,
+    column: string
+  ): Promise<AxiosResponse<ApiResponse<Record<string, unknown>[]>>> => {
+    return apiClient.post<ApiResponse<Record<string, unknown>[]>>(`/api/datasets/${id}/query`, {
+      dimension_groups: [{ id: 'enum-candidates', fields: [column] }],
+      limit: 1000,
+    });
+  },
 };
 
 // Charts API
@@ -455,6 +489,20 @@ export const sharesApi = {
   // Verify share password
   verifyPassword: (token: string, password: string): Promise<AxiosResponse<ApiResponse<Share>>> => {
     return apiClient.post<ApiResponse<Share>>(`/api/shares/${token}/verify`, { password });
+  },
+};
+
+// Query records API（地址栏即分享）
+export const queriesApi = {
+  // Persist one query configuration; the response carries the address-bar short
+  // id. Same spec re-submitted returns the ORIGINAL id (spec_hash dedupe).
+  save: (data: QueryRecordSaveRequest): Promise<AxiosResponse<ApiResponse<QueryRecordSaved>>> => {
+    return apiClient.post<ApiResponse<QueryRecordSaved>>('/api/queries', data);
+  },
+
+  // Resolve an address-bar short id back to its full record.
+  getByShortId: (shortId: string): Promise<AxiosResponse<ApiResponse<QueryRecord>>> => {
+    return apiClient.get<ApiResponse<QueryRecord>>(`/api/queries/${shortId}`);
   },
 };
 

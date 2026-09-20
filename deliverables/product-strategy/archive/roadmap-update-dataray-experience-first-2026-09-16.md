@@ -1,16 +1,16 @@
 > ⚠️ **已归档（superseded）——本文件不再指导实现，仅作决策轨迹留档。**
-> 现行文档：`../README.md`（索引）· `../prd-chart-query-share-2026-09-16.md`（产品规格）· `../roadmap-dataray-2026-09-16.md`（路线图）· `../decision-log-dataray-2026-09-16.md`（决策台账）
+> 现行文档：`../README.md`（索引）· `../prd-chart-query-share-2026-09-16.md`（产品规格）· `../roadmap-data-insights-2026-09-16.md`（路线图）· `../decision-log-data-insights-2026-09-16.md`（决策台账）
 > 被取代原因：排期口径已过三轮修订（91–131 → 98–146 → 101–152）；且其「四域验收」「R-04 看板 / R-05 联动在当期」「R-25 独立交付」等结论均已变更。
 
 ---
 
-# DataRay 改造优先级重排（体验优先版）与路线图 v2
+# Data Insights 改造优先级重排（体验优先版）与路线图 v2
 
 **日期**：2026-09-16
 **类型**：路线图更新（含需求池优先级重排 + 能力现状纠偏）
 **参与成员**：竞析（竞品分析师）／瑞思（用户研究员）／数析（数据分析师）／析客（需求分析师）／路径（路线图规划师）
 **主理人**：方向明（产品舵手）
-**上游报告**：`competitive-analysis-dataray-vs-superset-metabase-2026-09-16.md`（第一轮：全量能力差距与五阶段路线图）
+**上游报告**：`competitive-analysis-data-insights-vs-superset-metabase-2026-09-16.md`（第一轮：全量能力差距与五阶段路线图）
 
 ---
 
@@ -67,7 +67,7 @@
 
 **"语义层＝我的复合指标"**——只成立**行级**那一半：
 
-| 表达 | DataRay 现状 | 原因 |
+| 表达 | Data Insights 现状 | 原因 |
 |---|---|---|
 | `amount * 0.3`（行级复合，再被 `sum()` 包住） | ✅ 可以 | 写进虚拟字段 `expr` 即可 |
 | `sum(a) / sum(b)`（比率指标） | ❌ 不行 | 指标结构是 `MetricField{Field, Agg, Alias, Unit, Format}`，**单字段 + 单聚合**，无表达式位 |
@@ -103,7 +103,7 @@
 
 ### 3.1 拖拽建图交互对照
 
-| 交互项 | Superset | Metabase | DataRay 现状 | table-stakes |
+| 交互项 | Superset | Metabase | Data Insights 现状 | table-stakes |
 |---|---|---|---|---|
 | 字段列表组织 | Explore 左侧分 Columns/Metrics 两区，可搜索、"显示全部"、语义类型图标、指标可 certified | 列预览 + Summarize/Group by 分槽 + 类型图标 | 有维度组/指标组 ✅；**无搜索** ❌ | 是 |
 | 拖拽入槽 | **SIP-62 范式**：drag handle、ghost、合法 drop 区蓝/非法红、可重排、drop 后即时反馈（等 Done 才报错） | 主为 notebook 点击式；pivot 结果支持列拖拽重排 | 有弹窗，拖拽细节待核 ⚠️ | 是 |
@@ -116,7 +116,7 @@
 
 ### 3.2 自定义表达式能力对照（本轮重点）
 
-| 表达 | Metabase | Superset | Looker | Lightdash | Grafana | **DataRay** |
+| 表达 | Metabase | Superset | Looker | Lightdash | Grafana | **Data Insights** |
 |---|---|---|---|---|---|---|
 | 复合指标 `sum(a)/sum(b)` | ✅ summary/metric 表达式 | ✅ virtual metric | ✅ `type:number` | ✅ `type:number` | ✅ 计算字段 | ⚠️ 仅列级，聚合间运算 ❌ |
 | 比率指标 | ✅ 同上 | ✅ 同上 | ✅ 同上 | ✅ 同上 | ✅ | ❌ |
@@ -132,11 +132,11 @@
 ### 3.3 筛选 / 分组交互对照
 
 - **字段级筛选**：Metabase 操作符按类型（number/date/text/category/ID，含 between/relative dates）；Superset 五类控件（filter_select / filter_range / filter_time / filter_time_column / filter_time_grain）。
-- **看板级筛选**：Metabase = 控件 → 卡片列映射 + **自动连接含同字段的其它卡片（含跨 tab）** + 默认值；Superset = native filter 的 scope + DataMask + debounce。**竞析建议 DataRay 照 Metabase 模型**（更易实现）。
-- **级联/联动**：Metabase Linked filters（父子，**只认表元数据 FK、不认 model 的 join**，custom column/summary 不能做 linked filter）——DataRay 应**放宽为认 dataset 字段**（含虚拟字段），避开这个坑；Superset cross-filter（v5 默认开，需该图有维度）。
+- **看板级筛选**：Metabase = 控件 → 卡片列映射 + **自动连接含同字段的其它卡片（含跨 tab）** + 默认值；Superset = native filter 的 scope + DataMask + debounce。**竞析建议 Data Insights 照 Metabase 模型**（更易实现）。
+- **级联/联动**：Metabase Linked filters（父子，**只认表元数据 FK、不认 model 的 join**，custom column/summary 不能做 linked filter）——Data Insights 应**放宽为认 dataset 字段**（含虚拟字段），避开这个坑；Superset cross-filter（v5 默认开，需该图有维度）。
 - **分组/汇总**：Superset **Pivot Table v2** 有 rows/cols/metrics、series-limit/cell-limit、**rows total/subtotal、columns total/subtotal、transpose、combine metrics**；Metabase pivot 支持交换行列 + subtotal。Top N+"其他"：Metabase row chart 末位"未进前 N"、pie 的 "Minimum slice percentage"。排序会**影响 cumulative/offset 的计算顺序**。
 
-### 3.4 17 条体验层 table-stakes 与 DataRay 现状
+### 3.4 17 条体验层 table-stakes 与 Data Insights 现状
 
 | # | 能力 | 现状 | # | 能力 | 现状 |
 |---|---|---|---|---|---|

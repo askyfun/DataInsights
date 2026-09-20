@@ -12,13 +12,17 @@ describe('API Client', () => {
 });
 
 describe('resolveApiBaseURL', () => {
-  it('显式配置时直接采用（含空串 = 同源，生产走 nginx 反代的 /api）', () => {
+  it('配置了非空绝对地址时直接采用（前后端分开部署）', () => {
     expect(resolveApiBaseURL('https://api.example.com')).toBe('https://api.example.com');
-    expect(resolveApiBaseURL('')).toBe('');
   });
 
-  it('未配置时回退到当前访问主机名的 23352 开发默认', () => {
-    expect(resolveApiBaseURL(undefined)).toBe(
+  it('生产构建未配置时走同源（baseURL 空串，请求路径自带 /api）', () => {
+    expect(resolveApiBaseURL(undefined, true)).toBe('');
+    expect(resolveApiBaseURL('', true)).toBe('');
+  });
+
+  it('开发未配置时回退到当前访问主机名的 23352', () => {
+    expect(resolveApiBaseURL(undefined, false)).toBe(
       `http://${window.location.hostname || 'localhost'}:23352`
     );
   });

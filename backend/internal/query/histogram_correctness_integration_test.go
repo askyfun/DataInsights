@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/model"
+	"data-insights/internal/model"
 )
 
 // 本文件用真实 PostgreSQL 端到端验证直方图两阶段分箱查询的正确性（R-57，

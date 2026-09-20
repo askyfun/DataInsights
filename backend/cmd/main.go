@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
-	"dataray/internal/config"
-	"dataray/internal/database"
-	"dataray/internal/response"
+	"data-insights/internal/config"
+	"data-insights/internal/database"
+	"data-insights/internal/response"
+	"data-insights/internal/webui"
 
 	"github.com/getsentry/sentry-go"
 	sentrygin "github.com/getsentry/sentry-go/gin"
@@ -23,13 +25,40 @@ import (
 )
 
 func main() {
-	var configFile string
-	flag.StringVar(&configFile, "f", "etc/config.toml", "the config file")
+	var envFile string
+	flag.StringVar(&envFile, "env", "", "the .env file (default: probe ./.env then ../.env)")
 	flag.Parse()
 
+	// .env 必须在 Load 之前加载：它把值写进进程环境变量，再由 Load 统一读取。
+	// 默认探测两个位置，覆盖两种启动方式：从仓库根启动（.env）、从 backend/ 启动（../.env）。
+	envCandidates := []string{".env", filepath.Join("..", ".env")}
+	if envFile != "" {
+		envCandidates = []string{envFile}
+	}
+	loadedEnv, err := config.LoadDotEnv(envCandidates...)
+	if err != nil {
+		slog.Error("Failed to load env file", "error", err)
+		os.Exit(1)
+	}
+	if envFile != "" && loadedEnv == "" {
+		slog.Error("Env file not found", "path", envFile)
+		os.Exit(1)
+	}
+	if loadedEnv != "" {
+		slog.Info("Loaded env file", "path", loadedEnv)
+	}
+
 	c := &config.Config{}
-	if err := c.LoadConfig(configFile); err != nil {
+	if err := c.Load(); err != nil {
 		slog.Error("Failed to load config", "error", err)
+		os.Exit(1)
+	}
+
+	// 配置没有文件形式，连接串只能来自环境变量，所以这里必须显式兜住空值，
+	// 否则会退化成一个来自驱动层的、看不懂的连接失败。
+	if c.Database.Url == "" {
+		slog.Error("Database URL is not configured",
+			"hint", "set DATABASE_URL (or put it in a .env file)")
 		os.Exit(1)
 	}
 
@@ -79,7 +108,24 @@ func main() {
 	registerHealthRoute(r)
 
 	// Setup routes
-	SetupRoutes(r, db, securityKey)
+	SetupRoutes(r, db, securityKey, c.StaticDir != "")
+
+	// 前端静态产物与 API 同进程同端口。配了目录就托管页面，没配就是纯 API 服务
+	// （本地开发页面由 Vite dev server 提供，后端无须重复托管一份构建产物）。
+	// 两者共用 404 兜底：已注册路由不受影响，其余路径命中文件就返回、
+	// 未命中则回落 index.html，/api 等保留前缀回 JSON 404。
+	if c.StaticDir != "" {
+		ui, err := webui.New(c.StaticDir)
+		if err != nil {
+			slog.Error("Failed to serve the web UI", "dir", c.StaticDir, "error", err)
+			os.Exit(1)
+		}
+		ui.Mount(r)
+		slog.Info("Serving web UI", "dir", c.StaticDir)
+	} else {
+		slog.Warn("No static UI configured, serving API only",
+			"hint", "set STATIC_DIR to the frontend build directory")
+	}
 
 	addr := fmt.Sprintf("%s:%d", c.Host, c.Port)
 	slog.Info("Server starting", "addr", addr)
@@ -138,14 +184,12 @@ func requestIDMiddleware() gin.HandlerFunc {
 	}
 }
 
-// corsMiddleware returns a middleware that echoes Access-Control-Allow-Origin only
-// for origins in the configured allowlist. An empty allowlist defaults to the local
-// frontend origin (http://localhost:23351). Origins not in the allowlist receive no
-// CORS headers.
+// corsMiddleware handles cross-origin requests. An empty allowlist allows every
+// origin: the platform API has no cookie/session auth, so CORS is not a security
+// boundary here, and same-origin single-image deployments never need one. A
+// non-empty allowlist echoes only the configured origins.
 func corsMiddleware(origins []string) gin.HandlerFunc {
-	if len(origins) == 0 {
-		origins = []string{"http://localhost:23351"}
-	}
+	allowAll := len(origins) == 0
 	allowed := make(map[string]struct{}, len(origins))
 	for _, o := range origins {
 		allowed[o] = struct{}{}
@@ -153,11 +197,18 @@ func corsMiddleware(origins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		if origin != "" {
-			// Vary on every response carrying an Origin (hit or miss) so shared
-			// caches never serve one origin's CORS verdict to another origin.
-			c.Writer.Header().Add("Vary", "Origin")
-			if _, ok := allowed[origin]; ok {
-				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			_, inList := allowed[origin]
+			if !allowAll {
+				// Vary on every response carrying an Origin (hit or miss) so shared
+				// caches never serve one origin's CORS verdict to another origin.
+				c.Writer.Header().Add("Vary", "Origin")
+			}
+			if allowAll || inList {
+				if allowAll {
+					c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+				} else {
+					c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				}
 				c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD")
 				c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
 				c.Writer.Header().Set("Access-Control-Expose-Headers", "*")

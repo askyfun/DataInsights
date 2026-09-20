@@ -3,7 +3,7 @@
 > **状态**：技术方案，待实施  
 > **日期**：2026-09-17  
 > **范围**：R-21 多维度分组引擎 · R-48 count distinct · R-50 按值排序 · R-51 KPI 卡 · R-52 环形图 · R-53 透视表小计/合计 · R-54 中位数/百分位 · R-57 直方图 · R-58 双轴组合 · R-59 漏斗图 · R-62 雷达图 · 横条图（待编号）  
-> **依据**：`deliverables/product-strategy/chart-coverage-gap-dataray-2026-09-16.md`
+> **依据**：`deliverables/product-strategy/chart-coverage-gap-data-insights-2026-09-16.md`
 
 ---
 
@@ -513,7 +513,7 @@ type KpiResponse struct {
 // postgresql.go
 func (c *PostgreSQLConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
     return &DialectCapabilities{
-        SupportsGroupingSets:   true,   // PG 9.5+，DataRay 最低支持 PG 12
+        SupportsGroupingSets:   true,   // PG 9.5+，Data Insights 最低支持 PG 12
         SupportsPercentileCont: true,
         SupportsWindowFunctions: true,
         PercentileStrategy:     "percentile_cont",

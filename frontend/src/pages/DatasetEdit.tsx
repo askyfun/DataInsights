@@ -24,6 +24,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DatasetColumn, DatasetFormData, datasetsApi, datasourcesApi, TableInfo } from '../api';
+import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 
 const { Title, Text } = Typography;
@@ -398,7 +399,7 @@ const DatasetEditPage: React.FC = () => {
           )}
 
           <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <ModalFooter>
               <Button onClick={handleCancel}>{intl.formatMessage({ id: 'common.cancel' })}</Button>
               <Button
                 type="primary"
@@ -409,7 +410,7 @@ const DatasetEditPage: React.FC = () => {
               >
                 {intl.formatMessage({ id: 'common.save' })}
               </Button>
-            </Space>
+            </ModalFooter>
           </Form.Item>
         </Form>
 

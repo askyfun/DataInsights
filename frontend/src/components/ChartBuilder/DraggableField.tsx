@@ -1,3 +1,4 @@
+import { CalendarOutlined, FontSizeOutlined, NumberOutlined } from '@ant-design/icons';
 import { useDraggable } from '@dnd-kit/core';
 import { Tag, Tooltip } from 'antd';
 import React from 'react';
@@ -41,6 +42,25 @@ const FIELD_ACCENT: Record<'blue' | 'purple' | 'green', string> = {
 };
 
 /**
+ * 按字段数据类型返回侧边栏字段行的类型图标。
+ * 调用场景：字段行左侧替换原 5px 圆点，让圆点"只好看不传信息"的位置承载类型语义。
+ * 主要逻辑：复用 FilterConfigModal 的 classifyFieldKind 三分类——日期/时间类出时钟、
+ * 数值类出 # 号、其余（字符串）出文本图标；未知类型回落为字符串图标。
+ */
+const DATA_TYPE_ICONS = {
+  date: CalendarOutlined,
+  number: NumberOutlined,
+  string: FontSizeOutlined,
+} as const;
+
+const fieldDataTypeIcon = (field: ChartField) => {
+  const t = (field.dataType ?? '').toLowerCase();
+  if (/date|timestamp|\btime\b/.test(t)) return DATA_TYPE_ICONS.date;
+  if (/int|float|double|decimal|numeric|real|number/.test(t)) return DATA_TYPE_ICONS.number;
+  return DATA_TYPE_ICONS.string;
+};
+
+/**
  * 渲染拖拽中的标签预览（侧边栏字段与配置区字段标签共用）。
  * 调用场景：ChartBuilder 的 DragOverlay 需要一个跟随鼠标移动的轻量视觉副本。
  * 主要逻辑：按下发的颜色渲染标签，并关闭指针事件以免遮挡 drop zone 命中。
@@ -67,9 +87,9 @@ export const FieldDragPreview: React.FC<FieldDragPreviewProps> = ({ label, color
 /**
  * 渲染侧边栏可拖拽字段行。
  * 调用场景：图表查询界面的字段列表。
- * 主要逻辑：通过 dnd-kit 注册 draggable 节点；每行左侧为字段类型圆点、中间为字段名，
+ * 主要逻辑：通过 dnd-kit 注册 draggable 节点；每行左侧为字段数据类型图标、中间为字段名，
  * 整行作为 Tooltip 触发区，悬停时展示字段注释（无注释则不弹出）；拖拽时降低整行透明度。
- * 视觉约定：圆点色 = 字段类型语义色（维度蓝 / 日期紫 / 指标绿），与字段标签同源；
+ * 视觉约定：图标形状 = 数据类型（日期时钟 / 数值井号 / 字符串文本），图标色 = 字段角色语义色
  * 悬停用品牌蓝浅底而非黑色蒙层——黑色蒙层在灰画布上会发浑，也读不出"可拖"。
  */
 const DraggableField: React.FC<DraggableFieldProps> = ({ field }) => {
@@ -106,16 +126,14 @@ const DraggableField: React.FC<DraggableFieldProps> = ({ field }) => {
         {...listeners}
         {...attributes}
       >
-        <span
-          aria-hidden
-          style={{
-            width: 5,
-            height: 5,
-            borderRadius: '50%',
+        {React.createElement(fieldDataTypeIcon(field), {
+          'aria-hidden': true,
+          style: {
+            fontSize: 12,
             flexShrink: 0,
-            backgroundColor: FIELD_ACCENT[fieldTagColor(field)],
-          }}
-        />
+            color: FIELD_ACCENT[fieldTagColor(field)],
+          },
+        })}
         <span
           style={{
             flex: 1,

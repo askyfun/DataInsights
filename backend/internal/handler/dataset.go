@@ -3,10 +3,10 @@ package handler
 import (
 	"strconv"
 
-	"dataray/internal/domain/entity"
-	"dataray/internal/response"
-	"dataray/internal/router"
-	"dataray/internal/service/dataset"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/response"
+	"data-insights/internal/router"
+	"data-insights/internal/service/dataset"
 )
 
 // DatasetHandler handles dataset HTTP requests

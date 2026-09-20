@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"dataray/migrations"
+	"data-insights/migrations"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 

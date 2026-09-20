@@ -14,6 +14,7 @@ import { chartDefinitions } from '../components/ChartBuilder/chartDefinitions';
 import KpiCard from '../components/ChartBuilder/KpiCard';
 import PivotTable from '../components/ChartBuilder/PivotTable';
 import TableChart from '../components/ChartBuilder/TableChart';
+import LoadingPlaceholder from '../components/LoadingPlaceholder';
 import PageHeader from '../components/PageHeader';
 import { type ChartType, migrateChartConfig } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../lib/chartOptions';
@@ -300,12 +301,7 @@ const ShareView: React.FC = () => {
       <Card>
         {/* Chart */}
         {chartDataLoading ? (
-          <div style={{ textAlign: 'center', padding: '100px 0' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 16 }}>
-              <Text type="secondary">Loading chart data...</Text>
-            </div>
-          </div>
+          <LoadingPlaceholder text="Loading chart data..." />
         ) : isKpi ? (
           <KpiCard
             value={kpiPayload?.value ?? 0}

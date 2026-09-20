@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"dataray/internal/database"
-	"dataray/internal/datasource"
-	"dataray/internal/domain/entity"
-	"dataray/internal/model"
-	"dataray/internal/query"
-	"dataray/internal/response"
-	"dataray/internal/router"
-	dsservice "dataray/internal/service/datasource"
+	"data-insights/internal/database"
+	"data-insights/internal/datasource"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/model"
+	"data-insights/internal/query"
+	"data-insights/internal/response"
+	"data-insights/internal/router"
+	dsservice "data-insights/internal/service/datasource"
 
 	"github.com/uptrace/bun"
 )

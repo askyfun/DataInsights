@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/datasource"
-	"dataray/internal/model"
+	"data-insights/internal/datasource"
+	"data-insights/internal/model"
 )
 
 // boxplotMockConnection 按调用次序应答多组行，并回显每次调用的 SQL/args。

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"dataray/internal/datasource"
+	"data-insights/internal/datasource"
 )
 
 // WrapPreviewSQL wraps a user source (table or subquery) for preview.

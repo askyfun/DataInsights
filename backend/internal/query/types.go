@@ -53,6 +53,7 @@ const (
 	FilterLte       FilterOperator = "lte"
 	FilterLike      FilterOperator = "like"
 	FilterIn        FilterOperator = "in"
+	FilterNotIn     FilterOperator = "notIn"
 	FilterBetween   FilterOperator = "between"
 	FilterIsNull    FilterOperator = "isNull"
 	FilterIsNotNull FilterOperator = "isNotNull"
@@ -303,6 +304,8 @@ func (op FilterOperator) ToString() string {
 		return "LIKE"
 	case FilterIn:
 		return "IN"
+	case FilterNotIn:
+		return "NOT IN"
 	case FilterBetween:
 		return "BETWEEN"
 	case FilterIsNull:

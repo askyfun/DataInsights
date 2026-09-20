@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/datasource"
+	"data-insights/internal/datasource"
 )
 
 // boxplotCaps 是 boxplot stats builder 需要的能力声明（PG percentile_cont）。

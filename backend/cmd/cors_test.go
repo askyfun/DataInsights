@@ -37,11 +37,11 @@ func TestCORSAllowsConfiguredOrigin(t *testing.T) {
 func TestCORSPreflightAllowedOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(corsMiddleware([]string{"http://localhost:3000", "https://dataray.example"}))
+	r.Use(corsMiddleware([]string{"http://localhost:3000", "https://data-insights.example"}))
 	r.GET("/ping", func(c *gin.Context) { c.Status(200) })
 
 	req := httptest.NewRequest(http.MethodOptions, "/ping", nil)
-	req.Header.Set("Origin", "https://dataray.example")
+	req.Header.Set("Origin", "https://data-insights.example")
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -49,7 +49,7 @@ func TestCORSPreflightAllowedOrigin(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected preflight 204, got %d", w.Code)
 	}
-	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://dataray.example" {
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://data-insights.example" {
 		t.Fatalf("expected preflight origin echo, got %q", got)
 	}
 	if w.Header().Get("Access-Control-Allow-Methods") == "" {
@@ -74,18 +74,20 @@ func TestCORSPreflightOriginNotAllowed(t *testing.T) {
 	}
 }
 
-func TestCORSEmptyOriginsDefaultsToLocalhost(t *testing.T) {
+func TestCORSEmptyOriginsAllowsAll(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(corsMiddleware(nil))
 	r.GET("/ping", func(c *gin.Context) { c.Status(200) })
 
-	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	req.Header.Set("Origin", "http://localhost:23351")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:23351" {
-		t.Fatalf("expected default localhost origin, got %q", got)
+	for _, origin := range []string{"http://localhost:23351", "http://evil.example"} {
+		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+		req.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+			t.Fatalf("expected wildcard for %q, got %q", origin, got)
+		}
 	}
 }
 

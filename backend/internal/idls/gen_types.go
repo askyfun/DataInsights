@@ -477,7 +477,7 @@ type DatasourceCreateRequest struct {
 	Host         string `json:"host"`
 	Name         string `json:"name"`
 
-	// Password 连接密码；落库前 AES-GCM 加密（DATARAY_SECURITY_KEY）。
+	// Password 连接密码；落库前 AES-GCM 加密（SECURITY_KEY）。
 	Password *string `json:"password,omitempty"`
 	Port     int     `json:"port"`
 
@@ -703,6 +703,107 @@ type QueryConfig struct {
 	Sort            *SortConfig   `json:"sort,omitempty"`
 }
 
+// QueryRecord GET /api/queries/{q} 读数模型（entity.QueryRecord）。不含 ip / spec_hash / owner_id / tenant_id：前者是留痕列，后两者是账号体系的预留列（本期无值）， 都不该出现在对外的分享读出口。
+type QueryRecord struct {
+	// ChartId null 表示未关联图表（草稿查询）。
+	ChartId *int `json:"chart_id"`
+
+	// CreatedAt RFC3339。
+	CreatedAt string `json:"created_at"`
+	DatasetId int    `json:"dataset_id"`
+
+	// Expired 服务端按 expires_at 单字段派生的判定结果（null 视为未过期），客户端不重复实现。
+	Expired bool `json:"expired"`
+
+	// ExpiresAt RFC3339；null 表示永久。
+	ExpiresAt *string `json:"expires_at"`
+
+	// HitCount 本次读取**之后**的累计命中次数（含本次 +1）。
+	HitCount int `json:"hit_count"`
+
+	// QueryId 地址栏短码，与请求路径中的 {q} 一致。
+	QueryId string `json:"query_id"`
+
+	// Spec bi_query.spec_json 的顶层信封（entity.QuerySpecEnvelope）。外层 v 管记录级 schema 演进，内层 document 是前端的 ChartConfigDocument（自带 version:2 与 迁移函数 migrateChartConfig）；后端只做信封校验与透传，不复制一份会漂移的 类型定义。
+	Spec QueryRecordSpec `json:"spec"`
+}
+
+// QueryRecordResponse GET /api/queries/{q} 响应：Envelope 特化 data 为 QueryRecord。
+type QueryRecordResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data GET /api/queries/{q} 读数模型（entity.QueryRecord）。不含 ip / spec_hash / owner_id / tenant_id：前者是留痕列，后两者是账号体系的预留列（本期无值）， 都不该出现在对外的分享读出口。
+	Data QueryRecord `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// QueryRecordSaveRequest POST /api/queries 请求体（entity.QueryRecordSaveRequest）。
+type QueryRecordSaveRequest struct {
+	// ChartId 关联图表 ID；0/缺省表示草稿查询（落库为 NULL）。
+	ChartId *int `json:"chart_id,omitempty"`
+
+	// DatasetId 查询所属数据集；<=0 返回 20100。参与 spec_hash（同一份文档挂不同数据集不算同一条记录）。
+	DatasetId int `json:"dataset_id"`
+
+	// DurationMs 查询耗时（毫秒）；缺省表示未上报，去重命中时保留存量值。
+	DurationMs *int `json:"duration_ms,omitempty"`
+
+	// RowCount 结果行数；缺省表示未上报，去重命中时保留存量值而不是清零。
+	RowCount *int `json:"row_count,omitempty"`
+
+	// SourceType 留痕来源，约定 build / share_url；空值默认 build，超 50 字符返回 20100。
+	SourceType *string `json:"source_type,omitempty"`
+
+	// Spec bi_query.spec_json 的顶层信封（entity.QuerySpecEnvelope）。外层 v 管记录级 schema 演进，内层 document 是前端的 ChartConfigDocument（自带 version:2 与 迁移函数 migrateChartConfig）；后端只做信封校验与透传，不复制一份会漂移的 类型定义。
+	Spec QueryRecordSpec `json:"spec"`
+}
+
+// QueryRecordSaveResponse POST /api/queries 响应：Envelope 特化 data 为 QueryRecordSaved。
+type QueryRecordSaveResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data 落库回执（entity.QueryRecordSaved）：地址栏需要的最小集合。
+	Data QueryRecordSaved `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// QueryRecordSaved 落库回执（entity.QueryRecordSaved）：地址栏需要的最小集合。
+type QueryRecordSaved struct {
+	// CreatedAt RFC3339。
+	CreatedAt string `json:"created_at"`
+
+	// ExpiresAt RFC3339；null 表示永久（数据库里是 NULL）。
+	ExpiresAt *string `json:"expires_at"`
+
+	// QueryId 地址栏短码（idcodec base58 定长 21 位），不是数据库里的 uuid 原文。
+	//
+	// Example: CSatF9qXyRoQXFtAA3iZS
+	QueryId string `json:"query_id"`
+}
+
+// QueryRecordSpec bi_query.spec_json 的顶层信封（entity.QuerySpecEnvelope）。外层 v 管记录级 schema 演进，内层 document 是前端的 ChartConfigDocument（自带 version:2 与 迁移函数 migrateChartConfig）；后端只做信封校验与透传，不复制一份会漂移的 类型定义。
+type QueryRecordSpec struct {
+	// Document 图表配置文档（ChartConfigDocument v2）；后端不解释其内容。
+	Document map[string]interface{} `json:"document"`
+
+	// V 记录级 spec 版本；当前仅接受 1，其他值落库时返回 20100。
+	//
+	// Example: 1
+	V int `json:"v"`
+}
+
 // ResponseCode 业务状态码，与 backend/internal/response/response.go 常量一一对应。
 type ResponseCode int
 
@@ -837,6 +938,9 @@ type DatasetId = int
 // DatasourceId defines model for DatasourceId.
 type DatasourceId = int
 
+// QueryShortId defines model for QueryShortId.
+type QueryShortId = string
+
 // ShareToken defines model for ShareToken.
 type ShareToken = string
 
@@ -924,6 +1028,9 @@ type GetDatasourceFieldDistributionJSONRequestBody = FieldDistributionRequest
 
 // PreviewDatasourceJSONRequestBody defines body for PreviewDatasource for application/json ContentType.
 type PreviewDatasourceJSONRequestBody = DatasourcePreviewRequest
+
+// SaveQueryRecordJSONRequestBody defines body for SaveQueryRecord for application/json ContentType.
+type SaveQueryRecordJSONRequestBody = QueryRecordSaveRequest
 
 // CreateShareJSONRequestBody defines body for CreateShare for application/json ContentType.
 type CreateShareJSONRequestBody = ShareCreateRequest

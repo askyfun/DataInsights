@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"dataray/migrations"
+	"data-insights/migrations"
 	"github.com/pressly/goose/v3"
 )
 

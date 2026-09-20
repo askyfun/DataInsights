@@ -1,15 +1,15 @@
 > ⚠️ **已归档（superseded）——本文件不再指导实现，仅作决策轨迹留档。**
-> 现行文档：`../README.md`（索引）· `../prd-chart-query-share-2026-09-16.md`（产品规格）· `../roadmap-dataray-2026-09-16.md`（路线图）· `../decision-log-dataray-2026-09-16.md`（决策台账）
+> 现行文档：`../README.md`（索引）· `../prd-chart-query-share-2026-09-16.md`（产品规格）· `../roadmap-data-insights-2026-09-16.md`（路线图）· `../decision-log-data-insights-2026-09-16.md`（决策台账）
 > 被取代原因：其中 D3 已随看板延后而**关闭**、D10 因「不用管人力」**作废**、D5/D6 推荐值已生效；且三轮会话新增了大量决策与两项不可逆欠账，已超出本单覆盖范围。
 
 ---
 
-# DataRay 开工前决策确认单（Phase 0 / Phase 1 准入）
+# Data Insights 开工前决策确认单（Phase 0 / Phase 1 准入）
 
 **日期**：2026-09-16
 **类型**：开工前决策清单（主理人汇编）
 **参与成员**：主理人（编排汇编）· 来源为析客 / 路径 / 数析 / 瑞思 / 竞析已完成产出
-**来源**：`next-phase-scope-dataray-2026-09-16.md`（开工清单）· `roadmap-update-dataray-experience-first-2026-09-16.md`（路线图 v2）
+**来源**：`next-phase-scope-data-insights-2026-09-16.md`（开工清单）· `roadmap-update-data-insights-experience-first-2026-09-16.md`（路线图 v2）
 
 ---
 

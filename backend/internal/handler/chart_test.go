@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"testing"
 
-	"dataray/internal/domain/entity"
-	"dataray/internal/router"
-	"dataray/internal/service/chart"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/router"
+	"data-insights/internal/service/chart"
 
 	"github.com/gin-gonic/gin"
 )

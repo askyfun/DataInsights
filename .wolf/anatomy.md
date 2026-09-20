@@ -12,17 +12,17 @@
 
 - `.DS_Store` (~2183 tok)
 - `.gitignore` — Git ignore rules (~128 tok)
-- `AGENTS.md` — DataRay 开发规范 (~1344 tok)
+- `AGENTS.md` — Data Insights 开发规范 (~1344 tok)
 - `chrome_perf_trace.json` (~100498 tok)
 - `CLAUDE.md` — OpenWolf (~1400 tok)
 - `console-errors.txt` (~56 tok)
 - `docker-compose.yml` — Docker Compose services (~270 tok)
 - `LICENSE` — Project license (~9374 tok)
-- `Makefile` — DataRay Makefile (~587 tok)
+- `Makefile` — Data Insights Makefile (~587 tok)
 - `MEMORY.md` — 经验记录 (~221 tok)
 - `package-lock.json` — npm lock file (~215 tok)
 - `package.json` — Node.js package manifest (~175 tok)
-- `plan.md` — DataRay 图表查询与可视化语义演进计划 (~964 tok)
+- `plan.md` — Data Insights 图表查询与可视化语义演进计划 (~964 tok)
 - `README.md` — Project documentation (~517 tok)
 - `skills-lock.json` (~136 tok)
 
@@ -72,7 +72,7 @@
 ## .github/workflows/
 
 - `opencode-comment.yml` — CI: opencode-comment (~242 tok)
-- `opencode-cycle-hourly.yml` — CI: DataRay Hourly Development Cycle (~1782 tok)
+- `opencode-cycle-hourly.yml` — CI: Data Insights Hourly Development Cycle (~1782 tok)
 - `opencode-developer-single.yml` — CI: Developer Agent - Single Issue (~519 tok)
 - `opencode-review.yml` — CI: opencode-review (~228 tok)
 - `opencode-scheduled.yml` — CI: Scheduled OpenCode Task (~212 tok)
@@ -387,13 +387,13 @@
 ## docs/
 
 - `AGENTS.md` — Docs AGENTS.md (~188 tok)
-- `api-spec.md` — DataRay API 规范 (~1339 tok)
-- `api.md` — DataRay API 接口文档 (~4773 tok)
-- `architecture.md` — DataRay 架构文档 (~491 tok)
+- `api-spec.md` — Data Insights API 规范 (~1339 tok)
+- `api.md` — Data Insights API 接口文档 (~4773 tok)
+- `architecture.md` — Data Insights 架构文档 (~491 tok)
 - `chart-builder-plan.md` — Chart Builder 增强实现计划 (~1681 tok)
-- `coding-style.md` — DataRay 代码风格指南 (~631 tok)
-- `setup.md` — DataRay 环境搭建 (~162 tok)
-- `todo.md` — DataRay 开发计划汇总 (~2124 tok)
+- `coding-style.md` — Data Insights 代码风格指南 (~631 tok)
+- `setup.md` — Data Insights 环境搭建 (~162 tok)
+- `todo.md` — Data Insights 开发计划汇总 (~2124 tok)
 
 ## docs/DataWind/
 
@@ -403,16 +403,16 @@
 
 ## docs/plans/
 
-- `2026-02-27-frontend-code-quality.md` — DataRay 前端代码质量提升实施计划 (~3181 tok)
+- `2026-02-27-frontend-code-quality.md` — Data Insights 前端代码质量提升实施计划 (~3181 tok)
 
 ## frontend/
 
 - `.DS_Store` (~1639 tok)
 - `AGENTS.md` — Frontend AGENTS.md (~890 tok)
 - `biome.json` — Biome linter/formatter configuration (~172 tok)
-- `CLAUDE.md` — DataRay Frontend Coding Standards (~1093 tok)
+- `CLAUDE.md` — Data Insights Frontend Coding Standards (~1093 tok)
 - `Dockerfile` — Docker container definition (~40 tok)
-- `index.html` — DataRay (~96 tok)
+- `index.html` — Data Insights (~96 tok)
 - `package.json` — Node.js package manifest (~427 tok)
 - `pnpm-lock.yaml` — pnpm lock file (~126 tok)
 - `tsconfig.json` — TypeScript configuration (~180 tok)

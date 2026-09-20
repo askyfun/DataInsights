@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"dataray/internal/datasource"
+	"data-insights/internal/datasource"
 )
 
 // percentile.go — 百分位聚合的 SQL 表达式原语（R-54，plan §4.1-4.2）。

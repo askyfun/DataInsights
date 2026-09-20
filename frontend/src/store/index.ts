@@ -232,6 +232,7 @@ export type FilterOperator =
   | 'lte'
   | 'like'
   | 'in'
+  | 'notIn'
   | 'between'
   | 'isNull'
   | 'isNotNull';
@@ -408,7 +409,11 @@ export interface AppState {
   setChartStyleState: (style: ChartStyleConfig) => void;
   setChartQueryOptionsState: (options: ChartQueryOptions) => void;
   toggleAutoQuery: () => void;
-  executeChartQuery: (request: ChartQueryRequest) => Promise<void>;
+  /**
+   * 执行一次图表查询。返回本次查询是否**成功且未被更新请求取代**——调用方据此决定
+   * 要不要落库并把地址栏换成短码（失败或过期响应的配置不能变成可分享链接）。
+   */
+  executeChartQuery: (request: ChartQueryRequest) => Promise<boolean>;
   setTablePagination: (pagination: { page: number; pageSize: number; total: number }) => void;
 
   // Actions - Shares
@@ -1139,7 +1144,7 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({ autoQuery: !state.autoQuery }));
   },
 
-  executeChartQuery: async (request: ChartQueryRequest) => {
+  executeChartQuery: async (request: ChartQueryRequest): Promise<boolean> => {
     const seq = ++chartQuerySeq;
     set({ chartDataLoading: true });
     try {
@@ -1151,7 +1156,7 @@ export const useStore = create<AppState>((set) => ({
       const chartData = result?.data ?? [];
 
       // 过期响应（期间又发起了更新的查询）一律不落地，避免旧结果覆盖新结果。
-      if (seq !== chartQuerySeq) return;
+      if (seq !== chartQuerySeq) return false;
 
       if (!Array.isArray(chartData) && 'columns' in chartData) {
         const tablePatch =
@@ -1174,13 +1179,15 @@ export const useStore = create<AppState>((set) => ({
       } else {
         set({ chartData, chartQueryResponse: result, chartDataLoading: false });
       }
+      return true;
     } catch (error: any) {
-      if (seq !== chartQuerySeq) return;
+      if (seq !== chartQuerySeq) return false;
       console.error('Chart query failed:', error);
       // 查询失败必须对用户可见：后端 400（如空筛选字段）此前被静默吞掉，
       // 预览直接变空而没有任何提示。
       message.error(error.message || '图表查询失败');
       set({ chartData: [], chartQueryResponse: null, chartDataLoading: false });
+      return false;
     }
   },
 

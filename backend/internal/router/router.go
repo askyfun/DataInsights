@@ -3,7 +3,7 @@ package router
 import (
 	"net/http"
 
-	"dataray/internal/response"
+	"data-insights/internal/response"
 
 	"github.com/gin-gonic/gin"
 )

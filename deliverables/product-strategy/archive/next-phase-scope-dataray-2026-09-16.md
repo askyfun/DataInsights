@@ -1,15 +1,15 @@
 > ⚠️ **已归档（superseded）——本文件不再指导实现，仅作决策轨迹留档。**
-> 现行文档：`../README.md`（索引）· `../prd-chart-query-share-2026-09-16.md`（产品规格）· `../roadmap-dataray-2026-09-16.md`（路线图）· `../decision-log-dataray-2026-09-16.md`（决策台账）
+> 现行文档：`../README.md`（索引）· `../prd-chart-query-share-2026-09-16.md`（产品规格）· `../roadmap-data-insights-2026-09-16.md`（路线图）· `../decision-log-data-insights-2026-09-16.md`（决策台账）
 > 被取代原因：其 Phase 0 / Phase 1 清单在看板移出当期、分享机制切换为查询记录落库后已整体重排。
 
 ---
 
-# DataRay 下一阶段功能清单（Phase 0 地基 + Phase 1 体验核心）
+# Data Insights 下一阶段功能清单（Phase 0 地基 + Phase 1 体验核心）
 
 **日期**：2026-09-16
 **类型**：开工清单（自路线图 v2 收敛）
 **参与成员**：析客（需求分析师）· 路径（路线图规划师）· 数析（数据分析师）· 瑞思（用户研究员）· 竞析（竞品分析师）
-**来源**：`roadmap-update-dataray-experience-first-2026-09-16.md`（体验优先版路线图 v2）
+**来源**：`roadmap-update-data-insights-experience-first-2026-09-16.md`（体验优先版路线图 v2）
 
 ---
 
@@ -183,7 +183,7 @@ Phase 1 关键路径：  R-06 指标层 → R-04 看板 → R-05 联动级联
 - 路径（路线图规划师）：Phase 0–4 路线图 v2、关键路径与并行机会、触发式阶段专项设计、M0–M4 里程碑、工作量 224–329 人日。
 - 数析（数据分析师）：体验优先版权重与达标线（P0 四域各 ≥75%）、Gate G1–G3、体验可测量指标、验收用例集 v1.0（17/17）。
 - 瑞思（用户研究员）：取舍边界、"电脑在你自己手上"判据、不可逆项（留痕 / owner 字段）、导出与权限同批建议。
-- 竞析（竞品分析师）：17 条体验 table-stakes 与 DataRay 逐条对照、度量级表达式层判定、可复用做法建议。
+- 竞析（竞品分析师）：17 条体验 table-stakes 与 Data Insights 逐条对照、度量级表达式层判定、可复用做法建议。
 - **主理人仓库实测**：表结构（5 张表，无 owner/tenant）、`service/dataset/impl.go:206 UpdateColumns` 零校验、`query/bun_builder.go:26` 原样收 expr、前端零引用 `granularity`、`pieMergeOtherBelowRatio` 死链、`backend/internal/` 无 expr 校验包。
 
 ---

@@ -11,7 +11,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"golang.org/x/crypto/bcrypt"
 
-	"dataray/internal/model"
+	"data-insights/internal/model"
 )
 
 // captureMatcherFunc 记录实际执行的 SQL 并保留默认的 regexp 匹配语义，

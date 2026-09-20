@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/model"
+	"data-insights/internal/model"
 )
 
 // --- ParseDialect 显式映射 ---

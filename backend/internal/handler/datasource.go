@@ -1,7 +1,7 @@
-// Package handler contains the DataRay HTTP handlers.
+// Package handler contains the Data Insights HTTP handlers.
 //
 // Batch 2 migration pattern — converting a handler to the generic router
-// (dataray/internal/router). The datasource handlers in this file are the
+// (data-insights/internal/router). The datasource handlers in this file are the
 // project-wide reference; copy this pattern for the dataset/chart/share
 // domains. Hard rule: zero observable behavior change. The exact response
 // bodies are pinned byte-for-byte by datasource_test.go (envelope
@@ -83,10 +83,10 @@ package handler
 import (
 	"strconv"
 
-	"dataray/internal/domain/entity"
-	"dataray/internal/response"
-	"dataray/internal/router"
-	"dataray/internal/service/datasource"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/response"
+	"data-insights/internal/router"
+	"data-insights/internal/service/datasource"
 )
 
 // DatasourceHandler handles datasource HTTP requests

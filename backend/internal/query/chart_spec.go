@@ -1,6 +1,6 @@
 package query
 
-import "dataray/internal/domain/entity"
+import "data-insights/internal/domain/entity"
 
 // ChartSpec 图表语义规格，表达一个图表实例绑定了什么字段和配置。
 // 属于 Chart 语义层，不直接生成 SQL。

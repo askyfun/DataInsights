@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"dataray/internal/crypto"
-	"dataray/internal/datasource"
-	"dataray/internal/domain/entity"
-	"dataray/internal/model"
+	"data-insights/internal/crypto"
+	"data-insights/internal/datasource"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/model"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/uptrace/bun"

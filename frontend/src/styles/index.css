@@ -5,7 +5,7 @@
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   DataRay 表面系统（Surface System）
+   Data Insights 表面系统（Surface System）
 
    核心诊断：本产品的"简陋感"不是来自"白色太多"，而是来自**面与面之间没有明度差**。
    页签画布是白的、卡片是白的、卡头也是白的，唯一的边界线索（1px 描边）还被
@@ -268,6 +268,29 @@ h5.ant-typography {
   padding: 4px 8px !important;
   font-size: 13px;
   line-height: 1.4;
+}
+
+/* 行尺寸分档（仅图表构建页的预览表，图表配置 → 表格行尺寸）：
+   紧凑(small)=上方全局 4px；默认(medium)/宽松(large) 按 antd size 类放宽，
+   否则 size 切换被全局 4px 压平、无视觉效果。 */
+.chart-builder-page .ant-table-wrapper .ant-table-medium .ant-table-thead > tr > th,
+.chart-builder-page .ant-table-wrapper .ant-table-medium .ant-table-tbody > tr > td {
+  padding: 10px 8px !important;
+}
+
+.chart-builder-page
+  .ant-table-wrapper
+  .ant-table:not(.ant-table-small):not(.ant-table-medium)
+  .ant-table-thead
+  > tr
+  > th,
+.chart-builder-page
+  .ant-table-wrapper
+  .ant-table:not(.ant-table-small):not(.ant-table-medium)
+  .ant-table-tbody
+  > tr
+  > td {
+  padding: 16px 8px !important;
 }
 
 .ant-table-wrapper .ant-table-thead > tr > th {

@@ -1,12 +1,12 @@
 > ⚠️ **已归档（superseded）——本文件不再指导实现，仅作成员产出留档。**
-> 现行文档：`../chart-coverage-gap-dataray-2026-09-16.md`（图表覆盖差距与补齐清单 · 汇编定稿）
+> 现行文档：`../chart-coverage-gap-data-insights-2026-09-16.md`（图表覆盖差距与补齐清单 · 汇编定稿）
 > 被取代原因：本文件为**未回填覆盖率因子的初版**——它当时把「环形图」列为 P0、P0 合计写作 7–13 人日；经竞析覆盖矩阵回填 C 因子后，环形图落 **P2**、P0 变为 **5 项含 R-21 共 11–18 人日**。另初版把「堆叠」估为 1–2 人日独立项，经主理人实测核实 **bar 无分组槽位**，已修正为**绑定 R-21 交付**。
 
 ---
 
 # 图表覆盖 · 重要性与紧迫度量化框架（数析）
 
-**日期**：2026-09-16　**作者**：数析（数据分析师）　**配套**：`roadmap-dataray-2026-09-16.md` · `decision-log-dataray-2026-09-16.md`
+**日期**：2026-09-16　**作者**：数析（数据分析师）　**配套**：`roadmap-data-insights-2026-09-16.md` · `decision-log-data-insights-2026-09-16.md`
 
 ## 结论先行
 1. **缺的不止图型**：层2「聚合/统计」是层1 多处图型的前置依赖，应优先补底层。
@@ -108,4 +108,4 @@
 **断点统一**：以**图型种类≈12 种**为断点（现 7→补 5）；"种类＋变体"口径 ≈14–15。
 
 ---
-**证据来源**：DataRay 现状引自 `frontend/src/store/index.ts:90,96`、`backend/internal/query/types.go:7-13`、`backend/internal/query/bun_builder.go:389`、`frontend/src/components/ChartBuilder/FieldPill.tsx:31-38`、`frontend/src/components/ChartBuilder/TableChart.tsx`、`backend/internal/query/processor.go:372`（主理人勘察结论，直接采信）；R-46/R-47 已占用见 `roadmap-dataray-2026-09-16.md` 行 101–102。**所有成本与分值均为推断估算，非实测**。
+**证据来源**：Data Insights 现状引自 `frontend/src/store/index.ts:90,96`、`backend/internal/query/types.go:7-13`、`backend/internal/query/bun_builder.go:389`、`frontend/src/components/ChartBuilder/FieldPill.tsx:31-38`、`frontend/src/components/ChartBuilder/TableChart.tsx`、`backend/internal/query/processor.go:372`（主理人勘察结论，直接采信）；R-46/R-47 已占用见 `roadmap-data-insights-2026-09-16.md` 行 101–102。**所有成本与分值均为推断估算，非实测**。

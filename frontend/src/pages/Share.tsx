@@ -20,6 +20,7 @@ import dayjs, { Dayjs } from 'dayjs';
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Share, sharesApi } from '../api';
+import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
@@ -298,14 +299,14 @@ const SharePage: React.FC = () => {
           </Form.Item>
 
           <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <ModalFooter>
               <Button onClick={() => setCreateModalVisible(false)}>
                 {intl.formatMessage({ id: 'common.cancel' })}
               </Button>
               <Button type="primary" htmlType="submit" loading={createLoading}>
                 {intl.formatMessage({ id: 'share.createBtn' })}
               </Button>
-            </Space>
+            </ModalFooter>
           </Form.Item>
         </Form>
       </Modal>

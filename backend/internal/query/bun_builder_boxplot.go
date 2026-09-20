@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"dataray/internal/datasource"
+	"data-insights/internal/datasource"
 )
 
 // bun_builder_boxplot.go — 箱线图三查询 builder（R-52，plan §3.3）。

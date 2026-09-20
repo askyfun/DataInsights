@@ -1,8 +1,8 @@
 import type { TableProps } from 'antd';
-import { Empty, Spin, Table, Typography } from 'antd';
+import { Empty, Table } from 'antd';
 import { useMemo } from 'react';
-
-const { Text } = Typography;
+import { formatMetricValue } from '@/lib/format';
+import LoadingPlaceholder from '../LoadingPlaceholder';
 
 interface TableChartProps {
   data: any[];
@@ -13,6 +13,8 @@ interface TableChartProps {
   dimensionNames?: string[];
   /** 指标字段名列表，按用户拖入顺序 */
   metricNames?: string[];
+  /** 指标列的「格式」配置（键为输出列名）：如 0,0.00 → 千分位 + 两位小数。 */
+  metricFormats?: Record<string, string>;
   rowSize?: 'small' | 'middle' | 'large';
   pagination?: {
     page: number;
@@ -38,6 +40,7 @@ const TableChart: React.FC<TableChartProps> = ({
   columnLabels,
   dimensionNames,
   metricNames,
+  metricFormats,
   rowSize = 'small',
   pagination,
   sortField,
@@ -82,22 +85,28 @@ const TableChart: React.FC<TableChartProps> = ({
       orderedKeys.push(...keys);
     }
 
-    return orderedKeys.map((key) => ({
-      title: columnLabels?.[key] || key,
-      dataIndex: key,
-      key,
-      // 没有排序回调时（如分享页只读表格）不挂 sorter：避免渲染一个点了没反应的表头箭头。
-      sorter: Boolean(onSortChange),
-      // 受控排序：只有当前生效的排序列显示箭头状态，其余列恒为 null。
-      sortOrder: onSortChange && key === sortField ? toAntdSortOrder(sortOrder) : null,
-      ellipsis: true,
-    }));
+    return orderedKeys.map((key) => {
+      const format = metricFormats?.[key];
+      return {
+        title: columnLabels?.[key] || key,
+        dataIndex: key,
+        key,
+        // 没有排序回调时（如分享页只读表格）不挂 sorter：避免渲染一个点了没反应的表头箭头。
+        sorter: Boolean(onSortChange),
+        // 受控排序：只有当前生效的排序列显示箭头状态，其余列恒为 null。
+        sortOrder: onSortChange && key === sortField ? toAntdSortOrder(sortOrder) : null,
+        ellipsis: true,
+        // 「格式」只作用于指标列的展示层：排序仍按原始行值比较。
+        ...(format ? { render: (value: unknown) => formatMetricValue(value, format) } : {}),
+      };
+    });
   }, [
     columnLabels,
     data,
     propColumns,
     dimensionNames,
     metricNames,
+    metricFormats,
     onSortChange,
     sortField,
     sortOrder,
@@ -143,14 +152,7 @@ const TableChart: React.FC<TableChartProps> = ({
   };
 
   if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: '100px 0' }}>
-        <Spin size="large" />
-        <div style={{ marginTop: 16 }}>
-          <Text type="secondary">加载数据中...</Text>
-        </div>
-      </div>
-    );
+    return <LoadingPlaceholder text="加载数据中..." />;
   }
 
   if (!data || data.length === 0) {

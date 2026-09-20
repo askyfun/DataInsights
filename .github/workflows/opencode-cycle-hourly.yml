@@ -1,4 +1,4 @@
-name: DataRay Hourly Development Cycle
+name: Data Insights Hourly Development Cycle
 
 on:
   schedule:

@@ -1,10 +1,10 @@
 # Backend AGENTS.md
 
-Go 后端服务，提供 DataRay 平台的 REST API。
+Go 后端服务，提供 Data Insights 平台的 REST API。
 
 ## 技术栈
 
-Go 1.26 + Gin + bun ORM + PostgreSQL + Sentry
+Go 1.27 + Gin + bun ORM + PostgreSQL + Sentry
 
 ## 目录结构
 
@@ -14,10 +14,9 @@ backend/
 │   ├── main.go          # 入口：加载配置、初始化 DB、注册中间件和路由、启动 HTTP 服务
 │   ├── routes.go        # 路由注册：实例化 service → handler，挂载到 Gin RouterGroup
 │   └── chart_query_test.go
-├── etc/
-│   └── config.toml      # TOML 配置文件（Host, Port, Database.Url）
 ├── internal/
-│   ├── config/          # 配置加载（go-toml）
+│   ├── config/          # 配置加载（纯环境变量 + godotenv 读 .env；默认值 < .env < 真实环境变量）
+│   ├── webui/           # 前端产物托管与路径分流（挂 NoRoute；命中文件→返回，未命中→index.html，保留前缀→JSON 404）
 │   ├── database/        # DB 初始化（pgx + bun）和迁移
 │   ├── handler/         # Gin HTTP 处理器（请求绑定、响应格式化）
 │   ├── service/         # 业务逻辑层（按领域拆分：chart, dataset, datasource, share）
@@ -85,11 +84,25 @@ handler → service → domain/entity
 ```bash
 cd backend
 go mod download
-go run ./cmd/main.go -f etc/config.toml   # 启动服务，端口 23352
+go run ./cmd/main.go                       # 启动服务，端口 23352
 go test ./...                              # 运行所有测试
 go test -v ./path/to/pkg -run TestName     # 运行单个测试
 go test -race ./...                        # 带竞态检测运行测试
 ```
+
+## 配置加载
+
+优先级由低到高：**内置默认值 < `.env` 文件 < 真实系统环境变量**。
+
+**没有配置文件。** `etc/` 目录已删除，`config.go` 不再依赖 go-toml。理由：容器化部署下每个要用户填的值都必须能从外部注入（`--env-file` / compose `env_file` / K8s env），多一份 TOML 只会让"改了没生效"变得难查。
+
+- 入口：`cmd/main.go` 先 `config.LoadDotEnv(...)`，再 `Config.Load()`。`-env` 指定 .env（默认依次探测 `./.env`、`../.env`，覆盖"从仓库根启动"和"从 backend/ 启动"两种情形）。
+- `.env` 默认落在**仓库根**（`../.env`），由 godotenv 加载且**不覆盖**已存在的环境变量 —— 这就是"真实环境变量 > .env"的实现方式，也是 `docker run --env-file` / K8s env 能覆盖它的原因。
+- 环境变量（**无前缀**）：`PORT` / `DATABASE_URL` / `SECURITY_KEY` / `SENTRY_DSN` / `CORS_ALLOWED_ORIGINS`（留空 = CORS 放开所有来源，见 `cmd/main.go` `corsMiddleware`） / `STATIC_DIR`。**空字符串一律视为"未设置"**，所以 .env 里留空占位不会打掉内置默认值（Port `23352`；监听地址固定 `0.0.0.0`，不提供 env 覆盖）。
+- `DATABASE_URL` 是**唯一必填项**：`main.go` 在 `Load()` 之后显式检查，为空即 `os.Exit(1)` 并提示变量名。
+- `STATIC_DIR` 指向前端构建产物目录（镜像里是 `/app/web`）。**留空 = 只提供 API**，此时 `SetupRoutes` 才会注册 `/share/:token` 那条 302 落地页；配了静态目录则 `/share/<token>` 归前端路由（分享页本身就是 SPA 的 `/share/:token`，后端同路径的 302 会把它挡掉）。目录配错（读不到 `index.html`）同样 `os.Exit(1)`。
+
+⚠️ **写测试的坑**：`t.Setenv(k, "")` 只是把变量设成"存在但为空"，而 godotenv 的语义是"已存在的变量一律不覆盖" —— 两者相遇会让 `.env` 里的值被空壳挡住。凡是要经过 `LoadDotEnv` 的用例必须用 `os.Unsetenv`（测试里的 `unsetEnv` helper），不能图省事用 `clearEnv`。
 
 ## 数据库表
 

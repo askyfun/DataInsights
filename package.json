@@ -1,6 +1,7 @@
 {
   "name": "data-insights",
   "version": "1.0.0",
+  "packageManager": "pnpm@12.4.2",
   "description": "拖拽式 BI 可视化分析平台 MVP",
   "main": "index.js",
   "directories": {
@@ -8,7 +9,8 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "prepare": "husky"
+    "prepare": "husky",
+    "preinstall": "node scripts/only-pnpm.mjs"
   },
   "repository": {
     "type": "git",

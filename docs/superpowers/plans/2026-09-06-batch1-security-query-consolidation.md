@@ -767,7 +767,7 @@ type SecurityConfig struct {
 }
 ```
 
-`config.toml` 增加 `[Security] SecurityKey = "${DATARAY_SECURITY_KEY}"` 不适用（TOML 不做 env 替换）——改为在 `LoadConfig` 后支持 env 覆盖：`if v := os.Getenv("DATARAY_SECURITY_KEY"); v != "" { c.Security.SecurityKey = v }`。main.go 启动时校验：key 长度必须 32 字节（`len(key) != 32` 则 exit 1，提示用 `openssl rand -hex 16` 之外的 32 字节 hex）。key 解析：hex 字符串 → 32 bytes。
+`config.toml` 增加 `[Security] SecurityKey = "${DATA_INSIGHTS_SECURITY_KEY}"` 不适用（TOML 不做 env 替换）——改为在 `LoadConfig` 后支持 env 覆盖：`if v := os.Getenv("DATA_INSIGHTS_SECURITY_KEY"); v != "" { c.Security.SecurityKey = v }`。main.go 启动时校验：key 长度必须 32 字节（`len(key) != 32` 则 exit 1，提示用 `openssl rand -hex 16` 之外的 32 字节 hex）。key 解析：hex 字符串 → 32 bytes。
 
 - [ ] **Step 4: 写 service 层失败测试（写入加密、读取解密、存量明文自动升级）**
 
@@ -967,7 +967,7 @@ git commit -m "feat(db): introduce goose versioned migrations, remove CreateTabl
 
 - [ ] **Step 1: 逐项确认零引用后删除**
 
-Run: `cd backend && grep -rn "internal/idls\|dataray/internal/idls" --include="*.go" .` 等逐包确认，然后 `git rm`。
+Run: `cd backend && grep -rn "internal/idls\|data-insights/internal/idls" --include="*.go" .` 等逐包确认，然后 `git rm`。
 
 - [ ] **Step 2: 全量测试 + Commit**
 

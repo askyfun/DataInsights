@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"dataray/internal/response"
+	"data-insights/internal/response"
 
 	"github.com/gin-gonic/gin"
 )

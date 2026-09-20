@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/datasource"
-	"dataray/internal/model"
+	"data-insights/internal/datasource"
+	"data-insights/internal/model"
 )
 
 type MockConnection struct {

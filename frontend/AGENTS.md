@@ -1,6 +1,6 @@
 # Frontend AGENTS.md
 
-DataRay 前端应用，拖拽式 BI 可视化分析平台的用户界面。
+Data Insights 前端应用，拖拽式 BI 可视化分析平台的用户界面。
 
 ## 技术栈
 

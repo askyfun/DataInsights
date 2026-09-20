@@ -9,7 +9,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"dataray/internal/domain/entity"
+	"data-insights/internal/domain/entity"
 )
 
 // chartCaptureMatcher 记录实际执行的 SQL，同时保留默认 regexp 匹配语义。

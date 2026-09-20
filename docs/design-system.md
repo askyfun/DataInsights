@@ -1,6 +1,6 @@
-# DataRay 表面系统（Surface System）
+# Data Insights 表面系统（Surface System）
 
-> **受众**：维护 DataRay 前端的工程师，以及在此基础上做二次开发的协作者。
+> **受众**：维护 Data Insights 前端的工程师，以及在此基础上做二次开发的协作者。
 > **主任务**：拖拽式 BI 可视化分析 —— 选数据源 → 建数据集 → 拖字段配图 → 保存/分享。
 > **范围**：全站 9 个页面（图表构建 / 图表列表 / 数据集列表·详情·编辑 / 数据源列表·详情 / 分享列表 / 分享只读页）与首页的**表面层级、色彩、字体、页面骨架、组件样式**。
 > **不覆盖**：图表本身的视觉（`lib/chartOptions.ts` 的 ECharts option 构造）、国际化文案、后端。
@@ -401,10 +401,10 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
 ## 9. Agent 实施提示词
 
 ```
-项目：DataRay（React 19 + TypeScript + antd 6.6.4 + Vite）
+项目：Data Insights（React 19 + TypeScript + antd 6.6.4 + Vite）
 主流程：数据源 → 数据集 → 拖拽配图 → 保存 / 分享
 
-在 DataRay 新增或修改页面时，遵守以下约束：
+在 Data Insights 新增或修改页面时，遵守以下约束：
 
 1. 页面骨架固定为：<div className="dr-page"> → <PageHeader .../> → <Card>。
    页面标题绝不放回 <Card> 内。详情页的面包屑通过 PageHeader 的 breadcrumb prop 传入。

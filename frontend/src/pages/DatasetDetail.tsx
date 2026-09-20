@@ -33,6 +33,7 @@ import { useIntl } from 'react-intl';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { DatasetColumn } from '../api';
 import { DatasetPreview, datasetsApi } from '../api';
+import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
@@ -761,7 +762,7 @@ const DatasetDetailPage: React.FC = () => {
             />
           </Form.Item>
           <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <ModalFooter>
               <Button
                 onClick={() => {
                   setVirtualFieldModalVisible(false);
@@ -774,7 +775,7 @@ const DatasetDetailPage: React.FC = () => {
               <Button type="primary" onClick={handleSaveVirtualField}>
                 {intl.formatMessage({ id: 'common.save' })}
               </Button>
-            </Space>
+            </ModalFooter>
           </Form.Item>
         </Form>
       </Modal>

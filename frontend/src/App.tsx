@@ -47,7 +47,7 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    document.title = 'DataRay';
+    document.title = 'Data Insights';
   }, []);
 
   const menuItems = [
@@ -110,7 +110,7 @@ const App: React.FC = () => {
           <div className="demo-logo" />
           {!isMobile && (
             <Title level={4} style={{ margin: 0, marginLeft: 12 }}>
-              DataRay
+              Data Insights
             </Title>
           )}
         </div>
@@ -150,7 +150,7 @@ const App: React.FC = () => {
         title={
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div className="demo-logo" />
-            <span style={{ marginLeft: 12, fontWeight: 'bold' }}>DataRay</span>
+            <span style={{ marginLeft: 12, fontWeight: 'bold' }}>Data Insights</span>
           </div>
         }
         placement="left"
@@ -233,7 +233,7 @@ const App: React.FC = () => {
           padding: '16px',
         }}
       >
-        DataRay ©2026 Created with React + Ant Design
+        Data Insights ©2026 Created with React + Ant Design
       </Footer>
     </Layout>
   );

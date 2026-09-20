@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"math"
 
-	"dataray/internal/datasource"
-	"dataray/internal/model"
+	"data-insights/internal/datasource"
+	"data-insights/internal/model"
 )
 
 type GeneratedSQL struct {

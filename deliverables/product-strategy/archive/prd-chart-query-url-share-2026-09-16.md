@@ -1,5 +1,5 @@
 > ⚠️ **已归档（superseded）——本文件不再指导实现，仅作决策轨迹留档。**
-> 现行文档：`../README.md`（索引）· `../prd-chart-query-share-2026-09-16.md`（产品规格）· `../roadmap-dataray-2026-09-16.md`（路线图）· `../decision-log-dataray-2026-09-16.md`（决策台账）
+> 现行文档：`../README.md`（索引）· `../prd-chart-query-share-2026-09-16.md`（产品规格）· `../roadmap-data-insights-2026-09-16.md`（路线图）· `../decision-log-data-insights-2026-09-16.md`（决策台账）
 > 被取代原因：其核心机制「URL 携带压缩状态（lz-string + base64url + URL<2000 硬约束）」被产品负责人澄清推翻——火山引擎的真实机制是**服务端落库 + queryId 寻址**。该版本设计已整体作废（见 v2）。
 
 ---
@@ -7,7 +7,7 @@
 > ⚠️ **本文件已被取代（superseded）**：产品负责人随后说明火山引擎的真实机制是「每次查询自动落库生成 queryId + 地址栏替换为该 id」，即**服务端持久化寻址**，而非本文档设想的「URL 携带压缩状态」。
 > 请以 **`prd-chart-query-record-2026-09-16.md`（PRD v2）** 为准。本文档保留仅作决策轨迹留档：其中的 `?state=` lz-string 编码、URL <2000 硬约束、超长报错、R-35 可追溯 opt-in 均已在 v2 中作废。
 
-# DataRay 功能规格书（PRD）— 图表查询页 + URL 即状态分享
+# Data Insights 功能规格书（PRD）— 图表查询页 + URL 即状态分享
 
 **日期**：2026-09-16
 **类型**：PRD（范围变更产出，非新立项）+ 路线图重排

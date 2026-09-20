@@ -26,6 +26,7 @@ import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { DatasourceFormData, DatasourceType } from '../api';
+import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
@@ -393,7 +394,7 @@ const DatasourcePage: React.FC = () => {
           </Form.Item>
 
           <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <ModalFooter>
               <Button
                 icon={<CheckCircleOutlined />}
                 onClick={handleTestConnection}
@@ -421,7 +422,7 @@ const DatasourcePage: React.FC = () => {
                   ? intl.formatMessage({ id: 'common.update' })
                   : intl.formatMessage({ id: 'common.add' })}
               </Button>
-            </Space>
+            </ModalFooter>
           </Form.Item>
         </Form>
       </Modal>

@@ -8,7 +8,7 @@ import (
 	"math"
 	"testing"
 
-	"dataray/internal/model"
+	"data-insights/internal/model"
 )
 
 // 本文件用真实 PostgreSQL 端到端验证箱线图三查询编排的正确性（R-52，plan §8 验收）：

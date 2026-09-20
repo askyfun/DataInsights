@@ -6,11 +6,11 @@ import FilterDropZone from '../../components/ChartBuilder/FilterDropZone';
 import type { ChartField, FilterCondition } from '../../store';
 
 /**
- * 过滤字段组：与维度/指标字段组同构的拖入式过滤交互。
+ * 过滤字段组：与维度/指标字段组同构的拖入式过滤交互（弹窗式配置）。
  *
  * 这里只覆盖组件自身的渲染与交互契约（拖入落点由 ChartBuilder 的拖拽测试覆盖）：
- * 空态提示、条件行三件套（字段/操作符/值）、按操作符切换值输入形态、删除。
- * 多个条件之间恒为「且」——组件不提供 AND/OR 切换，故没有 logic 相关用例。
+ * 空态提示、条件行 = 字段芯片 + 摘要、点击行上抛 onEdit（进配置弹窗）、删除。
+ * 行内不再直接编辑操作符/值——收集过滤条件的职责已移交 FilterConfigModal。
  */
 
 const FIELDS: ChartField[] = [
@@ -31,8 +31,8 @@ type ZoneProps = ComponentProps<typeof FilterDropZone>;
 
 const renderZone = (props: Partial<ZoneProps> = {}) => {
   const onAdd = vi.fn();
+  const onEdit = vi.fn();
   const onRemove = vi.fn();
-  const onUpdate = vi.fn();
 
   render(
     <DndContext>
@@ -40,14 +40,14 @@ const renderZone = (props: Partial<ZoneProps> = {}) => {
         filters={[]}
         availableFields={FIELDS}
         onAdd={onAdd}
+        onEdit={onEdit}
         onRemove={onRemove}
-        onUpdate={onUpdate}
         {...props}
       />
     </DndContext>
   );
 
-  return { onAdd, onRemove, onUpdate };
+  return { onAdd, onEdit, onRemove };
 };
 
 describe('FilterDropZone', () => {
@@ -68,72 +68,49 @@ describe('FilterDropZone', () => {
     expect(onAdd).toHaveBeenCalledWith(FIELDS[1]);
   });
 
-  it('渲染条件行的字段名、操作符与值', () => {
+  it('渲染条件行的字段名与摘要（比较符）', () => {
     renderZone({
       filters: [makeFilter({ operator: 'gte', value: '100' })],
     });
 
     const row = screen.getByTestId('filter-row-filter-1');
     expect(row).toHaveTextContent('brand_name');
-    expect(row).toHaveTextContent('>=');
-    expect(screen.getByTestId('filter-value-filter-1')).toHaveValue('100');
+    expect(screen.getByTestId('filter-summary-filter-1')).toHaveTextContent('大于等于 100');
   });
 
-  it('同一字段可重复加入：>= 与 <= 两条条件各自一行', () => {
+  it('摘要按操作符分流：区间 / 属于 / 为空', () => {
     renderZone({
       filters: [
-        makeFilter({ id: 'filter-1', operator: 'gte', value: '100' }),
-        makeFilter({ id: 'filter-2', operator: 'lte', value: '500' }),
+        makeFilter({ id: 'f-between', operator: 'between', value: '10', valueEnd: '20' }),
+        makeFilter({ id: 'f-in', operator: 'in', value: ['北京', '上海'] }),
+        makeFilter({ id: 'f-null', operator: 'isNull' }),
       ],
     });
 
-    expect(screen.getByTestId('filter-row-filter-1')).toHaveTextContent('>=');
-    expect(screen.getByTestId('filter-row-filter-2')).toHaveTextContent('<=');
-    expect(screen.getByTestId('filter-value-filter-1')).toHaveValue('100');
-    expect(screen.getByTestId('filter-value-filter-2')).toHaveValue('500');
+    expect(screen.getByTestId('filter-summary-f-between')).toHaveTextContent('区间 10 ~ 20');
+    expect(screen.getByTestId('filter-summary-f-in')).toHaveTextContent('属于 2 个值');
+    expect(screen.getByTestId('filter-summary-f-null')).toHaveTextContent('为空');
   });
 
-  it('值输入变更上抛 onUpdate', () => {
-    const { onUpdate } = renderZone({ filters: [makeFilter({})] });
-
-    fireEvent.change(screen.getByTestId('filter-value-filter-1'), {
-      target: { value: 'BYD' },
+  it('点击条件行上抛 onEdit（携带条件与字段对象）', () => {
+    const { onEdit } = renderZone({
+      filters: [makeFilter({})],
     });
 
-    expect(onUpdate).toHaveBeenCalledWith('filter-1', { value: 'BYD' });
+    fireEvent.click(screen.getByTestId('filter-row-filter-1'));
+
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit.mock.calls[0]?.[0]).toMatchObject({ id: 'filter-1', field: 'brand_name' });
+    expect(onEdit.mock.calls[0]?.[1]).toEqual(FIELDS[0]);
   });
 
-  it('between 操作符渲染最小/最大值两个输入框', () => {
-    renderZone({
-      filters: [makeFilter({ operator: 'between', value: '10', valueEnd: '20' })],
-    });
-
-    expect(screen.getByTestId('filter-value-filter-1')).toHaveValue('10');
-    expect(screen.getByTestId('filter-value-end-filter-1')).toHaveValue('20');
-  });
-
-  it('in 操作符复用单输入框并提示多值写法', () => {
-    renderZone({ filters: [makeFilter({ operator: 'in' })] });
-
-    expect(screen.getByTestId('filter-value-filter-1')).toHaveAttribute(
-      'placeholder',
-      '值1, 值2, 值3'
-    );
-    expect(screen.queryByTestId('filter-value-end-filter-1')).not.toBeInTheDocument();
-  });
-
-  it('isNull 这类无值操作符不渲染值输入框', () => {
-    renderZone({ filters: [makeFilter({ operator: 'isNull' })] });
-
-    expect(screen.queryByTestId('filter-value-filter-1')).not.toBeInTheDocument();
-  });
-
-  it('点击删除按钮上抛 onRemove', () => {
-    const { onRemove } = renderZone({ filters: [makeFilter({})] });
+  it('点击删除按钮只上抛 onRemove，不触发 onEdit', () => {
+    const { onRemove, onEdit } = renderZone({ filters: [makeFilter({})] });
 
     fireEvent.click(screen.getByTestId('filter-remove-filter-1'));
 
     expect(onRemove).toHaveBeenCalledWith('filter-1');
+    expect(onEdit).not.toHaveBeenCalled();
   });
 
   it('只按 availableFields 过滤：没有可拖入字段时不渲染 + 按钮', () => {

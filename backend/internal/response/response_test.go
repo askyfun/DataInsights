@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"dataray/internal/query"
+	"data-insights/internal/query"
 
 	"github.com/gin-gonic/gin"
 )

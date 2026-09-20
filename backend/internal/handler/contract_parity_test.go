@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/domain/entity"
+	"data-insights/internal/domain/entity"
 )
 
 // jsonTagTypes 收集结构体声明的全部 json 字段名 → 声明类型（忽略无 tag、
@@ -60,6 +60,7 @@ func TestMirrorEntityJSONTagParity(t *testing.T) {
 		{"datasetQueryIn / entity.QueryConfig", datasetQueryIn{}, entity.QueryConfig{}, false},
 		{"chartCreateIn / entity.Chart", chartCreateIn{}, entity.Chart{}, false},
 		{"chartQueryIn / entity.ChartQueryRequest", chartQueryIn{}, entity.ChartQueryRequest{}, false},
+		{"querySaveIn / entity.QueryRecordSaveRequest", querySaveIn{}, entity.QueryRecordSaveRequest{}, false},
 		{"datasetCreateIn / entity.Dataset", datasetCreateIn{}, entity.Dataset{}, true},
 		{"datasetUpdateIn / entity.Dataset", datasetUpdateIn{}, entity.Dataset{}, true},
 	}

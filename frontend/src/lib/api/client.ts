@@ -21,14 +21,19 @@ function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
-// 全前端唯一的 axios 实例（别再在别处 axios.create）。baseURL 只有这一个来源：
-//   1. VITE_API_BASE_URL 已设置 → 用它；空字符串 = 同源相对路径，生产部署把
-//      /api 交给 nginx 反代到后端，前端因此不需要 CORS 白名单。
-//   2. 未设置 → 开发默认 http://<当前访问主机名>:23352（后端 [CORS] AllowedOrigins
-//      必须包含该主机名的 23351 来源，否则预检不返回 CORS 头）。
-export function resolveApiBaseURL(configured: string | undefined): string {
-  if (typeof configured === 'string') {
+// 全前端唯一的 axios 实例（别再在别处 axios.create）。baseURL 只有这一个来源，两档语义：
+//   1. VITE_API_BASE_URL 配置了非空绝对地址 → 直接采用（前后端分开部署时才需要）。
+//   2. 未配置 → 生产构建走同源（页面与 /api 由同一个 Go 进程提供，请求路径自带 /api
+//      前缀，所以 baseURL 留空串）；开发回退 http://<当前访问主机名>:23352（后端 CORS 默认放开）。
+export function resolveApiBaseURL(
+  configured: string | undefined,
+  isProd: boolean = import.meta.env.PROD
+): string {
+  if (configured) {
     return configured;
+  }
+  if (isProd) {
+    return '';
   }
   const host =
     typeof window === 'undefined' ? 'localhost' : window.location.hostname || 'localhost';

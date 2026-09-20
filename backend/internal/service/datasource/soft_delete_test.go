@@ -9,7 +9,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"dataray/internal/domain/entity"
+	"data-insights/internal/domain/entity"
 )
 
 // containsStmt 报告记录到的语句中是否有一条包含 sub（用于断言级联 UPDATE 的作用域）。

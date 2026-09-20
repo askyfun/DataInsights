@@ -7,12 +7,12 @@ import (
 	"math"
 	"time"
 
-	"dataray/internal/crypto"
-	"dataray/internal/database"
-	"dataray/internal/datasource"
-	"dataray/internal/domain/entity"
-	"dataray/internal/model"
-	"dataray/internal/query"
+	"data-insights/internal/crypto"
+	"data-insights/internal/database"
+	"data-insights/internal/datasource"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/model"
+	"data-insights/internal/query"
 
 	"github.com/uptrace/bun"
 )

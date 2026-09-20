@@ -3,7 +3,11 @@
 -- the address-bar id (shareable link) and the history list can consume it.
 --
 -- Design constraints (PRD v2 + v3):
---   * query_id is a non-guessable UUIDv4 (NEVER an auto-increment integer).
+--   * query_id is a non-guessable UUIDv7 (NEVER an auto-increment integer).
+--     v7's 48-bit millisecond timestamp prefix keeps B-tree inserts sequential
+--     (no random-page write amplification); its ~74 random bits keep ids
+--     unguessable. URLs present it as fixed-width base58 (backend/internal/idcodec),
+--     never as a raw UUID string.
 --   * Expiry is encoded by a SINGLE column `expires_at` (NULL = permanent).
 --     We deliberately do NOT add a `status` enum: status would drift from the
 --     REAL `expires_at` value, which is the source of truth.

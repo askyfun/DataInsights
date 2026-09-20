@@ -1,7 +1,7 @@
 import { CloseOutlined, PlusOutlined } from '@ant-design/icons';
 import { useDroppable } from '@dnd-kit/core';
-import { Button, Dropdown, Input, Select, Tag } from 'antd';
-import React, { useState } from 'react';
+import { Button, Dropdown, Tag } from 'antd';
+import React from 'react';
 import type { ChartField, FilterCondition, FilterOperator } from '@/store';
 import { fieldTagColor } from './DraggableField';
 import { dropZoneId, dropZoneSurfaceStyle } from './dropZoneStyles';
@@ -11,45 +11,54 @@ export interface FilterDropZoneProps {
   filters: FilterCondition[];
   /** 可拖入的字段全集（维度与指标均可参与过滤）。 */
   availableFields: ChartField[];
+  /** 拖入 / 下拉选择字段后回调：ChartBuilder 会弹窗收集过滤条件（期间不自动查询）。 */
   onAdd: (field: ChartField) => void;
+  /** 点击已存在的过滤条件芯片 → 弹窗编辑。 */
+  onEdit: (filter: FilterCondition, field: ChartField | undefined) => void;
   onRemove: (id: string) => void;
-  onUpdate: (id: string, patch: Partial<FilterCondition>) => void;
   emptyText?: string;
 }
 
-/**
- * 过滤操作符选项。
- * value 必须是后端 entity.Filter 认得的字面量：gte/lte/neq 不可写成 ge/le/ne，
- * 后端对未知操作符会静默退化。标签用 ASCII 比较符 + 中文动词，下拉宽度可控。
- */
-const OPERATOR_OPTIONS: { value: FilterOperator; label: string }[] = [
-  { value: 'eq', label: '=' },
-  { value: 'neq', label: '!=' },
-  { value: 'gt', label: '>' },
-  { value: 'gte', label: '>=' },
-  { value: 'lt', label: '<' },
-  { value: 'lte', label: '<=' },
-  { value: 'like', label: '包含' },
-  { value: 'in', label: '属于' },
-  { value: 'between', label: '区间' },
-  { value: 'isNull', label: '为空' },
-  { value: 'isNotNull', label: '不为空' },
-];
+/** 操作符中文标签（与过滤配置弹窗共用口径）。 */
+export const OPERATOR_LABELS: Partial<Record<FilterOperator, string>> = {
+  eq: '等于',
+  neq: '不等于',
+  gt: '大于',
+  gte: '大于等于',
+  lt: '小于',
+  lte: '小于等于',
+  like: '包含',
+  in: '属于',
+  notIn: '不属于',
+  between: '区间',
+  isNull: '为空',
+  isNotNull: '不为空',
+};
 
-const needsValue = (operator: FilterOperator): boolean =>
-  operator !== 'isNull' && operator !== 'isNotNull';
-
-const needsTwoValues = (operator: FilterOperator): boolean => operator === 'between';
-
-const needsMultiValues = (operator: FilterOperator): boolean => operator === 'in';
+/** 条件的单行摘要：芯片右侧的只读说明，点击整行进弹窗改。 */
+export function describeFilter(filter: FilterCondition): string {
+  const { operator } = filter;
+  const label = OPERATOR_LABELS[operator] ?? operator;
+  if (operator === 'isNull' || operator === 'isNotNull') {
+    return label;
+  }
+  if (operator === 'in' || operator === 'notIn') {
+    const values = Array.isArray(filter.value) ? (filter.value as unknown[]).map(String) : [];
+    return `${OPERATOR_LABELS[operator]} ${values.length} 个值`;
+  }
+  if (operator === 'between') {
+    return `区间 ${String(filter.value ?? '')} ~ ${String(filter.valueEnd ?? '')}`;
+  }
+  return `${label} ${String(filter.value ?? '')}`;
+}
 
 /**
  * 过滤字段组：与维度组、指标组同构的可拖入区域。
- * 调用场景：查询配置区第三行，替代旧的手动「Add Filter」按钮式交互。
+ * 调用场景：查询配置区第三行。
  * 主要逻辑：
- *   - 从左侧字段列表拖入任意字段（维度或指标）→ 落到本区即在 store 追加一条过滤条件；
- *   - 每条条件就地选择操作符并填值，删除用行尾 ×；
- *   - 多个条件之间恒为「且」：不再提供 AND/OR 切换，下发请求时 logic 恒为 and
+ *   - 从左侧字段列表拖入任意字段（维度或指标）→ ChartBuilder 弹出过滤配置弹窗；
+ *   - 已有条件渲染为「字段芯片 + 摘要」，点击进弹窗编辑，行尾 × 删除；
+ *   - 多个条件之间恒为「且」：下发请求时 logic 恒为 and
  *     （后端 bun_builder 对非 OR 的 logic 一律按 AND 处理）。
  * 同一字段可重复加入：>= 与 <= 各拖一次即构成区间，不做去重。
  */
@@ -57,15 +66,14 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
   filters,
   availableFields,
   onAdd,
+  onEdit,
   onRemove,
-  onUpdate,
   emptyText = '拖拽字段到此添加筛选，多个条件为「且」关系',
 }) => {
   const { setNodeRef, isOver } = useDroppable({
     id: dropZoneId('filter', 0),
     data: { type: 'filter', groupIndex: 0 },
   });
-  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   // 过滤条件只存列名，回查字段对象是为了拿到类型/日期信息以决定标签颜色。
   const fieldByName = new Map(availableFields.map((field) => [field.name, field]));
@@ -87,50 +95,8 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
     ),
     onClick: () => {
       onAdd(field);
-      setDropdownOpen(false);
     },
   }));
-
-  const renderValueInput = (filter: FilterCondition) => {
-    if (!needsValue(filter.operator)) {
-      return null;
-    }
-
-    if (needsTwoValues(filter.operator)) {
-      return (
-        <>
-          <Input
-            size="small"
-            style={{ width: 76 }}
-            placeholder="最小值"
-            value={filter.value ?? ''}
-            onChange={(e) => onUpdate(filter.id, { value: e.target.value })}
-            data-testid={`filter-value-${filter.id}`}
-          />
-          <span style={{ color: 'var(--dr-text-3)' }}>-</span>
-          <Input
-            size="small"
-            style={{ width: 76 }}
-            placeholder="最大值"
-            value={filter.valueEnd ?? ''}
-            onChange={(e) => onUpdate(filter.id, { valueEnd: e.target.value })}
-            data-testid={`filter-value-end-${filter.id}`}
-          />
-        </>
-      );
-    }
-
-    return (
-      <Input
-        size="small"
-        style={{ flex: 1, minWidth: 90 }}
-        placeholder={needsMultiValues(filter.operator) ? '值1, 值2, 值3' : '值'}
-        value={filter.value ?? ''}
-        onChange={(e) => onUpdate(filter.id, { value: e.target.value })}
-        data-testid={`filter-value-${filter.id}`}
-      />
-    );
-  };
 
   return (
     <div
@@ -138,6 +104,18 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
       data-testid="filter-drop-zone"
       style={dropZoneSurfaceStyle('filter', isOver)}
     >
+      {/* + 固定在最左（与维度/指标行的行首对齐），提示文案与条件芯片依次排在其右 */}
+      {availableFields.length > 0 && (
+        <Dropdown menu={{ items: dropdownItems }} trigger={['click']} placement="bottomLeft">
+          <Button
+            type="dashed"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={(e) => e.preventDefault()}
+          />
+        </Dropdown>
+      )}
+
       {filters.length === 0 && (
         <span style={{ color: 'var(--dr-text-3)', fontSize: 13 }}>{emptyText}</span>
       )}
@@ -147,34 +125,68 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
         return (
           <div
             key={filter.id}
-            data-testid={`filter-row-${filter.id}`}
-            style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 100%' }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              flex: '0 1 auto',
+              minWidth: 0,
+              maxWidth: '100%',
+            }}
           >
-            <Tag
-              color={field ? fieldTagColor(field) : 'default'}
+            {/* 行本体用原生 button：行内嵌了删除按钮，继续用 role="button" 的 div
+                会构成交互元素嵌套，键盘语义也不如原生按钮完整。 */}
+            <button
+              type="button"
+              data-testid={`filter-row-${filter.id}`}
+              onClick={() => onEdit(filter, field)}
               style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                flex: '0 1 auto',
+                cursor: 'pointer',
+                minWidth: 0,
+                maxWidth: '100%',
                 margin: 0,
-                padding: '0 5px',
-                borderRadius: '5px',
-                maxWidth: 160,
-                overflow: 'hidden',
-                whiteSpace: 'nowrap',
-                textOverflow: 'ellipsis',
+                padding: 0,
+                border: 0,
+                background: 'none',
+                font: 'inherit',
+                color: 'inherit',
+                textAlign: 'left',
               }}
             >
-              {filter.field || '未选择字段'}
-            </Tag>
-            <Select
-              size="small"
-              style={{ width: 84 }}
-              value={filter.operator}
-              onChange={(operator) =>
-                onUpdate(filter.id, { operator, value: '', valueEnd: undefined })
-              }
-              options={OPERATOR_OPTIONS}
-              data-testid={`filter-operator-${filter.id}`}
-            />
-            {renderValueInput(filter)}
+              <Tag
+                color={field ? fieldTagColor(field) : 'default'}
+                style={{
+                  margin: 0,
+                  padding: '0 5px',
+                  borderRadius: '5px',
+                  maxWidth: 160,
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {filter.field || '未选择字段'}
+              </Tag>
+              <span
+                data-testid={`filter-summary-${filter.id}`}
+                style={{
+                  flex: '0 1 auto',
+                  minWidth: 0,
+                  maxWidth: 220,
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap',
+                  textOverflow: 'ellipsis',
+                  fontSize: 12,
+                  color: 'var(--dr-text-2)',
+                }}
+              >
+                {describeFilter(filter)}
+              </span>
+            </button>
             <Button
               type="text"
               size="small"
@@ -186,23 +198,6 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
           </div>
         );
       })}
-
-      {availableFields.length > 0 && (
-        <Dropdown
-          menu={{ items: dropdownItems }}
-          trigger={['click']}
-          open={dropdownOpen}
-          onOpenChange={setDropdownOpen}
-          placement="bottomLeft"
-        >
-          <Button
-            type="dashed"
-            size="small"
-            icon={<PlusOutlined />}
-            onClick={(e) => e.preventDefault()}
-          />
-        </Dropdown>
-      )}
     </div>
   );
 };

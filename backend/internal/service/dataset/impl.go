@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"dataray/internal/database"
-	"dataray/internal/datasource"
-	"dataray/internal/domain/entity"
-	"dataray/internal/model"
-	"dataray/internal/query"
-	dsservice "dataray/internal/service/datasource"
+	"data-insights/internal/database"
+	"data-insights/internal/datasource"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/model"
+	"data-insights/internal/query"
+	dsservice "data-insights/internal/service/datasource"
 
 	"github.com/uptrace/bun"
 )

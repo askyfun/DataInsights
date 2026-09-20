@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/datasource"
-	"dataray/internal/model"
+	"data-insights/internal/datasource"
+	"data-insights/internal/model"
 )
 
 // 本文件用真实 PostgreSQL 端到端验证透视表小计/合计的 avg / count_distinct 真值正确性

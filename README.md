@@ -1,4 +1,4 @@
-# DataRay
+# Data Insights
 
 拖拽式 BI 可视化分析平台 MVP
 
@@ -23,23 +23,33 @@
 - Vite 构建工具
 
 ### 后端
-- Go 1.26+
+- Go 1.27+
 - Gin API 框架
 - uptrace/bun ORM
 - PostgreSQL 12+
 
 ## 快速开始
 
-### 使用 Docker Compose
+### 使用 Docker（单镜像单进程）
+
+前后端编译进**同一个镜像**，由**一个 Go 进程、一个端口**同时提供 API 与页面（没有 nginx）：
 
 ```bash
-cd data-insights
+cp .env.example .env                  # 按需修改（至少要填 DATABASE_URL）
+docker build -t data-insights .
+docker run -d -p 23352:23352 --env-file .env --name data-insights data-insights
+```
+
+打开 http://localhost:23352 就是完整应用。
+
+或用 compose（会额外起一个 PostgreSQL 容器）：
+
+```bash
 docker-compose up --build
 ```
 
 服务启动后：
-- 前端: http://localhost:23351
-- 后端 API: http://localhost:23352
+- 应用（含前端页面与 API）: http://localhost:23352
 
 ### 本地开发
 
@@ -48,10 +58,12 @@ docker-compose up --build
 ```bash
 cd backend
 go mod tidy
-go run ./cmd/main.go -f etc/config.yaml
+go run ./cmd/main.go
 ```
 
 #### 前端
+
+> 依赖**只允许用 pnpm** 安装。npm / yarn 会被 `preinstall` 钩子拦截并中止。详见 [AGENTS.md](AGENTS.md)。
 
 ```bash
 cd frontend
@@ -61,16 +73,31 @@ pnpm dev
 
 ## 配置
 
-### 后端配置 (backend/etc/config.yaml)
+前后端共用仓库根目录的**一份**环境变量文件，模板见 `.env.example`：
 
-```yaml
-Name: dataray
-Host: 0.0.0.0
-Port: 23352
-
-Database:
-  Url: postgres://user:password@localhost:5432/dbname?sslmode=disable
+```bash
+cp .env.example .env    # 然后按需修改
 ```
+
+**优先级（低 → 高）：内置默认值 < `.env` 文件 < 真实系统环境变量。**
+
+- `.env` **不入库**（已在 `.gitignore`）；真实值只在本机或被部署环境注入。常用项只有四个：`DATABASE_URL`（必填）、`PORT`、`SENTRY_DSN`、`VITE_SENTRY_DSN`；其余（CORS 白名单、密码加密密钥、静态目录、分开部署地址）都有合理默认值，见 `.env.example` 进阶注释。
+- 后端变量**无前缀**（单进程单体不需要命名空间，且 `DATABASE_URL` / `PORT` 是 12-factor 标准名，云平台会自动注入）：`PORT`、`DATABASE_URL`、`SECURITY_KEY`、`SENTRY_DSN`、`CORS_ALLOWED_ORIGINS`（留空 = 放开所有来源）、`STATIC_DIR`（前端产物目录；留空 = 只提供 API，页面由别的进程提供）。监听地址固定 `0.0.0.0`，不提供 env 覆盖。
+- 前端变量（`VITE_` 前缀）：`VITE_SENTRY_DSN`；`VITE_API_BASE_URL` 仅前后端分开部署时才需要填。⚠️ 这类变量在**构建期**被内联进 JS，改完必须重新 build，且**不能放密钥**。
+- 单容器/容器编排部署时，可用 `docker run --env-file .env ...` 或编排平台的 env 注入。
+
+**没有配置文件。** 后端不再读取任何 TOML/YAML —— 所有需要配置的值都在环境变量里，`DATABASE_URL` 缺失时启动会直接报错退出并告诉你缺哪个变量。这样单镜像容器只要 `--env-file .env` 就能跑，不用往镜像里塞或往容器里挂文件。
+
+### 一个进程怎么同时服务页面和 API
+
+Go 进程按路径分流，替代了原先 nginx 的角色：
+
+| 路径 | 去处 |
+|------|------|
+| `/api`、`/mcp`、`/health` 及其子路径 | 后端内部路由；没有匹配到就是 JSON 404（不会回落成 HTML） |
+| 其余路径 | `STATIC_DIR` 里的文件；没有对应文件则回落 `index.html`（交给前端路由） |
+
+`assets/` 下带内容哈希的产物走 `immutable` 长缓存，其余文件 `no-cache`。静态目录配错（读不到 `index.html`）会让进程**启动即失败**，不会跑起来之后整站 404。
 
 ## API 文档
 
@@ -96,13 +123,13 @@ Database:
 
 ```
 .
+├── Dockerfile                # 单镜像：前端产物 + Go 二进制，一个进程一个端口
 ├── docker-compose.yml
 ├── frontend/                 # 前端项目
 │   ├── src/
 │   │   ├── api/             # API 客户端
 │   │   ├── store/           # 状态管理
 │   │   └── pages/           # 页面组件
-│   └── Dockerfile
 └── backend/                  # 后端项目
     ├── cmd/                 # 主程序
     ├── internal/

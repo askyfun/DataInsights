@@ -1,4 +1,4 @@
-# DataRay API 规范
+# Data Insights API 规范
 
 ## 1. 统一响应格式
 

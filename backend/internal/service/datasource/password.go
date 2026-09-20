@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"dataray/internal/crypto"
-	"dataray/internal/model"
+	"data-insights/internal/crypto"
+	"data-insights/internal/model"
 
 	"github.com/uptrace/bun"
 )

@@ -857,6 +857,33 @@ func TestBunQueryBuilder_WithFilterIn(t *testing.T) {
 	}
 }
 
+func TestBunQueryBuilder_WithFilterNotIn(t *testing.T) {
+	qb := NewBunQueryBuilder()
+
+	ast := qb.Build(
+		"products",
+		SourceTypeTable,
+		[]string{"category"},
+		[]MetricConfig{{Field: "id", Agg: AggCount, Alias: "count"}},
+		[]FilterConfig{
+			{Field: "status", Op: FilterNotIn, Value: []any{"active", "pending", "draft"}},
+		},
+		nil,
+		nil,
+	)
+
+	sql, args := qb.BuildSelectQuery(ast)
+
+	expected := "SELECT category, COUNT(id) AS `count` FROM products WHERE status NOT IN (?, ?, ?) GROUP BY category"
+	if sql != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, sql)
+	}
+
+	if len(args) != 3 {
+		t.Errorf("Expected 3 args, got %d", len(args))
+	}
+}
+
 func TestBunQueryBuilder_WithFilterBetween(t *testing.T) {
 	qb := NewBunQueryBuilder()
 

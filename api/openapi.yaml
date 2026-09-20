@@ -1,10 +1,10 @@
-# DataRay API 契约（单一权威来源）
+# Data Insights API 契约（单一权威来源）
 #
 # 修改接口时：先改本文件 → `make api-gen` 双端重新生成 → 双端消费生成物。
 # 禁止直接编辑生成物（backend/internal/idls/gen_types.go、frontend/src/idls/gen_types.ts）。
 openapi: 3.0.3
 info:
-  title: DataRay API
+  title: Data Insights API
   description: |
     拖拽式 BI 可视化分析平台 API。
 
@@ -30,6 +30,8 @@ tags:
     description: 图表管理（CRUD、数据集取数预览、图表语义查询）
   - name: shares
     description: 分享管理（创建、列表、详情、密码校验）与公开视图跳转
+  - name: queries
+    description: 查询记录（地址栏即分享：落库去重与短码寻址）
 paths:
   /health:
     get:
@@ -770,6 +772,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Envelope'
+  /api/queries:
+    post:
+      tags:
+        - queries
+      summary: 查询记录落库（内容 hash 去重）
+      description: |
+        每次成功查询后由前端调用：把当前完整查询配置（spec_json）落成一条记录并
+        返回地址栏短码，复制地址栏即分享。
+
+        去重：spec_hash = sha256("<dataset_id>\n" + 规范化 spec JSON) 上有唯一约束，
+        同配置重复提交走 ON CONFLICT DO UPDATE，**复用原 query_id**，且只更新
+        row_count / duration_ms —— spec、created_at、expires_at、hit_count 一概不动。
+        因此「别人再查一次同样的条件」不会改变已分享链接的内容与有效期。
+
+        expires_at 恒为 created_at + 90 天，NULL 表示永久；打开链接**不刷新**它。
+
+        校验：dataset_id 缺失 → 20100；spec 非 JSON 或超 32KB → 20100；
+        spec.v != 1 → 20100；spec.document 非 JSON 对象 → 20100；
+        source_type 超过 50 字符 → 20100。落库失败 → 50000。
+      operationId: saveQueryRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRecordSaveRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为 QueryRecordSaved（地址栏短码）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryRecordSaveResponse'
+  /api/queries/{q}:
+    get:
+      tags:
+        - queries
+      summary: 短码寻址还原（`?q=` 直链）
+      description: |
+        把地址栏短码（idcodec 的 21 位 base58，**不是**数据库里的 uuid 原文）
+        还原成完整记录，供前端重建图表配置。
+
+        短码长度/字符集非法 → 20100；解码成功但无此记录 → 20300。
+        **已过期记录照常返回**（直链保活，条件 100% 还原），过期与否只经
+        `expired` 字段告知，由界面决定提示文案。
+
+        每次读取都会更新 hit_count（+1）与 last_accessed_at；这两项写失败只记
+        日志，不影响本次读取成功。`expires_at` 不刷新。
+      operationId: getQueryRecord
+      parameters:
+        - $ref: '#/components/parameters/QueryShortId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryRecordResponse'
 components:
   schemas:
     ResponseCode:
@@ -916,7 +976,7 @@ components:
         password:
           type: string
           writeOnly: true
-          description: 连接密码；落库前 AES-GCM 加密（DATARAY_SECURITY_KEY）。
+          description: 连接密码；落库前 AES-GCM 加密（SECURITY_KEY）。
     DatasourceUpdateRequest:
       type: object
       description: |
@@ -2439,7 +2499,7 @@ components:
         op:
           type: string
           description: >-
-            eq / neq / gt / gte / lt / lte / like / in / between / isNull / isNotNull；
+            eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull；
             未知值后端按 "=" 回退（FilterOperator.ToString default）。
         value: {}
         value_end: {}
@@ -2447,6 +2507,128 @@ components:
         logic:
           type: string
           description: 与其他条件的连接逻辑（如 "and" / "or"）。
+    QueryRecordSpec:
+      type: object
+      description: >-
+        bi_query.spec_json 的顶层信封（entity.QuerySpecEnvelope）。外层 v 管记录级
+        schema 演进，内层 document 是前端的 ChartConfigDocument（自带 version:2 与
+        迁移函数 migrateChartConfig）；后端只做信封校验与透传，不复制一份会漂移的
+        类型定义。
+      required:
+        - v
+        - document
+      properties:
+        v:
+          type: integer
+          description: 记录级 spec 版本；当前仅接受 1，其他值落库时返回 20100。
+          example: 1
+        document:
+          type: object
+          additionalProperties: true
+          description: 图表配置文档（ChartConfigDocument v2）；后端不解释其内容。
+    QueryRecordSaveRequest:
+      type: object
+      description: POST /api/queries 请求体（entity.QueryRecordSaveRequest）。
+      required:
+        - dataset_id
+        - spec
+      properties:
+        dataset_id:
+          type: integer
+          description: 查询所属数据集；<=0 返回 20100。参与 spec_hash（同一份文档挂不同数据集不算同一条记录）。
+        chart_id:
+          type: integer
+          description: 关联图表 ID；0/缺省表示草稿查询（落库为 NULL）。
+        spec:
+          $ref: '#/components/schemas/QueryRecordSpec'
+        source_type:
+          type: string
+          description: 留痕来源，约定 build / share_url；空值默认 build，超 50 字符返回 20100。
+        row_count:
+          type: integer
+          description: 结果行数；缺省表示未上报，去重命中时保留存量值而不是清零。
+        duration_ms:
+          type: integer
+          description: 查询耗时（毫秒）；缺省表示未上报，去重命中时保留存量值。
+    QueryRecordSaved:
+      type: object
+      description: 落库回执（entity.QueryRecordSaved）：地址栏需要的最小集合。
+      required:
+        - query_id
+        - created_at
+        - expires_at
+      properties:
+        query_id:
+          type: string
+          description: 地址栏短码（idcodec base58 定长 21 位），不是数据库里的 uuid 原文。
+          example: CSatF9qXyRoQXFtAA3iZS
+        created_at:
+          type: string
+          description: RFC3339。
+        expires_at:
+          type: string
+          nullable: true
+          description: RFC3339；null 表示永久（数据库里是 NULL）。
+    QueryRecord:
+      type: object
+      description: >-
+        GET /api/queries/{q} 读数模型（entity.QueryRecord）。不含 ip / spec_hash /
+        owner_id / tenant_id：前者是留痕列，后两者是账号体系的预留列（本期无值），
+        都不该出现在对外的分享读出口。
+      required:
+        - query_id
+        - spec
+        - dataset_id
+        - chart_id
+        - created_at
+        - expires_at
+        - expired
+        - hit_count
+      properties:
+        query_id:
+          type: string
+          description: 地址栏短码，与请求路径中的 {q} 一致。
+        spec:
+          $ref: '#/components/schemas/QueryRecordSpec'
+        dataset_id:
+          type: integer
+        chart_id:
+          type: integer
+          nullable: true
+          description: null 表示未关联图表（草稿查询）。
+        created_at:
+          type: string
+          description: RFC3339。
+        expires_at:
+          type: string
+          nullable: true
+          description: RFC3339；null 表示永久。
+        expired:
+          type: boolean
+          description: 服务端按 expires_at 单字段派生的判定结果（null 视为未过期），客户端不重复实现。
+        hit_count:
+          type: integer
+          description: 本次读取**之后**的累计命中次数（含本次 +1）。
+    QueryRecordSaveResponse:
+      description: POST /api/queries 响应：Envelope 特化 data 为 QueryRecordSaved。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/QueryRecordSaved'
+    QueryRecordResponse:
+      description: GET /api/queries/{q} 响应：Envelope 特化 data 为 QueryRecord。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/QueryRecord'
   parameters:
     DatasourceId:
       name: id
@@ -2478,6 +2660,19 @@ components:
         API 层按不透明字符串处理。
       schema:
         type: string
+    QueryShortId:
+      name: q
+      in: path
+      required: true
+      description: >-
+        查询记录短码（gin 通配符 :q）；idcodec 的 base58 定长 21 位，字符集为
+        123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz（不含 0 O I l）。
+        长度或字符集不符 → 20100；解码成功但无此记录 → 20300。
+      schema:
+        type: string
+        minLength: 21
+        maxLength: 21
+        pattern: '^[1-9A-HJ-NP-Za-km-z]{21}$'
     TableName:
       name: table
       in: path

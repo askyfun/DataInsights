@@ -1,4 +1,4 @@
-# DataRay 架构文档
+# Data Insights 架构文档
 
 ## 项目概述
 
@@ -9,7 +9,7 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 | 层级 | 技术 |
 |------|------|
 | 前端 | React 19 + TypeScript + Ant Design 6.x + ECharts 6.x + Zustand 5.x + @dnd-kit + Vite 8 + Sentry |
-| 后端 | Go 1.26 + Gin + bun ORM + PostgreSQL + Sentry |
+| 后端 | Go 1.27 + Gin + bun ORM + PostgreSQL + Sentry |
 | 部署 | Docker + docker-compose |
 
 ## 目录结构
@@ -30,7 +30,7 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 │   ├── internal/
 │   │   ├── config/           # 配置加载 (TOML)
 │   │   ├── database/         # 数据库连接与事务抽象（WithTx）
-│   │   ├── crypto/           # AES-GCM 加解密（DATARAY_SECURITY_KEY）
+│   │   ├── crypto/           # AES-GCM 加解密（SECURITY_KEY）
 │   │   ├── domain/entity/    # 领域实体类型
 │   │   ├── query/            # SQL 构造唯一出口（AST + bun_builder + raw.go）
 │   │   ├── datasource/       # 数据源驱动抽象
@@ -41,19 +41,20 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 │   │   │   └── starrocks.go
 │   │   └── model/            # 数据模型
 │   ├── migrations/           # goose 版本化迁移（embed.FS 内嵌）
-│   ├── etc/config.toml       # 配置文件
 │   └── go.mod
+├── Dockerfile                # 单镜像：前端产物 + Go 二进制（无 nginx，单进程单端口）
 ├── Makefile
 └── docker-compose.yml
 ```
 
 ## 关键约束
 
-1. **配置文件**: 后端使用 TOML 格式 (`etc/config.toml`)
-2. **CORS**: 后端配置 CORS 中间件允许跨域
-3. **API 基础URL**: 前端默认连接 `http://localhost:23352`，修改 `frontend/src/lib/api/client.ts`
-4. **前端端口**: Vite 默认 23351
-5. **热重载**: 后端开发使用 `air` 工具 (`make dev`)
+1. **配置**: **只有环境变量**（无配置文件）。优先级 内置默认值 < 仓库根 `.env` 文件 < 真实系统环境变量；`DATABASE_URL` 必填，缺失即启动失败
+2. **CORS**: 默认放开所有来源（平台 API 无登录态，CORS 不构成安全边界；同源部署本就不产生跨域请求）；`CORS_ALLOWED_ORIGINS` 填非空白名单可收紧
+3. **API 基础URL**: 未配置 `VITE_API_BASE_URL` 时生产构建自动同源、开发回退 `http://<当前主机名>:23352`；配置非空绝对地址仅用于前后端分开部署；唯一来源是 `frontend/src/lib/api/client.ts`
+4. **前端端口**: Vite 开发服务器默认 23351；生产是单镜像单端口 23352（Go 同时提供 API 与静态页面）
+5. **静态托管**: `backend/internal/webui` 挂在 gin 的 `NoRoute` 上 —— 命中文件就返回，未命中回落 `index.html`，`/api`、`/mcp`、`/health` 保留前缀一律 JSON 404。`STATIC_DIR` 留空时后端退化为纯 API 服务
+6. **热重载**: 后端开发使用 `air` 工具 (`make dev`)
 
 
 ## 图表查询与可视化语义分层

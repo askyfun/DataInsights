@@ -20,7 +20,7 @@
 
 ## DataWind 子目录
 
-`DataWind/` 包含竞品研究和产品规划文档，作为 DataRay 产品设计的参考依据。
+`DataWind/` 包含竞品研究和产品规划文档，作为 Data Insights 产品设计的参考依据。
 
 ## 维护规则
 

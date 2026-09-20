@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"dataray/internal/domain/entity"
-	"dataray/internal/router"
-	"dataray/internal/service/datasource"
+	"data-insights/internal/domain/entity"
+	"data-insights/internal/router"
+	"data-insights/internal/service/datasource"
 
 	"github.com/gin-gonic/gin"
 )

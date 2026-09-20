@@ -527,6 +527,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/queries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 查询记录落库（内容 hash 去重）
+         * @description 每次成功查询后由前端调用：把当前完整查询配置（spec_json）落成一条记录并
+         *     返回地址栏短码，复制地址栏即分享。
+         *
+         *     去重：spec_hash = sha256("<dataset_id>\n" + 规范化 spec JSON) 上有唯一约束，
+         *     同配置重复提交走 ON CONFLICT DO UPDATE，**复用原 query_id**，且只更新
+         *     row_count / duration_ms —— spec、created_at、expires_at、hit_count 一概不动。
+         *     因此「别人再查一次同样的条件」不会改变已分享链接的内容与有效期。
+         *
+         *     expires_at 恒为 created_at + 90 天，NULL 表示永久；打开链接**不刷新**它。
+         *
+         *     校验：dataset_id 缺失 → 20100；spec 非 JSON 或超 32KB → 20100；
+         *     spec.v != 1 → 20100；spec.document 非 JSON 对象 → 20100；
+         *     source_type 超过 50 字符 → 20100。落库失败 → 50000。
+         */
+        post: operations["saveQueryRecord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/queries/{q}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 短码寻址还原（`?q=` 直链）
+         * @description 把地址栏短码（idcodec 的 21 位 base58，**不是**数据库里的 uuid 原文）
+         *     还原成完整记录，供前端重建图表配置。
+         *
+         *     短码长度/字符集非法 → 20100；解码成功但无此记录 → 20300。
+         *     **已过期记录照常返回**（直链保活，条件 100% 还原），过期与否只经
+         *     `expired` 字段告知，由界面决定提示文案。
+         *
+         *     每次读取都会更新 hit_count（+1）与 last_accessed_at；这两项写失败只记
+         *     日志，不影响本次读取成功。`expires_at` 不刷新。
+         */
+        get: operations["getQueryRecord"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -590,7 +650,7 @@ export interface components {
             port: number;
             database_name: string;
             username: string;
-            /** @description 连接密码；落库前 AES-GCM 加密（DATARAY_SECURITY_KEY）。 */
+            /** @description 连接密码；落库前 AES-GCM 加密（SECURITY_KEY）。 */
             password: string;
         };
         /**
@@ -917,7 +977,7 @@ export interface components {
         /** @description POST /api/charts/query 请求体（entity.ChartQueryRequest 超集，同一 schema 描述 v1/v2 两种协议，按 spec_version 判别）。spec_version 缺失或 !=2： v1 平铺协议，消费 dims/metrics（形状同 ChartQueryRequest）；spec_version=2： v2 槽位协议，消费 dimension_groups/metric_groups（槽位名与 binding_id 经 ChartSpecFromRequestV2 保留进 QuerySpec/QueryAST）。filters/pagination/sort 两协议共用。 */
         ChartSpecQueryRequest: {
             dataset_id: number;
-            /** @description 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse。 */
+            /** @description 决定响应 data 形状：table -> ChartTableResponse；pie -> ChartPieResponse； bar/line/area 及未知 -> ChartAxisResponse；scatter -> ChartScatterResponse； pivot -> ChartPivotResponse；histogram -> ChartHistogramResponse。 */
             chart_type: string;
             /** @description 协议版本判别键；v2 路径必填且值为 2，缺失或其他值按 v1 平铺协议处理。 */
             spec_version?: number;
@@ -933,10 +993,14 @@ export interface components {
             filters?: components["schemas"]["Filter"][];
             pagination?: components["schemas"]["ChartPagination"];
             sort?: components["schemas"]["SortConfig"];
+            /** @description 查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go map[string]any omitempty，Task 3-1a 接线）：histogram 读取 bin_count （数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的 宽度）。executor 从请求结构体直接消费，不进入 QuerySpec/AST；其他 chart_type 忽略本节。 */
+            query_options?: {
+                [key: string]: unknown;
+            };
         };
         /** @description POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。 data 为查询处理器输出，是按 chart_type 判别的五形状（契约上 oneOf 语义、 未生成 union 类型：data 为无类型 schema，成员见下方各 Chart*Response schema；pie/scatter/table 成员间存在结构重叠，消费方以 chart_type 为准， 不做运行时判别）。data 成功时恒为非 null （response 归一化保证集合字段不为 null）。 */
         ChartDataResult: {
-            /** @description 查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema； 为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}， 消费方按 ChartQueryRequest.chart_type 手动判别，五成员为 ChartTableResponse / ChartPieResponse / ChartAxisResponse / ChartScatterResponse / ChartPivotResponse）。 */
+            /** @description 查询处理器输出，形状由 chart_type 判别（oneOf 语义，成员见下方各 schema； 为不引入 oapi-codegen runtime 依赖，Go 生成物为无类型 interface{}， 消费方按 ChartQueryRequest.chart_type 手动判别，成员为 ChartTableResponse / ChartPieResponse / ChartAxisResponse / ChartScatterResponse / ChartPivotResponse / ChartHistogramResponse （histogram，Task 3-1a））。 */
             data: unknown;
             /** @description 生成的取数 SQL（entity omitempty；成功路径恒非空）。 */
             select_sql?: string;
@@ -1021,11 +1085,11 @@ export interface components {
                 [key: string]: number;
             };
         };
-        /** @description 直方图响应（plan §3.3 Go struct HistogramResponse，Task 3-1 实现）。 当前仅声明，无 processor 返回。 */
+        /** @description 直方图响应（query.HistogramResponse，Task 3-1a 实现，R-57）。chart_type=histogram 时 ChartDataResult.data 的形状：两阶段分箱查询（阶段1 MIN/MAX/COUNT → 阶段2 FLOOR((field-min)/bin_width) 分组计数）产出。bins 为补全后的完整 连续分箱序列（无行的 bin 以 count=0 占位），sum(bins[].count) == 参与分箱的 数值行数；空数据集返回 bins=[]。被分箱字段为 metrics[0].field（对该列的 原始数值分箱计数，不做 SUM/AVG 聚合）；bin_count（默认 20）/bin_width 经请求的 query_options 传入。 */
         ChartHistogramResponse: {
             bins: components["schemas"]["ChartHistogramBin"][];
         };
-        /** @description 直方图分箱（plan §3.3 Go struct HistogramBin）。 */
+        /** @description 直方图分箱（query.HistogramBin）。区间为 [bin_start, bin_end) 半开、 相邻 bin 首尾相接（bin_end[i] == bin_start[i+1]）；等于最大值的边界行 归入最后一个 bin（浮点边界钳制，末 bin 实际闭区间）。所有值相同的 单值数据集产出单个 bin（宽度兜底 1，或用户 bin_width）。 */
         ChartHistogramBin: {
             /** Format: double */
             bin_start: number;
@@ -1224,12 +1288,75 @@ export interface components {
         /** @description 查询层过滤条件（query.FilterConfig）：JSON 键是 op，与旧协议 entity.Filter 的 operator 不同；Batch 3 chart_spec 协议统一采用本形状。 */
         FilterConfig: {
             field: string;
-            /** @description eq / neq / gt / gte / lt / lte / like / in / between / isNull / isNotNull； 未知值后端按 "=" 回退（FilterOperator.ToString default）。 */
+            /** @description eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull； 未知值后端按 "=" 回退（FilterOperator.ToString default）。 */
             op: string;
             value: unknown;
             value_end?: unknown;
             /** @description 与其他条件的连接逻辑（如 "and" / "or"）。 */
             logic: string;
+        };
+        /** @description bi_query.spec_json 的顶层信封（entity.QuerySpecEnvelope）。外层 v 管记录级 schema 演进，内层 document 是前端的 ChartConfigDocument（自带 version:2 与 迁移函数 migrateChartConfig）；后端只做信封校验与透传，不复制一份会漂移的 类型定义。 */
+        QueryRecordSpec: {
+            /**
+             * @description 记录级 spec 版本；当前仅接受 1，其他值落库时返回 20100。
+             * @example 1
+             */
+            v: number;
+            /** @description 图表配置文档（ChartConfigDocument v2）；后端不解释其内容。 */
+            document: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description POST /api/queries 请求体（entity.QueryRecordSaveRequest）。 */
+        QueryRecordSaveRequest: {
+            /** @description 查询所属数据集；<=0 返回 20100。参与 spec_hash（同一份文档挂不同数据集不算同一条记录）。 */
+            dataset_id: number;
+            /** @description 关联图表 ID；0/缺省表示草稿查询（落库为 NULL）。 */
+            chart_id?: number;
+            spec: components["schemas"]["QueryRecordSpec"];
+            /** @description 留痕来源，约定 build / share_url；空值默认 build，超 50 字符返回 20100。 */
+            source_type?: string;
+            /** @description 结果行数；缺省表示未上报，去重命中时保留存量值而不是清零。 */
+            row_count?: number;
+            /** @description 查询耗时（毫秒）；缺省表示未上报，去重命中时保留存量值。 */
+            duration_ms?: number;
+        };
+        /** @description 落库回执（entity.QueryRecordSaved）：地址栏需要的最小集合。 */
+        QueryRecordSaved: {
+            /**
+             * @description 地址栏短码（idcodec base58 定长 21 位），不是数据库里的 uuid 原文。
+             * @example CSatF9qXyRoQXFtAA3iZS
+             */
+            query_id: string;
+            /** @description RFC3339。 */
+            created_at: string;
+            /** @description RFC3339；null 表示永久（数据库里是 NULL）。 */
+            expires_at: string | null;
+        };
+        /** @description GET /api/queries/{q} 读数模型（entity.QueryRecord）。不含 ip / spec_hash / owner_id / tenant_id：前者是留痕列，后两者是账号体系的预留列（本期无值）， 都不该出现在对外的分享读出口。 */
+        QueryRecord: {
+            /** @description 地址栏短码，与请求路径中的 {q} 一致。 */
+            query_id: string;
+            spec: components["schemas"]["QueryRecordSpec"];
+            dataset_id: number;
+            /** @description null 表示未关联图表（草稿查询）。 */
+            chart_id: number | null;
+            /** @description RFC3339。 */
+            created_at: string;
+            /** @description RFC3339；null 表示永久。 */
+            expires_at: string | null;
+            /** @description 服务端按 expires_at 单字段派生的判定结果（null 视为未过期），客户端不重复实现。 */
+            expired: boolean;
+            /** @description 本次读取**之后**的累计命中次数（含本次 +1）。 */
+            hit_count: number;
+        };
+        /** @description POST /api/queries 响应：Envelope 特化 data 为 QueryRecordSaved。 */
+        QueryRecordSaveResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["QueryRecordSaved"];
+        };
+        /** @description GET /api/queries/{q} 响应：Envelope 特化 data 为 QueryRecord。 */
+        QueryRecordResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["QueryRecord"];
         };
     };
     responses: never;
@@ -1242,6 +1369,8 @@ export interface components {
         ChartId: number;
         /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
         ShareToken: string;
+        /** @description 查询记录短码（gin 通配符 :q）；idcodec 的 base58 定长 21 位，字符集为 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz（不含 0 O I l）。 长度或字符集不符 → 20100；解码成功但无此记录 → 20300。 */
+        QueryShortId: string;
         /** @description 表名；spec 占位符 {table} 与 gin 通配符 `:table` 对应，须为合法标识符， 前端以 URL 编码传输。 */
         TableName: string;
     };
@@ -2070,6 +2199,53 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    saveQueryRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueryRecordSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为 QueryRecordSaved（地址栏短码） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryRecordSaveResponse"];
+                };
+            };
+        };
+    };
+    getQueryRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 查询记录短码（gin 通配符 :q）；idcodec 的 base58 定长 21 位，字符集为 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz（不含 0 O I l）。 长度或字符集不符 → 20100；解码成功但无此记录 → 20300。 */
+                q: components["parameters"]["QueryShortId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryRecordResponse"];
+                };
             };
         };
     };
