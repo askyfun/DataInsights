@@ -551,3 +551,51 @@
 
 - 结论：**SHIP**（可合并 master），无 Critical、无行为回归；上述 Important 均为文档/测试卫生，不阻断合并。`make api-gen` 端到端重跑零漂移；15 个后端测试包 green；前端 tsc clean、vitest 68/4（4 为 master 既有 DatasourceDetail Intl 基线）；浏览器 E2E 实测 ShareView 渲染 v1 图表通过。评审驱动的文档修正（api.md `op`→`operator`、AGENTS.md 端点数 30+2 例外）已在收口 commit。
 
+---
+
+## 八、数据源方言能力验证清单（2026-09-21）
+
+> 4 种外部数据源（postgresql / mysql / clickhouse / starrocks）连接与取元数据均已实现；
+> 本清单跟踪**方言能力探测**与**能力门控图表**（boxplot、pivot）在各后端的落地与验证状态。
+
+### 8.1 能力 → 图表依赖
+
+| 能力字段 | 门控图表 | 不支持时行为 |
+|---|---|---|
+| `SupportsGroupingSets` | 透视 pivot | `executor.go` 自动回退 UNION ALL，**仍能出图** |
+| `PercentileStrategy != "unsupported"` | 箱线图 boxplot | 前置门 `CheckPercentileSupport` 拦截，**不出图** |
+| connect / GetTables / GetColumns / Execute | 所有图表基础 | — |
+
+### 8.2 四源验证状态
+
+图例：✅ 真实例实测 · 🟡 文档推断未跑实例 · ⬜ 保守 false · 🔎 懒探针（无实例走基线）
+
+| 源 | GroupingSets | Percentile | Window | 探测机制 |
+|---|---|---|---|---|
+| PostgreSQL | ✅ | ✅ `percentile_cont` | ✅ | **真实懒探针 + sync.Once**（唯一） |
+| StarRocks | ⬜（探针可升） | ✅ `percentile_cont_args_first`（2026-09-19 实测 @192.168.10.237:9030，作基线不重探） | ⬜（探针可升） | 🔎 只升不降 + nil 保底 |
+| ClickHouse | 🟡（文档-true，loud） | ⬜（CH 无 percentile_cont，事实） | 🟡 | **刻意静态**（无可安全只升探测的布尔能力；percentile 需语义校验） |
+| MySQL | ⬜（无 GROUPING SETS，文档事实） | ⬜（无标量 percentile 路径） | ⬜→🔎（8+ 探针可升 true） | 🔎 只升不降 + nil 保底 |
+
+### 8.3 本轮已完成（2026-09-21）
+
+- [x] `percentile.go` 落地 `quantilesExactInclusive` 策略 → `quantileExactInclusive(p)(field)`（CH 标量聚合形状，纯单测可验；CH 端到端仍待驱动翻转策略后生效）
+- [x] MySQL / StarRocks `Capabilities()` 从静态升级为**懒探针 + sync.Once**，采**只升不降 + nil 保底**设计 → 现有 `TestCapabilitiesStaticDrivers`（zero-value 连接）零回归
+- [x] `window_ntile` 明确标注为**架构性不可作标量表达式**（窗口函数在 GROUP BY 之后求值），显式报错不静默近似
+- [x] **P0**：把能力验证现状写进 `AGENTS.md` "已知限制"（防过度声称）
+- [x] MySQL / StarRocks 探针**集成测试脚手架** `capabilities_nonpg_integration_test.go`（`//go:build integration`，仿 PG）：版本感知断言（MySQL 8+→window=true）、基线不变式（StarRocks percentile=args_first 不得被探针降级）、sync.Once 指针缓存；无 env 自动 skip
+
+### 8.4 待办（按优先级）
+
+- [x] **P0 文档化限制**：把"仅 PG 有 live probe；CH 静态、MySQL/StarRocks 只升不降探针；无实例时行为=基线"写进 `AGENTS.md` 的"已知限制"
+- [ ] **P1 window_ntile 实现**（独立、较大，**需实例验证**）：MySQL 8+/StarRocks 的 percentile 需**子查询/lateral** 重塑 builder（现有单标量表达式模型容纳不下），先出设计方案再落地；不可盲写
+- [ ] **P1 CH percentile 语义校验**（**需 CH 实例**）：`quantileExactInclusive` 插值是否与预期 Type-7 一致，须用**已知数据集→预期 Q1/median/Q3** 的语义探针验证（语法探针不足以证伪静默错值），通过后才把 CH 的 `PercentileStrategy` 翻到 `quantilesExactInclusive`
+- [ ] **P2 接实例翻转 flag**：MySQL 8+ 窗口、StarRocks GROUPING SETS/窗口在真实实例跑探针实测（脚手架已备：`TEST_MYSQL_URL` / `TEST_STARROCKS_URL` + `go test -tags integration`）
+- [ ] **P2 端到端冒烟**：每种源各建一张 boxplot + pivot，确认出图正确（PG 现成；StarRocks percentile 可测；CH 待 P1；MySQL boxplot 暂不支持）
+
+### 8.5 扩容候选（新驱动，未排期）
+
+按画像优先级：SQL Server（企业/政务 BI 存量）> DuckDB（嵌入式分析，纯 Go 成本低）> Trino/Presto（湖仓）> Oracle（纯 Go 生态不友好）> Snowflake/BigQuery/Redshift（出海才需）。注意：加驱动的真实瓶颈不是"能否连接"，而是 `bun_builder` 目前 **PG 中心设计**（占位符 `$1`、标识符引号、percentile 语法各方言不同）能否方言化到新引擎。
+
+
+

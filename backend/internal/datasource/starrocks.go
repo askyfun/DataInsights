@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -45,6 +47,9 @@ func (d *starRocksDriver) TestConnection(ctx context.Context, config ConnectionC
 
 type starRocksConnection struct {
 	db *sql.DB
+	// capsOnce/caps：方言能力懒探针缓存，连接生命周期内只探测一次（见 probeCapabilities）。
+	capsOnce sync.Once
+	caps     *DialectCapabilities
 }
 
 func (c *starRocksConnection) Close() error {
@@ -171,15 +176,42 @@ func (c *starRocksConnection) Execute(ctx context.Context, sql string, args ...a
 	}, nil
 }
 
+// Capabilities 懒探针 + 缓存（复用 PG 模式）。
 func (c *starRocksConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
-	// 2026-09-19 在真实实例（192.168.10.237:9030）实测：percentile_cont(field, p)
-	// 为精确百分位（无 WITHIN GROUP 语法，参数列在前），故声明
-	// "percentile_cont_args_first" 策略（SQL 形态见 query/percentile.go）。
-	// GROUPING SETS / 窗口函数仍未实测，保持保守 false。
-	return &DialectCapabilities{
+	c.capsOnce.Do(func() {
+		c.caps = c.probeCapabilities(ctx)
+	})
+	return c.caps, nil
+}
+
+// probeCapabilities 从**保守基线**出发，仅对能"响亮失败"的布尔能力跑只读探针，
+// **只升不降**，故未接实例时与升级前的静态值完全一致。
+//   - PercentileStrategy "percentile_cont_args_first"：2026-09-19 已在真实实例
+//     （192.168.10.237:9030）实测为精确百分位，作为基线保留、**不再重探**（避免探针
+//     语法抖动误降级一个已验证能力）。
+//   - GROUPING SETS：StarRocks 较新版本支持，基线 false——跑探针，成功才升 true
+//     （升 true 后 pivot 走 GROUPING SETS 而非 UNION ALL 回退）。
+//   - 窗口函数：跑探针，成功才升 true。
+func (c *starRocksConnection) probeCapabilities(ctx context.Context) *DialectCapabilities {
+	caps := &DialectCapabilities{
 		SupportsGroupingSets:    false,
 		SupportsPercentileCont:  true,
 		SupportsWindowFunctions: false,
 		PercentileStrategy:      "percentile_cont_args_first",
-	}, nil
+	}
+	// nil-pool 兜底：zero-value 连接（无实例）返回基线，与升级前静态值一致。
+	if c.db == nil {
+		return caps
+	}
+	if _, err := c.Execute(ctx, `SELECT GROUPING(x) FROM (SELECT 1 AS x) t GROUP BY GROUPING SETS ((x), ())`); err != nil {
+		slog.Warn("starrocks capabilities probe: GROUPING SETS unavailable", "error", err)
+	} else {
+		caps.SupportsGroupingSets = true
+	}
+	if _, err := c.Execute(ctx, `SELECT ROW_NUMBER() OVER (ORDER BY 1) FROM (SELECT 1 AS x) t`); err != nil {
+		slog.Warn("starrocks capabilities probe: window functions unavailable", "error", err)
+	} else {
+		caps.SupportsWindowFunctions = true
+	}
+	return caps
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -45,6 +47,9 @@ func (d *mysqlDriver) TestConnection(ctx context.Context, config ConnectionConfi
 
 type mysqlConnection struct {
 	db *sql.DB
+	// capsOnce/caps：方言能力懒探针缓存，连接生命周期内只探测一次（见 probeCapabilities）。
+	capsOnce sync.Once
+	caps     *DialectCapabilities
 }
 
 func (c *mysqlConnection) Close() error {
@@ -169,16 +174,38 @@ func (c *mysqlConnection) Execute(ctx context.Context, sql string, args ...any) 
 	}, nil
 }
 
+// Capabilities 懒探针 + 缓存（复用 PG 模式）：首次调用探测、sync.Once 缓存。
 func (c *mysqlConnection) Capabilities(ctx context.Context) (*DialectCapabilities, error) {
-	// TODO(Task 3-0): 未经真实实例探针验证，当前返回保守默认值（不支持），
-	// 待有可用 MySQL 实例时按下列探针 SQL 实测后翻转：
-	//   - 窗口函数（MySQL 8+ 支持）：SELECT PERCENT_RANK() OVER (ORDER BY 1) FROM (SELECT 1) t
-	//   - GROUPING SETS：MySQL 无 GROUPING SETS（仅 WITH ROLLUP），SupportsGroupingSets
-	//     恒 false 是文档事实，无需探针。
-	return &DialectCapabilities{
+	c.capsOnce.Do(func() {
+		c.caps = c.probeCapabilities(ctx)
+	})
+	return c.caps, nil
+}
+
+// probeCapabilities 从**保守基线**出发，仅对能"响亮失败"的布尔能力跑只读探针，
+// 且**只升不降**（探针失败保留基线，绝不降级），所以未接实例时行为与旧静态值完全一致。
+//   - GROUPING SETS：基线 false 是文档事实（MySQL 无 GROUPING SETS，仅 WITH ROLLUP），
+//     恒 false、无需探针。
+//   - 窗口函数：MySQL 8+ 支持、5.7 不支持——跑探针区分，成功才升 true。
+//   - PercentileStrategy 恒 "unsupported"：MySQL 无 percentile_cont，唯一候选
+//     window_ntile 是窗口函数、无法作标量聚合表达式（见 query/percentile.go 注释），
+//     故 boxplot 在 MySQL 上暂不支持。
+func (c *mysqlConnection) probeCapabilities(ctx context.Context) *DialectCapabilities {
+	caps := &DialectCapabilities{
 		SupportsGroupingSets:    false,
 		SupportsPercentileCont:  false,
 		SupportsWindowFunctions: false,
 		PercentileStrategy:      "unsupported",
-	}, nil
+	}
+	// nil-pool 兜底：zero-value 连接（无实例）直接返回基线，与升级前的静态值一致。
+	if c.db == nil {
+		return caps
+	}
+	// 窗口函数（MySQL 8+）：失败模式 loud，安全只升不降。
+	if _, err := c.Execute(ctx, `SELECT ROW_NUMBER() OVER (ORDER BY 1) FROM (SELECT 1 AS x) t`); err != nil {
+		slog.Warn("mysql capabilities probe: window functions unavailable", "error", err)
+	} else {
+		caps.SupportsWindowFunctions = true
+	}
+	return caps
 }

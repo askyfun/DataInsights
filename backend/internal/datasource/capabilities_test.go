@@ -5,15 +5,17 @@ import (
 	"testing"
 )
 
-// TestCapabilitiesStaticDrivers 断言未接真实探针的 3 个驱动（CH/MySQL/StarRocks）的
-// Capabilities() 静态返回值符合 Task 3-0 裁定：
-//   - ClickHouse 按失败模式非对称处理：grouping-sets/window 保持 true（文档化 CH 21.x+
-//     事实，失败是 loud SQL 报错）；PercentileStrategy 保守 "unsupported"（silent
-//     wrong-data 风险，待真实实例探针验证 quantilesExactInclusive 后翻转）。
-//   - MySQL/StarRocks 全保守默认（无实例未实测）。
+// TestCapabilitiesStaticDrivers 用 zero-value 连接（db/conn=nil）钉死 3 个非 PG 驱动
+// Capabilities() 的**基线返回**（nil 保底路径），等价于"无实例"时的行为：
+//   - ClickHouse：**刻意保持静态**（无实例可安全只升不降探测的布尔能力，且 percentile
+//     需语义而非语法校验）——grouping-sets/window=true（文档化 CH 21.x+ 事实，失败 loud），
+//     PercentileStrategy 保守 "unsupported"。
+//   - MySQL/StarRocks：已升级为懒探针（见 probeCapabilities），但**只升不降 + nil 保底**，
+//     故 zero-value 连接返回的正是探针未运行时的基线静态值——MySQL 全保守、StarRocks
+//     percentile=args_first（2026-09-19 实测值作为基线）。接真实实例时探针只会把 false
+//     升 true，不会低于本基线，故本测试同时锁定"无实例行为不回归"。
 //
-// PostgreSQL 不在本测试内：Task 3-0 已把 PG 从静态 stub 升级为真实懒探针，由
-// capabilities_integration_test.go（//go:build integration）连真实 PG 验证。
+// PostgreSQL 不在此：其探针由 capabilities_integration_test.go（//go:build integration）连真实 PG 验证。
 func TestCapabilitiesStaticDrivers(t *testing.T) {
 	ctx := context.Background()
 

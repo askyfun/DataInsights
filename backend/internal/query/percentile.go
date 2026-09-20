@@ -19,13 +19,16 @@ const medianPercentile = 0.5
 
 // BuildPercentileExpr 按 caps 声明的策略生成 percentile SQL 表达式（不含 "AS alias"，
 // 由调用方拼接）。field 必须是已过 safeIdentifier 校验的裸/引号列名。
-// 当前仅 "percentile_cont" 策略真实落地（PG 走这条，plan §4.1 表格）；其余策略
-// **显式报错、不静默近似**（plan §4.2 明确规则）：
-//   - "" / "unsupported"：数据源不支持 percentile（CH/MySQL/StarRocks 现状，Task 3-0 保守裁定）；
-//   - "quantilesExactInclusive"：ClickHouse 潜在未来路径（返回 ARRAY 需 [1] 索引 + scalar 形状
-//     对齐），未实现——**若未来某驱动把策略改成这个值，本函数返回 "not yet implemented"
-//     错误**，强制要求同步升级本文件与测试，防止驱动侧声明与 SQL 生成侧脱节；
-//   - "window_ntile"：MySQL 8+ / StarRocks 潜在未来路径（PERCENT_RANK + 插值），同上；
+// 真实落地的策略（均产出**标量聚合表达式**，可进 GROUP BY SELECT）：
+//   - "percentile_cont"：PG 标准 SQL；
+//   - "percentile_cont_args_first"：StarRocks（参数列在前），2026-09-19 实测；
+//   - "quantilesExactInclusive"：ClickHouse 的 quantileExactInclusive(p)(field)，
+//     形状正确、可单测；但 CH 路径端到端仍待驱动侧探针实测翻转策略后才生效。
+// 其余策略**显式报错、不静默近似**（plan §4.2 明确规则）：
+//   - "" / "unsupported"：数据源不支持 percentile（MySQL 现状）；
+//   - "window_ntile"：MySQL 8+ / StarRocks 的候选路径，但 NTILE/PERCENT_RANK 是窗口函数、
+//     在 GROUP BY 之后求值，**无法作为标量聚合表达式**（需子查询重塑 builder 链），故报错，
+//     另列为独立任务，见 §"实现缺口"；
 //   - 其他未知值：视为配置错误。
 func BuildPercentileExpr(field string, p float64, caps *datasource.DialectCapabilities) (string, error) {
 	if caps == nil {
@@ -45,10 +48,23 @@ func BuildPercentileExpr(field string, p float64, caps *datasource.DialectCapabi
 		// 2026-09-19 在真实实例（192.168.10.237:9030）实测验证为精确百分位
 		// （0.5 分位返回 16.585，与 percentile_approx 的近似值 16.584999 明显区分）。
 		return fmt.Sprintf("percentile_cont(%s, %.4g)", field, p), nil
+	case "quantilesExactInclusive":
+		// ClickHouse：quantileExactInclusive(<p>)(<field>)——水平参数在括号内、列在第二组
+		// 括号里，是**有序集聚合函数**，返回单个标量，故能作为 GROUP BY SELECT 里的聚合
+		// 表达式（与 percentile_cont 同一形状契约）。每次调用只求一个百分位（boxplot 的
+		// Q1/median/Q3 分三次调用），故用**单数** quantile 而非复数 quantiles（后者返回
+		// ARRAY，需 [1] 索引，在聚合上下文里形状更脆）。
+		// 注意：本表达式能正确生成，但**不代表 CH 路径已验证**——需驱动侧把
+		// PercentileStrategy 探针实测翻转为本值才会走到这里（见 executor 前置门）。
+		return fmt.Sprintf("quantileExactInclusive(%.4g)(%s)", p, field), nil
+	case "window_ntile":
+		// **架构性不支持作为标量表达式**：NTILE/PERCENT_RANK 是窗口函数，在 GROUP BY
+		// **之后**对分组结果行求值，无法表达"组内原始行的第 p 百分位值"——那需要子查询
+		// /lateral 重塑整条 builder 链（SELECT 聚合表达式模型容纳不下）。硬产一个字符串
+		// 只会得到静默错值，故本策略**显式报错**，作为独立的 builder 重构任务另行处理。
+		return "", fmt.Errorf("percentile strategy %q needs a subquery/window builder (evaluated post-GROUP-BY), not implementable as a scalar aggregate expression", caps.PercentileStrategy)
 	case "", "unsupported":
 		return "", fmt.Errorf("percentile aggregation not supported by this data source")
-	case "quantilesExactInclusive", "window_ntile":
-		return "", fmt.Errorf("percentile strategy %q is declared but not yet implemented in percentile.go", caps.PercentileStrategy)
 	default:
 		return "", fmt.Errorf("unknown percentile strategy %q", caps.PercentileStrategy)
 	}
