@@ -16,6 +16,18 @@ import {
 import type { ComponentType } from 'react';
 import type { ChartConfig, ChartStyleConfig, QueryConfig } from '@/store';
 
+/**
+ * ⚠️ 改槽位（fieldGroups/styleKeys）必须按此清单同步，漏一步会静默丢功能：
+ * 1. chartDefinitions 的 fieldGroups(+styleKeys)
+ * 2. 后端 internal/query/processor.go、processor_stats.go 的槽位常量
+ *    （SlotXAxis / SlotIndicators / SlotSeriesGroup / SlotColorGroup 等）与归槽分支
+ * 3. 孤儿槽位（定义裁剪后不再被引用的字段组）
+ * 4. chartOptions.ts 渲染分支
+ * 5. 相关测试（chartDefinitions.test / builder / normalize 等共 4 处）
+ * 6. 历史图表兼容（migrateChartConfig / normalizeQueryConfigForChartType 的搬运逻辑）
+ * 7. 后端槽位常量默认不删（含已下线的 color_group/series_group，归槽分支刻意保留）
+ */
+
 export type BuilderChartType = ChartConfig['chartType'];
 export type FieldGroupKind = 'dimension' | 'metric';
 

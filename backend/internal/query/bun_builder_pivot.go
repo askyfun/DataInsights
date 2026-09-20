@@ -91,9 +91,9 @@ func (qb *BunQueryBuilder) buildPivotGroupingSetsQuery(ast *QueryAST, rowDims, c
 		sb.WriteString(safeIdentifier(ast.Source))
 	}
 
-	if len(ast.Filters) > 0 {
+	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" WHERE ")
-		sb.WriteString(qb.buildWhereClause(ast, &args))
+		sb.WriteString(where)
 	}
 
 	detailSet := make([]string, 0, len(rowExprs)+len(colExprs))
@@ -223,9 +223,9 @@ func (qb *BunQueryBuilder) buildPivotUnionAllQuery(ast *QueryAST, rowDims, colDi
 		sb.WriteString(strings.Join(selectParts, ", "))
 		sb.WriteString(" FROM ")
 		sb.WriteString(source())
-		if len(ast.Filters) > 0 {
+		if where := qb.buildWhereClause(ast, &args); where != "" {
 			sb.WriteString(" WHERE ")
-			sb.WriteString(qb.buildWhereClause(ast, &args))
+			sb.WriteString(where)
 		}
 		if len(groupBy) > 0 {
 			sb.WriteString(" GROUP BY ")

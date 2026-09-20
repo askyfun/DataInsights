@@ -139,6 +139,8 @@ func (s *datasetService) Delete(ctx context.Context, id int) error {
 			return fmt.Errorf("failed to cascade delete charts: %w", err)
 		}
 		// 级联软删这些图表下分享。
+		// ⚠️ 子查询刻意不带 deleted_at IS NULL：父行刚在本事务软删，子查询加过滤会断链。
+		// 行筛选只靠外层的 IS NULL——勿"顺手"给子查询补过滤。
 		if _, err := tx.NewUpdate().
 			Model((*model.Share)(nil)).
 			Set("deleted_at = now()").

@@ -44,9 +44,9 @@ func (qb *BunQueryBuilder) buildHistogramStatsQuery(ast *QueryAST, valueField st
 		qb.quoteResultAlias(histogramCountAlias)))
 	sb.WriteString(" FROM ")
 	sb.WriteString(histogramSourceSQL(ast))
-	if len(ast.Filters) > 0 {
+	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" WHERE ")
-		sb.WriteString(qb.buildWhereClause(ast, &args))
+		sb.WriteString(where)
 	}
 
 	return sb.String(), args
@@ -96,9 +96,9 @@ func (qb *BunQueryBuilder) buildHistogramBinQuery(ast *QueryAST, valueField stri
 	sb.WriteString(binCol)
 	sb.WriteString(fmt.Sprintf(", COUNT(*) AS %s FROM (SELECT FLOOR((%s - ?) / ?) AS %s FROM %s",
 		qb.quoteResultAlias(histogramCountAlias), field, binCol, histogramSourceSQL(ast)))
-	if len(ast.Filters) > 0 {
+	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" WHERE ")
-		sb.WriteString(qb.buildWhereClause(ast, &args))
+		sb.WriteString(where)
 	}
 	sb.WriteString(") AS _hist_bins GROUP BY ")
 	sb.WriteString(binCol)

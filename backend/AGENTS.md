@@ -82,9 +82,16 @@ handler → service → domain/entity
 ## 常用命令
 
 ```bash
+# 推荐走仓库根 Makefile
+make install-backend   # 安装 Go 依赖
+make dev-backend       # 启动服务，端口 23352（使用 air 热重载）
+make build-backend     # 构建后端二进制
+
+# 直接调 go 命令（需要时）
 cd backend
 go mod download
-go run ./cmd/main.go                       # 启动服务，端口 23352
+go run ./cmd                               # 启动服务，端口 23352（写成 cmd/main.go 会缺 routes.go）
+go build -o bin/server ./cmd               # 构建后端二进制
 go test ./...                              # 运行所有测试
 go test -v ./path/to/pkg -run TestName     # 运行单个测试
 go test -race ./...                        # 带竞态检测运行测试

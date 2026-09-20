@@ -12,7 +12,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 - **前端**: React 19 + TypeScript + Ant Design 6.x + ECharts 6.x + Zustand 5.x + @dnd-kit + Vite 8 + Biome（lint/格式化） + Vitest（测试）
 - **后端**: Go 1.27 + Gin + bun ORM + PostgreSQL + Sentry
-- **部署**: Docker + docker-compose
+- **部署**: Docker + docker compose
 
 ### 后端分层架构
 
@@ -71,9 +71,16 @@ pnpm check             # biome 完整检查（lint + 格式化）
 pnpm test              # vitest 运行测试
 pnpm build:check       # biome check + vitest（提交前验证）
 
-# 后端
+# 后端（推荐走 Makefile）
+make install-backend   # 安装 Go 依赖
+make dev-backend       # 开发服务器，端口 23352（使用 air 热重载）
+make build-backend     # 构建后端二进制
+make serve             # 本地验证单进程形态：构建前端后由后端托管 frontend/dist（单端口 23352）
+
+# 直接调 go 命令（需要时）
 cd backend && go mod download
-go run ./cmd/main.go                       # 开发服务器，端口 23352
+go run ./cmd                               # 开发服务器，端口 23352（写成 cmd/main.go 会缺 routes.go）
+go build -o bin/server ./cmd               # 构建后端二进制
 go test ./...                              # 运行所有测试
 go test -v ./path/to/pkg -run TestName     # 运行单个测试
 go test -race ./...                        # 带竞态检测运行测试
@@ -81,12 +88,11 @@ go test -race ./...                        # 带竞态检测运行测试
 # Makefile（项目根目录）
 make dev               # 前后端同时启动，带热重载（air）
 make dev-frontend      # 仅前端
-make dev-backend       # 仅后端（使用 air 热重载）
 make build             # 前后端构建
-make serve             # 本地验证单进程形态：构建前端后由后端托管 frontend/dist（单端口 23352）
 make docker-build      # 构建单镜像（前端+后端编译进同一个镜像）
-make docker-up         # docker-compose 启动所有服务
+make docker-up         # docker compose 启动所有服务（自动 --build）
 make docker-down       # 停止服务
+make docker-logs       # 查看日志
 make clean             # 清理 dist、node_modules、backend/bin
 ```
 
@@ -210,9 +216,9 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 
 **优先级（低 → 高）：内置默认值 < `.env` 文件 < 真实系统环境变量。项目不提供配置文件。**
 
-- **唯一配置来源是环境变量。** 没有 `config.toml`/`config.yaml` 这类文件（`backend/etc/` 已删除）。理由：容器化部署下每个要用户填的值都必须能从外部注入（`docker run --env-file` / compose `env_file` / K8s env），再挂一份文件只会制造"改了没生效"的歧义 —— 同一项两处可写、优先级还得记。
+- **唯一配置来源是环境变量。** 没有 `config.toml`/`config.yaml` 这类文件（`backend/etc/` 已删除）。理由：容器化部署下每个要用户填的值都必须能从外部注入（`docker run -e` / `docker run --env-file` / compose `environment` / K8s env），再挂一份文件只会制造"改了没生效"的歧义 —— 同一项两处可写、优先级还得记。
 - **环境变量文件（本地开发入口）**: 仓库根 `.env`（**不入库**，模板见 `.env.example`）。前后端共用这一份：后端读**裸名** env（无前缀，如 `DATABASE_URL`），前端只消费 `VITE_` 前缀（Vite 由 `vite.config.ts` 的 `envDir` 指向仓库根）。`docker run --env-file .env` 可直接使用，因此文件保持 `KEY=value` 裸格式：不加引号、不写 `export`。
-- **后端环境变量**: `PORT` / `DATABASE_URL` / `SECURITY_KEY` / `SENTRY_DSN` / `CORS_ALLOWED_ORIGINS` / `STATIC_DIR`。**刻意不加前缀**：单进程单体没有命名空间要抢，而 `DATABASE_URL` / `PORT` 是 12-factor 标准名，云平台（Heroku / Railway / Render / Fly）会自动注入，裸名能直接吃。监听地址固定 `0.0.0.0`，**不提供** env 覆盖。空字符串一律等同于"未设置"，所以 `.env` 里留空占位不会打掉内置默认值。`DATABASE_URL` 是**唯一必填项**，缺失时启动 fail-fast 并打印变量名，不会退化成驱动层看不懂的连接失败。装配逻辑全在 `internal/config/config.go` 的 `Load()`；`.env` 由 `LoadDotEnv` 装载且**不覆盖**已存在的真实环境变量 —— 这正是优先级的实现方式。启动参数只剩 `-env`（默认依次探测 `./.env`、`../.env`，覆盖"从仓库根启动"与"从 backend/ 启动"）。
+- **后端环境变量**: `PORT` / `DATABASE_URL` / `SECURITY_KEY` / `SENTRY_DSN` / `CORS_ALLOWED_ORIGINS` / `STATIC_DIR`。**刻意不加前缀**：单进程单体没有命名空间要抢，而 `DATABASE_URL` / `PORT` 是 12-factor 标准名，云平台（Heroku / Railway / Render / Fly）会自动注入，裸名能直接吃。监听地址固定 `0.0.0.0`，**不提供** env 覆盖。空字符串一律等同于"未设置"，所以 `.env` 里留空占位不会打掉内置默认值。`DATABASE_URL` 是**唯一必填项**，缺失时启动 fail-fast 并打印变量名，不会退化成驱动层看不懂的连接失败。装配逻辑全在 `internal/config/config.go` 的 `Load()`；`.env` 由 `LoadDotEnv` 装载且**不覆盖**已存在的真实环境变量 —— 这正是优先级的实现方式。启动参数只剩 `-env`（默认依次探测 `./.env`、`../.env`，覆盖"从仓库根启动"与"从 backend/ 启动"）。`SECURITY_KEY` 留空不再降级为明文：首次启动自动随机生成（32 字节 hex）并持久化到数据库 `bi_setting` 表（`internal/keystore`），重启/容器重建复用同一把，保证已加密数据源密码始终可解；显式配置时环境变量优先。
 - 前端 API 基础 URL: **唯一来源**是 `frontend/src/lib/api/client.ts` 的 `resolveApiBaseURL`（`api/index.ts` 只消费该实例，**不得再 `axios.create`**）。两档语义：`VITE_API_BASE_URL` 配了非空绝对地址则直接采用（前后端分开部署的逃生口）；未配置则生产构建自动同源（请求路径自带 `/api` 前缀，baseURL 留空串）、开发回退 `http://<当前访问主机名>:23352`（后端 CORS 默认放开，换自定义域名无需任何配置）。⚠️ `VITE_*` 是**构建期内联**进 JS 的，改完必须重新 build 才生效，也正因如此**绝不可**在里面放密钥。
 - 前端 Sentry DSN: `VITE_SENTRY_DSN`（**构建期内联**）。未设置则 `main.tsx` 完全跳过 `Sentry.init`，不产生任何上报。与后端 `SENTRY_DSN` 是两个独立项目。
 - **单镜像单进程（`Dockerfile`，构建上下文 = 仓库根目录）**: 三阶段 —— `node:24-alpine`（Active LTS）构建前端产物 → `golang:1.27-alpine` 编译后端 → `alpine:3.24` 运行（二进制 + `dist` 一起拷进去）。**没有 nginx**：Go 进程自己按路径分流，同时提供 API 与页面，对外只有一个端口 23352。
@@ -220,7 +226,7 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
   - 缓存策略继承原来的 nginx 配置语义：`assets/` 下带内容哈希的产物 `immutable` 长缓存，其余 `no-cache`。
   - 静态目录**配错即启动失败**（`webui.New` 读不到 `index.html` 就退出），不会跑起来之后整站 404。
   - 镜像自带的只有 `STATIC_DIR=/app/web`（代码默认值是"空 = 只提供 API"，必须显式指）；监听地址/端口的内置默认值本就是 `0.0.0.0:23352`，无需重复声明。其余全部运行时注入。
-- Docker compose: `docker-compose.yml` — PostgreSQL（端口 5432）+ **一个 app 服务**（23352，前后端同容器）；后端只认 `DATABASE_URL`（裸名即 12-factor 标准名，无前缀历史包袱）。
+- `docker compose`: `docker-compose.yml` — PostgreSQL（端口 5432）+ **一个 app 服务**（23352，前后端同容器）；后端只认 `DATABASE_URL`（裸名即 12-factor 标准名，无前缀历史包袱）。
 - 本地不起 Docker 也能验证同一形态：`make serve`（构建前端产物后 `STATIC_DIR=../frontend/dist go run ./cmd`）。不设 `STATIC_DIR` 时后端退化为纯 API 服务，此时 `/share/:token` 才会注册。
 - ⚠️ **`frontend/vite.config.js` / `.d.ts` 是 tsc 产物，且会遮蔽 `vite.config.ts`**（Vite 解析 `vite.config.js` 优先于 `.ts`）。曾出现改了 `.ts` 却完全不生效的情况。发现配置改动「没反应」时先 `ls frontend/vite.config.*`，删掉这两个文件再验证。
 
@@ -241,3 +247,5 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 - 前端无 ESLint/Prettier 配置（使用 Biome）
 - 后端无 golangci-lint 配置
 - 缺少端到端测试
+- **数据源方言能力验证不均衡**：4 种外部数据源（postgresql/mysql/clickhouse/starrocks）连接与元数据读取均已实现，但**只有 PostgreSQL 有真实能力懒探针**。MySQL/StarRocks 已升级为"只升不降 + nil 保底"探针（无实例时行为等于保守基线，不回归），ClickHouse 刻意保持静态（剩余布尔能力已是文档-true、percentile 需语义校验）。受能力门控的图表落地参差：**boxplot 仅 PG 端到端可用**（StarRocks percentile 策略已实测但翻转需实例；CH 待语义校验；MySQL 无标量 percentile 路径暂不支持）；pivot 全源可用（GROUPING SETS 缺失时自动回退 UNION ALL）。详见 `docs/todo.md` §八。不要向未列明实例验证的后端过度声称图表支持。
+

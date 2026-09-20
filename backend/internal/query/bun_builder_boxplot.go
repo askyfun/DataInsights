@@ -80,9 +80,9 @@ func (qb *BunQueryBuilder) buildBoxplotStatsQuery(
 	))
 	sb.WriteString(" FROM ")
 	sb.WriteString(histogramSourceSQL(ast)) // 通用 FROM 源渲染（SQL 数据集包 _subq、表数据集 safeIdentifier）
-	if len(ast.Filters) > 0 {
+	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" WHERE ")
-		sb.WriteString(qb.buildWhereClause(ast, &args))
+		sb.WriteString(where)
 	}
 	return sb.String(), args, nil
 }
@@ -122,9 +122,9 @@ func (qb *BunQueryBuilder) buildBoxplotOutliersQuery(
 	sb.WriteString(fmt.Sprintf("%s AS %s FROM %s", field, qb.quoteResultAlias(boxOutlierValueAlias), histogramSourceSQL(ast)))
 	sb.WriteString(" WHERE ")
 	sb.WriteString(fmt.Sprintf("(%s < ? OR %s > ?)", field, field))
-	if len(ast.Filters) > 0 {
+	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" AND ")
-		sb.WriteString(qb.buildWhereClause(ast, &args))
+		sb.WriteString(where)
 	}
 	sb.WriteString(" ORDER BY ")
 	sb.WriteString(field)
@@ -156,9 +156,9 @@ func (qb *BunQueryBuilder) buildBoxplotOutlierCountQuery(
 	sb.WriteString(fmt.Sprintf("COUNT(*) AS %s FROM %s", qb.quoteResultAlias(boxOutlierCountAlias), histogramSourceSQL(ast)))
 	sb.WriteString(" WHERE ")
 	sb.WriteString(fmt.Sprintf("(%s < ? OR %s > ?)", field, field))
-	if len(ast.Filters) > 0 {
+	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" AND ")
-		sb.WriteString(qb.buildWhereClause(ast, &args))
+		sb.WriteString(where)
 	}
 	return sb.String(), args
 }

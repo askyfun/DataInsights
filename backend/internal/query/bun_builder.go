@@ -135,10 +135,10 @@ func (qb *BunQueryBuilder) BuildSelectQuery(ast *QueryAST) (string, []interface{
 		sb.WriteString(safeIdentifier(ast.Source))
 	}
 
-	// WHERE 子句
-	if len(ast.Filters) > 0 {
+	// WHERE 子句（子句为空时不写：过滤全被跳过时不得留下悬空 WHERE）
+	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" WHERE ")
-		sb.WriteString(qb.buildWhereClause(ast, &args))
+		sb.WriteString(where)
 	}
 
 	// GROUP BY 子句
@@ -188,11 +188,11 @@ func (qb *BunQueryBuilder) BuildCountQuery(ast *QueryAST) (string, []interface{}
 		sb.WriteString(safeIdentifier(ast.Source))
 	}
 
-	// WHERE 子句
-	if len(ast.Filters) > 0 {
+	// WHERE 子句：与 select 共用 buildWhereClause——logic 标记已是切片元素，
+	// 此处若再用 " AND " 拼会产出 "p0 AND AND AND p1" 畸形 SQL。
+	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" WHERE ")
-		whereParts := qb.buildWhereParts(ast, &args)
-		sb.WriteString(strings.Join(whereParts, " AND "))
+		sb.WriteString(where)
 	}
 
 	// GROUP BY 子句
@@ -310,6 +310,13 @@ func (qb *BunQueryBuilder) renderDimensionGroupBy(dim DimensionExprAST) string {
 	}
 
 	safeField := safeIdentifier(fieldExpr)
+	// ⚠️ builder 自守：粒度串进 SQL 引号前必须过白名单形态（与 ValidateGranularity 同一份
+	// granularityTokenPattern）。生产路径由 executor 先校验后建 SQL；此守卫防的是将来
+	// 绕过 executor 的新调用点（SQL 预览/导出等）把引号闭合注入原样拼进 DATE_TRUNC。
+	// 非法粒度退化为原始字段，而非透传。
+	if !granularityTokenPattern.MatchString(dim.Granularity) {
+		return safeField
+	}
 	switch qb.dialect {
 	case DialectPostgreSQL:
 		return fmt.Sprintf("DATE_TRUNC('%s', %s)", dim.Granularity, safeField)
@@ -368,19 +375,21 @@ func (qb *BunQueryBuilder) buildFilterPart(f *FilterExpr, args *[]interface{}) s
 	case FilterIsNotNull:
 		return fmt.Sprintf("%s IS NOT NULL", field)
 	case FilterIn, FilterNotIn:
+		connector := "IN"
+		if f.Op == FilterNotIn {
+			connector = "NOT IN"
+		}
 		if vals, ok := f.Value.([]any); ok && len(vals) > 0 {
 			placeholders := make([]string, len(vals))
 			for i := range vals {
 				placeholders[i] = "?"
 				*args = append(*args, vals[i])
 			}
-			connector := "IN"
-			if f.Op == FilterNotIn {
-				connector = "NOT IN"
-			}
 			return fmt.Sprintf("%s %s (%s)", field, connector, strings.Join(placeholders, ", "))
 		}
-		return ""
+		// 值缺失或非数组：fail-closed——渲染恒假谓词（IN (NULL) 命中 0 行），
+		// 绝不让整条条件静默消失（否则会返回未过滤的全量数据，错误不可见）。
+		return fmt.Sprintf("%s %s (NULL)", field, connector)
 	case FilterBetween:
 		*args = append(*args, f.Value, f.ValueEnd)
 		return fmt.Sprintf("%s BETWEEN ? AND ?", field)

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -660,8 +661,15 @@ var SupportedExpressions = map[string]StandardDataType{
 func InferExpressionResultType(expr string) StandardDataType {
 	upperExpr := strings.ToUpper(expr)
 
-	// 检查已知函数
-	for funcName, resultType := range SupportedExpressions {
+	// 检查已知函数。必须按排序后的名字遍历：map 迭代序随机，
+	// 同一表达式（如 ABS(MONTH(x))）每次调用可能命中不同函数而返回不同类型（非纯函数）。
+	funcNames := make([]string, 0, len(SupportedExpressions))
+	for name := range SupportedExpressions {
+		funcNames = append(funcNames, name)
+	}
+	sort.Strings(funcNames)
+	for _, funcName := range funcNames {
+		resultType := SupportedExpressions[funcName]
 		if strings.Contains(upperExpr, funcName) {
 			if resultType != TypeUnknown {
 				return resultType

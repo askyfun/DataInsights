@@ -3,12 +3,12 @@
 ## 前端
 
 ```bash
-cd frontend && pnpm install
-
-pnpm dev             # 开发模式 (端口 23351)
-pnpm build           # 构建 (tsc + vite build)
-pnpm preview         # 预览构建结果
+make install-frontend    # 安装依赖（只允许 pnpm）
+make dev-frontend        # 开发模式 (端口 23351)
+make build-frontend      # 构建 (tsc + vite build)
 ```
+
+> 若本机没有 pnpm，先执行 `npm install -g pnpm`。npm / yarn 会被 `preinstall` 钩子拦截并中止。
 
 前端 API 地址只有一处来源：`src/lib/api/client.ts` 的 `resolveApiBaseURL`。两档语义，默认零配置：
 
@@ -20,6 +20,17 @@ pnpm preview         # 预览构建结果
 后端**不读任何配置文件**，只认裸名环境变量（无前缀），其中 `DATABASE_URL` 必填。
 
 ## 后端
+
+```bash
+make install-backend    # 安装 Go 依赖（等价 cd backend && go mod download）
+make dev-backend        # 开发模式（热重载，需要 air）
+make build-backend      # 构建二进制
+make serve              # 构建前端并让后端托管 frontend/dist（单端口 23352）
+```
+
+> `make dev-backend` 依赖 `air`。若未安装，执行 `go install github.com/cosmtrek/air@latest`。
+
+需要直接调 go 命令的参考：
 
 ```bash
 cd backend && go mod download
@@ -39,20 +50,29 @@ go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
 
 ## Docker
 
-单镜像单进程：前后端编译进**一个镜像**，由**一个 Go 进程、一个端口（23352）**同时提供 API 与页面。
+单镜像单进程：前后端编译进**一个镜像**，由**一个 Go 进程、一个端口（23352）**同时提供 API 与页面。首次构建约 5-10 分钟。
 
 ```bash
 make docker-build   # 构建镜像（等价 docker build -t data-insights .）
-make docker-up      # 启动（compose：PostgreSQL + app）
+make docker-up      # 启动（compose：PostgreSQL + app，自动 --build）
 make docker-logs    # 查看日志
 make docker-down    # 停止服务
 make dev            # 本地开发 (使用 air 热重载)
 ```
 
-直接用 Docker（不经过 compose）：
+> compose 路径所有环境变量都有默认值，不需要 `.env` 文件即可启动。
+
+直接用 Docker（不经过 compose，需要自备 PostgreSQL）：
 
 ```bash
 docker build -t data-insights .
+
+# DATABASE_URL 是唯一必填项
+docker run -d -p 23352:23352 \
+  -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
+  --name data-insights data-insights
+
+# 或通过 .env 文件传入（cp .env.example .env 后按需修改）
 docker run -d -p 23352:23352 --env-file .env --name data-insights data-insights
 ```
 

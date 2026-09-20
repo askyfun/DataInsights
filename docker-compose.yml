@@ -28,18 +28,22 @@ services:
         # VITE_API_BASE_URL 不传：生产构建默认同源，无需任何配置。
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
     container_name: data-insights-app
-    # 配置全部来自仓库根 .env —— 后端不读任何配置文件（没有 config.toml 这类东西）。
-    # compose 会读同目录的 .env 做插值，这里的 env_file 则把整份变量注入容器。
-    env_file:
-      - .env
+    # 后端不读任何配置文件，所有配置通过环境变量注入。
+    # 以下变量可通过三种方式覆盖（优先级高 → 低）：
+    #   1. shell 环境变量：DATABASE_URL=... docker compose up
+    #   2. 仓库根 .env 文件：docker compose 会自动加载同目录 .env 做插值
+    #   3. 直接修改本文件里的默认值
+    # 不再强制要求 `cp .env.example .env`。
     environment:
-      # environment 的优先级高于 env_file。compose 网络内的数据库是服务名 postgres，
-      # 而 .env 里的地址是给宿主本地开发用的（localhost），必须在这里覆盖。
-      DATABASE_URL: postgres://insights:insights123@postgres:5432/insights?sslmode=disable
+      # compose 网络内的数据库是服务名 postgres；默认值已指向 compose 自带的 PostgreSQL。
+      DATABASE_URL: ${DATABASE_URL:-postgres://insights:insights123@postgres:5432/insights?sslmode=disable}
+      PORT: ${PORT:-23352}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      SECURITY_KEY: ${SECURITY_KEY:-}
     ports:
-      # 容器内实际监听的端口来自 .env 的 PORT（默认 23352），两边必须一致 ——
-      # 只改 .env 的 PORT 会让映射端口和进程监听端口对不上。
-      - "23352:23352"
+      # 容器内监听端口与宿主机映射端口保持一致；通过 PORT 变量统一控制。
+      - "${PORT:-23352}:${PORT:-23352}"
     depends_on:
       postgres:
         condition: service_healthy

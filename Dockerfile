@@ -83,8 +83,9 @@ ENV STATIC_DIR=/app/web \
     TZ=Asia/Shanghai
 
 # 健康检查直接探后端的 /health —— 同一端口同一进程，无需额外的探活工具。
+# PORT 可在运行时覆盖；未设置则回退到默认 23352。
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:23352/health || exit 1
+    CMD wget -qO- "http://127.0.0.1:${PORT:-23352}/health" || exit 1
 
 EXPOSE 23352
 

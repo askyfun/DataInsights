@@ -89,7 +89,7 @@ build-frontend:
 # 构建后端
 build-backend:
 	@echo "$(YELLOW)构建后端...$(NC)"
-	cd backend && go build -o bin/server cmd/main.go
+	cd backend && go build -o bin/server ./cmd
 
 # 从 api/openapi.yaml 生成双端契约类型（backend/internal/idls 与 frontend/src/idls）
 api-gen:
@@ -105,14 +105,14 @@ docker-build:
 
 docker-up:
 	@echo "$(YELLOW)启动 Docker 容器...$(NC)"
-	docker-compose up -d
+	docker compose up -d --build
 
 docker-down:
 	@echo "$(YELLOW)停止 Docker 容器...$(NC)"
-	docker-compose down
+	docker compose down
 
 docker-logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 # 不用 Docker 也能验证「单进程同时提供 API 与页面」：先构建前端产物，
 # 再让后端托管 frontend/dist。端口与镜像一致（23352）。

@@ -4,13 +4,14 @@
 
 ## 功能特性
 
-- **数据源管理** - 支持 PostgreSQL、MySQL、ClickHouse、StarRocks 数据库连接配置和连接测试
-- **数据集管理** - 支持直接查询表模式或自定义 SQL 模式
-- **拖拽式图表构建** - 通过拖拽字段快速创建可视化图表
-  - 折线图 (Line Chart)
-  - 柱状图 (Bar Chart)
-  - 饼图 (Pie Chart)
-- **分享功能** - 生成分享链接，支持密码保护
+- **数据源管理** — 支持 PostgreSQL、MySQL、ClickHouse、StarRocks 四种数据库连接配置与连接测试
+- **数据集管理** — 支持直接查询表模式或自定义 SQL 模式
+- **拖拽式图表构建** — 通过拖拽字段快速创建可视化图表，支持 13 种图表类型：
+  - 表格、透视表、KPI 卡
+  - 柱状图、折线图、面积图、组合图（双轴）
+  - 饼图、漏斗图、雷达图
+  - 散点图、直方图、箱线图
+- **分享功能** — 生成分享链接，支持密码保护
 
 ## 技术栈
 
@@ -30,46 +31,64 @@
 
 ## 快速开始
 
+### 前置条件
+
+- Docker 和 Docker Compose（方式一），或仅 Docker（方式二需自备 PostgreSQL）
+
 ### 使用 Docker（单镜像单进程）
 
-前后端编译进**同一个镜像**，由**一个 Go 进程、一个端口**同时提供 API 与页面（没有 nginx）：
+前后端编译进**同一个镜像**，由**一个 Go 进程、一个端口**同时提供 API 与页面（没有 nginx）。首次构建约 5-10 分钟。
+
+**方式一：Docker Compose（推荐，零外部依赖）**
+
+自带 PostgreSQL 容器，一条命令跑起来：
 
 ```bash
-cp .env.example .env                  # 按需修改（至少要填 DATABASE_URL）
+make docker-up
+# 或
+docker compose up -d --build
+```
+
+> 所有环境变量都有默认值，不需要 `.env` 文件即可启动（`DATABASE_URL` 之外都具备默认值；`SECURITY_KEY` 留空会自动生成并持久化到数据库）。
+
+**方式二：直接用 Docker（需要自备可访问的 PostgreSQL）**
+
+```bash
+# 构建镜像
 docker build -t data-insights .
+
+# 启动（DATABASE_URL 是唯一必填项）
+docker run -d -p 23352:23352 \
+  -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
+  --name data-insights data-insights
+
+# 或通过 .env 文件传入（先 cp .env.example .env 再修改）
 docker run -d -p 23352:23352 --env-file .env --name data-insights data-insights
 ```
 
-打开 http://localhost:23352 就是完整应用。
-
-或用 compose（会额外起一个 PostgreSQL 容器）：
-
-```bash
-docker-compose up --build
-```
-
-服务启动后：
-- 应用（含前端页面与 API）: http://localhost:23352
+服务启动后访问 http://localhost:23352
 
 ### 本地开发
 
 #### 后端
 
 ```bash
-cd backend
-go mod tidy
-go run ./cmd/main.go
+make install-backend   # 安装 Go 依赖
+make dev-backend       # 开发模式（热重载，需要 air）
+make build-backend     # 构建二进制
 ```
+
+> `make dev-backend` 依赖 `air`。若未安装，可先执行 `go install github.com/cosmtrek/air@latest`。
+> 想直接调 go 命令的，见 [docs/setup.md](docs/setup.md)。
 
 #### 前端
 
-> 依赖**只允许用 pnpm** 安装。npm / yarn 会被 `preinstall` 钩子拦截并中止。详见 [AGENTS.md](AGENTS.md)。
-
 ```bash
-cd frontend
-pnpm install
-pnpm dev
+make install-frontend   # 安装依赖（只允许 pnpm，npm/yarn 会被拦截）
+make dev-frontend       # 开发服务器
 ```
+
+> 依赖**只允许用 pnpm** 安装。npm / yarn 会被 `preinstall` 钩子拦截并中止；若本机没有 pnpm，先执行 `npm install -g pnpm`。详见 [AGENTS.md](AGENTS.md)。
 
 ## 配置
 
@@ -81,8 +100,9 @@ cp .env.example .env    # 然后按需修改
 
 **优先级（低 → 高）：内置默认值 < `.env` 文件 < 真实系统环境变量。**
 
-- `.env` **不入库**（已在 `.gitignore`）；真实值只在本机或被部署环境注入。常用项只有四个：`DATABASE_URL`（必填）、`PORT`、`SENTRY_DSN`、`VITE_SENTRY_DSN`；其余（CORS 白名单、密码加密密钥、静态目录、分开部署地址）都有合理默认值，见 `.env.example` 进阶注释。
+- `.env` **不入库**（已在 `.gitignore`）；真实值只在本机或被部署环境注入。常用项只有两个：`DATABASE_URL`（必填）、`SECURITY_KEY`（留空也安全，见下）；其余（CORS 白名单、Sentry、静态目录、分开部署地址）都有合理默认值，见 `.env.example` 进阶注释。
 - 后端变量**无前缀**（单进程单体不需要命名空间，且 `DATABASE_URL` / `PORT` 是 12-factor 标准名，云平台会自动注入）：`PORT`、`DATABASE_URL`、`SECURITY_KEY`、`SENTRY_DSN`、`CORS_ALLOWED_ORIGINS`（留空 = 放开所有来源）、`STATIC_DIR`（前端产物目录；留空 = 只提供 API，页面由别的进程提供）。监听地址固定 `0.0.0.0`，不提供 env 覆盖。
+- `SECURITY_KEY` 用于加密数据源密码（AES-256-GCM）。**留空 = 首次启动自动随机生成并持久化到数据库 `bi_setting` 表**，此后重启/容器重建复用同一把，已加密密码始终可解；显式配置时环境变量优先。
 - 前端变量（`VITE_` 前缀）：`VITE_SENTRY_DSN`；`VITE_API_BASE_URL` 仅前后端分开部署时才需要填。⚠️ 这类变量在**构建期**被内联进 JS，改完必须重新 build，且**不能放密钥**。
 - 单容器/容器编排部署时，可用 `docker run --env-file .env ...` 或编排平台的 env 注入。
 
@@ -124,19 +144,22 @@ Go 进程按路径分流，替代了原先 nginx 的角色：
 ```
 .
 ├── Dockerfile                # 单镜像：前端产物 + Go 二进制，一个进程一个端口
-├── docker-compose.yml
-├── frontend/                 # 前端项目
-│   ├── src/
-│   │   ├── api/             # API 客户端
-│   │   ├── store/           # 状态管理
-│   │   └── pages/           # 页面组件
-└── backend/                  # 后端项目
-    ├── cmd/                 # 主程序
-    ├── internal/
-    │   ├── config/          # 配置
-    │   ├── database/        # 数据库
-    │   └── model/           # 数据模型
-    └── Dockerfile
+├── docker-compose.yml        # PostgreSQL + app（零外部依赖一键启动）
+├── frontend/                 # 前端项目（React 19 + TypeScript + Vite）
+│   └── src/
+│       ├── api/             # API 客户端与类型
+│       ├── store/           # Zustand 状态管理
+│       ├── pages/           # 页面组件
+│       └── components/      # 可复用组件（图表构建器、拖拽交互等）
+└── backend/                  # 后端项目（Go 1.27 + Gin + bun ORM）
+    ├── cmd/                 # 入口与路由注册
+    └── internal/
+        ├── config/          # 环境变量加载
+        ├── handler/         # HTTP 处理器
+        ├── service/         # 业务逻辑
+        ├── query/           # SQL 构造（AST + bun_builder）
+        ├── datasource/      # 多数据库驱动抽象
+        └── model/           # bun ORM 模型
 ```
 
 ## License
