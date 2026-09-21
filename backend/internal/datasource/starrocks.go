@@ -186,8 +186,8 @@ func (c *starRocksConnection) Capabilities(ctx context.Context) (*DialectCapabil
 
 // probeCapabilities 从**保守基线**出发，仅对能"响亮失败"的布尔能力跑只读探针，
 // **只升不降**，故未接实例时与升级前的静态值完全一致。
-//   - PercentileStrategy "percentile_cont_args_first"：2026-09-19 已在真实实例
-//     （192.168.10.237:9030）实测为精确百分位，作为基线保留、**不再重探**（避免探针
+//   - PercentileStrategy "percentile_cont_args_first"：2026-09-19 已在真实
+//     StarRocks 实例实测为精确百分位，作为基线保留、**不再重探**（避免探针
 //     语法抖动误降级一个已验证能力）。
 //   - GROUPING SETS：StarRocks 较新版本支持，基线 false——跑探针，成功才升 true
 //     （升 true 后 pivot 走 GROUPING SETS 而非 UNION ALL 回退）。
