@@ -1,1 +1,2 @@
+node scripts/check-secrets.mjs
 cd frontend && pnpm exec lint-staged
