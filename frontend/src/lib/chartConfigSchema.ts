@@ -149,6 +149,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** 仅认自有属性，避免 `obj['constructor']` 命中 Object.prototype 继承成员造成的假阳性 */
+function hasOwn(obj: object, key: string): boolean {
+  // Object.hasOwn 需 ES2022 lib（本项目 tsc target=ES2020），故用 call 形式；biome 的
+  // noPrototypeBuiltins 在此为 warning（门禁只卡 error）。
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+/** 以自有可枚举键写入：`obj['__proto__'] = v` 会被 setter 吞成原型，须绕开 */
+function defineOwn<T>(obj: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(obj, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
 function normalizeChartType(value: unknown, fallback: ChartType): ChartType {
   if (typeof value === 'string' && CHART_TYPES.includes(value)) {
     return value as ChartType;
@@ -166,7 +183,10 @@ function migrateGroups(input: unknown, resolve: FieldResolver): V1FieldGroup[] {
       return;
     }
     const fields = Array.isArray(entry.fields)
-      ? entry.fields.filter((f): f is string => typeof f === 'string').map((f) => resolve(f) ?? f)
+      ? entry.fields
+          .filter((f): f is string => typeof f === 'string')
+          .map((f) => resolve(f) ?? f)
+          .filter((f) => f !== '')
       : [];
     const group: V1FieldGroup = {
       id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `group-${index}`,
@@ -295,12 +315,12 @@ function mergeLegacyFieldMeta(
       if (name === undefined) {
         continue;
       }
-      const prev = fieldMeta[name];
+      const prev = hasOwn(fieldMeta, name) ? fieldMeta[name] : undefined;
       // 同一列名的同类元数据以先写入者为准（正常情况下不会冲突）
       if (prev && prev[metaKey] !== undefined) {
         continue;
       }
-      fieldMeta[name] = { ...prev, [metaKey]: value };
+      defineOwn(fieldMeta, name, { ...prev, [metaKey]: value });
     }
   }
   return fieldMeta;
@@ -326,7 +346,7 @@ function normalizeFieldMeta(input: unknown): Record<string, ChartMeta> {
       }
     }
     if (hasKey) {
-      fieldMeta[name] = normalized;
+      defineOwn(fieldMeta, name, normalized);
     }
   }
   return fieldMeta;
@@ -388,9 +408,10 @@ function convertV1ToV2(
       const bindings: BindingInstance[] = group.fields.map((field) => {
         const bindingId = `b-${counter}`;
         counter += 1;
-        const meta = v1FieldMeta[field];
+        // 仅认自有键：列名恰为 constructor/toString 等继承成员时不得凭空产出 meta 条目
+        const meta = hasOwn(v1FieldMeta, field) ? v1FieldMeta[field] : undefined;
         if (meta) {
-          fieldMeta[bindingId] = { ...meta };
+          defineOwn(fieldMeta, bindingId, { ...meta });
         }
         return { bindingId, field };
       });

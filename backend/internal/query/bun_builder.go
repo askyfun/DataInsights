@@ -396,9 +396,15 @@ func (qb *BunQueryBuilder) buildFilterPart(f *FilterExpr, args *[]interface{}) s
 	case FilterLike:
 		*args = append(*args, "%"+fmt.Sprintf("%v", f.Value)+"%")
 		return fmt.Sprintf("%s LIKE ?", field)
-	default:
+	case FilterEq, FilterNeq, FilterGt, FilterGte, FilterLt, FilterLte:
 		*args = append(*args, f.Value)
 		return fmt.Sprintf("%s %s ?", field, f.Op.ToString())
+	default:
+		// 未知算子：fail-closed——渲染恒假谓词（1 = 0，命中 0 行），与上面 IN/NotIn 的
+		// fail-closed 同构。绝不把未识别算子（前端笔误、或将来绕过 executor 校验的
+		// 新调用点）经 ToString 的 default 静默退化成 `field = ?`——那会把 gte 当 eq，
+		// 返回错误数据且全程无 error、无日志，错误不可见。
+		return "1 = 0"
 	}
 }
 
