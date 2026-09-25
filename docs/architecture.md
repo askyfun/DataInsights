@@ -133,7 +133,7 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 ## 契约与路由（Batch 2）
 
 - **契约单一事实源**：`api/openapi.yaml` 定义全部端点请求/响应 + `Envelope`（`code/msg/trace/data`）+ `ChartSpec`/`QuerySpec`；`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。当前生成物作为契约与校验基线；运行时类型尚未全量切换到生成物（列入 Batch 3）。
-- **泛型路由**：`backend/internal/router/router.go` 的 `API[In,Out] func(req Request[In], res *Response[Out]) error`（`res` 必须是指针，值传递会丢弃 handler 写入）已接入全部 31 个 API 端点。路由器按 HTTP 方法绑定 JSON body（POST/PUT/PATCH）+ query 参数并统一信封；`cmd/routes.go` 用 `Register{Get,Post,Put,Delete}Route` 注册，迁移样板见 `handler/datasource.go` 顶部 package doc。例外：`/health`（cmd/main.go）与 share `View`（302 重定向无法套 JSON 信封）。
+- **泛型路由**：`backend/internal/router/router.go` 的 `API[In,Out] func(req Request[In], res *Response[Out]) error`（`res` 必须是指针，值传递会丢弃 handler 写入）已接入全部 40 个 API 端点。路由器按 HTTP 方法绑定 JSON body（POST/PUT/PATCH）+ query 参数并统一信封；`cmd/routes.go` 用 `Register{Get,Post,Put,Delete}Route` 注册，迁移样板见 `handler/datasource.go` 顶部 package doc。例外：`/health`（cmd/main.go）与 share `View`（302 重定向无法套 JSON 信封）。
 - **图表配置 v1**：`bi_chart.config` 为 `{version:1, chartType, title, query:{dimensionGroups,metricGroups,filters,sort,limit}, fieldMeta, style, queryOptions}` 文档；`frontend/src/lib/chartConfigSchema.ts` 的 `migrateChartConfig` 在加载时把旧结构（`queryConfig` + 5 个平铺 Record + 位置 `field-N` + 恒为 null 的 `xAxisField`）迁移到 v1，`fieldId` 改用稳定列名，ShareView 据此正常渲染。
 
 ### 响应层
