@@ -1336,3 +1336,131 @@ describe('buildChartOption：boxplot 箱线图（R-52）', () => {
     expect(option.series[1].data).toEqual([]);
   });
 });
+
+describe('buildChartOption：时间维度类目轴排序（D3 后续修复）', () => {
+  // 后端 GROUP BY 不保证有序 → 折线/面积图直接消费会呈现锯齿假象。
+  // sortByTemporalAxis 对全 ISO 日期的 x_axis 按时间升序重排，并同步重排各 series.data。
+  const unsortedPayload = {
+    x_axis: ['2026-01-03T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'],
+    series: [
+      { name: 'temp_max', data: [30, 10, 20] },
+      { name: 'temp_min', data: [3, 1, 2] },
+    ],
+  };
+
+  it('line：x_axis 按时间升序，series.data 用同一份排列同步重排', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'line',
+        unsortedPayload,
+        baseStyle,
+        {},
+        { title: '', dimensions: ['date'], metrics: ['temp_max', 'temp_min'] }
+      )
+    );
+    expect(option.xAxis.data).toEqual([
+      '2026-01-01T00:00:00Z',
+      '2026-01-02T00:00:00Z',
+      '2026-01-03T00:00:00Z',
+    ]);
+    expect(option.series[0].data).toEqual([10, 20, 30]);
+    expect(option.series[1].data).toEqual([1, 2, 3]);
+  });
+
+  it('bar 同样按时间升序（柱状图看趋势时同语义）', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        unsortedPayload,
+        baseStyle,
+        {},
+        { title: '', dimensions: ['date'], metrics: ['temp_max'] }
+      )
+    );
+    expect(option.xAxis.data).toEqual([
+      '2026-01-01T00:00:00Z',
+      '2026-01-02T00:00:00Z',
+      '2026-01-03T00:00:00Z',
+    ]);
+    expect(option.series[0].data).toEqual([10, 20, 30]);
+  });
+
+  it('非时间维度（普通类目）保持后端原始顺序', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'line',
+        axisPayload, // Apple / Banana
+        baseStyle,
+        {},
+        { title: '', dimensions: ['city'], metrics: ['revenue'] }
+      )
+    );
+    expect(option.xAxis.data).toEqual(['Apple', 'Banana']);
+    expect(option.series[0].data).toEqual([1000, 2000]);
+  });
+
+  it('部分值非 ISO 日期时不重排（宁保持原序不误排）', () => {
+    const mixed = {
+      x_axis: ['2026-01-01T00:00:00Z', 'N/A'],
+      series: [{ name: 'v', data: [1, 2] }],
+    };
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'line',
+        mixed,
+        baseStyle,
+        {},
+        { title: '', dimensions: ['date'], metrics: ['v'] }
+      )
+    );
+    expect(option.xAxis.data).toEqual(['2026-01-01T00:00:00Z', 'N/A']);
+  });
+
+  it('combo：双轴 x_axis 同样按时间升序', () => {
+    const comboPayload = {
+      x_axis: ['2026-02-01T00:00:00Z', '2026-01-01T00:00:00Z'],
+      series: [
+        { name: 'm1', data: [2, 1] },
+        { name: 'm2', data: [22, 11] },
+      ],
+    };
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'combo',
+        comboPayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['date'],
+          metrics: ['m1', 'm2'],
+          metricSlots: [
+            { slot: 'primary_values', metrics: ['m1'] },
+            { slot: 'secondary_values', metrics: ['m2'] },
+          ],
+        }
+      )
+    );
+    expect(option.xAxis.data).toEqual(['2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z']);
+    expect(option.series[0].data).toEqual([1, 2]);
+    expect(option.series[1].data).toEqual([11, 22]);
+  });
+
+  it('axisLabel.formatter：ISO 午夜零点只显示日期，非零点时间转空格分隔', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'line',
+        unsortedPayload,
+        baseStyle,
+        {},
+        { title: '', dimensions: ['date'], metrics: ['temp_max'] }
+      )
+    );
+    const formatter = option.xAxis.axisLabel?.formatter;
+    expect(typeof formatter).toBe('function');
+    const fmt = formatter as (val: string) => string;
+    expect(fmt('2026-01-01T00:00:00Z')).toBe('2026-01-01');
+    expect(fmt('2026-01-01T08:30:00Z')).toBe('2026-01-01 08:30:00');
+    expect(fmt('2026-01-01 12:00:00 +0000 UTC')).toBe('2026-01-01 12:00:00');
+  });
+});

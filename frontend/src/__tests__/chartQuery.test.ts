@@ -219,7 +219,7 @@ describe('composeChartQueryRequest：histogram 的 query_options.bin_count 发�
   ];
   const histogramQueryConfig = {
     dimensionGroups: [],
-    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] }],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] }],
     filters: [],
   };
   const baseInput = {
@@ -243,7 +243,7 @@ describe('composeChartQueryRequest：histogram 的 query_options.bin_count 发�
     expect(request?.query_options).toEqual({ bin_count: 15 });
     expect(request?.spec_version).toBeUndefined();
     expect(request?.dims).toEqual([]);
-    expect(request?.metrics).toEqual([{ field: 'amount', agg: 'sum', alias: 'amount' }]);
+    expect(request?.metrics).toEqual([{ field: 'f-1', agg: 'sum', alias: 'amount' }]);
   });
 
   it('histogram + binCount 未设：bin_count 缺省 20', () => {
@@ -261,7 +261,7 @@ describe('composeChartQueryRequest：histogram 的 query_options.bin_count 发�
       ...baseInput,
       chartType: 'bar',
       queryConfig: {
-        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-1', field: 'f-1' }] }],
+        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'f-1' }] }],
         metricGroups: [],
         filters: [],
       },
@@ -279,8 +279,8 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
     { id: 'f-2', name: 'cnt', type: 'metric' as const, dataType: 'number' },
   ];
   const funnelQueryConfig = {
-    dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] }],
-    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] }],
+    dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] }],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'f-2' }] }],
     filters: [],
   };
   const baseInput = {
@@ -300,8 +300,8 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
 
     expect(request).not.toBeNull();
     expect(request?.spec_version).toBeUndefined();
-    expect(request?.dims).toEqual(['stage']);
-    expect(request?.metrics).toEqual([{ field: 'cnt', agg: 'sum', alias: 'cnt' }]);
+    expect(request?.dims).toEqual(['f-1']);
+    expect(request?.metrics).toEqual([{ field: 'f-2', agg: 'sum', alias: 'cnt' }]);
     expect(request?.sort).toEqual({ field: 'cnt', order: 'desc' });
   });
 
@@ -312,7 +312,7 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
     });
 
     expect(request?.sort).toEqual({ field: 'cnt', order: 'desc' });
-    expect(request?.metrics).toEqual([{ field: 'cnt', agg: 'sum', alias: 'cnt' }]);
+    expect(request?.metrics).toEqual([{ field: 'f-2', agg: 'sum', alias: 'cnt' }]);
   });
 
   it('覆盖性：用户此前设的 sort（stages asc）被无条件覆盖为 value desc', () => {
@@ -362,8 +362,8 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
       ...baseInput,
       chartType: 'bar',
       queryConfig: {
-        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] }],
-        metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] }],
+        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] }],
+        metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'f-2' }] }],
         filters: [],
       },
     });
@@ -384,10 +384,10 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
   ];
   const radarQueryConfig = {
     dimensionGroups: [
-      { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] },
-      { id: 'dim-group-2', bindings: [] as { bindingId: string; field: string }[] },
+      { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] },
+      { id: 'dim-group-2', bindings: [] as { bindingId: string; fieldId: string }[] },
     ],
-    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] }],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'f-2' }] }],
     filters: [],
   };
   const baseInput = {
@@ -414,7 +414,7 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
     expect(metricNames).toContain('values');
     // indicators 组携带 attr 字段与 binding_id；后端按 GroupName + binding_id 解析槽位。
     const indicatorGroup = request?.dimension_groups?.find((g) => g.name === 'indicators');
-    expect(indicatorGroup?.fields).toEqual([{ field: 'attr', binding_id: 'b-0' }]);
+    expect(indicatorGroup?.fields).toEqual([{ field: 'f-1', binding_id: 'b-0' }]);
   });
 
   it('radar 残留的第二个维度组已无槽位：只发第一组 indicators（历史文档由 normalize 先行合并）', () => {
@@ -427,15 +427,15 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
       queryConfig: {
         ...radarQueryConfig,
         dimensionGroups: [
-          { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] },
-          { id: 'dim-group-2', bindings: [{ bindingId: 'b-2', field: 'f-3' }] },
+          { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] },
+          { id: 'dim-group-2', bindings: [{ bindingId: 'b-2', fieldId: 'f-3' }] },
         ],
       },
     });
     const dimNames = (request?.dimension_groups ?? []).map((g) => g.name);
     expect(dimNames).toEqual(['indicators']);
     const indicatorGroup = request?.dimension_groups?.find((g) => g.name === 'indicators');
-    expect(indicatorGroup?.fields).toEqual([{ field: 'attr', binding_id: 'b-0' }]);
+    expect(indicatorGroup?.fields).toEqual([{ field: 'f-1', binding_id: 'b-0' }]);
   });
 
   it('非 radar 图型（bar）走 v1：不受 radar v2 触发污染', () => {
@@ -443,8 +443,8 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
       ...baseInput,
       chartType: 'bar',
       queryConfig: {
-        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] }],
-        metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] }],
+        dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] }],
+        metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'f-2' }] }],
         filters: [],
       },
     });
@@ -465,10 +465,10 @@ describe('composeChartQueryRequest：pivot 强制走 v2 槽位协议', () => {
   ];
   const pivotQueryConfig = {
     dimensionGroups: [
-      { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'f-1' }] },
-      { id: 'dim-group-2', bindings: [{ bindingId: 'b-1', field: 'f-2' }] },
+      { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] },
+      { id: 'dim-group-2', bindings: [{ bindingId: 'b-1', fieldId: 'f-2' }] },
     ],
-    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-2', field: 'f-3' }] }],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-2', fieldId: 'f-3' }] }],
     filters: [],
   };
   const baseInput = {
@@ -492,12 +492,12 @@ describe('composeChartQueryRequest：pivot 强制走 v2 槽位协议', () => {
     const dimNames = (request?.dimension_groups ?? []).map((g) => g.name);
     expect(dimNames).toEqual(['rows', 'columns']);
     const rowGroup = request?.dimension_groups?.find((g) => g.name === 'rows');
-    expect(rowGroup?.fields).toEqual([{ field: 'region', binding_id: 'b-0' }]);
+    expect(rowGroup?.fields).toEqual([{ field: 'f-1', binding_id: 'b-0' }]);
     const colGroup = request?.dimension_groups?.find((g) => g.name === 'columns');
-    expect(colGroup?.fields).toEqual([{ field: 'month', binding_id: 'b-1' }]);
+    expect(colGroup?.fields).toEqual([{ field: 'f-2', binding_id: 'b-1' }]);
     const metricGroup = request?.metric_groups?.find((g) => g.name === 'values');
     expect(metricGroup?.fields).toEqual([
-      { field: 'amount', agg: 'sum', alias: 'amount', binding_id: 'b-2' },
+      { field: 'f-3', agg: 'sum', alias: 'amount', binding_id: 'b-2' },
     ]);
   });
 
@@ -507,15 +507,15 @@ describe('composeChartQueryRequest：pivot 强制走 v2 槽位协议', () => {
       queryConfig: {
         ...pivotQueryConfig,
         dimensionGroups: [
-          { id: 'dim-group-1', bindings: [{ bindingId: 'b-1', field: 'f-2' }] },
-          { id: 'dim-group-2', bindings: [{ bindingId: 'b-0', field: 'f-1' }] },
+          { id: 'dim-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'f-2' }] },
+          { id: 'dim-group-2', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] },
         ],
       },
     });
 
     const rowGroup = request?.dimension_groups?.find((g) => g.name === 'rows');
-    expect(rowGroup?.fields).toEqual([{ field: 'month', binding_id: 'b-1' }]);
+    expect(rowGroup?.fields).toEqual([{ field: 'f-2', binding_id: 'b-1' }]);
     const colGroup = request?.dimension_groups?.find((g) => g.name === 'columns');
-    expect(colGroup?.fields).toEqual([{ field: 'region', binding_id: 'b-0' }]);
+    expect(colGroup?.fields).toEqual([{ field: 'f-1', binding_id: 'b-0' }]);
   });
 });

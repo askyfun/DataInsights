@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -604,6 +605,13 @@ func toString(val any) string {
 		return v
 	case []byte:
 		return string(v)
+	case time.Time:
+		// DATE/DATETIME 列经驱动扫描为 time.Time；零时刻（纯日期）输出日期，
+		// 否则输出秒级时间戳，避免 fmt.Sprintf("%v") 直出 Go 时区字符串污染维度类目。
+		if v.Hour() == 0 && v.Minute() == 0 && v.Second() == 0 {
+			return v.Format("2006-01-02")
+		}
+		return v.Format("2006-01-02 15:04:05")
 	default:
 		return fmt.Sprintf("%v", v)
 	}

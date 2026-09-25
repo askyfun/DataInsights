@@ -128,9 +128,30 @@ describe('ChartBuilder drag overlay', () => {
         msg: 'ok',
         trace: '',
         data: [
-          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
-          { name: 'city', expr: 'city', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'integer', comment: '', role: 'metric' },
+          {
+            id: 'region',
+            name: 'region',
+            expr: 'region',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'city',
+            name: 'city',
+            expr: 'city',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'revenue',
+            name: 'revenue',
+            expr: 'revenue',
+            type: 'integer',
+            comment: '',
+            role: 'metric',
+          },
         ],
       })
     );
@@ -223,7 +244,7 @@ describe('ChartBuilder drag overlay', () => {
 
     expect(useStore.getState().queryConfig.dimensionGroups[0]?.bindings).toEqual([]);
     expect(useStore.getState().queryConfig.dimensionGroups[1]?.bindings).toEqual([
-      { bindingId: 'b-0', field: 'region' },
+      { bindingId: 'b-0', fieldId: 'region' },
     ]);
   });
 
@@ -273,8 +294,8 @@ describe('ChartBuilder drag overlay', () => {
       });
 
       const groups = useStore.getState().queryConfig.dimensionGroups;
-      expect(groups[0].bindings).toEqual([{ bindingId: 'b-1', field: 'city' }]);
-      expect(groups[1].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
+      expect(groups[0].bindings).toEqual([{ bindingId: 'b-1', fieldId: 'city' }]);
+      expect(groups[1].bindings).toEqual([{ bindingId: 'b-0', fieldId: 'region' }]);
     });
 
     it('落在同组另一个字段标签上时组内换序', async () => {
@@ -344,14 +365,14 @@ describe('ChartBuilder drag overlay', () => {
 
       const metricGroups = useStore.getState().queryConfig.metricGroups;
       expect(metricGroups[0].bindings).toEqual([]);
-      expect(metricGroups[1].bindings).toEqual([{ bindingId: 'b-2', field: 'revenue' }]);
+      expect(metricGroups[1].bindings).toEqual([{ bindingId: 'b-2', fieldId: 'revenue' }]);
     });
   });
 
   /**
    * 过滤字段组：从左侧字段列表拖入即在过滤区追加一条条件。
    * 与维度/指标组共用同一套落点协议（data.type === 'filter'），这里锁死两件事：
-   * 条件按列名记录、多条件恒为「且」（logic 恒 and），且同一字段可重复加入。
+   * 条件按列的稳定 id 记录、多条件恒为「且」（logic 恒 and），且同一字段可重复加入。
    */
   describe('过滤字段组拖入', () => {
     const fieldDrag = (name: string) => {
@@ -380,7 +401,7 @@ describe('ChartBuilder drag overlay', () => {
 
       const filters = useStore.getState().queryConfig.filters;
       expect(filters).toHaveLength(1);
-      expect(filters[0]).toMatchObject({ field: 'region', operator: 'eq', logic: 'and' });
+      expect(filters[0]).toMatchObject({ fieldId: 'region', operator: 'eq', logic: 'and' });
     });
 
     it('拖入指标字段同样成立（维度与指标都可参与过滤）', async () => {
@@ -394,7 +415,7 @@ describe('ChartBuilder drag overlay', () => {
       });
 
       expect(useStore.getState().queryConfig.filters[0]).toMatchObject({
-        field: 'revenue',
+        fieldId: 'revenue',
         logic: 'and',
       });
     });
@@ -411,7 +432,7 @@ describe('ChartBuilder drag overlay', () => {
       });
 
       const filters = useStore.getState().queryConfig.filters;
-      expect(filters.map((filter) => filter.field)).toEqual(['revenue', 'revenue']);
+      expect(filters.map((filter) => filter.fieldId)).toEqual(['revenue', 'revenue']);
       expect(filters[0].id).not.toBe(filters[1].id);
     });
   });

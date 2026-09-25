@@ -43,9 +43,9 @@ jobs:
           prompt: |
             你作为项目经理 agent，分析 docs/*.md 文档，确认产品还有哪些待改进的需求。
             重点关注：
-            - docs/todo.md 中的待完成任务
-            - docs/architecture.md 中的架构设计
-            - docs/api-spec.md 中的API规范
+            - 仓库 open GitHub issues 中的待完成任务
+            - docs/developer-guide/architecture.md 中的架构设计
+            - docs/developer-guide/api.md 与 api/openapi.yaml 中的API契约
             - README.md 中的功能特性
             
             重要 - 避免重复 Issue：
@@ -88,7 +88,7 @@ jobs:
         with:
           model: minimax-cn-coding-plan/MiniMax-M2.5
           prompt: |
-            你作为架构师 agent，根据 docs/todo.md 分析产品需求和技术架构上的问题。
+            你作为架构师 agent，根据 docs/*.md 与 api/openapi.yaml 分析产品需求和技术架构上的问题。
             重点关注：
             - 后端 Go 代码的架构合理性
             - 前端 React 代码的架构模式
@@ -164,12 +164,12 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: '1.27'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Run QA Agent
         uses: anomalyco/opencode/github@latest

@@ -20,10 +20,11 @@ const CHART_TYPES: ChartType[] = [
 ];
 
 const FIELD_IDS = ['field-0', 'field-1', 'field-2'];
+// 新契约：id 是列的稳定标识，legacyId 承担旧结构位置 id 的解析职责
 const FIELDS = [
-  { id: 'field-0', name: 'region' },
-  { id: 'field-1', name: 'gmv' },
-  { id: 'field-2', name: 'order_date' },
+  { id: 'col-0', name: 'region', legacyId: 'field-0' },
+  { id: 'col-1', name: 'gmv', legacyId: 'field-1' },
+  { id: 'col-2', name: 'order_date', legacyId: 'field-2' },
 ];
 
 const KEYS = [
@@ -123,7 +124,7 @@ function randomGroupEntry(rng: Rng, index: number): unknown {
             rng.bool(0.8)
               ? {
                   bindingId: rng.pick(['b-0', 'b-1', 'b-0', '', 'x']),
-                  field: rng.pick([...FIELD_IDS, 'region', 'gmv', '']),
+                  fieldId: rng.pick([...FIELD_IDS, 'region', 'gmv', '']),
                 }
               : rng.json(2)
           )
@@ -153,7 +154,7 @@ function randomQuery(rng: Rng): unknown {
         ? Array.from({ length: rng.int(4) }, () =>
             rng.bool(0.7)
               ? {
-                  field: rng.pick([...FIELD_IDS, 'region', 'gmv', '__proto__']),
+                  fieldId: rng.pick([...FIELD_IDS, 'region', 'gmv', '__proto__']),
                   operator: 'eq',
                   value: rng.int(5),
                 }
@@ -274,7 +275,7 @@ function deepEqOwn(a: unknown, b: unknown, path = '$'): string | null {
 function checkRaw(
   raw: string,
   fallback: ChartType,
-  fields?: { id: string; name: string }[]
+  fields?: { id: string; name: string; legacyId?: string }[]
 ): Violation[] {
   const v: Violation[] = [];
   let out: ReturnType<typeof migrateChartConfig>;
@@ -301,7 +302,7 @@ function checkRaw(
   if (out.fieldMeta === null || typeof out.fieldMeta !== 'object' || Array.isArray(out.fieldMeta))
     v.push({ kind: 'fieldMeta', detail: `fieldMeta=${j(out.fieldMeta)}` });
 
-  const allBindings: Array<{ bindingId: string; field: string }> = [];
+  const allBindings: Array<{ bindingId: string; fieldId: string }> = [];
   for (const gkey of ['dimensionGroups', 'metricGroups'] as const) {
     for (const g of out.query[gkey]) {
       if (typeof g.id !== 'string' || g.id === '')
@@ -311,8 +312,8 @@ function checkRaw(
           !b ||
           typeof b.bindingId !== 'string' ||
           b.bindingId === '' ||
-          typeof b.field !== 'string' ||
-          b.field === ''
+          typeof b.fieldId !== 'string' ||
+          b.fieldId === ''
         ) {
           v.push({ kind: 'binding', detail: `binding=${j(b)}` });
           continue;
@@ -332,7 +333,7 @@ function checkRaw(
   if (fields && inputVersion !== 2) {
     // 只有"输入里存在可解析映射却没解析"才算违规；已知不可解析的位置 id 是文档化的有损路径
     for (const b of allBindings) {
-      if (/^field-\d+$/.test(b.field) && fields.some((f) => f.id === b.field)) {
+      if (/^field-\d+$/.test(b.fieldId) && fields.some((f) => f.legacyId === b.fieldId)) {
         v.push({ kind: 'positional', detail: `字段仍是位置 id: ${j(b)}` });
       }
     }
@@ -404,7 +405,7 @@ describe('chaos · chartConfigSchema 迁移属性', () => {
         // 位置 id 泄漏统计（非违规，仅暴露面）
         const out = migrateChartConfig(raw, 'bar', FIELDS);
         for (const g of [...out.query.dimensionGroups, ...out.query.metricGroups]) {
-          for (const b of g.bindings) if (/^field-\d+$/.test(b.field)) positionalLeaks++;
+          for (const b of g.bindings) if (/^field-\d+$/.test(b.fieldId)) positionalLeaks++;
         }
         if (violations.length > 0 && failures.length < 12) {
           failures.push({ seed, raw, violations });
@@ -462,7 +463,7 @@ describe('chaos · chartConfigSchema 迁移属性', () => {
       '二次迁移 bindings:',
       JSON.stringify(second.query.metricGroups[0].bindings)
     );
-    // 修复前：空字段生成 {bindingId:'b-0',field:''}，二次迁移被 isBindingInstance 丢弃 → 非幂等。
+    // 修复前：空字段生成 {bindingId:'b-0',fieldId:''}，二次迁移被 isBindingInstance 丢弃 → 非幂等。
     // 修复后：空字段在建组阶段即被过滤，binding 为空且二次迁移相等。
     expect(first.query.metricGroups[0].bindings).toEqual([]);
     expect(second).toEqual(first);
@@ -491,7 +492,7 @@ describe('chaos · chartConfigSchema 迁移属性', () => {
       version: 2,
       chartType: 'bar',
       query: {
-        dimensionGroups: [{ id: 'x_axis', bindings: [{ bindingId: 'b-0', field: 'field-0' }] }],
+        dimensionGroups: [{ id: 'x_axis', bindings: [{ bindingId: 'b-0', fieldId: 'field-0' }] }],
         metricGroups: [],
         filters: [],
       },
@@ -505,7 +506,7 @@ describe('chaos · chartConfigSchema 迁移属性', () => {
       '[T1-C] v2 位置 id + fields 参数 → 输出字段:',
       JSON.stringify(doc.query.dimensionGroups[0].bindings)
     );
-    expect(doc.query.dimensionGroups[0].bindings[0].field).toBe('field-0');
+    expect(doc.query.dimensionGroups[0].bindings[0].fieldId).toBe('field-0');
   });
 
   it('无 fields 参数：旧位置 id 原样保留（有损路径）——统计暴露面', () => {
@@ -517,14 +518,14 @@ describe('chaos · chartConfigSchema 迁移属性', () => {
     });
     const doc = migrateChartConfig(raw, 'bar');
     const fields = [...doc.query.dimensionGroups, ...doc.query.metricGroups].flatMap((g) =>
-      g.bindings.map((b) => b.field)
+      g.bindings.map((b) => b.fieldId)
     );
     // eslint-disable-next-line no-console
     console.log('[T1] 无 fields 时输出字段:', JSON.stringify(fields), 'version:', doc.version);
     expect(fields).toEqual(['field-0', 'field-1']);
     // 二次迁移（v2 直通）不会修复它
     const again = migrateChartConfig(JSON.stringify(doc), 'bar');
-    expect(again.query.metricGroups[0].bindings[0].field).toBe('field-1');
+    expect(again.query.metricGroups[0].bindings[0].fieldId).toBe('field-1');
   });
 
   it('fieldMeta 键为 __proto__ 时元数据必须仍是自有键（不得被 setter 吞掉）', () => {
@@ -537,7 +538,9 @@ describe('chaos · chartConfigSchema 迁移属性', () => {
       queryOptions: {},
     });
     const doc = migrateChartConfig(raw, 'bar');
-    const own = Object.prototype.hasOwnProperty.call(doc.fieldMeta, '__proto__');
+    // 判自有键不能用 Object.hasOwn（tsc lib=ES2020 报 TS2550），也不能写
+    // hasOwnProperty.call（biome --write 会重写成前者）——与 chartConfigSchema.hasOwn 同源。
+    const own = Object.getOwnPropertyDescriptor(doc.fieldMeta, '__proto__') !== undefined;
     const roundTripped = JSON.parse(JSON.stringify(doc.fieldMeta));
     // eslint-disable-next-line no-console
     console.log('[T1] __proto__ 自有键:', own, '序列化后:', JSON.stringify(roundTripped));
@@ -587,8 +590,8 @@ describe('chaos · chartConfigSchema 迁移属性', () => {
       version: 2,
       chartType: 'bar',
       query: {
-        dimensionGroups: [{ id: 'x_axis', bindings: [{ bindingId: 'b-0', field: 'region' }] }],
-        metricGroups: [{ id: 'values', bindings: [{ bindingId: 'b-0', field: 'gmv' }] }],
+        dimensionGroups: [{ id: 'x_axis', bindings: [{ bindingId: 'b-0', fieldId: 'region' }] }],
+        metricGroups: [{ id: 'values', bindings: [{ bindingId: 'b-0', fieldId: 'gmv' }] }],
         filters: [],
       },
       fieldMeta: { 'b-0': { aggregation: 'sum' } },

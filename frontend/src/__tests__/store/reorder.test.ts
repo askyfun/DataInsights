@@ -24,8 +24,8 @@ describe('reorderDimensionField', () => {
 
     const dims = useStore.getState().queryConfig.dimensionGroups[0]?.bindings;
     expect(dims).toEqual([
-      { bindingId: 'b-0', field: 'name' },
-      { bindingId: 'b-1', field: 'city' },
+      { bindingId: 'b-0', fieldId: 'name' },
+      { bindingId: 'b-1', fieldId: 'city' },
     ]);
   });
 
@@ -38,15 +38,15 @@ describe('reorderDimensionField', () => {
 
     // 初始顺序: [name, city]
     expect(useStore.getState().queryConfig.dimensionGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'name' },
-      { bindingId: 'b-1', field: 'city' },
+      { bindingId: 'b-0', fieldId: 'name' },
+      { bindingId: 'b-1', fieldId: 'city' },
     ]);
 
     // 交换: [city, name]
     reorderDimensionField(0, 1);
     expect(useStore.getState().queryConfig.dimensionGroups[0].bindings).toEqual([
-      { bindingId: 'b-1', field: 'city' },
-      { bindingId: 'b-0', field: 'name' },
+      { bindingId: 'b-1', fieldId: 'city' },
+      { bindingId: 'b-0', fieldId: 'name' },
     ]);
   });
 
@@ -61,9 +61,9 @@ describe('reorderDimensionField', () => {
     // 初始: [name, city, date]
     reorderDimensionField(0, 2);
     // 期望: [city, date, name]
-    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings.map((b) => b.field)).toEqual(
-      ['city', 'date', 'name']
-    );
+    expect(
+      useStore.getState().queryConfig.dimensionGroups[0].bindings.map((b) => b.fieldId)
+    ).toEqual(['city', 'date', 'name']);
   });
 
   it('reorderDimensionField 移动到开头', () => {
@@ -77,9 +77,9 @@ describe('reorderDimensionField', () => {
     // 初始: [name, city, date]
     reorderDimensionField(2, 0);
     // 期望: [date, name, city]
-    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings.map((b) => b.field)).toEqual(
-      ['date', 'name', 'city']
-    );
+    expect(
+      useStore.getState().queryConfig.dimensionGroups[0].bindings.map((b) => b.fieldId)
+    ).toEqual(['date', 'name', 'city']);
   });
 
   it('addDimensionField 支持追加到指定维度组', () => {
@@ -93,10 +93,10 @@ describe('reorderDimensionField', () => {
     addDimensionField(fields[1], 1);
 
     expect(useStore.getState().queryConfig.dimensionGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'name' },
+      { bindingId: 'b-0', fieldId: 'name' },
     ]);
     expect(useStore.getState().queryConfig.dimensionGroups[1].bindings).toEqual([
-      { bindingId: 'b-1', field: 'city' },
+      { bindingId: 'b-1', fieldId: 'city' },
     ]);
   });
 
@@ -118,10 +118,10 @@ describe('reorderDimensionField', () => {
     addMetricField(fields[1], 1);
 
     expect(useStore.getState().queryConfig.metricGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'revenue' },
+      { bindingId: 'b-0', fieldId: 'revenue' },
     ]);
     expect(useStore.getState().queryConfig.metricGroups[1].bindings).toEqual([
-      { bindingId: 'b-1', field: 'profit' },
+      { bindingId: 'b-1', fieldId: 'profit' },
     ]);
   });
 
@@ -137,7 +137,7 @@ describe('reorderDimensionField', () => {
 
     expect(useStore.getState().queryConfig.metricGroups).toEqual([
       { id: 'metric-group-1', bindings: [] },
-      { id: 'metric-group-2', bindings: [{ bindingId: 'b-0', field: 'revenue' }] },
+      { id: 'metric-group-2', bindings: [{ bindingId: 'b-0', fieldId: 'revenue' }] },
     ]);
   });
 });

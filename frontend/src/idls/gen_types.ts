@@ -943,13 +943,17 @@ export interface components {
             /** @description 分片键的 JSON 数组字符串。 */
             shard_keys?: string;
         };
-        /** @description 数据集列定义（entity.DatasetColumn）；JSON 字段名为 snake_case 的 type_config。 */
+        /** @description 数据集列定义（entity.DatasetColumn）；JSON 字段名为 snake_case 的 type_config。 id 是列的**稳定标识**（8 位 base36 短 ID，由后端分配后不再变化），name 是 **可变的展示名**：图表配置、shard_keys 与查询请求一律引用 id，展示时才由 id 解析回 name。列未落库时后端在首次读取时分配 id 并物化。 */
         DatasetColumn: {
+            /** @description 列的稳定标识；由后端分配，客户端只读回传，不可自行生成或改写。 */
+            id: string;
+            /** @description 可变展示名。同一数据集内必须唯一（后端在 PUT /columns 校验）。 */
             name: string;
+            /** @description SQL 表达式。物理列的 expr 即来源表列名，改展示名不应改动 expr。 */
             expr: string;
             /**
-             * @description 统一规范数据类型（8 类，与后端 model.StandardDataTypes 对齐）。 历史词
-             * number/json/unknown 由后端归一为 float/map/string，不再出现。
+             * @description 统一规范数据类型（8 类，与后端 model.StandardDataTypes 对齐）。 历史词 number/json/unknown 由后端归一为 float/map/string，不再出现。
+             * @enum {string}
              */
             type: "float" | "integer" | "boolean" | "string" | "date" | "datetime" | "array" | "map";
             type_config: components["schemas"]["TypeConfig"];
@@ -1361,11 +1365,12 @@ export interface components {
         };
         /** @description 维度字段绑定（query.DimensionField）。 */
         ChartDimensionField: {
+            /** @description 数据集列的 **id**（不是展示名）；SQL 输出别名与响应负载键才用展示名。 */
             field: string;
             label?: string;
             /** @description 时间粒度（day / week / month 等）；执行前按方言校验（ValidateGranularity）。 */
             granularity?: string;
-            /** @description 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。 */
+            /** @description 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一字段在不同槽位/组里有不同的 binding_id。 */
             binding_id?: string;
         };
         /** @description 指标组（query.MetricGroup）。 */
@@ -1377,6 +1382,7 @@ export interface components {
         };
         /** @description 指标字段绑定（query.MetricField）。 */
         ChartMetricField: {
+            /** @description 数据集列的 **id**（不是展示名）；SQL 输出别名与响应负载键才用展示名。 */
             field: string;
             label?: string;
             /** @description sum / avg / count / max / min（query.AggregationType）。 */
@@ -1384,7 +1390,7 @@ export interface components {
             alias?: string;
             unit?: string;
             format?: string;
-            /** @description 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。 */
+            /** @description 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一字段在不同槽位/组里有不同的 binding_id。 */
             binding_id?: string;
         };
         /** @description 查询语义规格（query.QuerySpec:46）：表达"查什么"，不含视觉语义， 由 ChartSpec/旧请求转换而来，是 BunQueryBuilder 的上游输入。 */
@@ -1588,13 +1594,23 @@ export interface components {
             operator?: string;
             /** @description type=filter 是否允许多选。 */
             multi?: boolean;
+            /** @description type=filter 且绑定字段是日期类时的粒度与周计算逻辑（口径见前端 lib/dateFilter.ts）。 **后端只做投影解析、不读这个键**：盘级筛选的取值由前端按它现算成具体区间后随请求下发。 */
+            date?: {
+                /**
+                 * @description 粒度；hour 仅对带时分秒的 datetime 字段有意义。
+                 * @enum {string}
+                 */
+                granularity?: "hour" | "day" | "week" | "month";
+                /** @description 周计算逻辑：一周从星期几开始（0=周日 … 6=周六）。缺省 1（周一）。 */
+                weekStart?: number;
+            };
             /** @description type=filter 的默认选中值。**空数组 = 未激活**：未激活的筛选器不参与合并、 不触发覆盖（PRD §8.3 步骤 2），否则拖入一个筛选器会莫名抹掉图表默认条件。 */
             defaultValue?: unknown[];
         };
         /** @description 盘级筛选器的绑定粒度：数据集字段。按 (datasetId, column) 二元组命中同数据集的 图表（PRD §11-2 的推荐口径，避免跨数据集同名字段静默误伤）。 */
         DashboardFilterBinding: {
             datasetId: number;
-            /** @description 绑定列名（列名即字段标识；改列名会使该筛选器断链，属已接受的约定）。 */
+            /** @description **列的稳定 id（DatasetColumn.id），不是列名。** 盘级条件最终以 entity.Filter.Field 参与取数，而「哪些字段被盘级条件覆盖」（响应里的 overriddenFields）是拿图表自身过滤 条件里的列 id 求交集得出的 —— 存列名会让这个可见标识永远匹配不上。列名可变，只用于展示。 */
             column: string;
         };
         /** @description POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。 */

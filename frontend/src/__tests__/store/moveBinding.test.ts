@@ -42,10 +42,10 @@ describe('moveBinding', () => {
     );
 
     expect(result).toBe('moved');
-    expect(dimBindings(0)).toEqual([{ bindingId: 'b-1', field: 'city' }]);
+    expect(dimBindings(0)).toEqual([{ bindingId: 'b-1', fieldId: 'city' }]);
     expect(dimBindings(1)).toEqual([
-      { bindingId: 'b-2', field: 'month' },
-      { bindingId: 'b-0', field: 'region' },
+      { bindingId: 'b-2', fieldId: 'month' },
+      { bindingId: 'b-0', fieldId: 'region' },
     ]);
   });
 
@@ -60,8 +60,8 @@ describe('moveBinding', () => {
     );
 
     expect(dimBindings(1)).toEqual([
-      { bindingId: 'b-0', field: 'region' },
-      { bindingId: 'b-1', field: 'month' },
+      { bindingId: 'b-0', fieldId: 'region' },
+      { bindingId: 'b-1', fieldId: 'month' },
     ]);
   });
 
@@ -92,8 +92,8 @@ describe('moveBinding', () => {
     expect(result).toBe('moved');
     expect(metricBindings(0)).toEqual([]);
     expect(metricBindings(1)).toEqual([
-      { bindingId: 'b-1', field: 'profit' },
-      { bindingId: 'b-0', field: 'revenue' },
+      { bindingId: 'b-1', fieldId: 'profit' },
+      { bindingId: 'b-0', fieldId: 'revenue' },
     ]);
   });
 
@@ -110,7 +110,7 @@ describe('moveBinding', () => {
       { kind: 'metric', groupIndex: 1 }
     );
 
-    expect(metricBindings(1)).toEqual([{ bindingId: 'b-0', field: 'revenue' }]);
+    expect(metricBindings(1)).toEqual([{ bindingId: 'b-0', fieldId: 'revenue' }]);
     expect(useStore.getState().metricAggregations['b-0']).toBe('avg');
     expect(useStore.getState().metricAliases['b-0']).toBe('平均营收');
   });
@@ -148,8 +148,8 @@ describe('moveBinding', () => {
     );
 
     expect(result).toBe('noop');
-    expect(dimBindings(0)).toEqual([{ bindingId: 'b-0', field: 'region' }]);
-    expect(metricBindings(0)).toEqual([{ bindingId: 'b-1', field: 'revenue' }]);
+    expect(dimBindings(0)).toEqual([{ bindingId: 'b-0', fieldId: 'region' }]);
+    expect(metricBindings(0)).toEqual([{ bindingId: 'b-1', fieldId: 'revenue' }]);
   });
 
   it('目标组已有同名列时拒绝（单组内不允许重复列）', () => {
@@ -163,8 +163,8 @@ describe('moveBinding', () => {
     );
 
     expect(result).toBe('rejected');
-    expect(dimBindings(0)).toEqual([{ bindingId: 'b-0', field: 'region' }]);
-    expect(dimBindings(1)).toEqual([{ bindingId: 'b-1', field: 'region' }]);
+    expect(dimBindings(0)).toEqual([{ bindingId: 'b-0', fieldId: 'region' }]);
+    expect(dimBindings(1)).toEqual([{ bindingId: 'b-1', fieldId: 'region' }]);
   });
 
   it('源绑定不存在或目标组不存在时不做任何变更（noop）', () => {

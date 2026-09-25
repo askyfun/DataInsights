@@ -42,7 +42,7 @@ import (
 func BuildPivotGroupingSetsQuery(dialect DialectType, ast *QueryAST, rowDims, colDims []DimensionExprAST) (string, []any) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 	return qb.buildPivotGroupingSetsQuery(ast, rowDims, colDims)
 }
 
@@ -162,7 +162,7 @@ func (qb *BunQueryBuilder) buildPivotGroupingSetsQuery(ast *QueryAST, rowDims, c
 func BuildPivotUnionAllQuery(dialect DialectType, ast *QueryAST, rowDims, colDims []DimensionExprAST) (string, []any) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 	return qb.buildPivotUnionAllQuery(ast, rowDims, colDims)
 }
 

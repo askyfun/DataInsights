@@ -1,29 +1,49 @@
 # Docs AGENTS.md
 
-项目文档目录，包含架构设计、API 规范、开发计划和参考资料。
+> 最后更新：2026-09-26
+
+本目录是 Data Insights 的**入库文档**（随代码版本化），按**四区**组织：新手入门、用户指南、部署指南、开发者指南。本文件是本目录的索引与维护规则。
+
+## 分区
+
+| 分区 | 目录 | 用途 |
+|------|------|------|
+| 新手入门 | `getting-started/` | 核心概念、应用场景、对外 roadmap 与极简上手 |
+| 用户指南 | `user-guide/` | 配置字典与核心功能使用说明（含「为什么做这个功能」） |
+| 部署指南 | `deployment/` | 容器 / Compose 与生产环境部署实践 |
+| 开发者指南 | `developer-guide/` | 架构、API、图表查询设计、排障、本地环境、活跃待办、贡献规范、表面系统（摊平、无子目录） |
+
+## 入库 vs 本机（红线）
+
+- **入库**（可链接）：`docs/**` 下的一切，**含** `developer-guide/troubleshooting.md` 与 `developer-guide/backlog.md` —— 这两份由本机笔记**分流脱敏**而来，是入库文档，可直接链接。
+- **本机**（不入库，**不得**从入库文档链接）：`docs/pitfalls.md`、`docs/backlog.md`、`docs/archive/`、`docs/superpowers/`、根 `MEMORY.md` 等。
+- 需要提及时**只写「本地工作笔记」，不给路径**。
 
 ## 文档清单
 
-| 文件 | 用途 |
-|------|------|
-| `setup.md` | 环境搭建指南（依赖安装、数据库配置、启动命令） |
-| `architecture.md` | 系统架构说明（目录结构、技术栈、分层设计） |
-| `api.md` | API 接口文档（统一响应格式、各领域接口定义） |
-| `api-spec.md` | API 规范详情 |
-| `coding-style.md` | 代码风格指南 |
-| `chart-builder-plan.md` | 图表构建器功能设计文档 |
-| `todo.md` | 开发任务清单 |
-| `plans/2026-02-27-frontend-code-quality.md` | 前端代码质量改进计划 |
-| `DataWind/01_DataWind_Research_Analysis.md` | DataWind 产品调研分析 |
-| `DataWind/02_Product_Requirements_Spec.md` | 产品需求规格 |
-| `DataWind/03_Technical_Architecture_Design.md` | 技术架构设计 |
-
-## DataWind 子目录
-
-`DataWind/` 包含竞品研究和产品规划文档，作为 Data Insights 产品设计的参考依据。
+| 文件 | 用途 | 维护时机 |
+|------|------|----------|
+| `getting-started/overview.md` | 核心概念、应用场景与对外 roadmap | 产品定位、核心概念或对外路线调整时 |
+| `getting-started/quick-start.md` | 极简上手（一条命令跑起来） | 上手路径或前置条件变化时 |
+| `user-guide/configuration.md` | 配置与参数字典 | 环境变量、默认值或配置优先级变化时 |
+| `user-guide/features.md` | 核心功能使用说明（含「为什么做」） | 新增 / 调整面向用户的功能时 |
+| `deployment/docker.md` | 容器与 Docker Compose | 镜像形态、Compose 或构建细节变化时 |
+| `deployment/production.md` | 生产环境部署实践 | 部署形态、安全实践或可观测性变化时 |
+| `developer-guide/architecture.md` | 系统架构 + 关键设计决策 | 新增分层 / 目录、查询链路、部署形态或关键决策变更时 |
+| `developer-guide/api.md` | API 接口文档（叙述性视图；契约事实源是 `../api/openapi.yaml`） | 新增或修改端点时，与 `../api/openapi.yaml` 同步更新 |
+| `developer-guide/chart-query-design.md` | 图表查询链路设计（契约模型 / SQL 生成 / 处理器） | 图表配置文档结构、查询协议或可视化语义变更时 |
+| `developer-guide/troubleshooting.md` | 排障（外部开发者照抄本仓也会踩的坑） | 遇到可复现的公共坑时 |
+| `developer-guide/backlog.md` | 活跃待办 / 方言能力矩阵 | 活跃项推进或新增能力缺口时 |
+| `developer-guide/dev-setup.md` | 本地开发环境搭建（依赖、数据库、启动命令） | 前置依赖、端口、Makefile 目标或包管理约束变化时 |
+| `developer-guide/design-system.md` | 前端表面系统规范（页面骨架、色彩、字体、组件样式） | 全站视觉主题、共享样式或 antd 主题令牌调整时 |
+| `developer-guide/contributing.md` | 贡献流程、提交前门禁与语言级编码规范 | 引入新工具链、团队约定或门禁变化时 |
+| `AGENTS.md` | 本目录索引与维护规则 | 本目录增删文档时 |
 
 ## 维护规则
 
-- 大型业务逻辑调整或架构调整必须同步更新此目录下的相关文档
-- 新增功能应更新 `api.md` 和 `todo.md`
-- 计划文档放入 `plans/` 子目录，以日期命名
+- 大型业务逻辑或架构调整必须同步更新本目录下的相关文档。
+- 新增 / 修改接口先改 `../api/openapi.yaml`（事实源），再更新 `developer-guide/api.md` 并跑 `make api-gen` 同步双端类型。
+- **入库文档不得引用 gitignored 文件**（本机的 `docs/pitfalls.md`、`docs/backlog.md`、`docs/archive/`、`docs/superpowers/`、根 `MEMORY.md` 等）。需要提到时只写「本地工作笔记」，不给路径链接。
+- 入库的 `developer-guide/troubleshooting.md` / `developer-guide/backlog.md` 由本机笔记**分流脱敏**而来，可直接链接；但**不得**链接其本机源文件。
+- 新增 / 删除文档必须同步本索引与根 `AGENTS.md` 的「开发资源」表。
+- 新建 / 重写文档在标题下加一行 `> 最后更新：YYYY-MM-DD`。

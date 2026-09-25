@@ -2,16 +2,17 @@ import {
   ArrowLeftOutlined,
   DashboardOutlined,
   DeleteOutlined,
+  PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
 } from '@ant-design/icons';
 import {
   Alert,
+  App,
   Button,
   Card,
   Empty,
   Input,
-  message,
   Result,
   Select,
   Space,
@@ -36,9 +37,24 @@ import {
   type Dashboard,
   type DashboardQueryResult,
   dashboardsApi,
+  datasetsApi,
 } from '../api';
 import ChartView from '../components/ChartView/ChartView';
+import AddFilterWidgetModal, {
+  type NewFilterWidgetConfig,
+} from '../components/DashboardFilterBlock/AddFilterWidgetModal';
+import DashboardFilterBlock from '../components/DashboardFilterBlock/DashboardFilterBlock';
+import DateFilterModal, {
+  type DateFilterModalPayload,
+} from '../components/DateFilter/DateFilterModal';
 import PageHeader from '../components/PageHeader';
+import {
+  type DashboardQueryFilterValue,
+  dashboardFiltersPayload,
+  dateFilterWidgetSettings,
+  filterWidgetFamily,
+  initialFilterWidgetValues,
+} from '../lib/dashboardFilterValue';
 import {
   createWidgetId,
   DASHBOARD_DEFAULT_SIZE,
@@ -46,13 +62,24 @@ import {
   DASHBOARD_MIN_H,
   DASHBOARD_MIN_W,
   type DashboardChartWidget,
+  type DashboardFilterWidget,
   type DashboardLayoutDocument,
+  type DashboardWidget,
+  findFreePlacement,
   migrateDashboardLayout,
   normalizePlacement,
   serializeDashboardLayout,
 } from '../lib/dashboardLayoutSchema';
+import type { DateGranularity, WeekStart } from '../lib/dateFilter';
+import { isDateFilterValue } from '../lib/dateFilter';
+import { useStore } from '../store';
 
 const { Text } = Typography;
+
+/** 挑出布局里的筛选器块（类型守卫版本，多处复用）。 */
+function filterWidgetsOf(widgets: readonly DashboardWidget[]): DashboardFilterWidget[] {
+  return widgets.filter((widget): widget is DashboardFilterWidget => widget.type === 'filter');
+}
 
 /** 草稿 key：PRD §11-8 的「key 命名」在本批定为 `<前缀><dashboardId>`。 */
 const DRAFT_PREFIX = 'dashboard-draft:';
@@ -115,6 +142,13 @@ const DashboardEditor: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { width, mounted, containerRef } = useContainerWidth();
+  // message 取 App 上下文实例，不用静态 message.*：静态方法读不到 ConfigProvider 的
+  // 主题上下文，antd 6 会打 "Static function can not consume context like dynamic theme"。
+  // 依赖根部的 <App> 包裹（见 main.tsx）——没有它 useApp() 拿到的是空对象。
+  const { message } = App.useApp();
+  // 盘级筛选器要绑数据集字段，故这里需要数据集清单（与数据集页共用同一份 store 状态）。
+  const datasets = useStore((state) => state.datasets);
+  const fetchDatasets = useStore((state) => state.fetchDatasets);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -123,11 +157,21 @@ const DashboardEditor: React.FC = () => {
   const [baseline, setBaseline] = useState<{ name: string; layout: string } | null>(null);
   const [charts, setCharts] = useState<Chart[]>([]);
   const [chartsById, setChartsById] = useState<Record<number, Chart>>({});
+  /** 块引用图表的数据集列 ID→列名；ChartView 据此把列 ID 换成展示名。 */
+  const [fieldNames, setFieldNames] = useState<Record<string, string>>({});
   const [results, setResults] = useState<Record<string, DashboardQueryResult>>({});
   const [pendingData, setPendingData] = useState<Record<string, ChartDataResponse | null>>({});
   const [querying, setQuerying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
+  /**
+   * 盘级筛选器的**当前取值**（widgetId → 日期筛选值）。刻意不写进 layout：
+   * `defaultValue` 是「默认选中值」，取值本身由这里在会话内持有，改完立即重取。
+   */
+  // 取值按原始类型存：日期族是 DateFilterValue，字符串/数值族是 unknown[]。
+  const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
+  const [addFilterOpen, setAddFilterOpen] = useState(false);
+  const [configuringFilterId, setConfiguringFilterId] = useState<string | null>(null);
   /** 未持久化块的本地取数在途集合：防止 effect 重跑时对同一块重复发请求。 */
   const inflightRef = useRef<Set<string>>(new Set());
   /**
@@ -140,12 +184,17 @@ const DashboardEditor: React.FC = () => {
    */
   const persistedIdsRef = useRef<Set<string>>(new Set());
 
-  /** 盘级取数。v1 不提供筛选器入口，故此处的 `filters` 恒为空数组。 */
+  /**
+   * 盘级取数。
+   *
+   * `filters` 是筛选器的**当前取值**（不是合并结果）：合并由后端单点完成（PRD §6.3），
+   * 前端只负责把「哪个筛选器现在选了什么」如实下发，形状规则见 `lib/dashboardFilterValue`。
+   */
   const runQuery = useCallback(
-    async (dashboardId: string) => {
+    async (dashboardId: string, filters: DashboardQueryFilterValue[]) => {
       setQuerying(true);
       try {
-        const response = await dashboardsApi.query(dashboardId, { filters: [] });
+        const response = await dashboardsApi.query(dashboardId, { filters });
         const map: Record<string, DashboardQueryResult> = {};
         for (const result of response.data.data.results ?? []) {
           map[result.widgetId] = result;
@@ -157,7 +206,26 @@ const DashboardEditor: React.FC = () => {
         setQuerying(false);
       }
     },
-    [intl]
+    // message 实例跨渲染稳定（antd 内部 useMemo([], …)），进依赖数组不会引起循环。
+    [intl, message]
+  );
+
+  /**
+   * 按给定的筛选器状态重取一整盘。
+   *
+   * 只把**已落库**的筛选器下发出去：后端是按已落库的 layout 逐块取数、并按同一份 layout
+   * 建筛选器索引的，未保存的筛选器它根本认不出来 —— 发了也只是白跑一趟。
+   * 调用方传显式的 widgets/values 而不是读组件状态：改筛选取值、改粒度这些场景下
+   * 新状态还没落进 state，读旧值会算出上一轮的载荷。
+   */
+  const queryWithFilters = useCallback(
+    (dashboardId: string, widgets: readonly DashboardWidget[], values: Record<string, unknown>) => {
+      const active = filterWidgetsOf(widgets).filter((widget) =>
+        persistedIdsRef.current.has(widget.widgetId)
+      );
+      return runQuery(dashboardId, dashboardFiltersPayload(active, values));
+    },
+    [runQuery]
   );
 
   const load = useCallback(
@@ -180,21 +248,62 @@ const DashboardEditor: React.FC = () => {
         setResults({});
         setPendingData({});
 
+        // 列 ID→列名映射：ChartView 的 labelOf 靠它把配置里的列 ID 换成展示名。
+        // 缺了它，combo 分支的 xAxis.name 会把裸列 ID 画进坐标轴（浏览器验收缺陷 1）。
+        // 按块引用的图表去重的数据集拉取，单个数据集失败不阻断盘装载（回落空映射，
+        // ChartView 对未命中字段原样输出，行为与修复前一致）。
         const serverDoc = migrateDashboardLayout(dashboard.layout_json);
+        const datasetIds = [
+          ...new Set(
+            serverDoc.widgets.flatMap((w) =>
+              w.type === 'chart' ? [byId[w.chartId]?.dataset_id] : []
+            )
+          ),
+        ].filter((id): id is number => typeof id === 'number');
+        if (datasetIds.length > 0) {
+          void Promise.all(
+            datasetIds.map((id) =>
+              datasetsApi
+                .getColumns(id)
+                .then((r) => r.data.data ?? [])
+                .catch(() => [])
+            )
+          ).then((columnGroups) => {
+            const names: Record<string, string> = {};
+            for (const columns of columnGroups) {
+              for (const column of columns) {
+                names[column.id] = column.name;
+              }
+            }
+            setFieldNames(names);
+          });
+        } else {
+          setFieldNames({});
+        }
+
         const serverLayout = serializeDashboardLayout(serverDoc);
         persistedIdsRef.current = new Set(serverDoc.widgets.map((widget) => widget.widgetId));
 
         // 本地草稿只在「真的与后端不一致」时恢复；一致就顺手清掉，
         // 避免一条陈旧草稿长期驻留、下次打开又被判定为「未保存改动」。
+        //
+        // ⚠️「不一致」的判定必须与写草稿侧的 `dirty` **对称**：`dirty` 同时看 name 与
+        // layout，这里若只比 layout，「只改了名字」的草稿会被判成"与后端一致"而走删除
+        // 分支 —— 用户的未保存改名静默丢失（浏览器验收 D-1）。
         let nextDoc = serverDoc;
         let nextName = dashboard.name;
         let restored = false;
         const draftRaw = localStorage.getItem(DRAFT_PREFIX + dashboardId);
         if (draftRaw) {
           const draft = readDraft(draftRaw);
-          if (draft && serializeDashboardLayout(draft.layout) !== serverLayout) {
+          const draftName = draft?.name ?? dashboard.name;
+          const keep =
+            draft !== null &&
+            (draftName !== dashboard.name ||
+              serializeDashboardLayout(draft.layout) !== serverLayout);
+          if (draft && keep) {
             nextDoc = draft.layout;
-            nextName = draft.name ?? dashboard.name;
+            nextName = draftName;
             restored = true;
           } else {
             localStorage.removeItem(DRAFT_PREFIX + dashboardId);
@@ -206,14 +315,18 @@ const DashboardEditor: React.FC = () => {
         setBaseline({ name: dashboard.name, layout: serverLayout });
         setDraftRestored(restored);
 
-        await runQuery(dashboardId);
+        // 筛选器初值取布局里落库的「默认选中值」：控件与首屏取数用同一份，
+        // 否则会出现"控件显示最近 7 天、实际查的是全量"这种不一致。
+        const seeded = initialFilterWidgetValues(filterWidgetsOf(nextDoc.widgets));
+        setFilterValues(seeded);
+        await queryWithFilters(dashboardId, nextDoc.widgets, seeded);
       } catch (error: any) {
         setLoadError(error.message || intl.formatMessage({ id: 'dashboard.loadFailed' }));
       } finally {
         setLoading(false);
       }
     },
-    [intl, runQuery]
+    [intl, queryWithFilters]
   );
 
   useEffect(() => {
@@ -221,6 +334,13 @@ const DashboardEditor: React.FC = () => {
       load(id);
     }
   }, [id, load]);
+
+  // 数据集清单只服务于「添加筛选器」的字段选择器；空列表时拉一次即可。
+  useEffect(() => {
+    if (datasets.length === 0) {
+      void fetchDatasets();
+    }
+  }, [datasets.length, fetchDatasets]);
 
   const dirty = useMemo(() => {
     if (!baseline) {
@@ -335,16 +455,17 @@ const DashboardEditor: React.FC = () => {
   const handleAddChart = useCallback((chartId: number) => {
     setDoc((prev) => {
       const size = DASHBOARD_DEFAULT_SIZE.chart;
-      // 落在当前最底边之下，避免与既有块重叠。
+      // 放进首个空位（自上而下、自左而右），而不是一律 `x: 0` 落在最底边 —— 否则 12 列
+      // 画布上默认 6 列宽的块会全部堆在左半边、右半边长期空置（浏览器验收 D-3）。
       // 注意：RGL 收到新 layout prop 时会自行 compact（`useGridLayout` 的 prop 同步 effect），
       // 故渲染位置可能比这里存的 y 更靠上——两者在首次拖拽后即收敛（onDragStop 同步整盘），
       // 落库内容始终合法，不需要在这里预压缩。
-      const bottom = prev.widgets.reduce((max, widget) => Math.max(max, widget.y + widget.h), 0);
+      const spot = findFreePlacement(prev.widgets, size);
       const widget: DashboardChartWidget = {
         widgetId: createWidgetId(),
         type: 'chart',
         chartId,
-        ...normalizePlacement({ x: 0, y: bottom, w: size.w, h: size.h }, size),
+        ...normalizePlacement({ x: spot.x, y: spot.y, w: size.w, h: size.h }, size),
       };
       return { ...prev, widgets: [...prev.widgets, widget] };
     });
@@ -356,6 +477,99 @@ const DashboardEditor: React.FC = () => {
       widgets: prev.widgets.filter((widget) => widget.widgetId !== widgetId),
     }));
   }, []);
+
+  /** 新建筛选器块：与图表块走同一套落位规则（放进首个空位，而不是一律落在最左边）。 */
+  const handleAddFilterWidget = useCallback((config: NewFilterWidgetConfig) => {
+    setDoc((prev) => {
+      const size = DASHBOARD_DEFAULT_SIZE.filter;
+      const spot = findFreePlacement(prev.widgets, size);
+      const widget: DashboardFilterWidget = {
+        widgetId: createWidgetId(),
+        type: 'filter',
+        binding: config.binding,
+        label: config.label,
+        dataType: config.dataType,
+        // 算子/多选由弹窗按族给默认（见 AddFilterWidgetModal.defaultOperatorFor）。
+        operator: config.operator,
+        multi: config.multi,
+        // 日期族才需要粒度与周计算逻辑；先给默认，用户在块上「配置」里再调。
+        ...(filterWidgetFamily({ dataType: config.dataType }) === 'date'
+          ? { date: { granularity: 'day' as const, weekStart: 1 as const } }
+          : {}),
+        ...normalizePlacement({ x: spot.x, y: spot.y, w: size.w, h: size.h }, size),
+      };
+      return { ...prev, widgets: [...prev.widgets, widget] };
+    });
+    setAddFilterOpen(false);
+  }, []);
+
+  /**
+   * 改筛选器状态的**唯一出口**：写 layout（`defaultValue` 就是「该筛选器的默认选中值」，
+   * 重开盘时由它做初值）→ 立刻按新取值重取一次。筛选器的意义就是「切一下马上看结果」。
+   *
+   * 传入显式的 `nextValue`/`nextDate` 而不是读 state：粒度与取值要同一次请求生效，
+   * 读上一轮的状态会算出旧粒度的区间。重取只用**已落库**的筛选器（见 queryWithFilters）。
+   */
+  const applyFilterState = useCallback(
+    (
+      widgetId: string,
+      nextValue: unknown,
+      nextDate?: { granularity: DateGranularity; weekStart: WeekStart }
+    ) => {
+      const values = { ...filterValues, [widgetId]: nextValue };
+      const widgets = doc.widgets.map((widget) => {
+        if (widget.widgetId !== widgetId || widget.type !== 'filter') {
+          return widget;
+        }
+        return {
+          ...widget,
+          defaultValue: nextValue,
+          // 只有日期族带 date 配置；其余族保持原样（没有该键就是没有）。
+          date: nextDate ?? widget.date,
+        };
+      });
+      setFilterValues(values);
+      setDoc((prev) => ({ ...prev, widgets }));
+      if (!id) {
+        return;
+      }
+      void queryWithFilters(id, widgets, values);
+    },
+    [doc.widgets, filterValues, id, queryWithFilters]
+  );
+
+  /**
+   * 换算子（数值族在块上直接改）。只改 layout：取值形状在**下发时**按新算子收形
+   * （例如 between ↔ gt 会改变载荷元素个数），所以不用同步改取值。
+   */
+  const handleFilterOperatorChange = useCallback(
+    (widgetId: string, operator: DashboardFilterWidget['operator']) => {
+      const widgets = doc.widgets.map((widget) =>
+        widget.widgetId === widgetId && widget.type === 'filter' ? { ...widget, operator } : widget
+      );
+      setDoc((prev) => ({ ...prev, widgets }));
+      if (!id) {
+        return;
+      }
+      void queryWithFilters(id, widgets, filterValues);
+    },
+    [doc.widgets, filterValues, id, queryWithFilters]
+  );
+
+  /** 完整日期筛选弹窗确定：取值与粒度/周计算逻辑一起落库并重取。 */
+  const handleConfigureFilterOk = useCallback(
+    (payload: DateFilterModalPayload) => {
+      if (!configuringFilterId) {
+        return;
+      }
+      applyFilterState(configuringFilterId, payload.value, {
+        granularity: payload.granularity,
+        weekStart: payload.weekStart,
+      });
+      setConfiguringFilterId(null);
+    },
+    [applyFilterState, configuringFilterId]
+  );
 
   const handleSave = async () => {
     if (!id) {
@@ -379,7 +593,8 @@ const DashboardEditor: React.FC = () => {
       setDraftRestored(false);
       message.success(intl.formatMessage({ id: 'common.success' }));
       // 落库后由后端按新布局重新逐块取数，顺手覆盖掉未持久化块的本地结果。
-      await runQuery(id);
+      // persistedIdsRef 刚在上面刷过，所以这次会把（刚保存的）筛选器一并下发。
+      await queryWithFilters(id, doc.widgets, filterValues);
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
@@ -395,6 +610,12 @@ const DashboardEditor: React.FC = () => {
     setDraftRestored(false);
     load(id);
   };
+
+  /** 正在「配置」的筛选器块；null 时弹窗不渲染内容。 */
+  const configuringFilter = configuringFilterId
+    ? (filterWidgetsOf(doc.widgets).find((widget) => widget.widgetId === configuringFilterId) ??
+      null)
+    : null;
 
   const renderChartBlock = (widget: DashboardChartWidget) => {
     const result = results[widget.widgetId];
@@ -439,7 +660,12 @@ const DashboardEditor: React.FC = () => {
         );
       }
       return (
-        <ChartView chart={chart} data={data} echartsStyle={{ height: '100%', minHeight: 0 }} />
+        <ChartView
+          chart={chart}
+          data={data}
+          fieldNames={fieldNames}
+          echartsStyle={{ height: '100%', minHeight: 0 }}
+        />
       );
     }
 
@@ -479,35 +705,21 @@ const DashboardEditor: React.FC = () => {
       );
     }
     return (
-      <ChartView chart={chart} data={pending} echartsStyle={{ height: '100%', minHeight: 0 }} />
+      <ChartView
+        chart={chart}
+        data={pending}
+        fieldNames={fieldNames}
+        echartsStyle={{ height: '100%', minHeight: 0 }}
+      />
     );
   };
 
-  if (loading) {
-    return (
-      <div className="dr-page dr-page--center">
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="dr-page dr-page--center">
-        <Result
-          status="warning"
-          title={intl.formatMessage({ id: 'dashboard.notFound' })}
-          subTitle={loadError}
-          extra={
-            <Button onClick={() => navigate('/')}>
-              {intl.formatMessage({ id: 'dashboard.back' })}
-            </Button>
-          }
-        />
-      </div>
-    );
-  }
-
+  // ⚠️ 装载态与错误态**不**走提前 return：`<div ref={containerRef}>` 必须在首屏 commit
+  // 里就存在。`useContainerWidth` 的「挂载即测量 + 挂 ResizeObserver」那个 effect 只跑
+  // 一次（依赖是 measureWidth，而它只依赖 mounted），若那一刻 ref 还是 null，它会直接
+  // return —— ResizeObserver 永远挂不上、宽度永远停在 initialWidth(1280)。症状是栅格按
+  // 1280 排版：窄屏块溢出容器造成横向滚动、宽屏右侧留白，且此后任何 resize 都不再重测
+  //（浏览器验收 D-2）。三种状态都渲染在同一个容器里，测宽口径才一致。
   const chartOptions = charts.map((chart) => ({ value: chart.id, label: chart.name }));
 
   return (
@@ -529,7 +741,8 @@ const DashboardEditor: React.FC = () => {
               icon={<ReloadOutlined />}
               loading={querying}
               onClick={() => {
-                if (id) runQuery(id);
+                // 刷新沿用当前筛选器取值（不是空载荷），否则点一下刷新就"筛了个寂寞"。
+                if (id) void queryWithFilters(id, doc.widgets, filterValues);
               }}
             >
               {intl.formatMessage({ id: 'common.refresh' })}
@@ -567,7 +780,7 @@ const DashboardEditor: React.FC = () => {
             onChange={(event) => setName(event.target.value)}
             placeholder={intl.formatMessage({ id: 'dashboard.name' })}
             aria-label={intl.formatMessage({ id: 'dashboard.name' })}
-            status={name.trim() ? undefined : 'error'}
+            status={loading || name.trim() ? undefined : 'error'}
             style={{ maxWidth: 320 }}
           />
           <Space>
@@ -583,11 +796,33 @@ const DashboardEditor: React.FC = () => {
               optionFilterProp="label"
               style={{ minWidth: 220 }}
             />
+            <Button
+              icon={<PlusOutlined />}
+              data-testid="dashboard-add-filter"
+              onClick={() => setAddFilterOpen(true)}
+            >
+              {intl.formatMessage({ id: 'dashboard.addFilter' })}
+            </Button>
           </Space>
         </div>
 
         <div ref={containerRef}>
-          {doc.widgets.length === 0 ? (
+          {loading ? (
+            <div className="dr-state">
+              <Spin size="large" />
+            </div>
+          ) : loadError ? (
+            <Result
+              status="warning"
+              title={intl.formatMessage({ id: 'dashboard.notFound' })}
+              subTitle={loadError}
+              extra={
+                <Button onClick={() => navigate('/')}>
+                  {intl.formatMessage({ id: 'dashboard.back' })}
+                </Button>
+              }
+            />
+          ) : doc.widgets.length === 0 ? (
             <div className="dr-state">
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -615,36 +850,53 @@ const DashboardEditor: React.FC = () => {
               onDragStop={handleLayoutCommit}
               onResizeStop={handleLayoutCommit}
             >
-              {doc.widgets
-                .filter((widget): widget is DashboardChartWidget => widget.type === 'chart')
-                .map((widget) => (
-                  <div key={widget.widgetId}>
-                    <Card
-                      size="small"
-                      title={
-                        widget.titleOverride ||
-                        chartsById[widget.chartId]?.name ||
-                        `#${widget.chartId}`
-                      }
-                      extra={
-                        <Button
-                          type="text"
-                          size="small"
-                          danger
-                          icon={<DeleteOutlined />}
-                          aria-label={intl.formatMessage({ id: 'dashboard.removeBlock' })}
-                          onClick={() => handleRemoveWidget(widget.widgetId)}
-                        />
-                      }
-                      style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-                      styles={{
-                        body: { flex: 1, minHeight: 0, padding: 8, overflow: 'hidden' },
-                      }}
-                    >
-                      {renderChartBlock(widget)}
-                    </Card>
-                  </div>
-                ))}
+              {doc.widgets.map(
+                (widget) =>
+                  widget.type === 'chart' ? (
+                    <div key={widget.widgetId}>
+                      <Card
+                        size="small"
+                        title={
+                          widget.titleOverride ||
+                          chartsById[widget.chartId]?.name ||
+                          `#${widget.chartId}`
+                        }
+                        extra={
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            aria-label={intl.formatMessage({ id: 'dashboard.removeBlock' })}
+                            onClick={() => handleRemoveWidget(widget.widgetId)}
+                          />
+                        }
+                        style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+                        styles={{
+                          body: { flex: 1, minHeight: 0, padding: 8, overflow: 'hidden' },
+                        }}
+                      >
+                        {renderChartBlock(widget)}
+                      </Card>
+                    </div>
+                  ) : widget.type === 'filter' ? (
+                    <div key={widget.widgetId}>
+                      <DashboardFilterBlock
+                        widget={widget}
+                        value={filterValues[widget.widgetId]}
+                        // 未落库的筛选器后端读不到（盘级取数按已落库 layout 建索引）。
+                        unsaved={!persistedIdsRef.current.has(widget.widgetId)}
+                        onChange={(next) => applyFilterState(widget.widgetId, next)}
+                        onOperatorChange={(operator) =>
+                          handleFilterOperatorChange(widget.widgetId, operator)
+                        }
+                        onConfigure={() => setConfiguringFilterId(widget.widgetId)}
+                        onRemove={() => handleRemoveWidget(widget.widgetId)}
+                      />
+                    </div>
+                  ) : null
+                // 说明：text 块保持现状——占用宫格但不画内容。
+              )}
             </GridLayout>
           ) : (
             <div className="dr-state">
@@ -653,6 +905,29 @@ const DashboardEditor: React.FC = () => {
           )}
         </div>
       </Card>
+
+      <AddFilterWidgetModal
+        open={addFilterOpen}
+        datasets={datasets}
+        onOk={handleAddFilterWidget}
+        onCancel={() => setAddFilterOpen(false)}
+      />
+
+      <DateFilterModal
+        open={configuringFilter !== null}
+        fieldName={configuringFilter?.label}
+        withTime={configuringFilter ? dateFilterWidgetSettings(configuringFilter).withTime : false}
+        initial={
+          // 取值 state 是 unknown（三族共用），进日期弹窗前必须过守卫。
+          configuringFilterId && isDateFilterValue(filterValues[configuringFilterId])
+            ? filterValues[configuringFilterId]
+            : undefined
+        }
+        initialGranularity={configuringFilter?.date?.granularity}
+        initialWeekStart={configuringFilter?.date?.weekStart}
+        onOk={handleConfigureFilterOk}
+        onCancel={() => setConfiguringFilterId(null)}
+      />
     </div>
   );
 };

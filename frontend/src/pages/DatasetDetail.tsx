@@ -122,24 +122,49 @@ const DatasetDetailPage: React.FC = () => {
     }
   };
 
-  const handleColumnRoleChange = (name: string, role: 'dimension' | 'metric') => {
-    setColumns((prev) => prev.map((col) => (col.name === name ? { ...col, role } : col)));
+  // 切到「数据预览」tab 时自动加载一次（此前必须手点刷新，空态误导为无数据）
+  const handleTabChange = (key: string) => {
+    if (key === 'preview' && !preview && !previewLoading) {
+      loadPreview();
+    }
   };
 
-  const handleColumnTypeChange = (name: string, type: string) => {
+  // 本地状态的身份一律用列 id，不用列名：列名自本特性起可改，按名索引在改名后
+  // 会错位（改完 A 的名字，后续对 A 的编辑会落到名字撞上的另一列）。
+  const handleColumnRoleChange = (id: string, role: 'dimension' | 'metric') => {
+    setColumns((prev) => prev.map((col) => (col.id === id ? { ...col, role } : col)));
+  };
+
+  const handleColumnTypeChange = (id: string, type: string) => {
     setColumns((prev) =>
-      prev.map((col) => (col.name === name ? { ...col, type: type as DatasetColumn['type'] } : col))
+      prev.map((col) => (col.id === id ? { ...col, type: type as DatasetColumn['type'] } : col))
     );
   };
 
-  const handleColumnCommentChange = (name: string, comment: string) => {
-    setColumns((prev) => prev.map((col) => (col.name === name ? { ...col, comment } : col)));
+  const handleColumnCommentChange = (id: string, comment: string) => {
+    setColumns((prev) => prev.map((col) => (col.id === id ? { ...col, comment } : col)));
+  };
+
+  const handleColumnNameChange = (id: string, name: string) => {
+    setColumns((prev) => prev.map((col) => (col.id === id ? { ...col, name } : col)));
   };
 
   const handleSaveColumns = async () => {
+    // 列名是可变展示名，但会作为 SQL 输出别名与响应负载键使用，同名无法区分。
+    const trimmed = columns.map((col) => ({ ...col, name: col.name.trim() }));
+    if (trimmed.some((col) => col.name === '')) {
+      message.error(intl.formatMessage({ id: 'field.pleaseEnterFieldName' }));
+      return;
+    }
+    const names = trimmed.map((col) => col.name);
+    if (new Set(names).size !== names.length) {
+      message.error(intl.formatMessage({ id: 'field.duplicateName' }));
+      return;
+    }
+
     setSavingColumns(true);
     try {
-      await datasetsApi.updateColumns(datasetId, columns);
+      await datasetsApi.updateColumns(datasetId, trimmed);
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
@@ -168,6 +193,8 @@ const DatasetDetailPage: React.FC = () => {
         newColumn = { ...editingVirtualField, ...values };
       } else {
         newColumn = {
+          // 空 id = 请后端分配（列的稳定标识由后端 idgen 生成）
+          id: '',
           name: values.name,
           type: values.type || 'string',
           role: values.role || 'dimension',
@@ -179,7 +206,7 @@ const DatasetDetailPage: React.FC = () => {
       let updatedColumns: DatasetColumn[];
       if (isEditing) {
         updatedColumns = columns.map((col) =>
-          col.name === editingVirtualField.name ? newColumn : col
+          col.id === editingVirtualField.id ? newColumn : col
         );
       } else {
         updatedColumns = [...columns, newColumn];
@@ -187,7 +214,9 @@ const DatasetDetailPage: React.FC = () => {
 
       setSavingColumns(true);
       await datasetsApi.updateColumns(datasetId, updatedColumns);
-      setColumns(updatedColumns);
+      // 从服务端重取而非落本地数组：新增列的 id 由后端分配，留在本地副本里它仍是空串，
+      // 下一次编辑/删除按 id 匹配就会命中所有未回填的行。
+      await loadColumns();
 
       setVirtualFieldModalVisible(false);
       form.resetFields();
@@ -203,12 +232,12 @@ const DatasetDetailPage: React.FC = () => {
     }
   };
 
-  const handleDeleteVirtualField = async (name: string) => {
+  const handleDeleteVirtualField = async (id: string) => {
     try {
-      const updatedColumns = columns.filter((col) => col.name !== name);
+      const updatedColumns = columns.filter((col) => col.id !== id);
       setSavingColumns(true);
       await datasetsApi.updateColumns(datasetId, updatedColumns);
-      setColumns(updatedColumns);
+      await loadColumns();
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
@@ -248,15 +277,18 @@ const DatasetDetailPage: React.FC = () => {
   })();
   const shardKeySet = new Set(shardKeys);
 
+  // shard_keys 存列 ID；历史数据里存的还是列名，故两种都认（迁移后只剩 ID）
+  const isShardKey = (col: DatasetColumn) => shardKeySet.has(col.id) || shardKeySet.has(col.name);
+
   const columnsManagementTableData = [...columns]
     .sort((a, b) => {
-      const aShard = shardKeySet.has(a.name) ? 0 : 1;
-      const bShard = shardKeySet.has(b.name) ? 0 : 1;
+      const aShard = isShardKey(a) ? 0 : 1;
+      const bShard = isShardKey(b) ? 0 : 1;
       return aShard - bShard;
     })
     .map((col) => ({
       ...col,
-      key: col.name,
+      key: col.id,
     }));
 
   const fieldsTableColumns = [
@@ -264,45 +296,41 @@ const DatasetDetailPage: React.FC = () => {
       title: intl.formatMessage({ id: 'field.name' }),
       dataIndex: 'name',
       key: 'name',
-      width: 220,
-      render: (name: string, record: any) => (
-        <Space orientation="vertical" size={2} style={{ maxWidth: 200 }}>
+      width: 240,
+      render: (name: string, record: DatasetColumn) => (
+        <Space orientation="vertical" size={2} style={{ maxWidth: 220 }}>
           <Space size={4}>
-            {record.isVirtual && <FunctionOutlined style={{ color: '#722ed1' }} />}
-            <Text
-              strong={record.isVirtual}
-              title={name}
+            {record.expr && record.expr !== record.name && (
+              <FunctionOutlined style={{ color: '#722ed1' }} />
+            )}
+            {/* 字段名可改：id 是稳定引用键，改名只影响展示与 SQL 输出别名 */}
+            <Input
+              value={name}
+              onChange={(event) => handleColumnNameChange(record.id, event.target.value)}
               style={{
-                display: 'inline-block',
-                maxWidth: 170,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                verticalAlign: 'bottom',
+                width: 170,
                 // 与图表构建页的字段语义同源：维度蓝 / 指标绿
                 color: record.role === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)',
               }}
-            >
-              {name}
-            </Text>
+            />
           </Space>
           <Space size={4} wrap>
-            {shardKeySet.has(name) && (
+            {isShardKey(record) && (
               <Tag color="orange" style={{ marginInlineEnd: 0 }}>
                 {intl.formatMessage({ id: 'field.shardKey' })}
               </Tag>
             )}
-            {record.isVirtual && (
+            {record.expr && record.expr !== record.name && (
               <Tag color="purple" style={{ marginInlineEnd: 0 }}>
                 {intl.formatMessage({ id: 'field.virtual' })}
               </Tag>
             )}
-            {record.role === 'dimension' && !record.isVirtual && (
+            {record.role === 'dimension' && (
               <Tag color="blue" style={{ marginInlineEnd: 0 }}>
                 {intl.formatMessage({ id: 'field.dimension' })}
               </Tag>
             )}
-            {record.role === 'metric' && !record.isVirtual && (
+            {record.role === 'metric' && (
               <Tag color="purple" style={{ marginInlineEnd: 0 }}>
                 {intl.formatMessage({ id: 'field.metric' })}
               </Tag>
@@ -320,7 +348,7 @@ const DatasetDetailPage: React.FC = () => {
           value={comment}
           placeholder={intl.formatMessage({ id: 'field.descriptionPlaceholder' })}
           variant="borderless"
-          onChange={(event) => handleColumnCommentChange(record.name, event.target.value)}
+          onChange={(event) => handleColumnCommentChange(record.id, event.target.value)}
           style={{ width: '100%', paddingInline: 0 }}
         />
       ),
@@ -335,7 +363,7 @@ const DatasetDetailPage: React.FC = () => {
           value={dataType}
           size="small"
           style={{ width: 110 }}
-          onChange={(value) => handleColumnTypeChange(record.name, value)}
+          onChange={(value) => handleColumnTypeChange(record.id, value)}
         >
           <Select.Option value="string">
             {intl.formatMessage({ id: 'dataType.string' })}
@@ -368,7 +396,7 @@ const DatasetDetailPage: React.FC = () => {
           unCheckedChildren={intl.formatMessage({ id: 'field.dimension' })}
           size="small"
           onChange={(checked) =>
-            handleColumnRoleChange(record.name, checked ? 'metric' : 'dimension')
+            handleColumnRoleChange(record.id, checked ? 'metric' : 'dimension')
           }
           style={{
             // 只在「指标」态染色（指标绿）；「维度」态交回 antd 默认灰，
@@ -396,8 +424,9 @@ const DatasetDetailPage: React.FC = () => {
       title: intl.formatMessage({ id: 'dataset.actions' }),
       key: 'actions',
       width: 100,
-      render: (_: any, record: any) => {
-        if (!record.isVirtual) return null;
+      render: (_: unknown, record: DatasetColumn) => {
+        // 虚拟字段 = 表达式不等于列名本身（物理列的 expr 恰为来源列名）
+        if (!record.expr || record.expr === record.name) return null;
         return (
           <Space size="small">
             <Button
@@ -408,7 +437,7 @@ const DatasetDetailPage: React.FC = () => {
             />
             <Popconfirm
               title={intl.formatMessage({ id: 'virtualField.deleteConfirm' })}
-              onConfirm={() => handleDeleteVirtualField(record.name)}
+              onConfirm={() => handleDeleteVirtualField(record.id)}
               okText={intl.formatMessage({ id: 'common.yes' })}
               cancelText={intl.formatMessage({ id: 'common.no' })}
             >
@@ -587,6 +616,7 @@ const DatasetDetailPage: React.FC = () => {
 
         <Tabs
           defaultActiveKey="fields"
+          onChange={handleTabChange}
           items={[
             {
               key: 'fields',
@@ -701,7 +731,7 @@ const DatasetDetailPage: React.FC = () => {
               { required: true, message: intl.formatMessage({ id: 'field.pleaseEnterFieldName' }) },
             ]}
           >
-            <Input placeholder="e.g., total_price" disabled={!!editingVirtualField} />
+            <Input placeholder="e.g., total_price" />
           </Form.Item>
           <Form.Item
             name="dataType"

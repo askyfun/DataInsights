@@ -68,7 +68,9 @@ func (p *QueryPlanner) PlanAST(source string, sourceType SourceType, spec *Query
 		Filters:        make([]FilterExpr, 0, len(spec.Filters)),
 		Pagination:     spec.Pagination,
 		Limit:          spec.Limit,
-		ColumnMappings: map[string]string{},
+		ColumnMappings:       map[string]string{},
+		LegacyColumnMappings: map[string]string{},
+		ColumnNames:          map[string]string{},
 	}
 
 	if spec.Sort != nil {

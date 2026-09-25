@@ -13,13 +13,13 @@ frontend/src/
 ├── main.tsx              # 入口：Sentry、i18n、BrowserRouter
 ├── App.tsx               # 根组件：Layout + 路由 + 导航菜单
 ├── api/
-│   ├── index.ts          # API 客户端和所有类型定义（axios 实例 + datasourcesApi/datasetsApi/chartsApi/sharesApi）
+│   ├── index.ts          # API 模块封装（datasourcesApi/datasetsApi/chartsApi/dashboardsApi/sharesApi/queriesApi）；只消费 lib/api/client 的单一 axios 实例，实体/响应类型来自 idls/gen_types.ts
 │   └── datatypes.ts      # 标准数据类型系统 + 多数据库类型映射
 ├── lib/api/
-│   └── client.ts         # 底层 Axios 工具（get/post/put/del 泛型辅助函数）
+│   └── client.ts         # 持有唯一 axios 实例（baseURL 由 resolveApiBaseURL 决定）+ get/post/put/del 泛型辅助
 ├── store/
 │   └── index.ts          # 单一 Zustand Store（全部应用状态 + 异步 actions）
-├── idls/                 # API 类型定义（datasource, dataset, chart, share）
+├── idls/                 # API 类型定义（现仅 gen_types.ts 生成物；Batch 2 已删除手写类型）
 ├── pages/                # 页面组件（每个页面自包含）
 │   ├── Datasource.tsx        # 数据源 CRUD 列表
 │   ├── DatasourceDetail.tsx  # 数据源详情（表/列浏览）
@@ -28,6 +28,8 @@ frontend/src/
 │   ├── DatasetEdit.tsx       # 数据集编辑表单
 │   ├── ChartBuilder.tsx      # 拖拽式图表构建器（核心功能）
 │   ├── Charts.tsx            # 已保存图表列表
+│   ├── Dashboards.tsx        # 仪表盘列表（首页 `/`）
+│   ├── DashboardEditor.tsx   # 仪表盘编辑器（12 列栅格布局）
 │   ├── Share.tsx             # 分享链接管理
 │   └── ShareView.tsx         # 公开分享视图（密码保护）
 ├── components/
@@ -62,15 +64,16 @@ frontend/src/
 
 ### API 层
 
-- `api/index.ts` — 创建 Axios 实例（baseURL: `http://{hostname}:23352`），定义所有 API 模块和 TypeScript 接口
-- `lib/api/client.ts` — 底层工具（request ID 注入、code 20000 验证、Sentry 错误上报）
+- `lib/api/client.ts` — 持有**唯一** axios 实例（baseURL 由 `resolveApiBaseURL` 决定：生产同源、开发回退 `http://{hostname}:23352`），提供 `get/post/put/del` 泛型辅助，含 request ID 注入、code 20000 验证、Sentry 错误上报
+- `api/index.ts` — 定义所有 API 模块（datasourcesApi/datasetsApi/chartsApi/dashboardsApi/sharesApi/queriesApi），**只消费** `lib/api/client` 的实例，**不得再 `axios.create`**
 - 响应拦截器验证 `code === 20000` 才算成功
 
 ### 路由
 
 | 路径 | 组件 | 说明 |
 |------|------|------|
-| `/` | 欢迎页 | 首页 |
+| `/` | DashboardsPage | 首页（仪表盘列表） |
+| `/dashboards/:id` | DashboardEditor | 仪表盘编辑器 |
 | `/datasources` | DatasourcePage | 数据源列表 |
 | `/datasources/:id` | DatasourceDetailPage | 数据源详情 |
 | `/datasets` | DatasetPage | 数据集列表 |
@@ -93,14 +96,14 @@ frontend/src/
 
 ```bash
 cd frontend
-npm install              # 安装依赖
-npm run dev              # 开发服务器，端口 23351
-npm run build            # tsc + vite 构建
-npm run test             # vitest 运行测试
-npm run check            # biome lint + 格式化检查
-npm run build:check      # biome check + vitest（提交前验证）
-npm run format           # biome 格式化
-npm run lint             # biome lint
+pnpm install             # 安装依赖（npm/yarn/bun 会被 preinstall 钩子硬拦截）
+pnpm dev                 # 开发服务器，端口 23351
+pnpm build               # tsc + vite 构建
+pnpm test                # vitest 运行测试
+pnpm check               # biome lint + 格式化检查
+pnpm build:check         # biome check + vitest（提交前验证）
+pnpm format              # biome 格式化
+pnpm lint                # biome lint
 ```
 
 ## 约束
@@ -109,5 +112,5 @@ npm run lint             # biome lint
 - API 通信使用 snake_case（与后端一致）
 - 所有组件使用函数式组件 + React.FC + 显式 props 接口
 - Biome 格式化：2 空格缩进，100 字符行宽
-- 提交前必须通过 `npm run build:check`
+- 提交前必须通过 `pnpm build:check`
 - 路径别名 `@/*` 映射到 `./src/*`

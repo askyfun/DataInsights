@@ -7,6 +7,7 @@ import {
   DASHBOARD_MIN_W,
   type DashboardFilterWidget,
   emptyDashboardLayout,
+  findFreePlacement,
   isFilterActive,
   migrateDashboardLayout,
   normalizePlacement,
@@ -343,5 +344,149 @@ describe('isFilterActive：只有"有值"的筛选器才参与合并', () => {
   it('无值算子（isNull / isNotNull）恒为激活——它们靠算子本身表达，不需要值', () => {
     expect(isFilterActive({ ...base, operator: 'isNull', defaultValue: undefined })).toBe(true);
     expect(isFilterActive({ ...base, operator: 'isNotNull', defaultValue: undefined })).toBe(true);
+  });
+});
+
+/**
+ * 新增块的落点选择。
+ *
+ * 回归（浏览器验收 D-3）：旧实现硬编码 `x: 0, y: 最底边`，12 列画布上默认 6 列宽的块会
+ * 全部堆在左半边、右半边长期空置。RGL 的 vertical compactor 只做纵向吸附，不会横向填空，
+ * 所以这个选择必须在建块时就做对。
+ */
+describe('findFreePlacement：新块放进首个空位（自上而下、自左而右）', () => {
+  const six = { w: 6, h: 8 };
+
+  it('空盘 → 左上角', () => {
+    expect(findFreePlacement([], six)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('已有一块 6 列块 → 落在同一行右侧，而不是下一行', () => {
+    const spot = findFreePlacement([{ x: 0, y: 0, w: 6, h: 8 }], six);
+    expect(spot).toEqual({ x: 6, y: 0 });
+  });
+
+  it('左右各一块 → 回落到下一行左侧（这一行放不下 6 列）', () => {
+    const spot = findFreePlacement(
+      [
+        { x: 0, y: 0, w: 6, h: 8 },
+        { x: 6, y: 0, w: 6, h: 8 },
+      ],
+      six
+    );
+    expect(spot).toEqual({ x: 0, y: 8 });
+  });
+
+  it('上方有空洞时优先填空洞，而不是继续往下堆', () => {
+    const spot = findFreePlacement(
+      [
+        { x: 0, y: 0, w: 6, h: 8 },
+        { x: 0, y: 8, w: 6, h: 8 },
+      ],
+      six
+    );
+    expect(spot).toEqual({ x: 6, y: 0 });
+  });
+
+  it('3 列块填得更紧：4 块之后占满前两行', () => {
+    const three = { w: 3, h: 3 };
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const spot = findFreePlacement(placed, three);
+      placed.push({ ...spot, ...three });
+    }
+    expect(placed).toEqual([
+      { x: 0, y: 0, w: 3, h: 3 },
+      { x: 3, y: 0, w: 3, h: 3 },
+      { x: 6, y: 0, w: 3, h: 3 },
+      { x: 9, y: 0, w: 3, h: 3 },
+      { x: 0, y: 3, w: 3, h: 3 },
+    ]);
+  });
+
+  it('返回的位置恒不与既有块重叠，且 x + w 不越界', () => {
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const spot = findFreePlacement(placed, { w: 5, h: 4 });
+      expect(spot.x).toBeGreaterThanOrEqual(0);
+      expect(spot.x + 5).toBeLessThanOrEqual(DASHBOARD_GRID_COLS);
+      expect(spot.y).toBeGreaterThanOrEqual(0);
+      for (const other of placed) {
+        const disjoint =
+          spot.x >= other.x + other.w ||
+          other.x >= spot.x + 5 ||
+          spot.y >= other.y + other.h ||
+          other.y >= spot.y + 4;
+        expect(disjoint).toBe(true);
+      }
+      placed.push({ ...spot, w: 5, h: 4 });
+    }
+  });
+
+  it('尺寸先按最小尺寸与列数收敛（w 超过列数时按满列处理）', () => {
+    expect(findFreePlacement([], { w: 999, h: 1 })).toEqual({ x: 0, y: 0 });
+    // 满列块放不进任何一行 → 回落到最底边之下（与旧行为一致）。
+    expect(findFreePlacement([{ x: 0, y: 0, w: 12, h: 2 }], { w: 12, h: 2 })).toEqual({
+      x: 0,
+      y: 2,
+    });
+  });
+
+  it('不修改入参', () => {
+    const widgets = [{ x: 0, y: 0, w: 6, h: 8 }];
+    const snapshot = JSON.stringify(widgets);
+    findFreePlacement(widgets, six);
+    expect(JSON.stringify(widgets)).toBe(snapshot);
+  });
+});
+
+describe('筛选器块的 date 配置（粒度 / 周计算逻辑）', () => {
+  const layoutWith = (date: unknown) =>
+    JSON.stringify({
+      version: 1,
+      grid: { cols: 12 },
+      widgets: [
+        {
+          widgetId: 'w-f',
+          type: 'filter',
+          binding: { datasetId: 3, column: '0000i529' },
+          label: '交易日期',
+          dataType: 'date',
+          operator: 'between',
+          multi: false,
+          date,
+          x: 0,
+          y: 0,
+          w: 3,
+          h: 3,
+        },
+      ],
+    });
+
+  const dateOf = (date: unknown) => {
+    const widget = migrateDashboardLayout(layoutWith(date)).widgets[0];
+    return widget.type === 'filter' ? widget.date : undefined;
+  };
+
+  it('合法的粒度 + 周计算逻辑被采纳', () => {
+    expect(dateOf({ granularity: 'week', weekStart: 0 })).toEqual({
+      granularity: 'week',
+      weekStart: 0,
+    });
+    expect(dateOf({ granularity: 'month', weekStart: 6 })).toEqual({
+      granularity: 'month',
+      weekStart: 6,
+    });
+  });
+
+  it('半截 / 非法配置一律丢弃（宁可退回默认口径，也不要混合配置）', () => {
+    expect(dateOf({ granularity: 'week' })).toBeUndefined();
+    expect(dateOf({ weekStart: 0 })).toBeUndefined();
+    expect(dateOf({ granularity: 'nope', weekStart: 0 })).toBeUndefined();
+    // weekStart 合法域是 0..6，7 越界
+    expect(dateOf({ granularity: 'day', weekStart: 7 })).toBeUndefined();
+    expect(dateOf('day')).toBeUndefined();
+    expect(dateOf(null)).toBeUndefined();
+    expect(dateOf(undefined)).toBeUndefined();
   });
 });

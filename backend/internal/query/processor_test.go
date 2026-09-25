@@ -3,9 +3,24 @@ package query
 import (
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// TestToString_TimeValue 先红：DATE/DATETIME 列经驱动扫描为 time.Time，
+// toString 此前落到 fmt.Sprintf("%v")，x_axis 出现 "2026-01-04 00:00:00 +0000 UTC"
+// 这种 Go 内部字符串。纯日期（零时刻）应输出 YYYY-MM-DD，带时间部分输出秒级时间戳。
+func TestToString_TimeValue(t *testing.T) {
+	dateOnly := time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC)
+	if got := toString(dateOnly); got != "2026-01-04" {
+		t.Errorf("toString(date) = %q, want 2026-01-04", got)
+	}
+	withTime := time.Date(2026, 1, 4, 13, 30, 5, 0, time.UTC)
+	if got := toString(withTime); got != "2026-01-04 13:30:05" {
+		t.Errorf("toString(datetime) = %q, want 2026-01-04 13:30:05", got)
+	}
+}
 
 // TestAxisProcessor_EmptyData 验证空行数据返回空响应
 func TestAxisProcessor_EmptyData(t *testing.T) {

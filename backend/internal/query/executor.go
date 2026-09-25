@@ -47,6 +47,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 
 	qb := NewQueryBuilder()
 	qb.WithColumnMappings(e.dataset.Columns)
+	idx := qb.indexes()
 
 	ast := req.PlannedAST
 	if ast == nil {
@@ -60,11 +61,20 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 			req.Pagination,
 		)
 	} else {
-		ast.ApplyColumnMappings(qb.columnMappings)
+		ast.ApplyColumnIndex(idx)
 		if ast.Source == "" {
 			ast.Source = baseQuery
 		}
 		ast.SourceType = sourceType
+	}
+
+	// 负载层统一用列名（展示语义）。wire 上维度/指标/过滤引用的是**列 ID**（稳定，
+	// 改名不断链），而 SQL 输出别名与响应键都是列名；这里把请求携带的平铺参数就地
+	// 翻译一次，下游处理器与分页表格无需感知列 ID。未命中列 ID 的条目原样保留
+	// （历史 name 形态），行为与改动前一致。
+	req.Dims = idx.localizeFields(req.Dims)
+	for i := range req.Metrics {
+		req.Metrics[i].Alias = idx.localizeAlias(req.Metrics[i].Field, req.Metrics[i].ResolveAlias())
 	}
 
 	if err := ast.ValidateGranularity(dialect); err != nil {

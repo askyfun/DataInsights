@@ -27,7 +27,7 @@ const (
 func BuildHistogramStatsQuery(dialect DialectType, ast *QueryAST, valueField string) (string, []any) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 	return qb.buildHistogramStatsQuery(ast, valueField)
 }
 
@@ -79,7 +79,7 @@ func (qb *BunQueryBuilder) buildHistogramStatsQuery(ast *QueryAST, valueField st
 func BuildHistogramBinQuery(dialect DialectType, ast *QueryAST, valueField string, minValue, binWidth float64) (string, []any) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 	return qb.buildHistogramBinQuery(ast, valueField, minValue, binWidth)
 }
 

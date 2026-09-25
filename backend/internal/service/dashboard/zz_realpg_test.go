@@ -14,8 +14,8 @@ import (
 	"data-insights/internal/domain/entity"
 )
 
-// zz_ 前缀是本仓库的探针约定（留工作区、不入库，见 docs/pitfalls.md 的
-// zz_repro_op_test.go）。本探针按 docs/pitfalls.md「跨库写 SQL 必须真跑一次」的
+// zz_ 前缀是本仓库的探针约定（留工作区、不入库，见 docs/developer-guide/troubleshooting.md 的
+// zz_repro_op_test.go）。本探针按 docs/developer-guide/troubleshooting.md「跨库写 SQL 必须真跑一次」的
 // 规矩，对真实 PostgreSQL 跑一遍完整往返：sqlmock 抓不出 JSONB 列收到 string
 // 参数、uuid 主键绑定、bun 的 `@\?` 转义在真实驱动下的形态。
 //

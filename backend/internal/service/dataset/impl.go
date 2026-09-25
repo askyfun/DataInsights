@@ -11,6 +11,7 @@ import (
 	"data-insights/internal/database"
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/idgen"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
 	dsservice "data-insights/internal/service/datasource"
@@ -63,7 +64,10 @@ func NewService(db *bun.DB) Service {
 // List returns all datasets with pagination
 func (s *datasetService) List(ctx context.Context, limit, offset int) ([]entity.Dataset, error) {
 	var datasets []model.Dataset
-	q := s.db.NewSelect().Model(&datasets).Where("deleted_at IS NULL")
+	// 显式 id 倒序：不写 ORDER BY 时 PostgreSQL 返回的是堆物理序，UPDATE 会写新行
+	// 版本追加到堆尾，编辑过的数据集会漂到列表后面（表现为顺序"随机"）。id 倒序让
+	// 新建/导入的靠前，且天然稳定。对齐 dashboard 服务的显式排序决策。
+	q := s.db.NewSelect().Model(&datasets).Where("deleted_at IS NULL").OrderExpr("id DESC")
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
@@ -167,6 +171,13 @@ func (s *datasetService) GetColumns(ctx context.Context, id int) ([]entity.Datas
 			for i := range savedColumns {
 				savedColumns[i].Type = string(model.NormalizeStandardType(savedColumns[i].Type))
 			}
+			// 历史数据（本特性之前保存的列）没有 ID：补齐并回写，否则图表配置
+			// 与 shard_keys 没有可引用的稳定标识。
+			if assignColumnIDs(savedColumns) {
+				if err := s.persistColumns(ctx, ds, savedColumns); err != nil {
+					return nil, err
+				}
+			}
 			return savedColumns, nil
 		}
 	}
@@ -205,7 +216,61 @@ func (s *datasetService) GetColumns(ctx context.Context, id int) ([]entity.Datas
 		return nil, fmt.Errorf("no table or query defined")
 	}
 
-	return mapDatasetColumns(dbColumns, dsModel.Type), nil
+	// 列 ID 是图表配置 / shard_keys 的引用键，没有落库就没有稳定 ID 可引用，
+	// 因此首次读取即分配 ID 并物化（幂等）。物化后列集合以落库为准——与用户
+	// 手动保存过一次列定义后的行为一致。
+	columns := mapDatasetColumns(dbColumns, dsModel.Type)
+	assignColumnIDs(columns)
+	if err := s.persistColumns(ctx, ds, columns); err != nil {
+		return nil, err
+	}
+	return columns, nil
+}
+
+// persistColumns 只写 bi_dataset.columns 一列：GET 路径上的物化不应顺手改动
+// updated_at（那是用户显式保存的语义）。
+func (s *datasetService) persistColumns(ctx context.Context, ds *model.Dataset, columns []entity.DatasetColumn) error {
+	columnsJSON, err := json.Marshal(columns)
+	if err != nil {
+		return fmt.Errorf("failed to marshal columns: %w", err)
+	}
+	ds.Columns = string(columnsJSON)
+
+	if _, err := s.db.NewUpdate().Model(ds).Column("columns").WherePK().Where("deleted_at IS NULL").Exec(ctx); err != nil {
+		return fmt.Errorf("failed to persist columns: %w", err)
+	}
+	return nil
+}
+
+// assignColumnIDs 给缺 ID 或 ID 重复的列补发稳定 ID（幂等），返回是否有改动。
+// 已有 ID 一律原样保留——列 ID 落地后被图表配置引用，换 ID 等于断链。
+// 列集合不存在"增量合并"（只要有落库就以落库为准），故无需跨请求的 ID 复用逻辑。
+func assignColumnIDs(columns []entity.DatasetColumn) bool {
+	used := make(map[string]struct{}, len(columns))
+	changed := false
+	for i := range columns {
+		if id := columns[i].ID; id != "" {
+			if _, dup := used[id]; !dup {
+				used[id] = struct{}{}
+				continue
+			}
+		}
+		columns[i].ID = newColumnID(used)
+		used[columns[i].ID] = struct{}{}
+		changed = true
+	}
+	return changed
+}
+
+// newColumnID 生成一个未被 used 占用的短 ID。idgen 保证进程内唯一，跨重启靠随机
+// 起始偏移错开；这里的 used 检查兜住极小概率的启动偏移撞车。
+func newColumnID(used map[string]struct{}) string {
+	for {
+		id := idgen.New()
+		if _, dup := used[id]; !dup {
+			return id
+		}
+	}
 }
 
 // mapDatasetColumns converts driver columns to entity columns with inferred
@@ -245,6 +310,9 @@ func (s *datasetService) UpdateColumns(ctx context.Context, id int, columns []en
 	if err != nil {
 		return nil, err
 	}
+
+	// 前端在新建虚拟字段时不会带 ID；这里补发，保证落库的列恒有稳定标识。
+	assignColumnIDs(columns)
 
 	columnsJSON, err := json.Marshal(columns)
 	if err != nil {

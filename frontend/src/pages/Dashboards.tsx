@@ -5,7 +5,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import { Button, Card, message, Popconfirm, Space, Table, Tag, Typography } from 'antd';
+import { App, Button, Card, Popconfirm, Space, Table, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
@@ -28,6 +28,10 @@ const countChartBlocks = (layoutJson: string): number =>
 const DashboardsPage: React.FC = () => {
   const intl = useIntl();
   const navigate = useNavigate();
+  // message 取 App 上下文实例，不用静态 message.*（静态方法读不到 ConfigProvider 的
+  // 主题上下文）。依赖根部的 <App> 包裹，见 main.tsx。该实例跨渲染稳定（antd 内部
+  // 以 useMemo([], …) 产出），故放进下方依赖数组不会引起 effect 循环。
+  const { message } = App.useApp();
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -41,7 +45,7 @@ const DashboardsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [intl]);
+  }, [intl, message]);
 
   useEffect(() => {
     fetchDashboards();

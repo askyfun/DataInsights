@@ -471,12 +471,12 @@ const relocateOverflowBindings = (
   }
 
   const target = kept[targetIndex];
-  const seen = new Set(target.bindings.map((binding) => binding.field));
+  const seen = new Set(target.bindings.map((binding) => binding.fieldId));
   for (const binding of overflow) {
-    if (seen.has(binding.field)) {
+    if (seen.has(binding.fieldId)) {
       continue;
     }
-    seen.add(binding.field);
+    seen.add(binding.fieldId);
     target.bindings.push(binding);
   }
 

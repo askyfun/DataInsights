@@ -1525,8 +1525,13 @@ components:
           description: 分片键的 JSON 数组字符串。
     DatasetColumn:
       type: object
-      description: 数据集列定义（entity.DatasetColumn）；JSON 字段名为 snake_case 的 type_config。
+      description: >-
+        数据集列定义（entity.DatasetColumn）；JSON 字段名为 snake_case 的 type_config。
+        id 是列的**稳定标识**（8 位 base36 短 ID，由后端分配后不再变化），name 是
+        **可变的展示名**：图表配置、shard_keys 与查询请求一律引用 id，展示时才由
+        id 解析回 name。列未落库时后端在首次读取时分配 id 并物化。
       required:
+        - id
         - name
         - expr
         - type
@@ -1534,10 +1539,15 @@ components:
         - comment
         - role
       properties:
+        id:
+          type: string
+          description: 列的稳定标识；由后端分配，客户端只读回传，不可自行生成或改写。
         name:
           type: string
+          description: 可变展示名。同一数据集内必须唯一（后端在 PUT /columns 校验）。
         expr:
           type: string
+          description: SQL 表达式。物理列的 expr 即来源表列名，改展示名不应改动 expr。
         type:
           type: string
           enum: [float, integer, boolean, string, date, datetime, array, map]
@@ -2556,6 +2566,7 @@ components:
       properties:
         field:
           type: string
+          description: 数据集列的 **id**（不是展示名）；SQL 输出别名与响应负载键才用展示名。
         label:
           type: string
         granularity:
@@ -2563,7 +2574,7 @@ components:
           description: 时间粒度（day / week / month 等）；执行前按方言校验（ValidateGranularity）。
         binding_id:
           type: string
-          description: 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。
+          description: 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一字段在不同槽位/组里有不同的 binding_id。
     ChartMetricGroup:
       type: object
       description: 指标组（query.MetricGroup）。
@@ -2590,6 +2601,7 @@ components:
       properties:
         field:
           type: string
+          description: 数据集列的 **id**（不是展示名）；SQL 输出别名与响应负载键才用展示名。
         label:
           type: string
         agg:
@@ -2603,7 +2615,7 @@ components:
           type: string
         binding_id:
           type: string
-          description: 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。
+          description: 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一字段在不同槽位/组里有不同的 binding_id。
     QuerySpec:
       type: object
       description: >-
@@ -3001,6 +3013,21 @@ components:
         multi:
           type: boolean
           description: type=filter 是否允许多选。
+        date:
+          type: object
+          description: >-
+            type=filter 且绑定字段是日期类时的粒度与周计算逻辑（口径见前端 lib/dateFilter.ts）。
+            **后端只做投影解析、不读这个键**：盘级筛选的取值由前端按它现算成具体区间后随请求下发。
+          properties:
+            granularity:
+              type: string
+              enum: [hour, day, week, month]
+              description: 粒度；hour 仅对带时分秒的 datetime 字段有意义。
+            weekStart:
+              type: integer
+              minimum: 0
+              maximum: 6
+              description: 周计算逻辑：一周从星期几开始（0=周日 … 6=周六）。缺省 1（周一）。
         defaultValue:
           type: array
           description: >-
@@ -3020,7 +3047,10 @@ components:
           type: integer
         column:
           type: string
-          description: 绑定列名（列名即字段标识；改列名会使该筛选器断链，属已接受的约定）。
+          description: >-
+            **列的稳定 id（DatasetColumn.id），不是列名。** 盘级条件最终以 entity.Filter.Field
+            参与取数，而「哪些字段被盘级条件覆盖」（响应里的 overriddenFields）是拿图表自身过滤
+            条件里的列 id 求交集得出的 —— 存列名会让这个可见标识永远匹配不上。列名可变，只用于展示。
     DashboardQueryFilter:
       type: object
       description: POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。

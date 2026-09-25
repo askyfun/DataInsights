@@ -129,7 +129,16 @@ func TestToDatasetModelMapsTimestamps(t *testing.T) {
 // 不再把 querySQL 拼成表名传给 GetColumns（该路径已被驱动校验拒绝）。
 func TestGetColumnsSQLDatasetDerivesFromQuery(t *testing.T) {
 	stub := &stubConnection{resultColumns: []string{"id", "name"}}
+	var executed []string
+	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(datasetCaptureMatcher(&executed)))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer sqlDB.Close()
+	mock.ExpectExec(`UPDATE "bi_dataset"`).WillReturnResult(sqlmock.NewResult(0, 1))
+
 	s := &datasetService{
+		db: bun.NewDB(sqlDB, pgdialect.New()),
 		getDatasetModelFn: func(ctx context.Context, id int) (*model.Dataset, error) {
 			return &model.Dataset{
 				ID:        1,
@@ -173,6 +182,16 @@ func TestGetColumnsSQLDatasetDerivesFromQuery(t *testing.T) {
 		if col.Role != "dimension" {
 			t.Errorf("column %q role = %q, want dimension", col.Name, col.Role)
 		}
+		if col.ID == "" {
+			t.Errorf("materialized column %q must carry a column id", col.Name)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("GET on an unmaterialized dataset must persist the assigned column ids: %v", err)
+	}
+	upd := findStmt(executed, `UPDATE "bi_dataset"`)
+	if !strings.Contains(upd, `"columns"`) {
+		t.Fatalf("materialization must write the columns column, got: %s", upd)
 	}
 }
 
@@ -182,7 +201,16 @@ func TestGetColumnsTableDatasetUsesGetColumns(t *testing.T) {
 	stub := &stubConnection{
 		getColumnsResult: []datasource.ColumnInfo{{Name: "id", Type: "int"}},
 	}
+	var executed []string
+	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(datasetCaptureMatcher(&executed)))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer sqlDB.Close()
+	mock.ExpectExec(`UPDATE "bi_dataset"`).WillReturnResult(sqlmock.NewResult(0, 1))
+
 	s := &datasetService{
+		db: bun.NewDB(sqlDB, pgdialect.New()),
 		getDatasetModelFn: func(ctx context.Context, id int) (*model.Dataset, error) {
 			return &model.Dataset{
 				ID:        1,
@@ -214,6 +242,12 @@ func TestGetColumnsTableDatasetUsesGetColumns(t *testing.T) {
 	}
 	if !strings.Contains(cols[0].Expr, "id") {
 		t.Fatalf("unexpected expr: %q", cols[0].Expr)
+	}
+	if cols[0].ID == "" {
+		t.Fatal("materialized column must carry a column id")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("materialization must persist: %v", err)
 	}
 }
 

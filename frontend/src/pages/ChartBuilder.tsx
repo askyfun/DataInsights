@@ -76,12 +76,24 @@ import KpiCard from '../components/ChartBuilder/KpiCard';
 import PivotTable from '../components/ChartBuilder/PivotTable';
 import QueryConfigRow from '../components/ChartBuilder/QueryConfigRow';
 import TableChart from '../components/ChartBuilder/TableChart';
+import DateFilterControl from '../components/DateFilter/DateFilterControl';
+import DateFilterModal, {
+  type DateFilterModalPayload,
+} from '../components/DateFilter/DateFilterModal';
 import {
   type ChartConfigDocument,
   type ChartType,
   migrateChartConfig,
 } from '../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload } from '../lib/chartOptions';
+import { classifyFieldKind, normalizeDataType } from '../lib/dataTypes';
+import {
+  type DateFilterIntent,
+  type DateFilterValue,
+  dateFilterValueFromLegacy,
+  expandDateFilterIntent,
+  isDateFilterValue,
+} from '../lib/dateFilter';
 import {
   buildChartConfigDocument,
   buildQuerySpecDocument,
@@ -272,7 +284,7 @@ const findBindingIdByOutputName = (
     binding: BindingInstance,
     kind: 'metric' | 'dimension'
   ): string | undefined => {
-    const columnName = fieldMap.get(binding.field)?.name;
+    const columnName = fieldMap.get(binding.fieldId)?.name;
     if (columnName === undefined) {
       return undefined;
     }
@@ -313,7 +325,7 @@ const findOutputNameByBindingId = (
   for (const group of queryConfig.metricGroups) {
     for (const binding of group.bindings) {
       if (binding.bindingId !== bindingId) continue;
-      const columnName = fieldMap.get(binding.field)?.name;
+      const columnName = fieldMap.get(binding.fieldId)?.name;
       return columnName === undefined
         ? undefined
         : wireAliasOf(metricAliases[binding.bindingId], columnName);
@@ -322,7 +334,7 @@ const findOutputNameByBindingId = (
   for (const group of queryConfig.dimensionGroups) {
     for (const binding of group.bindings) {
       if (binding.bindingId !== bindingId) continue;
-      return fieldMap.get(binding.field)?.name;
+      return fieldMap.get(binding.fieldId)?.name;
     }
   }
   return undefined;
@@ -394,15 +406,25 @@ export const composeChartQueryRequest = (
   const activeGroups = getActiveFieldGroups(chartType, queryConfig);
   const fieldMap = new Map(fields.map((f) => [f.id, f]));
 
-  const filtersPayload = queryConfig.filters.map((f) => {
-    const field = fields.find((candidate) => candidate.id === f.field);
-    return {
-      field: field?.name || f.field,
-      operator: f.operator,
-      value: f.value,
-      value_end: f.valueEnd,
-      logic: f.logic,
-    };
+  // 过滤条件展开：日期条件带上的是「意图」（最近 7 天 / 本月 …），在**下发请求这一刻**
+  // 才解析成具体区间——这样动态日期是真的动态，页面挂着跨天也不会失真；其余条件照旧直传。
+  // 一条日期意图可能展开成两条（区间 + `包含空日期` 的 IS NULL，用 OR 连接）。
+  const filtersPayload = queryConfig.filters.flatMap((f) => {
+    const field = fields.find((candidate) => candidate.id === f.fieldId);
+    // wire 引用列的稳定 id；SQL 输出别名与响应负载键才用展示名
+    const fieldRef = field?.id || f.fieldId;
+    if (f.date && isDateFilterValue(f.date.value)) {
+      return expandDateFilterIntent(f.date, fieldRef);
+    }
+    return [
+      {
+        field: fieldRef,
+        operator: f.operator,
+        value: f.value,
+        value_end: f.valueEnd,
+        logic: f.logic,
+      },
+    ];
   });
   const paginationPayload =
     chartType === 'table'
@@ -440,7 +462,7 @@ export const composeChartQueryRequest = (
     if (!sortBinding) {
       return undefined;
     }
-    const columnName = fieldMap.get(sortBinding.binding.field)?.name;
+    const columnName = fieldMap.get(sortBinding.binding.fieldId)?.name;
     if (columnName === undefined) {
       return undefined;
     }
@@ -462,7 +484,7 @@ export const composeChartQueryRequest = (
       return undefined;
     }
     const valueBinding = activeGroups.metricGroups[0]?.bindings[0];
-    const columnName = valueBinding ? fieldMap.get(valueBinding.field)?.name : undefined;
+    const columnName = valueBinding ? fieldMap.get(valueBinding.fieldId)?.name : undefined;
     if (!valueBinding || columnName === undefined) {
       return {};
     }
@@ -494,11 +516,11 @@ export const composeChartQueryRequest = (
         return;
       }
       const groupFields: ChartDimensionField[] = group.bindings.flatMap((binding) => {
-        const chartField = fieldMap.get(binding.field);
+        const chartField = fieldMap.get(binding.fieldId);
         if (!chartField) {
           return [];
         }
-        return [{ field: chartField.name, binding_id: binding.bindingId }];
+        return [{ field: chartField.id, binding_id: binding.bindingId }];
       });
       dimensionGroupsPayload.push({ name: def.id, label: def.label, fields: groupFields });
     });
@@ -510,13 +532,13 @@ export const composeChartQueryRequest = (
         return;
       }
       const groupFields: ChartMetricField[] = group.bindings.flatMap((binding) => {
-        const chartField = fieldMap.get(binding.field);
+        const chartField = fieldMap.get(binding.fieldId);
         if (!chartField) {
           return [];
         }
         return [
           {
-            field: chartField.name,
+            field: chartField.id,
             agg: (metricAggregations[binding.bindingId] || 'sum') as ChartQueryAggregation,
             alias: wireAliasOf(metricAliases[binding.bindingId], chartField.name),
             binding_id: binding.bindingId,
@@ -552,23 +574,23 @@ export const composeChartQueryRequest = (
 
   // v1 平铺协议：逻辑与改动前完全一致
   const dimensionFields = activeGroups.dimensionGroups
-    .flatMap((group) => group.bindings.map((b) => b.field))
+    .flatMap((group) => group.bindings.map((b) => b.fieldId))
     .map((name) => fieldMap.get(name))
     .filter((f): f is ChartField => f !== undefined);
 
-  // 已知限制（Task 0-6+0-8 解决）：wire 这一层 metrics[].field 仍是列名，若同一列名
-  // 出现在两个不同指标组（D2 场景），flatMap 会产生重复列名，后端将收到两个相同 field
-  // 的 metric 配置。本阶段按现有逻辑原样发送、不去重——真正区分要等 v2 wire 的 bindingId 别名。
+  // 已知限制：同一列被同一槽位拖入两次时，flatMap 会产生重复的 field（列 id），后端将
+  // 收到两个相同的 metric 配置。本阶段按现有逻辑原样发送、不去重——真正区分依赖
+  // v2 wire 的 bindingId 别名（v1 平铺协议不带 binding_id）。
   const metrics = activeGroups.metricGroups
     .flatMap((group) => group.bindings)
     .flatMap((binding) => {
-      const chartField = fieldMap.get(binding.field);
+      const chartField = fieldMap.get(binding.fieldId);
       if (!chartField) {
         return [];
       }
       return [
         {
-          field: chartField.name,
+          field: chartField.id,
           agg: (metricAggregations[binding.bindingId] || 'sum') as ChartQueryAggregation,
           alias: wireAliasOf(metricAliases[binding.bindingId], chartField.name),
         },
@@ -582,7 +604,7 @@ export const composeChartQueryRequest = (
   return {
     dataset_id: datasetId,
     chart_type: chartType,
-    dims: dimensionFields.map((f) => f.name),
+    dims: dimensionFields.map((f) => f.id),
     metrics,
     filters: filtersPayload,
     ...sortPayload,
@@ -669,24 +691,24 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     // context.dimensions/metrics 仍是列名：buildChartOption 用它们匹配结构化响应的
     // x_axis / series[].name（后端目前仍按列名/别名返回，未切到 bindingId）。
     const dimensions = dimensionBindings
-      .map((b) => fieldMap.get(b.field)?.name)
+      .map((b) => fieldMap.get(b.fieldId)?.name)
       .filter((name): name is string => name !== undefined);
     const metrics = metricBindings
-      .map((b) => fieldMap.get(b.field)?.name)
+      .map((b) => fieldMap.get(b.fieldId)?.name)
       .filter((name): name is string => name !== undefined);
 
     // labels 的键保持列名（buildChartOption 按列名/系列名查显示名），但 label/alias/unit
     // 的值按 bindingId 取（五个 Record 已改为 bindingId 键）。
     const labels: Record<string, string> = {};
     for (const binding of dimensionBindings) {
-      const name = fieldMap.get(binding.field)?.name;
+      const name = fieldMap.get(binding.fieldId)?.name;
       const label = dimensionLabels[binding.bindingId];
       if (name && label) {
         labels[name] = label;
       }
     }
     for (const binding of metricBindings) {
-      const baseName = fieldMap.get(binding.field)?.name || binding.field;
+      const baseName = fieldMap.get(binding.fieldId)?.name || binding.fieldId;
       const alias = metricAliases[binding.bindingId];
       const unit = metricUnits[binding.bindingId];
       const displayName = alias || baseName;
@@ -710,7 +732,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
               slot: def.id,
               metrics: (queryConfig.metricGroups[index]?.bindings ?? [])
                 .map((b) =>
-                  wireAliasOf(metricAliases[b.bindingId], fieldMap.get(b.field)?.name ?? '')
+                  wireAliasOf(metricAliases[b.bindingId], fieldMap.get(b.fieldId)?.name ?? '')
                 )
                 .filter((name): name is string => name !== undefined),
             }))
@@ -1173,6 +1195,10 @@ const ChartBuilder: React.FC = () => {
   // 过滤配置弹窗：id=正在编辑的条件，isNew=本次拖入/下拉新建（取消时回收）。
   // 弹窗打开期间自动查询被挂起——输入中途态不进请求，确定才写回 store。
   const [filterEditing, setFilterEditing] = useState<{ id: string; isNew: boolean } | null>(null);
+  // 日期筛选弹窗：日期字段走这条独立的编辑器（五种模式 + 粒度 + 快捷选项）。
+  const [dateFilterEditing, setDateFilterEditing] = useState<{ id: string; isNew: boolean } | null>(
+    null
+  );
   // 字段属性弹窗：芯片扳手按钮打开，收拢原右下角维度/指标属性面板的配置。
   const [fieldSettings, setFieldSettings] = useState<{
     kind: 'dimension' | 'metric';
@@ -1343,21 +1369,47 @@ const ChartBuilder: React.FC = () => {
   const editingFilterCondition = filterEditing
     ? queryConfig.filters.find((f) => f.id === filterEditing.id)
     : undefined;
+  // 按列 ID 反查字段：fieldId 存的是列的稳定标识（DatasetColumn.id），不是可变列名。
   const editingFilterField = editingFilterCondition
-    ? (chartBuilderFields.find((f) => f.name === editingFilterCondition.field) ?? null)
+    ? (chartBuilderFields.find((f) => f.id === editingFilterCondition.fieldId) ?? null)
+    : null;
+  const editingDateFilterCondition = dateFilterEditing
+    ? queryConfig.filters.find((f) => f.id === dateFilterEditing.id)
+    : undefined;
+  const editingDateFilterField = editingDateFilterCondition
+    ? (chartBuilderFields.find((f) => f.id === editingDateFilterCondition.fieldId) ?? null)
     : null;
 
-  /** 拖入 / 下拉选择字段 → 新建一条空条件并打开弹窗；取消时由 isNew 回收。 */
+  /**
+   * 拖入 / 下拉选择字段 → 新建一条空条件并打开弹窗；取消时由 isNew 回收。
+   * 日期字段进日期筛选弹窗（动态日期/快捷选项/粒度），其余字段进通用筛选弹窗。
+   */
   const openFilterEditor = useCallback(
     (field: ChartField) => {
-      addFilter({ field: field.name });
+      addFilter({ fieldId: field.id });
       const filters = useStore.getState().queryConfig.filters;
       const last = filters[filters.length - 1];
-      if (last) {
-        setFilterEditing({ id: last.id, isNew: true });
+      if (!last) return;
+      if (classifyFieldKind(field.dataType) === 'date') {
+        setDateFilterEditing({ id: last.id, isNew: true });
+        return;
       }
+      setFilterEditing({ id: last.id, isNew: true });
     },
     [addFilter]
+  );
+
+  /** 点击已有条件：日期条件（无论新旧）都进日期筛选弹窗，其余进通用弹窗。 */
+  const openExistingFilterEditor = useCallback(
+    (filter: FilterCondition, field: ChartField | undefined) => {
+      const isDateField = field !== undefined && classifyFieldKind(field.dataType) === 'date';
+      if (filter.date || isDateField) {
+        setDateFilterEditing({ id: filter.id, isNew: false });
+        return;
+      }
+      setFilterEditing({ id: filter.id, isNew: false });
+    },
+    []
   );
 
   const handleFilterModalOk = useCallback(
@@ -1376,6 +1428,58 @@ const ChartBuilder: React.FC = () => {
     setFilterEditing(null);
   }, [filterEditing, removeFilter]);
 
+  /**
+   * 把日期意图的**当前区间**同步进 operator/value：这是给「不认识日期的下游」的兜底快照
+   * （后端读配置的路径、以及保存时的物化出口）。页面查询本身走 filtersPayload 的动态解析，
+   * 不依赖这两个字段。
+   */
+  const dateIntentSnapshotPatch = useCallback(
+    (intent: DateFilterIntent): Partial<FilterCondition> => {
+      // 主条件恒为第一条；「包含空日期」追加的 IS NULL 排在其后，不该被当成主条件。
+      const primary = expandDateFilterIntent(intent, '')[0];
+      return {
+        date: intent,
+        operator: (primary?.operator ?? 'eq') as FilterCondition['operator'],
+        value: primary?.value ?? '',
+        valueEnd: primary?.value_end,
+      };
+    },
+    []
+  );
+
+  /**
+   * 日期筛选弹窗确定：只写「意图」（`最近 7 天` 这类），区间留到下发请求时再解析，
+   * 页面挂着过夜也不会变成过期快照。同时把此刻的区间写进 operator/value 作为兜底，
+   * 供不认识日期的下游使用（保存时还会重物化一次，见 buildChartConfigDocument）。
+   */
+  const handleDateFilterModalOk = useCallback(
+    (payload: DateFilterModalPayload) => {
+      if (!dateFilterEditing) return;
+      updateFilter(
+        dateFilterEditing.id,
+        dateIntentSnapshotPatch({
+          value: payload.value,
+          granularity: payload.granularity,
+          weekStart: payload.weekStart,
+          asFilter: payload.asFilter,
+          label: payload.filterLabel,
+          withTime: editingDateFilterField
+            ? normalizeDataType(editingDateFilterField.dataType) === 'datetime'
+            : false,
+        })
+      );
+      setDateFilterEditing(null);
+    },
+    [dateFilterEditing, dateIntentSnapshotPatch, editingDateFilterField, updateFilter]
+  );
+
+  const handleDateFilterModalCancel = useCallback(() => {
+    if (dateFilterEditing?.isNew) {
+      removeFilter(dateFilterEditing.id);
+    }
+    setDateFilterEditing(null);
+  }, [dateFilterEditing, removeFilter]);
+
   /** 删除条件时若其编辑弹窗正开着，一并关闭，避免残留空弹窗。 */
   const handleFilterRemove = useCallback(
     (id: string) => {
@@ -1383,9 +1487,57 @@ const ChartBuilder: React.FC = () => {
       if (filterEditing?.id === id) {
         setFilterEditing(null);
       }
+      if (dateFilterEditing?.id === id) {
+        setDateFilterEditing(null);
+      }
     },
-    [filterEditing, removeFilter]
+    [dateFilterEditing, filterEditing, removeFilter]
   );
+
+  /**
+   * 「作为时间范围筛选器」的日期条件在预览区上方出一枚行内控件
+   * （对齐火山引擎智能洞察「在图表上显示日期筛选框」）。浮层里改条件即时生效、不设确认。
+   */
+  const renderDateFilterBar = () => {
+    const controls = queryConfig.filters.filter((filter) => filter.date?.asFilter === true);
+    if (controls.length === 0) return null;
+    return (
+      <div
+        style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}
+        data-testid="chart-date-filter-bar"
+      >
+        {controls.map((filter) => {
+          const date = filter.date;
+          if (!date) return null;
+          const field = chartBuilderFields.find((candidate) => candidate.id === filter.fieldId);
+          return (
+            <DateFilterControl
+              key={filter.id}
+              label={date.label || field?.name || filter.fieldId}
+              value={date.value}
+              settings={{
+                granularity: date.granularity,
+                weekStart: date.weekStart,
+                withTime: date.withTime,
+              }}
+              withTime={date.withTime}
+              allowModeSwitch
+              allowClear
+              onChange={(next: DateFilterValue) =>
+                updateFilter(filter.id, dateIntentSnapshotPatch({ ...date, value: next }))
+              }
+              onClear={() =>
+                updateFilter(
+                  filter.id,
+                  dateIntentSnapshotPatch({ ...date, value: { kind: 'dynamic' } })
+                )
+              }
+            />
+          );
+        })}
+      </div>
+    );
+  };
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -1462,7 +1614,7 @@ const ChartBuilder: React.FC = () => {
           message.warning('请将维度拖入维度区域');
         }
       } else if (dropZoneType === 'filter') {
-        // 过滤条件按列名记录（与 binding.field 同口径）。同一字段可重复加入——
+        // 过滤条件按**列的稳定 id** 记录（与 `binding.fieldId` 同口径）。同一字段可重复加入——
         // 区间筛选就是同字段各拖一次 >= 与 <=，因此这里不做去重。
         // 拖入即弹过滤配置弹窗：条件在弹窗里完成输入，确定才生效。
         openFilterEditor(field);
@@ -1555,7 +1707,7 @@ const ChartBuilder: React.FC = () => {
     const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
     return activeQueryConfig.dimensionGroups.flatMap((g) =>
       g.bindings.flatMap((binding) => {
-        const field = fieldMap.get(binding.field);
+        const field = fieldMap.get(binding.fieldId);
         return field ? [{ binding, field }] : [];
       })
     );
@@ -1565,7 +1717,7 @@ const ChartBuilder: React.FC = () => {
     const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
     return activeQueryConfig.metricGroups.flatMap((g) =>
       g.bindings.flatMap((binding) => {
-        const field = fieldMap.get(binding.field);
+        const field = fieldMap.get(binding.fieldId);
         return field ? [{ binding, field }] : [];
       })
     );
@@ -1581,7 +1733,7 @@ const ChartBuilder: React.FC = () => {
       const bindings = queryConfig.dimensionGroups[groupIndex]?.bindings || [];
       const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
       return bindings.flatMap((binding) => {
-        const field = fieldMap.get(binding.field);
+        const field = fieldMap.get(binding.fieldId);
         return field ? [{ binding, field }] : [];
       });
     },
@@ -1598,7 +1750,7 @@ const ChartBuilder: React.FC = () => {
       const bindings = queryConfig.metricGroups[groupIndex]?.bindings || [];
       const fieldMap = new Map(chartBuilderFields.map((f) => [f.id, f]));
       return bindings.flatMap((binding) => {
-        const field = fieldMap.get(binding.field);
+        const field = fieldMap.get(binding.fieldId);
         return field ? [{ binding, field }] : [];
       });
     },
@@ -2087,8 +2239,11 @@ const ChartBuilder: React.FC = () => {
             chart.config,
             chart.chart_type as ChartType,
             chartBuilderFields.map((field, index) => ({
-              id: `field-${index}`,
+              // id：列的稳定标识（历史文档的列名引用在此升级为列 ID）
+              id: field.id,
               name: field.name,
+              // legacyId：旧结构（无 version）里的位置 id，仅用于解析那类文档
+              legacyId: `field-${index}`,
             }))
           );
 
@@ -2393,12 +2548,14 @@ const ChartBuilder: React.FC = () => {
                   filters={queryConfig.filters}
                   availableFields={chartBuilderFields}
                   onAdd={openFilterEditor}
-                  onEdit={(filter) => setFilterEditing({ id: filter.id, isNew: false })}
+                  onEdit={openExistingFilterEditor}
                   onRemove={handleFilterRemove}
                 />
               </QueryConfigRow>
             </div>
           </Card>
+
+          {renderDateFilterBar()}
 
           <Card
             title="预览"
@@ -2601,12 +2758,14 @@ const ChartBuilder: React.FC = () => {
                   filters={queryConfig.filters}
                   availableFields={chartBuilderFields}
                   onAdd={openFilterEditor}
-                  onEdit={(filter) => setFilterEditing({ id: filter.id, isNew: false })}
+                  onEdit={openExistingFilterEditor}
                   onRemove={handleFilterRemove}
                 />
               </QueryConfigRow>
             </div>
           </Card>
+
+          {renderDateFilterBar()}
 
           <Card
             title="预览"
@@ -2774,6 +2933,32 @@ const ChartBuilder: React.FC = () => {
         datasetId={selectedDatasetId}
         onOk={handleFilterModalOk}
         onCancel={handleFilterModalCancel}
+      />
+
+      <DateFilterModal
+        open={dateFilterEditing !== null && editingDateFilterCondition !== undefined}
+        fieldName={editingDateFilterField?.name ?? editingDateFilterCondition?.fieldId}
+        withTime={
+          editingDateFilterField
+            ? normalizeDataType(editingDateFilterField.dataType) === 'datetime'
+            : false
+        }
+        initial={
+          editingDateFilterCondition?.date?.value ??
+          (editingDateFilterCondition
+            ? (dateFilterValueFromLegacy(
+                editingDateFilterCondition.operator,
+                editingDateFilterCondition.value,
+                editingDateFilterCondition.valueEnd
+              ) ?? undefined)
+            : undefined)
+        }
+        initialGranularity={editingDateFilterCondition?.date?.granularity}
+        initialWeekStart={editingDateFilterCondition?.date?.weekStart}
+        initialAsFilter={editingDateFilterCondition?.date?.asFilter}
+        initialFilterLabel={editingDateFilterCondition?.date?.label}
+        onOk={handleDateFilterModalOk}
+        onCancel={handleDateFilterModalCancel}
       />
 
       <FieldSettingsModal

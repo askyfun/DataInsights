@@ -11,34 +11,36 @@ import (
 
 // BunQueryBuilder 使用 bun ORM 的安全查询构建器
 type BunQueryBuilder struct {
-	columnMappings map[string]string
-	dialect        DialectType
+	columns columnIndex
+	dialect DialectType
 }
 
 // NewBunQueryBuilder 创建新的 BunQueryBuilder
 func NewBunQueryBuilder() *BunQueryBuilder {
 	return &BunQueryBuilder{
-		columnMappings: make(map[string]string),
+		columns: newColumnIndex(),
 	}
 }
 
-// WithColumnMappings 设置列映射
+// WithColumnMappings 用 bi_dataset.columns 建立列索引（权威键为列 ID）。
 func (qb *BunQueryBuilder) WithColumnMappings(columns string) error {
-	if columns == "" {
-		return nil
-	}
-
-	var cols []ColumnInfo
-	if err := unmarshalJSON(columns, &cols); err != nil {
+	idx, err := buildColumnIndex(columns)
+	if err != nil {
 		return err
 	}
-
-	for _, col := range cols {
-		if col.Expr != "" && col.Name != "" {
-			qb.columnMappings[col.Name] = col.Expr
-		}
-	}
+	qb.columns = idx
 	return nil
+}
+
+// withASTIndex 从已规划的 AST 恢复列索引（含列 ID → 展示名）。
+// 调用场景：pivot/histogram/boxplot 各图型 builder 从 AST 重建 qb 时复用，
+// 保证它们与通用路径用同一套「列 ID 解析表达式、列名做输出别名」规则。
+func (qb *BunQueryBuilder) withASTIndex(ast *QueryAST) {
+	qb.columns = columnIndex{
+		byID:     ast.ColumnMappings,
+		byName:   ast.LegacyColumnMappings,
+		nameByID: ast.ColumnNames,
+	}
 }
 
 // SetDialect 设置数据库方言
@@ -61,7 +63,9 @@ func (qb *BunQueryBuilder) Build(
 		SourceType:     sourceType,
 		Dimensions:     dims,
 		Filters:        make([]FilterExpr, 0, len(filters)),
-		ColumnMappings: qb.columnMappings,
+		ColumnMappings:       qb.columns.byID,
+		LegacyColumnMappings: qb.columns.byName,
+		ColumnNames:          qb.columns.nameByID,
 		Sort:           nil,
 		Pagination:     pagination,
 		Metrics:        make([]MetricExpr, 0, len(metrics)),
@@ -74,7 +78,7 @@ func (qb *BunQueryBuilder) Build(
 			Field:     m.Field,
 			FieldExpr: fieldExpr,
 			Agg:       m.Agg,
-			Alias:     m.ResolveAlias(),
+			Alias:     qb.columns.displayAlias(m.Field, m.ResolveAlias(), ""),
 			IsAgg:     isAggregateFunction(fieldExpr),
 		}
 		ast.Metrics = append(ast.Metrics, expr)
@@ -107,10 +111,8 @@ func (qb *BunQueryBuilder) Build(
 
 // getFieldExpr 获取字段表达式
 func (qb *BunQueryBuilder) getFieldExpr(field string) string {
-	if expr, ok := qb.columnMappings[field]; ok && expr != "" {
-		return expr
-	}
-	return field
+	expr, _ := qb.columns.expr(field)
+	return expr
 }
 
 // BuildSelectQuery 使用 bun 构建安全的选择查询
@@ -538,7 +540,7 @@ func NewBunSQLBuilder(dialect DialectType) *BunSQLBuilder {
 func (b *BunSQLBuilder) BuildSelect(ast *QueryAST) (string, []interface{}) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(b.dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 
 	return qb.BuildSelectQuery(ast)
 }
@@ -547,7 +549,7 @@ func (b *BunSQLBuilder) BuildSelect(ast *QueryAST) (string, []interface{}) {
 func (b *BunSQLBuilder) BuildCount(ast *QueryAST) (string, []interface{}) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(b.dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 
 	return qb.BuildCountQuery(ast)
 }

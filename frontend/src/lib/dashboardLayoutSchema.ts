@@ -24,6 +24,8 @@
 
 import type { FilterOperator } from '../store';
 import { normalizeDataType } from './dataTypes';
+import type { DateGranularity, WeekStart } from './dateFilter';
+import { isDateGranularity, isWeekStart } from './dateFilter';
 
 /** 渲染列数。与后端 layout_json 的 grid.cols 保持同一口径。 */
 export const DASHBOARD_GRID_COLS = 12;
@@ -64,7 +66,14 @@ export interface DashboardTextWidget extends DashboardPlacement {
   markdown: string;
 }
 
-/** 筛选器绑定：数据集 + 列名。两者共同构成字段标识（DatasetColumn 没有稳定 id，列名即标识）。 */
+/**
+ * 筛选器绑定：数据集 + **列 ID**（`DatasetColumn.id`）。
+ *
+ * ⚠️ 取值必须是列 ID 而不是列名：盘级条件最终以 `entity.Filter.Field` 传给图表取数，
+ * 而「哪些字段被盘级条件覆盖」的判定（`overriddenFields`）拿的是图表自身过滤条件里的
+ * **列 ID** 去求交集 —— 存列名会让这个可见标识永远匹配不上。列名可变，只用于展示。
+ * （openapi 里 `binding.column` 的描述仍写着「列名」，是列 ID 改造前的口径，待同步。）
+ */
 export interface DashboardFilterBinding {
   datasetId: number;
   column: string;
@@ -81,6 +90,12 @@ export interface DashboardFilterWidget extends DashboardPlacement {
   multi: boolean;
   /** 未选择（undefined/null/空数组）表示"未激活"，不参与筛选合并。 */
   defaultValue?: unknown;
+  /**
+   * 日期型筛选器的粒度与周计算逻辑。只对 `dataType` 是 date/datetime 的筛选器有意义：
+   * 控件据它决定快捷选项集合、周起始日与展示格式（见 `lib/dateFilter.ts`）。
+   * 其余类型的筛选器带上它会被忽略，不影响行为。
+   */
+  date?: { granularity: DateGranularity; weekStart: WeekStart };
 }
 
 export type DashboardWidget = DashboardChartWidget | DashboardTextWidget | DashboardFilterWidget;
@@ -160,6 +175,38 @@ export function normalizePlacement(
   return { x, y, w, h };
 }
 
+/**
+ * 在栅格上找首个能容纳 `size` 的空位（自上而下、自左而右）。
+ *
+ * 替代原先「新块一律 `x: 0`、落在最底边之下」的硬编码：12 列画布上默认 6 列宽的块
+ * 会因此永远堆在左半边、右半边长期空置（浏览器验收 D-3）。vertical compactor 只做
+ * **纵向**吸附，不会把块横向挪进空位，所以这个选择必须在建块时就做对。
+ *
+ * 纯函数、不修改入参；`widgets` 被填满时回落到最底边之下（与旧行为一致）。
+ */
+export function findFreePlacement(
+  widgets: readonly DashboardPlacement[],
+  size: { w: number; h: number },
+  cols: number = DASHBOARD_GRID_COLS
+): { x: number; y: number } {
+  const w = Math.min(Math.max(size.w, DASHBOARD_MIN_W), cols);
+  const h = Math.max(size.h, DASHBOARD_MIN_H);
+  const bottom = widgets.reduce((max, widget) => Math.max(max, widget.y + widget.h), 0);
+  const overlaps = (x: number, y: number) =>
+    widgets.some(
+      (widget) =>
+        x < widget.x + widget.w && widget.x < x + w && y < widget.y + widget.h && widget.y < y + h
+    );
+  for (let y = 0; y <= bottom; y += 1) {
+    for (let x = 0; x + w <= cols; x += 1) {
+      if (!overlaps(x, y)) {
+        return { x, y };
+      }
+    }
+  }
+  return { x: 0, y: bottom };
+}
+
 /** 归一单个 widget；无法修复时返回 null（调用方负责丢弃）。 */
 function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
   if (!isPlainObject(raw)) {
@@ -227,6 +274,16 @@ function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
   };
   if (raw.defaultValue !== undefined) {
     widget.defaultValue = raw.defaultValue;
+  }
+  // 日期粒度 / 周计算逻辑：两个字段都合法才采纳。半截配置当没有——宁可退回默认口径，
+  // 也不要拿一个「粒度来自布局、周起始日来自默认值」的混合配置去求值。
+  const dateConfig = raw.date;
+  if (
+    isPlainObject(dateConfig) &&
+    isDateGranularity(dateConfig.granularity) &&
+    isWeekStart(dateConfig.weekStart)
+  ) {
+    widget.date = { granularity: dateConfig.granularity, weekStart: dateConfig.weekStart };
   }
   return widget;
 }

@@ -20,7 +20,7 @@ const FIELDS: ChartField[] = [
 
 const makeFilter = (patch: Partial<FilterCondition>): FilterCondition => ({
   id: 'filter-1',
-  field: 'brand_name',
+  fieldId: 'brand_name',
   operator: 'eq',
   value: '',
   logic: 'and',
@@ -100,8 +100,48 @@ describe('FilterDropZone', () => {
     fireEvent.click(screen.getByTestId('filter-row-filter-1'));
 
     expect(onEdit).toHaveBeenCalledTimes(1);
-    expect(onEdit.mock.calls[0]?.[0]).toMatchObject({ id: 'filter-1', field: 'brand_name' });
+    expect(onEdit.mock.calls[0]?.[0]).toMatchObject({ id: 'filter-1', fieldId: 'brand_name' });
     expect(onEdit.mock.calls[0]?.[1]).toEqual(FIELDS[0]);
+  });
+
+  it('条件按列 ID 反查字段：列 id 与列名不同时芯片仍显示列名', () => {
+    // 现实里 DatasetColumn.id（"0000i529"）与 name（"date"）并不相同，
+    // 按列名反查会让芯片退化成裸 id、并丢掉字段颜色。
+    const fields: ChartField[] = [
+      { id: '0000i529', name: 'date', type: 'dimension', dataType: 'date' },
+    ];
+    const { onEdit } = renderZone({
+      availableFields: fields,
+      filters: [makeFilter({ fieldId: '0000i529' })],
+    });
+
+    expect(screen.getByTestId('filter-row-filter-1')).toHaveTextContent('date');
+    expect(screen.getByTestId('filter-row-filter-1')).not.toHaveTextContent('0000i529');
+
+    fireEvent.click(screen.getByTestId('filter-row-filter-1'));
+    expect(onEdit.mock.calls[0]?.[1]).toEqual(fields[0]);
+  });
+
+  it('日期筛选条件展示「意图」摘要，而不是兜底的 operator/value', () => {
+    renderZone({
+      filters: [
+        makeFilter({
+          fieldId: 'brand_name',
+          operator: 'between',
+          value: '2026-09-18',
+          valueEnd: '2026-09-24',
+          date: {
+            value: { kind: 'dynamic', preset: 'last7d' },
+            granularity: 'day',
+            weekStart: 1,
+            asFilter: true,
+            label: '交易日期',
+          },
+        }),
+      ],
+    });
+
+    expect(screen.getByTestId('filter-summary-filter-1')).toHaveTextContent('最近 7 天');
   });
 
   it('点击删除按钮只上抛 onRemove，不触发 onEdit', () => {

@@ -35,6 +35,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { DataType } from '../api';
 import {
   ColumnInfo,
+  Dataset,
   DatasetColumn,
   DatasetFormData,
   DatasetPreview,
@@ -66,6 +67,8 @@ const DatasetPage: React.FC = () => {
   const [editingDataset, setEditingDataset] = useState<any>(null);
   const [datasetColumns, setDatasetColumns] = useState<DatasetColumn[]>([]);
   const [searchText, setSearchText] = useState('');
+  const [filterDatasourceId, setFilterDatasourceId] = useState<number | undefined>(undefined);
+  const [filterQueryType, setFilterQueryType] = useState<string | undefined>(undefined);
   const [modalPreviewLoading, setModalPreviewLoading] = useState(false);
   const [modalPreviewData, setModalPreviewData] = useState<DatasetPreview | null>(null);
   const [savingColumns, setSavingColumns] = useState(false);
@@ -241,11 +244,15 @@ const DatasetPage: React.FC = () => {
       let updatedColumns: DatasetColumn[];
 
       if (editingVirtualField) {
+        // 向导里所有列（含物理列）的 id 都是空串（落库后才由后端分配），
+        // 按 id 或名字匹配都会误伤其他列；弹窗打开期间列表不变，用对象引用锁定这一行。
         updatedColumns = datasetColumns.map((col) =>
-          col.name === editingVirtualField.name ? { ...col, ...values } : col
+          col === editingVirtualField ? { ...col, ...values } : col
         );
       } else {
         const newField: DatasetColumn = {
+          // 空 id = 由后端分配（列的稳定标识）
+          id: '',
           name: values.name,
           type: values.type,
           role: values.role || 'dimension',
@@ -264,6 +271,9 @@ const DatasetPage: React.FC = () => {
             ? intl.formatMessage({ id: 'virtualField.fieldUpdated' })
             : intl.formatMessage({ id: 'virtualField.fieldAdded' })
         );
+      } else {
+        // 创建向导：数据集尚未落库，只更新本地列表，「完成」时随 datasetColumns 一并提交
+        setDatasetColumns(updatedColumns);
       }
 
       setVirtualFieldModalVisible(false);
@@ -412,8 +422,12 @@ const DatasetPage: React.FC = () => {
       const datasourceType = getDatasourceType(datasourceId);
 
       const defaultColumns: DatasetColumn[] = tableColumns.map((col: ColumnInfo) => ({
+        // 空 id = 由后端分配（列的稳定标识）
+        id: '',
         name: col.name,
-        expr: `\`${col.name}\``,
+        // 裸标识符：方言引号由查询层负责。带反引号会在 PostgreSQL 下原样渲染成
+        // 语法错误，且会让「物理列 = expr 等于列名本身」的判定失效。
+        expr: col.name,
         type: toStandardType(col.data_type || 'varchar', datasourceType),
         comment: col.comment || '',
         role: isNumericType(normalizeDataType(col.data_type)) ? 'metric' : 'dimension',
@@ -557,13 +571,14 @@ const DatasetPage: React.FC = () => {
     }
   };
 
-  const handleColumnRoleChange = (name: string, role: 'dimension' | 'metric') => {
-    setDatasetColumns((prev) => prev.map((col) => (col.name === name ? { ...col, role } : col)));
+  const handleColumnRoleChange = (record: DatasetColumn, role: 'dimension' | 'metric') => {
+    // 向导期列 id 均为空串、列名可撞，行内切换按引用锁定这一行（同虚拟字段编辑）
+    setDatasetColumns((prev) => prev.map((col) => (col === record ? { ...col, role } : col)));
   };
 
-  const handleColumnTypeChange = (name: string, type: string) => {
+  const handleColumnTypeChange = (record: DatasetColumn, type: string) => {
     setDatasetColumns((prev) =>
-      prev.map((col) => (col.name === name ? { ...col, type: type as DatasetColumn['type'] } : col))
+      prev.map((col) => (col === record ? { ...col, type: type as DatasetColumn['type'] } : col))
     );
   };
 
@@ -579,10 +594,29 @@ const DatasetPage: React.FC = () => {
     return ds ? ds.type : 'starrocks';
   };
 
-  // Filter datasets by search text
-  const filteredDatasets = (Array.isArray(datasets) ? datasets : []).filter((ds) =>
-    ds.name.toLowerCase().includes(searchText.toLowerCase())
-  );
+  // 工具栏筛选：关键字（名称/表名）+ 数据源 + 查询类型，全部在客户端完成
+  // （列表一次性拉取，见 datasetsApi.getAll）。
+  const keyword = searchText.trim().toLowerCase();
+  const filteredDatasets = (Array.isArray(datasets) ? datasets : []).filter((ds) => {
+    if (filterDatasourceId !== undefined && ds.datasource_id !== filterDatasourceId) return false;
+    if (filterQueryType !== undefined && ds.query_type !== filterQueryType) return false;
+    if (!keyword) return true;
+    return (
+      ds.name.toLowerCase().includes(keyword) ||
+      (ds.table_name ?? '').toLowerCase().includes(keyword)
+    );
+  });
+
+  // 时间列排序：空值/非法日期沉底，同键值时按 id 兜底——本机实测有 21 条数据集的
+  // created_at 完全相同（两批批量导入），只按时间排会同键抖动、看起来像排序坏了。
+  const compareTimeAsc = (a: string, b: string) => {
+    const ta = Date.parse(a);
+    const tb = Date.parse(b);
+    const va = Number.isNaN(ta) ? Number.NEGATIVE_INFINITY : ta;
+    const vb = Number.isNaN(tb) ? Number.NEGATIVE_INFINITY : tb;
+    if (va === vb) return 0;
+    return va < vb ? -1 : 1;
+  };
 
   // Table columns configuration
   const columns = [
@@ -591,11 +625,15 @@ const DatasetPage: React.FC = () => {
       dataIndex: 'id',
       key: 'id',
       width: 60,
+      // 默认视图与后端 List 的 ORDER BY id DESC 对齐：新建/导入的排最前。
+      sorter: (a: Dataset, b: Dataset) => a.id - b.id,
+      defaultSortOrder: 'descend' as const,
     },
     {
       title: intl.formatMessage({ id: 'dataset.name' }),
       dataIndex: 'name',
       key: 'name',
+      sorter: (a: Dataset, b: Dataset) => a.name.localeCompare(b.name) || b.id - a.id,
       render: (text: string, record: any) => (
         <Link
           to={`/datasets/${record.id}`}
@@ -632,6 +670,14 @@ const DatasetPage: React.FC = () => {
       title: intl.formatMessage({ id: 'dataset.createdAt' }),
       dataIndex: 'created_at',
       key: 'created_at',
+      sorter: (a: Dataset, b: Dataset) => compareTimeAsc(a.created_at, b.created_at) || b.id - a.id,
+      render: (text: string) => formatDateTime(text),
+    },
+    {
+      title: intl.formatMessage({ id: 'dataset.updatedAt' }),
+      dataIndex: 'updated_at',
+      key: 'updated_at',
+      sorter: (a: Dataset, b: Dataset) => compareTimeAsc(a.updated_at, b.updated_at) || b.id - a.id,
       render: (text: string) => formatDateTime(text),
     },
     {
@@ -703,13 +749,37 @@ const DatasetPage: React.FC = () => {
 
       <Card>
         <div className="dr-card-toolbar">
-          <Input.Search
-            placeholder={intl.formatMessage({ id: 'dataset.searchPlaceholder' })}
-            allowClear
-            style={{ width: 300 }}
-            onChange={(e) => setSearchText(e.target.value)}
-            value={searchText}
-          />
+          <Space wrap>
+            <Input.Search
+              placeholder={intl.formatMessage({ id: 'dataset.searchPlaceholder' })}
+              allowClear
+              style={{ width: 300 }}
+              onChange={(e) => setSearchText(e.target.value)}
+              value={searchText}
+            />
+            <Select
+              allowClear
+              placeholder={intl.formatMessage({ id: 'dataset.datasource' })}
+              style={{ width: 180 }}
+              value={filterDatasourceId}
+              onChange={(value) => setFilterDatasourceId(value)}
+              options={(Array.isArray(datasources) ? datasources : []).map((d) => ({
+                label: d.name,
+                value: d.id,
+              }))}
+            />
+            <Select
+              allowClear
+              placeholder={intl.formatMessage({ id: 'dataset.queryType' })}
+              style={{ width: 140 }}
+              value={filterQueryType}
+              onChange={(value) => setFilterQueryType(value)}
+              options={[
+                { label: intl.formatMessage({ id: 'dataset.queryType.table' }), value: 'table' },
+                { label: intl.formatMessage({ id: 'dataset.queryType.sql' }), value: 'sql' },
+              ]}
+            />
+          </Space>
         </div>
 
         <Table
@@ -1028,7 +1098,7 @@ const DatasetPage: React.FC = () => {
                   key: 'name',
                   render: (name: string, record: any) => (
                     <Space>
-                      {record.expr && record.expr !== `\`${record.name}\`` && (
+                      {record.expr && record.expr !== record.name && (
                         <FunctionOutlined style={{ color: '#722ed1' }} />
                       )}
                       <Text
@@ -1040,7 +1110,7 @@ const DatasetPage: React.FC = () => {
                       >
                         {name}
                       </Text>
-                      {record.expr && record.expr !== `\`${record.name}\`` && (
+                      {record.expr && record.expr !== record.name && (
                         <Tag color="purple">{intl.formatMessage({ id: 'field.virtual' })}</Tag>
                       )}
                     </Space>
@@ -1056,7 +1126,7 @@ const DatasetPage: React.FC = () => {
                       value={type}
                       size="small"
                       style={{ width: 110 }}
-                      onChange={(value) => handleColumnTypeChange(record.name, value)}
+                      onChange={(value) => handleColumnTypeChange(record, value)}
                     >
                       <Select.Option value="string">
                         {intl.formatMessage({ id: 'dataType.string' })}
@@ -1091,7 +1161,7 @@ const DatasetPage: React.FC = () => {
                       unCheckedChildren={intl.formatMessage({ id: 'field.dimension' })}
                       size="small"
                       onChange={(checked) =>
-                        handleColumnRoleChange(record.name, checked ? 'metric' : 'dimension')
+                        handleColumnRoleChange(record, checked ? 'metric' : 'dimension')
                       }
                       style={{
                         // 只在「指标」态染色（指标绿）；「维度」态交回 antd 默认灰，
@@ -1120,7 +1190,8 @@ const DatasetPage: React.FC = () => {
                   key: 'actions',
                   width: 100,
                   render: (_: any, record: any) => {
-                    const isVirtual = record.expr && record.expr !== `\`${record.name}\``;
+                    // 物理列的 expr 恰为来源列名本身；不等的才是虚拟字段
+                    const isVirtual = record.expr && record.expr !== record.name;
                     return isVirtual ? (
                       <Space size="small">
                         <Button
@@ -1132,8 +1203,9 @@ const DatasetPage: React.FC = () => {
                         <Popconfirm
                           title={intl.formatMessage({ id: 'virtualField.deleteConfirm' })}
                           onConfirm={() => {
+                            // 同编辑：向导期列 id 均为空串，按 id 过滤会连带删掉其他列，用引用锁定
                             const updatedColumns = (datasetColumns || []).filter(
-                              (col) => col.name !== record.name
+                              (col) => col !== record
                             );
                             setDatasetColumns(updatedColumns);
                           }}

@@ -18,6 +18,7 @@ import (
 	"data-insights/internal/config"
 	"data-insights/internal/database"
 	"data-insights/internal/keystore"
+	"data-insights/internal/migration/columnids"
 	"data-insights/internal/response"
 	"data-insights/internal/webui"
 
@@ -29,6 +30,15 @@ import (
 func main() {
 	var envFile string
 	flag.StringVar(&envFile, "env", "", "the .env file (default: probe ./.env then ../.env)")
+
+	// 一次性数据迁移开关：列引用从「列名」反写为「列的稳定 id」。
+	// 默认 dry-run，需显式 -apply 才写库。
+	var migrateColumnIDs bool
+	var applyMigration bool
+	flag.BoolVar(&migrateColumnIDs, "migrate-column-ids", false,
+		"回填数据集列 ID，并把落库的列引用（bi_chart.config / bi_dataset.shard_keys）从列名改写为列 ID")
+	flag.BoolVar(&applyMigration, "apply", false,
+		"与 -migrate-column-ids 连用：改写引用并写库（缺省只扫描；注意补发列 ID 这一步在 dry-run 下也会执行，它只新增字段、不改动任何引用）")
 	flag.Parse()
 
 	// .env 必须在 Load 之前加载：它把值写进进程环境变量，再由 Load 统一读取。
@@ -86,6 +96,20 @@ func main() {
 	if err != nil {
 		slog.Error("Failed to resolve security key", "error", err)
 		os.Exit(1)
+	}
+
+	if migrateColumnIDs {
+		report, err := columnids.Run(context.Background(), db, securityKey, applyMigration)
+		if err != nil {
+			slog.Error("Column id migration failed", "error", err)
+			os.Exit(1)
+		}
+		mode := "dry-run（未改写引用；加 -apply 生效。补发的列 ID 属纯新增字段，已在本次执行中落库）"
+		if applyMigration {
+			mode = "已写库"
+		}
+		fmt.Printf("列 ID 反向迁移 %s\n%s", mode, report)
+		return
 	}
 
 	gin.SetMode(gin.ReleaseMode)

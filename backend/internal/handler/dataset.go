@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/response"
@@ -277,11 +279,34 @@ func (h *DatasetHandler) UpdateColumns(req router.Request[[]entity.DatasetColumn
 		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
 	}
 
+	if err := validateColumnPayload(req.In); err != nil {
+		return err
+	}
+
 	result, err := h.svc.UpdateColumns(req.Ctx.Request.Context(), id, req.In)
 	if err != nil {
 		return err
 	}
 	res.Out = result
+	return nil
+}
+
+// validateColumnPayload 校验列定义 payload。
+// 字段名是**可变展示名**，列的引用键是 ID；但列名会作为 SQL 输出别名 / 响应负载键
+// 使用，同名会让表格与系列无法区分，故必须在写入口挡住。空名同理（无名的列在
+// 字段列表里不可选，且在 SQL 里会产生空别名）。
+func validateColumnPayload(columns []entity.DatasetColumn) error {
+	seen := make(map[string]struct{}, len(columns))
+	for _, col := range columns {
+		name := strings.TrimSpace(col.Name)
+		if name == "" {
+			return router.NewBusinessError(response.CodeBadRequest, "column name is required")
+		}
+		if _, dup := seen[name]; dup {
+			return router.NewBusinessError(response.CodeBadRequest, fmt.Sprintf("duplicate column name: %s", name))
+		}
+		seen[name] = struct{}{}
+	}
 	return nil
 }
 

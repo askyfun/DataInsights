@@ -110,6 +110,9 @@ func (d Dataset) MarshalJSON() ([]byte, error) {
 }
 
 type DatasetColumn struct {
+	// ID 是列的稳定标识（idgen 短 ID），落库后不再变化；Name 是可变展示名。
+	// 图表配置、shard_keys、查询请求一律引用 ID，展示时才由 ID 解析回 Name。
+	ID         string           `json:"id"`
 	Name       string           `json:"name"`
 	Expr       string           `json:"expr"`
 	Type       StandardDataType `json:"type"`

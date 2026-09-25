@@ -1,0 +1,432 @@
+{
+  "note": "日期筛选解析的双端共用用例表。TS（frontend/src/lib/dateFilter.ts）与 Go（backend/internal/query/datefilter.go）必须逐例一致 —— 改语义时必须同时改两边并跑两边的测试，任一侧漂移都会让对应用例失败。now 固定以保证可复现；两侧都按**本地时区**解释（后端取数用服务器本地日，前端用浏览器本地日）。",
+  "now": "2026-09-25T14:30:45",
+  "cases": [
+    {
+      "name": "最近 1 天 = 昨天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last1d" },
+      "want": { "operator": "between", "start": "2026-09-24", "end": "2026-09-24" }
+    },
+    {
+      "name": "最近 7 天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last7d" },
+      "want": { "operator": "between", "start": "2026-09-18", "end": "2026-09-24" }
+    },
+    {
+      "name": "最近 14 天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last14d" },
+      "want": { "operator": "between", "start": "2026-09-11", "end": "2026-09-24" }
+    },
+    {
+      "name": "最近 30 天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last30d" },
+      "want": { "operator": "between", "start": "2026-08-26", "end": "2026-09-24" }
+    },
+    {
+      "name": "最近 365 天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last365d" },
+      "want": { "operator": "between", "start": "2025-09-25", "end": "2026-09-24" }
+    },
+    {
+      "name": "本周止于昨天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "thisWeek" },
+      "want": { "operator": "between", "start": "2026-09-21", "end": "2026-09-24" }
+    },
+    {
+      "name": "上周取完整自然周",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "lastWeek" },
+      "want": { "operator": "between", "start": "2026-09-14", "end": "2026-09-20" }
+    },
+    {
+      "name": "本月止于昨天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "thisMonth" },
+      "want": { "operator": "between", "start": "2026-09-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "上月取完整月",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "lastMonth" },
+      "want": { "operator": "between", "start": "2026-08-01", "end": "2026-08-31" }
+    },
+    {
+      "name": "本双月（9~10 月组）",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "thisBiMonth" },
+      "want": { "operator": "between", "start": "2026-09-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "上双月（7~8 月组）",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "lastBiMonth" },
+      "want": { "operator": "between", "start": "2026-07-01", "end": "2026-08-31" }
+    },
+    {
+      "name": "本季度（Q3）",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "thisQuarter" },
+      "want": { "operator": "between", "start": "2026-07-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "上季度（Q2）",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "lastQuarter" },
+      "want": { "operator": "between", "start": "2026-04-01", "end": "2026-06-30" }
+    },
+    {
+      "name": "最近 3 个月",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last3m" },
+      "want": { "operator": "between", "start": "2026-07-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "最近 6 个月",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last6m" },
+      "want": { "operator": "between", "start": "2026-04-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "今年止于昨天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "thisYear" },
+      "want": { "operator": "between", "start": "2026-01-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "最近 2 年",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last2y" },
+      "want": { "operator": "between", "start": "2025-01-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "去年取完整年",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "lastYear" },
+      "want": { "operator": "between", "start": "2025-01-01", "end": "2025-12-31" }
+    },
+
+    {
+      "name": "周粒度：最近 1 周",
+      "granularity": "week",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last1w" },
+      "want": { "operator": "between", "start": "2026-09-21", "end": "2026-09-24" }
+    },
+    {
+      "name": "周粒度：最近 4 周",
+      "granularity": "week",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last4w" },
+      "want": { "operator": "between", "start": "2026-08-31", "end": "2026-09-24" }
+    },
+    {
+      "name": "周粒度：最近 13 周",
+      "granularity": "week",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last13w" },
+      "want": { "operator": "between", "start": "2026-06-29", "end": "2026-09-24" }
+    },
+    {
+      "name": "月粒度：最近 1 个月",
+      "granularity": "month",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last1m" },
+      "want": { "operator": "between", "start": "2026-09-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "月粒度：最近 12 个月",
+      "granularity": "month",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last12m" },
+      "want": { "operator": "between", "start": "2025-10-01", "end": "2026-09-24" }
+    },
+
+    {
+      "name": "周计算逻辑：周日起算的本周",
+      "granularity": "day",
+      "weekStart": 0,
+      "value": { "kind": "dynamic", "preset": "thisWeek" },
+      "want": { "operator": "between", "start": "2026-09-20", "end": "2026-09-24" }
+    },
+    {
+      "name": "周计算逻辑：周日起算的上周",
+      "granularity": "day",
+      "weekStart": 0,
+      "value": { "kind": "dynamic", "preset": "lastWeek" },
+      "want": { "operator": "between", "start": "2026-09-13", "end": "2026-09-19" }
+    },
+    {
+      "name": "周计算逻辑：周六起算的本周",
+      "granularity": "day",
+      "weekStart": 6,
+      "value": { "kind": "dynamic", "preset": "thisWeek" },
+      "want": { "operator": "between", "start": "2026-09-19", "end": "2026-09-24" }
+    },
+
+    {
+      "name": "自定义：最近 3 天（不含今天）",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "custom": { "op": "last", "n": 3, "unit": "day" } },
+      "want": { "operator": "between", "start": "2026-09-22", "end": "2026-09-24" }
+    },
+    {
+      "name": "自定义：最近 3 天（含今天）",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": {
+        "kind": "dynamic",
+        "custom": { "op": "last", "n": 3, "unit": "day", "includeToday": true }
+      },
+      "want": { "operator": "between", "start": "2026-09-22", "end": "2026-09-25" }
+    },
+    {
+      "name": "自定义：最近 2 周",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "custom": { "op": "last", "n": 2, "unit": "week" } },
+      "want": { "operator": "between", "start": "2026-09-14", "end": "2026-09-24" }
+    },
+    {
+      "name": "自定义：最近 2 个月",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "custom": { "op": "last", "n": 2, "unit": "month" } },
+      "want": { "operator": "between", "start": "2026-08-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "自定义：最近 2 年",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "custom": { "op": "last", "n": 2, "unit": "year" } },
+      "want": { "operator": "between", "start": "2025-01-01", "end": "2026-09-24" }
+    },
+    {
+      "name": "自定义：1 天前（只有上界）",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "custom": { "op": "before", "n": 1, "unit": "day" } },
+      "want": { "operator": "lte", "end": "2026-09-24" }
+    },
+    {
+      "name": "自定义：1 天后（只有下界）",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "custom": { "op": "after", "n": 1, "unit": "day" } },
+      "want": { "operator": "gte", "start": "2026-09-26" }
+    },
+
+    {
+      "name": "小时粒度：最近 1 小时（默认对齐整点、不含本小时）",
+      "granularity": "hour",
+      "weekStart": 1,
+      "withTime": true,
+      "value": { "kind": "dynamic", "custom": { "op": "last", "n": 1, "unit": "hour" } },
+      "want": {
+        "operator": "between",
+        "start": "2026-09-25 13:00:00",
+        "end": "2026-09-25 13:59:59"
+      }
+    },
+    {
+      "name": "小时粒度：包含本小时",
+      "granularity": "hour",
+      "weekStart": 1,
+      "withTime": true,
+      "value": {
+        "kind": "dynamic",
+        "custom": { "op": "last", "n": 1, "unit": "hour", "includeCurrentHour": true }
+      },
+      "want": {
+        "operator": "between",
+        "start": "2026-09-25 13:00:00",
+        "end": "2026-09-25 14:59:59"
+      }
+    },
+    {
+      "name": "小时粒度：关闭整点 → 滚动窗口保留分秒",
+      "granularity": "hour",
+      "weekStart": 1,
+      "withTime": true,
+      "value": {
+        "kind": "dynamic",
+        "custom": { "op": "last", "n": 1, "unit": "hour", "onTheHour": false }
+      },
+      "want": {
+        "operator": "between",
+        "start": "2026-09-25 13:30:45",
+        "end": "2026-09-25 14:30:45"
+      }
+    },
+
+    {
+      "name": "高级：开始固定 + 结束 1 天前（文档原例）",
+      "now": "2020-02-13T00:00:00",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": {
+        "kind": "advanced",
+        "start": { "type": "fixed", "value": "2020-01-04" },
+        "end": { "type": "dynamic", "op": "before", "n": 1, "unit": "day" }
+      },
+      "want": { "operator": "between", "start": "2020-01-04", "end": "2020-02-12" }
+    },
+    {
+      "name": "高级：结束无限制 → 只下发下界",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": {
+        "kind": "advanced",
+        "start": { "type": "fixed", "value": "2023-06-14" },
+        "end": { "type": "unlimited" }
+      },
+      "want": { "operator": "gte", "start": "2023-06-14" }
+    },
+    {
+      "name": "高级：开始无限制 → 只下发上界",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": {
+        "kind": "advanced",
+        "start": { "type": "unlimited" },
+        "end": { "type": "fixed", "value": "2023-06-14" }
+      },
+      "want": { "operator": "lte", "end": "2023-06-14" }
+    },
+    {
+      "name": "高级：起止同时无限制 → 不下发任何条件",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": {
+        "kind": "advanced",
+        "start": { "type": "unlimited" },
+        "end": { "type": "unlimited" }
+      },
+      "want": { "operator": null }
+    },
+    {
+      "name": "高级：两端都用动态 30 天前 ~ 1 天前",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": {
+        "kind": "advanced",
+        "start": { "type": "dynamic", "op": "before", "n": 30, "unit": "day" },
+        "end": { "type": "dynamic", "op": "before", "n": 1, "unit": "day" }
+      },
+      "want": { "operator": "between", "start": "2026-08-26", "end": "2026-09-24" }
+    },
+
+    {
+      "name": "固定日期：区间原样",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "fixed", "start": "2026-08-08", "end": "2026-08-12" },
+      "want": { "operator": "between", "start": "2026-08-08", "end": "2026-08-12" }
+    },
+    {
+      "name": "固定日期：缺一端 → 不下发",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "fixed", "start": "2026-08-08", "end": "" },
+      "want": { "operator": null }
+    },
+    {
+      "name": "固定日期：带时分秒的字段保留时间部分",
+      "granularity": "day",
+      "weekStart": 1,
+      "withTime": true,
+      "value": { "kind": "fixed", "start": "2026-08-08 09:00:00", "end": "2026-08-12 18:30:00" },
+      "want": {
+        "operator": "between",
+        "start": "2026-08-08 09:00:00",
+        "end": "2026-08-12 18:30:00"
+      }
+    },
+    {
+      "name": "固定日期：包含空日期标记",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": {
+        "kind": "fixed",
+        "start": "2026-08-01",
+        "end": "2026-08-31",
+        "includeEmpty": true
+      },
+      "want": {
+        "operator": "between",
+        "start": "2026-08-01",
+        "end": "2026-08-31",
+        "includeEmpty": true
+      }
+    },
+
+    {
+      "name": "特殊值：空日期",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "special", "value": "empty" },
+      "want": { "operator": "isNull" }
+    },
+    {
+      "name": "特殊值：非空日期",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "special", "value": "notEmpty" },
+      "want": { "operator": "isNotNull" }
+    },
+    {
+      "name": "特殊值：所有日期 → 不下发",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "special", "value": "all" },
+      "want": { "operator": null }
+    },
+
+    {
+      "name": "单个日期：日粒度收敛到当天",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "single", "date": "2026-05-15" },
+      "want": { "operator": "between", "start": "2026-05-15", "end": "2026-05-15" }
+    },
+    {
+      "name": "单个日期：月粒度收敛到整月",
+      "granularity": "month",
+      "weekStart": 1,
+      "value": { "kind": "single", "date": "2026-05-15" },
+      "want": { "operator": "between", "start": "2026-05-01", "end": "2026-05-31" }
+    },
+
+    {
+      "name": "未选择 → 不下发任何条件",
+      "granularity": "day",
+      "weekStart": 1,
+      "value": { "kind": "dynamic" },
+      "want": { "operator": null }
+    }
+  ]
+}

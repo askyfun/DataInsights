@@ -301,9 +301,9 @@ func TestBunQueryBuilder_WithSQLSource(t *testing.T) {
 
 func TestBunSQLBuilder_BuildSelect(t *testing.T) {
 	qb := NewBunQueryBuilder()
-	qb.columnMappings = map[string]string{
+	qb.columns = columnIndex{byID: map[string]string{
 		"cnt": "count(*)",
-	}
+	}}
 
 	ast := qb.Build(
 		"test_table",

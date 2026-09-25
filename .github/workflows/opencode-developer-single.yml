@@ -32,12 +32,12 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: '1.27'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Run Developer Agent
         uses: anomalyco/opencode/github@latest
@@ -54,7 +54,7 @@ jobs:
             - 标签: ${{ github.event.inputs.issue_labels }}
             
             开发要求：
-            - 遵循项目现有的代码规范（参考 docs/coding-style.md）
+            - 遵循项目现有的代码规范（参考 docs/developer-guide/contributing.md）
             - 确保后端 Go 代码有单元测试覆盖
             - 运行 go test 验证测试通过
             

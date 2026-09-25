@@ -15,11 +15,11 @@ describe('addFilter', () => {
   });
 
   it('只传 field 时补齐默认值，logic 恒为 and', () => {
-    useStore.getState().addFilter({ field: 'sale_count' });
+    useStore.getState().addFilter({ fieldId: 'sale_count' });
 
     const [filter] = useStore.getState().queryConfig.filters;
     expect(filter).toMatchObject({
-      field: 'sale_count',
+      fieldId: 'sale_count',
       operator: 'eq',
       value: '',
       logic: 'and',
@@ -29,13 +29,13 @@ describe('addFilter', () => {
 
   it('连续追加同一字段的多条条件：不去重且 id 互不相同', () => {
     const { addFilter } = useStore.getState();
-    addFilter({ field: 'sale_count' });
-    addFilter({ field: 'sale_count' });
+    addFilter({ fieldId: 'sale_count' });
+    addFilter({ fieldId: 'sale_count' });
 
     const filters = useStore.getState().queryConfig.filters;
     expect(filters).toHaveLength(2);
-    expect(filters[0].field).toBe('sale_count');
-    expect(filters[1].field).toBe('sale_count');
+    expect(filters[0].fieldId).toBe('sale_count');
+    expect(filters[1].fieldId).toBe('sale_count');
     expect(filters[0].id).not.toBe(filters[1].id);
   });
 
@@ -43,13 +43,13 @@ describe('addFilter', () => {
     useStore.getState().addFilter();
 
     const [filter] = useStore.getState().queryConfig.filters;
-    expect(filter).toMatchObject({ field: '', operator: 'eq', logic: 'and' });
+    expect(filter).toMatchObject({ fieldId: '', operator: 'eq', logic: 'and' });
   });
 
   it('显式传入的字段覆盖默认值（兼容既有调用方）', () => {
     useStore.getState().addFilter({
       id: 'filter-gt-1',
-      field: 'revenue',
+      fieldId: 'revenue',
       operator: 'gt',
       value: 100,
       logic: 'and',
@@ -57,7 +57,7 @@ describe('addFilter', () => {
 
     expect(useStore.getState().queryConfig.filters[0]).toEqual({
       id: 'filter-gt-1',
-      field: 'revenue',
+      fieldId: 'revenue',
       operator: 'gt',
       value: 100,
       logic: 'and',
@@ -66,14 +66,14 @@ describe('addFilter', () => {
 
   it('removeFilter 只删指定 id 的条件', () => {
     const { addFilter } = useStore.getState();
-    addFilter({ field: 'brand_name' });
-    addFilter({ field: 'sale_count' });
+    addFilter({ fieldId: 'brand_name' });
+    addFilter({ fieldId: 'sale_count' });
 
     const [first] = useStore.getState().queryConfig.filters;
     useStore.getState().removeFilter(first.id);
 
     const filters = useStore.getState().queryConfig.filters;
     expect(filters).toHaveLength(1);
-    expect(filters[0].field).toBe('sale_count');
+    expect(filters[0].fieldId).toBe('sale_count');
   });
 });

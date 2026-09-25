@@ -135,7 +135,7 @@ const resetChartBuilderState = () => {
     chartDataLoading: false,
     queryConfig: {
       dimensionGroups: [
-        { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+        { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', fieldId: 'region' }] },
       ],
       metricGroups: [],
       filters: [],
@@ -234,6 +234,7 @@ describe('ChartBuilder', () => {
         trace: '',
         data: [
           {
+            id: 'region',
             name: 'region',
             expr: 'region',
             type: 'string',
@@ -241,6 +242,7 @@ describe('ChartBuilder', () => {
             role: 'dimension',
           },
           {
+            id: 'revenue',
             name: 'revenue',
             expr: 'revenue',
             type: 'float',
@@ -375,7 +377,7 @@ describe('ChartBuilder', () => {
 
     await waitFor(() => {
       expect(useStore.getState().queryConfig.metricGroups[0]?.bindings).toEqual([
-        { bindingId: 'b-1', field: 'revenue' },
+        { bindingId: 'b-1', fieldId: 'revenue' },
       ]);
     });
 
@@ -739,9 +741,30 @@ describe('ChartBuilder', () => {
         msg: 'ok',
         trace: '',
         data: [
-          { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
-          { name: 'growth', expr: 'growth', type: 'float', comment: '', role: 'metric' },
+          {
+            id: 'month',
+            name: 'month',
+            expr: 'month',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'revenue',
+            name: 'revenue',
+            expr: 'revenue',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
+          {
+            id: 'growth',
+            name: 'growth',
+            expr: 'growth',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
         ],
       })
     );
@@ -763,10 +786,12 @@ describe('ChartBuilder', () => {
             chartType: 'combo',
             title: 'Combo',
             query: {
-              dimensionGroups: [{ id: 'x_axis', bindings: [{ bindingId: 'b-0', field: 'month' }] }],
+              dimensionGroups: [
+                { id: 'x_axis', bindings: [{ bindingId: 'b-0', fieldId: 'month' }] },
+              ],
               metricGroups: [
-                { id: 'primary_values', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
-                { id: 'secondary_values', bindings: [{ bindingId: 'b-2', field: 'growth' }] },
+                { id: 'primary_values', bindings: [{ bindingId: 'b-1', fieldId: 'revenue' }] },
+                { id: 'secondary_values', bindings: [{ bindingId: 'b-2', fieldId: 'growth' }] },
               ],
               filters: [],
               limit: 1000,
@@ -866,7 +891,7 @@ describe('ChartBuilder', () => {
     act(() => {
       useStore.getState().addFilter({
         id: 'filter-gt-1',
-        field: 'region',
+        fieldId: 'region',
         operator: 'gt',
         value: 100,
         logic: 'and',
@@ -879,10 +904,13 @@ describe('ChartBuilder', () => {
 
     const request = mockExecuteChartQuery.mock.calls[1][0];
     expect(request.filters).toHaveLength(1);
+    // ⚠️ wire 上的键是 `field`（openapi / entity.Filter 口径），值才是列的稳定 id。
+    // 持久化文档里那个键叫 `fieldId`，两者不是一回事，别按名字对齐。
     expect(request.filters[0]).toEqual(
       expect.objectContaining({ field: 'region', operator: 'gt', value: 100, logic: 'and' })
     );
     expect(request.filters[0]).not.toHaveProperty('op');
+    expect(request.filters[0]).not.toHaveProperty('fieldId');
   });
 
   it('loads saved metric groups with a sparse hole without crashing and normalizes them for scatter charts', async () => {
@@ -924,7 +952,7 @@ describe('ChartBuilder', () => {
 
     // 迁移丢弃空洞条目，图表定义规范化补齐到散点图需要的 2 个指标组
     expect(useStore.getState().queryConfig.metricGroups).toEqual([
-      { id: 'metric-group-secondary', bindings: [{ bindingId: 'b-0', field: 'revenue' }] },
+      { id: 'metric-group-secondary', bindings: [{ bindingId: 'b-0', fieldId: 'revenue' }] },
       { id: 'metric-group-2', bindings: [] },
     ]);
     expect(errorSpy).not.toHaveBeenCalled();
@@ -952,7 +980,7 @@ describe('ChartBuilder', () => {
               dimensionGroups: [{ id: 'dim-group-main', fields: ['field-0'] }],
               metricGroups: [{ id: 'metric-group-main', fields: ['field-1'] }],
               filters: [
-                { id: 'f-0', field: 'field-0', operator: 'eq', value: 'East', logic: 'and' },
+                { id: 'f-0', fieldId: 'field-0', operator: 'eq', value: 'East', logic: 'and' },
               ],
               limit: 1000,
             },
@@ -973,14 +1001,14 @@ describe('ChartBuilder', () => {
     // 旧位置 id 借助 chartBuilderFields 解析为列名，再转 v2 bindings
     await waitFor(() => {
       expect(useStore.getState().queryConfig.dimensionGroups[0]?.bindings).toEqual([
-        { bindingId: 'b-0', field: 'region' },
+        { bindingId: 'b-0', fieldId: 'region' },
       ]);
     });
 
     expect(useStore.getState().queryConfig.metricGroups[0]?.bindings).toEqual([
-      { bindingId: 'b-1', field: 'revenue' },
+      { bindingId: 'b-1', fieldId: 'revenue' },
     ]);
-    expect(useStore.getState().queryConfig.filters[0]?.field).toBe('region');
+    expect(useStore.getState().queryConfig.filters[0]?.fieldId).toBe('region');
     expect(useStore.getState().dimensionLabels).toEqual({ 'b-0': '区域' });
     expect(useStore.getState().metricAggregations).toEqual({ 'b-1': 'avg' });
     expect(useStore.getState().metricAliases).toEqual({ 'b-1': 'gmv' });
@@ -1014,7 +1042,7 @@ describe('ChartBuilder', () => {
     await waitFor(() => {
       expect(useStore.getState().chartBuilderFields).toHaveLength(2);
       expect(useStore.getState().queryConfig.dimensionGroups[0]?.bindings).toEqual([
-        { bindingId: 'b-0', field: 'region' },
+        { bindingId: 'b-0', fieldId: 'region' },
       ]);
     });
 
@@ -1047,10 +1075,10 @@ describe('ChartBuilder', () => {
       title: 'Sales Table',
       query: {
         dimensionGroups: [
-          { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+          { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', fieldId: 'region' }] },
         ],
         metricGroups: [
-          { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+          { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'revenue' }] },
         ],
         filters: [],
         limit: 1000,
@@ -1075,9 +1103,30 @@ describe('ChartBuilder', () => {
         msg: 'ok',
         trace: '',
         data: [
-          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
-          { name: 'city', expr: 'city', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
+          {
+            id: 'region',
+            name: 'region',
+            expr: 'region',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'city',
+            name: 'city',
+            expr: 'city',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'revenue',
+            name: 'revenue',
+            expr: 'revenue',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
         ],
       })
     );
@@ -1099,11 +1148,11 @@ describe('ChartBuilder', () => {
             title: 'Legacy Bar',
             query: {
               dimensionGroups: [
-                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'region' }] },
-                { id: 'color_group', bindings: [{ bindingId: 'b-1', field: 'city' }] },
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'region' }] },
+                { id: 'color_group', bindings: [{ bindingId: 'b-1', fieldId: 'city' }] },
               ],
               metricGroups: [
-                { id: 'metric-group-1', bindings: [{ bindingId: 'b-2', field: 'revenue' }] },
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-2', fieldId: 'revenue' }] },
               ],
               filters: [],
               limit: 1000,
@@ -1137,8 +1186,8 @@ describe('ChartBuilder', () => {
     const groups = useStore.getState().queryConfig.dimensionGroups;
     expect(groups).toHaveLength(1);
     expect(groups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'region' },
-      { bindingId: 'b-1', field: 'city' },
+      { bindingId: 'b-0', fieldId: 'region' },
+      { bindingId: 'b-1', fieldId: 'city' },
     ]);
   });
 
@@ -1149,8 +1198,22 @@ describe('ChartBuilder', () => {
         msg: 'ok',
         trace: '',
         data: [
-          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
+          {
+            id: 'region',
+            name: 'region',
+            expr: 'region',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'revenue',
+            name: 'revenue',
+            expr: 'revenue',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
         ],
       })
     );
@@ -1172,10 +1235,10 @@ describe('ChartBuilder', () => {
             title: 'Plain Bar',
             query: {
               dimensionGroups: [
-                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'region' }] },
               ],
               metricGroups: [
-                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'revenue' }] },
               ],
               filters: [],
               limit: 1000,
@@ -1215,9 +1278,30 @@ describe('ChartBuilder', () => {
         msg: 'ok',
         trace: '',
         data: [
-          { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
-          { name: 'growth', expr: 'growth', type: 'float', comment: '', role: 'metric' },
+          {
+            id: 'month',
+            name: 'month',
+            expr: 'month',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'revenue',
+            name: 'revenue',
+            expr: 'revenue',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
+          {
+            id: 'growth',
+            name: 'growth',
+            expr: 'growth',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
         ],
       })
     );
@@ -1239,11 +1323,11 @@ describe('ChartBuilder', () => {
             title: 'Combo Chart',
             query: {
               dimensionGroups: [
-                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'month' }] },
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'month' }] },
               ],
               metricGroups: [
-                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
-                { id: 'metric-group-2', bindings: [{ bindingId: 'b-2', field: 'growth' }] },
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'revenue' }] },
+                { id: 'metric-group-2', bindings: [{ bindingId: 'b-2', fieldId: 'growth' }] },
               ],
               filters: [],
               limit: 1000,
@@ -1296,9 +1380,30 @@ describe('ChartBuilder', () => {
         msg: 'ok',
         trace: '',
         data: [
-          { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
-          { name: 'growth', expr: 'growth', type: 'float', comment: '', role: 'metric' },
+          {
+            id: 'month',
+            name: 'month',
+            expr: 'month',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'revenue',
+            name: 'revenue',
+            expr: 'revenue',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
+          {
+            id: 'growth',
+            name: 'growth',
+            expr: 'growth',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
         ],
       })
     );
@@ -1320,11 +1425,11 @@ describe('ChartBuilder', () => {
             title: 'Combo Chart',
             query: {
               dimensionGroups: [
-                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', field: 'month' }] },
+                { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'month' }] },
               ],
               metricGroups: [
-                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
-                { id: 'metric-group-2', bindings: [{ bindingId: 'b-2', field: 'growth' }] },
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'revenue' }] },
+                { id: 'metric-group-2', bindings: [{ bindingId: 'b-2', fieldId: 'growth' }] },
               ],
               filters: [],
               limit: 1000,
@@ -1405,8 +1510,22 @@ describe('ChartBuilder', () => {
         msg: 'ok',
         trace: '',
         data: [
-          { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
+          {
+            id: 'region',
+            name: 'region',
+            expr: 'region',
+            type: 'string',
+            comment: '',
+            role: 'dimension',
+          },
+          {
+            id: 'revenue',
+            name: 'revenue',
+            expr: 'revenue',
+            type: 'float',
+            comment: '',
+            role: 'metric',
+          },
         ],
       })
     );
@@ -1429,7 +1548,7 @@ describe('ChartBuilder', () => {
             query: {
               dimensionGroups: [],
               metricGroups: [
-                { id: 'metric-group-1', bindings: [{ bindingId: 'b-0', field: 'revenue' }] },
+                { id: 'metric-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'revenue' }] },
               ],
               filters: [],
               limit: 1000,
@@ -1558,9 +1677,30 @@ describe('ChartBuilder', () => {
           msg: 'ok',
           trace: '',
           data: [
-            { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
-            { name: 'month', expr: 'month', type: 'integer', comment: '', role: 'dimension' },
-            { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
+            {
+              id: 'region',
+              name: 'region',
+              expr: 'region',
+              type: 'string',
+              comment: '',
+              role: 'dimension',
+            },
+            {
+              id: 'month',
+              name: 'month',
+              expr: 'month',
+              type: 'integer',
+              comment: '',
+              role: 'dimension',
+            },
+            {
+              id: 'revenue',
+              name: 'revenue',
+              expr: 'revenue',
+              type: 'float',
+              comment: '',
+              role: 'metric',
+            },
           ],
         })
       );
@@ -1588,8 +1728,8 @@ describe('ChartBuilder', () => {
       await seedPivotRowsColumns();
 
       const before = useStore.getState().queryConfig.dimensionGroups;
-      expect(before[0].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
-      expect(before[1].bindings).toEqual([{ bindingId: 'b-1', field: 'month' }]);
+      expect(before[0].bindings).toEqual([{ bindingId: 'b-0', fieldId: 'region' }]);
+      expect(before[1].bindings).toEqual([{ bindingId: 'b-1', fieldId: 'month' }]);
 
       act(() => {
         fireEvent.click(screen.getByTestId('pivot-swap-rows-columns'));
@@ -1609,7 +1749,7 @@ describe('ChartBuilder', () => {
 
       const groups = useStore.getState().queryConfig.dimensionGroups;
       expect(groups).toHaveLength(1);
-      expect(groups[0].bindings.map((binding) => binding.field)).toEqual(['region', 'month']);
+      expect(groups[0].bindings.map((binding) => binding.fieldId)).toEqual(['region', 'month']);
 
       // 请求侧同样带上两个维度，证明字段真的进了表格的维度槽位而不是被 slice 掉
       await waitFor(() => {
@@ -1636,10 +1776,10 @@ describe('ChartBuilder 地址栏即分享', () => {
     title: '分享来的图表',
     query: {
       dimensionGroups: [
-        { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', field: 'region' }] },
+        { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', fieldId: 'region' }] },
       ],
       metricGroups: [
-        { id: 'metric-group-main', bindings: [{ bindingId: 'b-1', field: 'revenue' }] },
+        { id: 'metric-group-main', bindings: [{ bindingId: 'b-1', fieldId: 'revenue' }] },
       ],
       filters: [],
       limit: 1000,
@@ -1745,7 +1885,7 @@ describe('ChartBuilder 地址栏即分享', () => {
     });
     expect(useStore.getState().chartBuilderConfig.title).toBe('分享来的图表');
     // 记录里存的维度必须真的回到槽位（而不是只还原了图型外壳）
-    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings[0].field).toBe('region');
+    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings[0].fieldId).toBe('region');
 
     await waitFor(() => {
       const lastRequest =
@@ -1816,7 +1956,7 @@ describe('ChartBuilder 地址栏即分享', () => {
       expect(useStore.getState().chartBuilderConfig.chartType).toBe('bar');
     });
     expect(useStore.getState().chartBuilderConfig.title).toBe('分享来的图表');
-    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings[0].field).toBe('region');
+    expect(useStore.getState().queryConfig.dimensionGroups[0].bindings[0].fieldId).toBe('region');
     // 还原只是中间态，用户要的是「图出来」：槽位就位后必须按还原后的配置真发一次查询
     await waitFor(() => {
       const lastRequest =

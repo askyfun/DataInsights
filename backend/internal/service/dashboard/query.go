@@ -230,14 +230,24 @@ func blockError(out entity.DashboardQueryBlock, err error) entity.DashboardQuery
 // buildOverrides 实现 PRD §8.3 的输入侧：从盘级筛选器里挑出对该图表数据集适用的、
 // 且**已激活**的那些，翻成 chart 侧认识的覆盖条件。
 //
-// 三条规则：
+// 请求里的值恒为数组（`DashboardQueryFilter.value: []`），但**下发到 builder 的形状必须按算子分流**，
+// 否则 SQL 形状是错的：
+//   - `in` / `notIn` 要数组：builder 按元素展开成 `IN (?, ?, …)`；
+//   - `between` 要**两个标量**（`Value` + `ValueEnd`）；
+//   - 其余标量算子（`eq`/`neq`/`gt`/`gte`/`lt`/`lte`/`like`）要**单个标量**：builder 直接
+//     `append(f.Value)`，塞数组进去会渲染成 `col = ARRAY[...]` → PG 报 42883。
+//     ⚠️ 这条曾长期是缺陷：既有测试只断言算子字符串，取值形状零覆盖。
+//   - `isNull` / `isNotNull` 不看值，只靠「数组非空」表达「已激活」。
+//
+// 四条规则：
 //  1. 适用条件是 (binding.datasetId == 图表数据集) —— 产品负责人确认的二元组口径
 //     （PRD §11-2）：纯按列名匹配会跨数据集误伤同名同义字段（比如两个数据集都有
 //     region），而盘允许混搭多数据集（D12）。
 //  2. 值为空数组或请求里没出现 = 未激活，跳过，不产生覆盖、也不计入 appliedFields。
 //     否则拖入一个筛选器就会莫名抹掉图表的默认条件（PRD §8.3 步骤 2 的警告）。
-//  3. 多选（值长度 > 1）且算子不是 in/notIn 时按 in 处理：布局里的算子可能是在
-//     单选语境下配的，而请求给了多个值，语义只能是「属于其中之一」。
+//  3. `between` 的拆分必须排在规则 4 之前：否则二元组会被「多值降级为 in」吃掉，区间变成 IN 两元素。
+//  4. 多选（值长度 > 1）且算子是标量算子时按 in 处理：布局里的算子可能是在单选语境下配的，
+//     而请求给了多个值，语义只能是「属于其中之一」。
 func buildOverrides(
 	filters []layoutFilterBinding, values map[string][]any, datasetID int,
 ) ([]entity.Filter, []string) {
@@ -255,8 +265,16 @@ func buildOverrides(
 		}
 
 		operator := f.Operator
-		if len(value) > 1 && operator != "in" && operator != "notIn" {
+		// 默认（标量算子 + 单值）取第一个元素；其余分支各自覆盖。
+		var valueArg, valueEndArg any = value[0], nil
+		switch {
+		case operator == "between" && len(value) == 2:
+			valueArg, valueEndArg = value[0], value[1]
+		case operator == "in" || operator == "notIn":
+			valueArg = value
+		case len(value) > 1:
 			operator = "in"
+			valueArg = value
 		}
 
 		overrides = append(overrides, entity.Filter{
@@ -264,7 +282,8 @@ func buildOverrides(
 			ID:       "dash-" + f.WidgetID,
 			Field:    f.Column,
 			Operator: operator,
-			Value:    value,
+			Value:    valueArg,
+			ValueEnd: valueEndArg,
 			Logic:    "and",
 		})
 

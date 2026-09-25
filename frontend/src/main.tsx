@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/react';
-import { ConfigProvider, theme } from 'antd';
+import { App as AntdApp, ConfigProvider, theme } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
 import React from 'react';
@@ -98,7 +98,13 @@ const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
           },
         }}
       >
-        <BrowserRouter>{children}</BrowserRouter>
+        {/* antd 的 <App> 提供 message/notification/modal 的上下文实例，让它们能读到上面这份
+            ConfigProvider 主题。静态 message.* 读不到上下文，antd 6 会打
+            "Static function can not consume context like dynamic theme"。
+            component={false} → 渲染 Fragment，不新增 DOM 层（避免影响全高布局）。 */}
+        <AntdApp component={false}>
+          <BrowserRouter>{children}</BrowserRouter>
+        </AntdApp>
       </ConfigProvider>
     </IntlProvider>
   );

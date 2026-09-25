@@ -1,6 +1,7 @@
 // 仪表盘列表页：契约是「后端 layout_json 是不可信输入，计数必须经迁移函数」，
 // 以及删除/新建两条动作真的打到 API 并且刷新。
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { App } from 'antd';
 import type { AxiosResponse } from 'axios';
 import { IntlProvider } from 'react-intl';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -80,12 +81,16 @@ const dashboards: Dashboard[] = [
 const renderPage = () =>
   render(
     <IntlProvider locale="zh-CN" messages={messages['zh-CN']}>
-      <MemoryRouter initialEntries={['/']}>
-        <Routes>
-          <Route path="/" element={<DashboardsPage />} />
-          <Route path="/dashboards/:id" element={<div data-testid="editor-route" />} />
-        </Routes>
-      </MemoryRouter>
+      {/* 页面用 App.useApp() 取 message（避开 antd 6 的静态 message 告警），
+          没有这层包裹 useApp() 拿到的是空对象、调用即抛错。 */}
+      <App component={false}>
+        <MemoryRouter initialEntries={['/']}>
+          <Routes>
+            <Route path="/" element={<DashboardsPage />} />
+            <Route path="/dashboards/:id" element={<div data-testid="editor-route" />} />
+          </Routes>
+        </MemoryRouter>
+      </App>
     </IntlProvider>
   );
 

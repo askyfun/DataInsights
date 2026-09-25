@@ -1,8 +1,10 @@
 # Data Insights 表面系统（Surface System）
 
+> 最后更新：2026-09-26
+
 > **受众**：维护 Data Insights 前端的工程师，以及在此基础上做二次开发的协作者。
 > **主任务**：拖拽式 BI 可视化分析 —— 选数据源 → 建数据集 → 拖字段配图 → 保存/分享。
-> **范围**：全站 9 个页面（图表构建 / 图表列表 / 数据集列表·详情·编辑 / 数据源列表·详情 / 分享列表 / 分享只读页）与首页的**表面层级、色彩、字体、页面骨架、组件样式**。
+> **范围**：全站 11 个页面（图表构建 / 图表列表 / 数据集列表·详情·编辑 / 数据源列表·详情 / 分享列表 / 分享只读页 / 仪表盘列表 / 仪表盘编辑器）与首页的**表面层级、色彩、字体、页面骨架、组件样式**。
 > **不覆盖**：图表本身的视觉（`lib/chartOptions.ts` 的 ECharts option 构造）、国际化文案、后端。
 > **依据来源**：全部结论来自源码取证（读 `styles/index.css`、`pages/*.tsx`、antd 6.6.4 发行产物），不含用户调研或可用性测试数据。
 > **关键假设**：产品定位为**内部密集型数据工具**，不面向 C 端；因此优先"一屏塞更多"而非"留白显高级"。
@@ -24,7 +26,7 @@
 | antd 6 的 Card `headerBg` 默认是 `transparent`，无边框后卡头完全融进卡体 | `antd/es/card/style/index.js` |
 | **页面标题渲染在卡片内部** → 卡内同时存在背景白、卡头白、标题区白三层同色 | `Charts.tsx` / `Datasource.tsx` / `Dataset.tsx` 等 |
 | 全页最大一片白 = 预览空态 | `ChartCanvas` 空态 `Empty` + `padding:'100px 0'` |
-| 顶栏品牌标记从未定义样式 | `App.tsx` 用 `.demo-logo`，全仓无该 CSS 规则 → 渲染成 0×0 空 div |
+| 顶栏品牌标记一度无样式 | `App.tsx` 用 `.demo-logo`，早期全仓无该 CSS 规则（渲染成 0×0 空 div）；现已在 `styles/index.css` 补齐为品牌色圆角方块 + 三道递增柱（见 7.2） |
 | 「维度」有两个蓝 | `#1890ff`（4 处）与 antd 预设 blue `#1677ff` 并存 |
 | 「指标」有两个色 | 图表构建页用绿 `#52c41a`，数据集详情页用紫 `#722ed1` |
 | 灰阶暖冷混用 | `#999`/`#595959`/`#f0f2f5`/`#fafafa`（暖）与 `#f8f9fa`/`#f4f5f7`（冷）并存 |
@@ -410,7 +412,7 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
    页面标题绝不放回 <Card> 内。详情页的面包屑通过 PageHeader 的 breadcrumb prop 传入。
 2. 只使用 styles/index.css 中 :root 已定义的 token（--dr-canvas/surface/sunken/
    border/border-strong/text-1..4/accent/accent-soft/shadow-card/dim/metric/filter/date）。
-   禁止新增 HEX 字面量；确需新增语义色时先扩展 token 表并同步 docs/design-system.md。
+   禁止新增 HEX 字面量；确需新增语义色时先扩展 token 表并同步 docs/developer-guide/design-system.md。
 3. 加载态与空态统一包在 .dr-state 内（高度一致）；整页级的加载/结果态用
    .dr-page--center。
 4. 卡片内的工具条用 .dr-card-toolbar。
@@ -420,7 +422,7 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
 7. 改 PivotTable / TableChart / KpiCard 时注意它们在 ShareView 下也会渲染 ——
    只能用 :root 变量，不能依赖某个页面的祖先类。
 
-预期产物：修改后的页面/组件 + 必要的 token 扩展 + docs/design-system.md 同步。
+预期产物：修改后的页面/组件 + 必要的 token 扩展 + docs/developer-guide/design-system.md 同步。
 验收标准：npx tsc --noEmit 通过；npx biome check src/ 零问题；
 npx vitest run 全通过（其中 surfaces.test.tsx 必须仍能断言页头不在卡片内）。
 

@@ -47,7 +47,7 @@ const DATE_FIELD: ChartField = {
 
 const makeInitial = (patch: Partial<FilterCondition>): FilterCondition => ({
   id: 'filter-1',
-  field: FIELD.name,
+  fieldId: FIELD.name,
   operator: 'gte',
   value: '',
   logic: 'and',

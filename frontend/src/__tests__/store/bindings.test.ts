@@ -5,12 +5,12 @@ import { type BindingInstance, nextBindingId, reconcileGroupBindings, useStore }
  * bindingId 生成与 QueryPanel Select diff 的纯函数测试。
  *
  * nextBindingId：全局唯一、顺序递增，删除中间 binding 后不复用旧号。
- * reconcileGroupBindings：QueryPanel 多选 Select 变更时，保留仍选中列名的现有
- * bindingId（避免按 bindingId 存的 aggregation/alias 丢失），只为新增列名生成新号，
+ * reconcileGroupBindings：QueryPanel 多选 Select 变更时，保留仍选中列（列 id）的现有
+ * bindingId（避免按 bindingId 存的 aggregation/alias 丢失），只为新增列生成新号，
  * 移除取消选中的 binding，输出顺序跟随 Select 的 values。
  */
 
-const b = (bindingId: string, field: string): BindingInstance => ({ bindingId, field });
+const b = (bindingId: string, fieldId: string): BindingInstance => ({ bindingId, fieldId });
 
 describe('nextBindingId', () => {
   it('空视野返回 b-0', () => {
@@ -125,7 +125,7 @@ describe('removeDimensionField/removeMetricField 清理 bindingId 元数据', ()
     // nextBindingId 为 max+1：删掉最大号 b-0 后新增 profit 复用 b-0
     addMetricField(fields[1]);
     expect(useStore.getState().queryConfig.metricGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'profit' },
+      { bindingId: 'b-0', fieldId: 'profit' },
     ]);
 
     // 复用的 b-0 属于新列 profit，不得带上 revenue 的旧元数据
@@ -148,7 +148,7 @@ describe('removeDimensionField/removeMetricField 清理 bindingId 元数据', ()
 
     addDimensionField(fields[3]); // date → b-0（复用）
     expect(useStore.getState().queryConfig.dimensionGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'date' },
+      { bindingId: 'b-0', fieldId: 'date' },
     ]);
     expect(useStore.getState().dimensionLabels['b-0']).toBeUndefined();
   });
@@ -226,7 +226,7 @@ describe('removeDimensionGroup/removeMetricGroup 清理整组 bindingId 元数�
     // 组已空 → nextBindingId 从 b-0 重新分配；加入不同列 cost 复用 b-0
     addMetricField(fields[2], 0);
     expect(useStore.getState().queryConfig.metricGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'cost' },
+      { bindingId: 'b-0', fieldId: 'cost' },
     ]);
     const after = useStore.getState();
     expect(after.metricAggregations['b-0']).toBeUndefined();
@@ -253,7 +253,7 @@ describe('removeDimensionGroup/removeMetricGroup 清理整组 bindingId 元数�
 
     addDimensionField(fields[5], 0); // region → b-0（复用）
     expect(useStore.getState().queryConfig.dimensionGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'region' },
+      { bindingId: 'b-0', fieldId: 'region' },
     ]);
     expect(useStore.getState().dimensionLabels['b-0']).toBeUndefined();
   });
@@ -319,7 +319,7 @@ describe('reconcileGroupFields 清理取消选中的 bindingId 元数据', () =>
     reconcileGroupFields('metric', groupId, ['revenue']);
 
     expect(useStore.getState().queryConfig.metricGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'revenue' },
+      { bindingId: 'b-0', fieldId: 'revenue' },
     ]);
     const afterDeselect = useStore.getState();
     expect(afterDeselect.metricAggregations['b-1']).toBeUndefined();
@@ -330,8 +330,8 @@ describe('reconcileGroupFields 清理取消选中的 bindingId 元数据', () =>
     // 当前最大号回退到 b-0 → 再选中不同列 cost 会复用 b-1
     reconcileGroupFields('metric', groupId, ['revenue', 'cost']);
     expect(useStore.getState().queryConfig.metricGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'revenue' },
-      { bindingId: 'b-1', field: 'cost' },
+      { bindingId: 'b-0', fieldId: 'revenue' },
+      { bindingId: 'b-1', fieldId: 'cost' },
     ]);
     const afterReuse = useStore.getState();
     expect(afterReuse.metricAggregations['b-1']).toBeUndefined();
@@ -352,7 +352,7 @@ describe('reconcileGroupFields 清理取消选中的 bindingId 元数据', () =>
     reconcileGroupFields('dimension', groupId, ['city']); // 取消选中 date
 
     expect(useStore.getState().queryConfig.dimensionGroups[0].bindings).toEqual([
-      { bindingId: 'b-0', field: 'city' },
+      { bindingId: 'b-0', fieldId: 'city' },
     ]);
     expect(useStore.getState().dimensionLabels['b-1']).toBeUndefined();
   });

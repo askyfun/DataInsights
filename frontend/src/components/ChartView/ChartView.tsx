@@ -1,6 +1,6 @@
 import { Result } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { type CSSProperties, useMemo } from 'react';
+import { type CSSProperties, useCallback, useMemo } from 'react';
 import { type Chart, type ChartDataResponse, isPivotV2Payload } from '../../api';
 import { type ChartType, migrateChartConfig } from '../../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../../lib/chartOptions';
@@ -25,6 +25,12 @@ interface ChartViewProps {
    * 仪表盘块内应传 `{ height: '100%', minHeight: 0 }`，让图表随块高伸缩。
    */
   echartsStyle?: CSSProperties;
+  /**
+   * 列 ID → 列名映射（数据集列列表派生）。持久化文档的 `binding.field` 是**列的
+   * 稳定 id**，而 SQL 输出别名与响应负载键是列名，因此本组件渲染前必须做一次
+   * 翻译。缺省/未命中时回落 field 本身——历史文档里 field 本就是列名，行为不变。
+   */
+  fieldNames?: Record<string, string>;
 }
 
 /** 分享页的 ECharts 容器尺寸（改造前的原值，勿改：ShareView 行为按此冻结）。 */
@@ -42,32 +48,40 @@ const SHARE_ECHARTS_STYLE: CSSProperties = { height: 'calc(100vh - 250px)', minH
  * 任一臂都取不到可渲染内容时回落 Result 兜底，**不抛异常**。
  *
  * 数据来源说明：本组件不发起请求也不做加载态（调用方自己有更贴切的加载语汇）。
- * v1 持久化文档的组字段本身就是稳定列名，可直接用于按列名索引的响应负载，
- * 故无需运行时字段列表——这也是本组件能被仪表盘块直接复用的原因。
+ * 字段标识来自持久化文档（列 id），而负载键与 SQL 输出别名是列名，翻译由调用方
+ * 通过 `fieldNames` 注入（见该 prop 的说明）。
  */
-const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle }) => {
-  // 统一经迁移函数读取 v1 文档；ShareView 没有字段列表，
-  // v1 配置的组字段本身就是稳定列名，可直接用于按列名索引的数据行。
+const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldNames }) => {
   const chartDoc = useMemo(
     () => migrateChartConfig(chart.config, chart.chart_type as ChartType),
     [chart]
   );
 
+  /** 列 id → 列名；映射缺失（历史文档 field 本就是列名）时原样返回。
+   * 只认自有属性：fieldId 恰为 constructor/toString 等继承成员时不得穿透原型链 */
+  const nameOf = useCallback(
+    (field: string): string =>
+      (fieldNames && Object.getOwnPropertyDescriptor(fieldNames, field)?.value) ?? field,
+    [fieldNames]
+  );
+
   // 展示名：优先 fieldMeta 的 label/alias，其次列名
   const displayLabels = useMemo(() => {
-    const labels: Record<string, string> = {};
+    // 无原型容器：列名为 __proto__ 时 `labels[name] = ...` 才不会落进 setter 被吞
+    const labels: Record<string, string> = Object.create(null);
     for (const group of [...chartDoc.query.dimensionGroups, ...chartDoc.query.metricGroups]) {
       for (const binding of group.bindings) {
-        // fieldMeta 按 bindingId 取（v2 键），但 labels 的键保持列名——buildChartOption
-        // 用列名匹配结构化响应的 series name / x_axis（后端目前仍按列名/别名返回）。
-        // 已知歧义（Task 0-6+0-8 解决）：同一列名有多个 binding（多个不同 label）时，
-        // 共享列名键上后写入者覆盖先写入者。
+        // fieldMeta 按 bindingId 取（v2 键），而 labels 的键必须是**列名**——
+        // buildChartOption 用列名匹配结构化响应的 series name / x_axis。
+        // 已知歧义：同一列有多个 binding（多个不同 label）时，共享列名键上
+        // 后写入者覆盖先写入者。
         const meta = chartDoc.fieldMeta[binding.bindingId];
-        labels[binding.field] = meta?.label || meta?.alias || binding.field;
+        const name = nameOf(binding.fieldId);
+        labels[name] = meta?.label || meta?.alias || name;
       }
     }
     return labels;
-  }, [chartDoc]);
+  }, [chartDoc, nameOf]);
 
   // 样式来自持久化 v1 文档的 style 小节（schema 上是 unknown）：
   // 缺失/形状非法时经 normalizeChartStyle 回落 ChartStyleConfig 默认值。
@@ -77,8 +91,7 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle }) => {
   // 负载与 legacy 裸行回退两臂都在函数内部处理）。
   const chartOption = useMemo(() => {
     // combo 双轴：按图型定义的 metric 槽位（primary_values/secondary_values）与持久化文档的
-    // metricGroups 按 index 对齐派生 metricSlots。本组件无运行时字段列表，持久化的
-    // binding.field 本身即稳定列名，可直接使用。槽位名取自定义的 fieldGroup id（非组的位置 id）。
+    // metricGroups 按 index 对齐派生 metricSlots。槽位名取自定义的 fieldGroup id（非组的位置 id）。
     // metrics 用 alias 优先（列名兜底），与 displayLabels 读 fieldMeta.alias 的方式一致——
     // 后端 series 名按 ResolveAlias()（alias 优先，列名兜底）生成，若这里只填列名，
     // 带别名的 series 会反查不到槽位而被静默分配到主轴。
@@ -89,17 +102,19 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle }) => {
             .map((def, index) => ({
               slot: def.id,
               metrics: (chartDoc.query.metricGroups[index]?.bindings ?? []).map(
-                (b) => chartDoc.fieldMeta[b.bindingId]?.alias || b.field
+                (b) => chartDoc.fieldMeta[b.bindingId]?.alias || nameOf(b.fieldId)
               ),
             }))
         : undefined;
     return buildChartOption(chartDoc.chartType, data, chartStyle, displayLabels, {
       title: chartDoc.title || chart.name,
-      dimensions: chartDoc.query.dimensionGroups.flatMap((g) => g.bindings.map((b) => b.field)),
-      metrics: chartDoc.query.metricGroups.flatMap((g) => g.bindings.map((b) => b.field)),
+      dimensions: chartDoc.query.dimensionGroups.flatMap((g) =>
+        g.bindings.map((b) => nameOf(b.fieldId))
+      ),
+      metrics: chartDoc.query.metricGroups.flatMap((g) => g.bindings.map((b) => nameOf(b.fieldId))),
       metricSlots,
     });
-  }, [chart, chartDoc, data, chartStyle, displayLabels]);
+  }, [chart, chartDoc, data, chartStyle, displayLabels, nameOf]);
 
   const isTableLike = chartDoc.chartType === 'table' || chartDoc.chartType === 'pivot';
   // 聚合负载的 table/pivot 臂：TableResponse 带 pagination、PivotResponse 不带，

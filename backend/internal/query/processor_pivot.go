@@ -56,7 +56,10 @@ func resolvePivotSlots(dims []string, ast *QueryAST) (rowDims, colDims []Dimensi
 	}
 	for i, d := range dims {
 		expr := ast.DimensionExprs[i]
-		if expr.Field != d {
+		// dims 有两种口径，都要接受：Planner 原样下传的字段标识（列 ID），以及
+		// executor 翻译后的展示名（负载口径，见 idx.localizeFields）。两种都对不上
+		// 才判定槽位不可解析——保持旧的"顺序必须与 AST 一致"这道守卫不变。
+		if d != expr.Field && d != pivotDimOutputKey(expr) {
 			return nil, nil, false
 		}
 		switch expr.GroupName {

@@ -9,6 +9,7 @@
  */
 import type { ChartConfig, ChartQueryOptions, ChartStyleConfig, QueryConfig } from '../store';
 import { type ChartConfigDocument, type ChartMeta, migrateChartConfig } from './chartConfigSchema';
+import { materializeDateFilterSnapshot } from './dateFilter';
 
 /** 记录级 spec 版本；与后端 entity.CurrentQuerySpecVersion 必须一致。 */
 export const CURRENT_QUERY_SPEC_VERSION = 1;
@@ -71,7 +72,10 @@ export function buildChartConfigDocument(input: ChartConfigDocumentInput): Chart
     query: {
       dimensionGroups: input.activeQueryConfig.dimensionGroups,
       metricGroups: input.activeQueryConfig.metricGroups,
-      filters: input.queryConfig.filters,
+      // 日期筛选在这里物化成「保存时刻的区间快照」：后端路径（分享页 / 仪表盘）读的是
+      // 这份配置，它不认识「最近 7 天」这种意图。图表查询页不走这里，仍按意图动态解析。
+      // 「所有日期」物化不出任何条件 → 整条丢弃（它等价于没有这条筛选）。
+      filters: input.queryConfig.filters.flatMap((filter) => materializeDateFilterSnapshot(filter)),
       sort: input.queryConfig.sort,
       limit: input.queryConfig.limit,
     },

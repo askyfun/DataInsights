@@ -43,5 +43,5 @@ PM Agent → Architect Agent → Developer Agent → QA Agent
 - AI 模型: `minimax-cn-coding-plan/MiniMax-M2.5`
 - 密钥: `MINIMAX_API_KEY`（Secrets）
 - 运行环境: `ubuntu-latest`
-- Go 版本: 1.26
-- Node 版本: 20
+- Go / Node 版本：工作流自身**不构建**产品产物，产品构建版本以仓库根 `Dockerfile` 为准（`golang:1.27-alpine` + `node:24-alpine` = **Go 1.27 / Node 24**）。
+- `opencode-cycle-hourly.yml`（qa-agent）与 `opencode-developer-single.yml` 里的 `setup-go@v5` / `setup-node@v4` 步骤钉在 **Go 1.27 / Node 24**（供 agent 跑测试），与仓库根 `Dockerfile` 的产品构建版本一致。

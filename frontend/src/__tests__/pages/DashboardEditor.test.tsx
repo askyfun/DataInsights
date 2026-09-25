@@ -5,6 +5,7 @@
 // 量不到容器宽度（真 RGL 会一直停在 width=0 的加载态）。RGL v2 的 props 契约由
 // tsc 对 node_modules 里的 .d.ts 校验，不靠这里补。
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { App } from 'antd';
 import type { AxiosResponse } from 'axios';
 import { IntlProvider } from 'react-intl';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -28,12 +29,21 @@ vi.mock('../../api', () => ({
     getById: vi.fn(),
     getChartData: vi.fn(),
   },
+  datasetsApi: {
+    getColumns: vi
+      .fn()
+      .mockResolvedValue({ data: { code: 20000, msg: 'success', trace: '', data: [] } }),
+  },
 }));
 
 // 替身除了「渲染成一个 div」，还把收到的 props 存下来：
 // 这样测试可以直接触发 onDragStop / onResizeStop，覆盖 handleLayoutCommit 的
 // 边界收敛与邻块下推（真实 RGL 的几何在 jsdom 里无法产生）。
-const gridHarness = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
+const gridHarness = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+  /** 真 RefObject：用于断言「装载态容器节点是否已存在」（见 D-2 回归用例）。 */
+  containerRef: null as { current: HTMLDivElement | null } | null,
+}));
 
 vi.mock('react-grid-layout', async () => {
   const React = await import('react');
@@ -46,12 +56,14 @@ vi.mock('react-grid-layout', async () => {
         props.children as React.ReactNode
       );
     },
-    useContainerWidth: () => ({
-      width: 1200,
-      mounted: true,
-      containerRef: { current: null },
-      measureWidth: () => {},
-    }),
+    // 给真 ref（而不是 `{ current: null }` 死对象）：编辑器把容器 ref 挂在栅格外层 div 上，
+    // 那个节点若在首屏 commit 里不存在，真 RGL 的 useContainerWidth 会永久停在
+    // initialWidth —— 这正是 D-2（栅格宽度恒为 1280）的成因，需要一个能观测的 ref。
+    useContainerWidth: () => {
+      const containerRef = React.useRef<HTMLDivElement | null>(null);
+      gridHarness.containerRef = containerRef;
+      return { width: 1200, mounted: true, containerRef, measureWidth: () => {} };
+    },
     verticalCompactor: { kind: 'vertical' },
   };
 });
@@ -115,12 +127,16 @@ const axisPayload = { x_axis: ['2026-01'], series: [{ name: 'total', data: [10] 
 const renderEditor = () =>
   render(
     <IntlProvider locale="zh-CN" messages={messages['zh-CN']}>
-      <MemoryRouter initialEntries={['/dashboards/d-1']}>
-        <Routes>
-          <Route path="/dashboards/:id" element={<DashboardEditor />} />
-          <Route path="/" element={<div data-testid="list-route" />} />
-        </Routes>
-      </MemoryRouter>
+      {/* 页面用 App.useApp() 取 message（避开 antd 6 的静态 message 告警），
+          没有这层包裹 useApp() 拿到的是空对象、调用即抛错。 */}
+      <App component={false}>
+        <MemoryRouter initialEntries={['/dashboards/d-1']}>
+          <Routes>
+            <Route path="/dashboards/:id" element={<DashboardEditor />} />
+            <Route path="/" element={<div data-testid="list-route" />} />
+          </Routes>
+        </MemoryRouter>
+      </App>
     </IntlProvider>
   );
 
@@ -352,5 +368,39 @@ describe('仪表盘画布页', () => {
     expect(screen.getByText('图表已删除')).toBeInTheDocument();
     // layout 里没有 w-ghost，栅格下只应有两个块。
     expect(document.querySelectorAll('[data-testid="grid"] > *')).toHaveLength(2);
+  });
+
+  // 回归（浏览器验收 D-1）：写草稿侧的 dirty 同时看 name 与 layout，而恢复侧只比 layout，
+  // 于是「只改了名字」的草稿会被判成"与后端一致"→ 走删除分支，用户的未保存改名静默丢失。
+  it('草稿只改了名称（布局与后端一致）时也必须恢复，不得当作已保存清掉', async () => {
+    primeHappyPath();
+    localStorage.setItem(
+      'dashboard-draft:d-1',
+      JSON.stringify({ name: '草稿改名', layout: layoutDoc })
+    );
+
+    renderEditor();
+
+    await waitFor(() =>
+      expect(screen.getByText('已恢复本地草稿（上次未保存的改动）')).toBeInTheDocument()
+    );
+    expect(screen.getByDisplayValue('草稿改名')).toBeInTheDocument();
+    // 布局与后端一致，故仍是后端那两块；草稿要留着（此时 dirty 为真，真相源仍是后端）。
+    expect(screen.getByTestId('grid')).toBeInTheDocument();
+    expect(localStorage.getItem('dashboard-draft:d-1')).not.toBeNull();
+  });
+
+  // 回归（浏览器验收 D-2）：编辑器曾在装载态提前 return 一个纯 Spin 页面，首屏 commit 里
+  // 没有栅格容器节点 → RGL 的 useContainerWidth「挂载即测量 + 挂 ResizeObserver」那次
+  // effect 读到 null 后直接 return（依赖不含节点，不会重跑），宽度永久停在
+  // initialWidth(1280)：窄屏块溢出容器、宽屏右侧留白，且此后 resize 也不再重测。
+  it('装载态即渲染栅格容器节点，保证 useContainerWidth 能测到真实宽度', async () => {
+    // 悬挂的 getById：页面停在装载态，容器节点必须已经存在。
+    mockGetById.mockReturnValue(new Promise<never>(() => {}));
+    mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+
+    renderEditor();
+
+    await waitFor(() => expect(gridHarness.containerRef?.current).toBeTruthy());
   });
 });

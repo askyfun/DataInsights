@@ -2,6 +2,7 @@ import { arrayMove } from '@dnd-kit/sortable';
 import { message } from 'antd';
 import { create } from 'zustand';
 import { isNumericType, normalizeDataType } from '@/lib/dataTypes';
+import type { DateFilterIntent } from '@/lib/dateFilter';
 import {
   Chart,
   ChartDataResponse,
@@ -106,7 +107,12 @@ export type FieldType = 'dimension' | 'metric';
 
 // Field interface for chart builder
 export interface ChartField {
+  /**
+   * 字段的**稳定标识** = 数据集列的 id（`DatasetColumn.id`）。
+   * 图表配置、shard_keys 与查询请求一律引用它；改名不断链。
+   */
   id: string;
+  /** 列的**可变展示名**（`DatasetColumn.name`）：只用于展示与 SQL 输出别名。 */
   name: string;
   type: FieldType;
   dataType: string;
@@ -115,13 +121,15 @@ export interface ChartField {
 
 /**
  * 字段绑定实例：一次"把某列拖入某个槽位"的唯一记录。
- * bindingId 全局唯一（形如 b-0/b-1，顺序递增），field 为稳定列名。
+ * bindingId 全局唯一（形如 b-0/b-1，顺序递增），field 为**列的稳定 id**
+ * （ChartField.id == DatasetColumn.id；键名沿用历史叫法，内容已从列名换成列 ID）。
  * 同一列被拖入两个不同组会得到两个不同 bindingId，从而各自持有独立的
  * aggregation/alias/unit/format 元数据（修复 D2：按列名共享导致的互相覆盖）。
  */
 export interface BindingInstance {
   bindingId: string;
-  field: string;
+  /** 数据集列的稳定 id（`DatasetColumn.id`）。列名是可变展示名，不进任何持久化引用。 */
+  fieldId: string;
 }
 
 // 字段组 - 支持多维度/多指标
@@ -205,8 +213,8 @@ export function reconcileGroupBindings(
 ): BindingInstance[] {
   const existingByField = new Map<string, BindingInstance>();
   for (const binding of groupBindings) {
-    if (!existingByField.has(binding.field)) {
-      existingByField.set(binding.field, binding);
+    if (!existingByField.has(binding.fieldId)) {
+      existingByField.set(binding.fieldId, binding);
     }
   }
   // 本次新增的 binding 追加进 id 生成视野，保证同一次变更多个新增列名号互不冲突
@@ -217,7 +225,7 @@ export function reconcileGroupBindings(
     if (existing) {
       return [existing];
     }
-    const binding: BindingInstance = { bindingId: nextBindingId(idScope), field };
+    const binding: BindingInstance = { bindingId: nextBindingId(idScope), fieldId: field };
     newBindings.push(binding);
     return [binding];
   });
@@ -241,11 +249,18 @@ export type FilterOperator =
 // 过滤条件
 export interface FilterCondition {
   id: string;
-  field: string;
+  /** 数据集列的稳定 id（`DatasetColumn.id`）。 */
+  fieldId: string;
   operator: FilterOperator;
   value: any;
   valueEnd?: any;
   logic: 'and' | 'or';
+  /**
+   * 日期字段的筛选**意图**（`最近 7 天` / `本月` / 自定义起止 …）。
+   * 存在时它是权威：`operator`/`value`/`valueEnd` 只作为「不认日期的下游」的兜底快照
+   * （由 `materializeDateFilterSnapshot` 在保存时填）。见 `@/lib/dateFilter`。
+   */
+  date?: DateFilterIntent;
 }
 
 // 图表配置接口
@@ -624,9 +639,10 @@ export const useStore = create<AppState>((set) => ({
       const columns = response.data.data;
 
       // 使用后端返回的 role，如果没有则自动推断
-      // fieldId 直接使用列名（v1 持久化契约的稳定标识），不再使用位置 id
+      // fieldId 使用列的稳定 id（后端分配的短 ID），不再使用位置 id 或列名——
+      // 列名是可变的展示名，改名不应切断已保存图表的字段引用。
       const fields: ChartField[] = columns.map((col: DatasetColumn) => ({
-        id: col.name,
+        id: col.id,
         name: col.name,
         type: col.role || (isNumericType(normalizeDataType(col.type)) ? 'metric' : 'dimension'),
         dataType: normalizeDataType(col.type),
@@ -793,7 +809,7 @@ export const useStore = create<AppState>((set) => ({
     set((state) => {
       const newFilter: FilterCondition = {
         id: createFilterId(),
-        field: '',
+        fieldId: '',
         operator: 'eq',
         value: '',
         logic: 'and',
@@ -837,7 +853,7 @@ export const useStore = create<AppState>((set) => ({
       );
       const existingBindings = dimensionGroups[groupIndex]?.bindings || [];
       // 同一 group 内不允许重复列名；不同 group 之间允许相同列名（D2 场景）
-      if (existingBindings.some((b) => b.field === field.id)) return state;
+      if (existingBindings.some((b) => b.fieldId === field.id)) return state;
 
       const bindingId = nextBindingId([
         ...dimensionGroups.map((g) => g.bindings),
@@ -846,7 +862,7 @@ export const useStore = create<AppState>((set) => ({
 
       const newGroup: FieldGroup = {
         id: dimensionGroups[groupIndex]?.id || `dim-group-${groupIndex + 1}`,
-        bindings: [...existingBindings, { bindingId, field: field.id }],
+        bindings: [...existingBindings, { bindingId, fieldId: field.id }],
       };
 
       dimensionGroups[groupIndex] = newGroup;
@@ -908,7 +924,7 @@ export const useStore = create<AppState>((set) => ({
       );
       const existingBindings = metricGroups[groupIndex]?.bindings || [];
       // 同一 group 内不允许重复列名；不同 group 之间允许相同列名（D2 场景）
-      if (existingBindings.some((b) => b.field === field.id)) return state;
+      if (existingBindings.some((b) => b.fieldId === field.id)) return state;
 
       const bindingId = nextBindingId([
         ...state.queryConfig.dimensionGroups.map((g) => g.bindings),
@@ -917,7 +933,7 @@ export const useStore = create<AppState>((set) => ({
 
       const newGroup: FieldGroup = {
         id: metricGroups[groupIndex]?.id || `metric-group-${groupIndex + 1}`,
-        bindings: [...existingBindings, { bindingId, field: field.id }],
+        bindings: [...existingBindings, { bindingId, fieldId: field.id }],
       };
 
       metricGroups[groupIndex] = newGroup;
@@ -1005,7 +1021,9 @@ export const useStore = create<AppState>((set) => ({
       if (sameGroup && (target.index === undefined || target.index === fromIndex)) return state;
 
       if (
-        toGroup.bindings.some((b) => b.field === binding.field && b.bindingId !== binding.bindingId)
+        toGroup.bindings.some(
+          (b) => b.fieldId === binding.fieldId && b.bindingId !== binding.bindingId
+        )
       ) {
         result = 'rejected';
         return state;

@@ -695,14 +695,14 @@ func TestDatasetGetColumns_Success(t *testing.T) {
 		getColumnsFunc: func(_ context.Context, id int) ([]entity.DatasetColumn, error) {
 			gotID = id
 			return []entity.DatasetColumn{
-				{Name: "id", Expr: "id", Type: "int8", Comment: "", Role: "dimension"},
-				{Name: "amount", Expr: "SUM(amount)", Type: "float", TypeConfig: entity.TypeConfig{Precision: 2, Scale: 1}, Comment: "c", Role: "metric"},
+				{ID: "c1", Name: "id", Expr: "id", Type: "int8", Comment: "", Role: "dimension"},
+				{ID: "c2", Name: "amount", Expr: "SUM(amount)", Type: "float", TypeConfig: entity.TypeConfig{Precision: 2, Scale: 1}, Comment: "c", Role: "metric"},
 			}, nil
 		},
 	})
 	// Key order follows the entity.DatasetColumn struct tags.
 	w := serve(newDatasetTestRouter(h), http.MethodGet, "/api/datasets/7/columns", "")
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":[{"name":"id","expr":"id","type":"int8","type_config":{"precision":0,"scale":0},"comment":"","role":"dimension"},{"name":"amount","expr":"SUM(amount)","type":"float","type_config":{"precision":2,"scale":1},"comment":"c","role":"metric"}]}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":[{"id":"c1","name":"id","expr":"id","type":"int8","type_config":{"precision":0,"scale":0},"comment":"","role":"dimension"},{"id":"c2","name":"amount","expr":"SUM(amount)","type":"float","type_config":{"precision":2,"scale":1},"comment":"c","role":"metric"}]}`)
 	if gotID != 7 {
 		t.Errorf("expected GetColumns called with id=7, got %d", gotID)
 	}

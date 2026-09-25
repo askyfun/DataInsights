@@ -32,7 +32,9 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 查询链路：handler → service → `query` 包（AST + bun_builder / raw.go）→ datasource 驱动。`Connection.Execute(ctx, sql string, args ...any)` 已支持参数化执行，bun_builder 是图表 SQL 的唯一出口，值参数一律通过 args 传递；标识符使用白名单校验（裸名 `datasource.IsValidIdentifier`，query 包 `safeIdentifier` 额外允许成对引号包裹的标识符）。`dialect.go` 的手写字符串 SQL builder（`SQLBuilder`/`baseSQLBuilder`/`BuildQueryString` 及各方言 builder）已作为死代码删除，仅保留 `DialectType`/`ParseDialect`/`BuildQueryStringWithBun`；聚合表达式 `aggExprPattern` 收紧为显式函数白名单（`count|sum|avg|min|max`），杜绝 `pg_sleep(1)` 之类经列 `FieldExpr` 注入任意函数名。
 
-契约工程（Batch 2/3）：`api/openapi.yaml` 是前后端接口的单一事实源，`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。**前端运行时类型已切换到生成物打底（Batch 3）**：`frontend/src/api/index.ts` 的实体/响应/请求类型 alias 到 `components['schemas']`，窄联合处用薄手写层（`Omit<G.X,'type'> & { type: Union }`）重收紧；已判死的声明（手写 `typeConfig`——wire 实为 snake `type_config` 且前端零消费、`ColumnInfo` 幽灵字段、`GeneratedSQL` 等）随迁移删除。三条静默红线仍有效：生成 `*Response` 是信封包装（裸 payload 对应 `ChartDataResult` 等去后缀类型，禁按名替换）、`*FormData` 是 UI 数组约定保留手写、store `QueryConfig` 为 camelCase UI 模型不换。后端 handler In/Out 仍为 handler-local 镜像（json tag 由 `contract_parity_test.go` 反射守卫），**未**切换到 `idls.*`——生成 Go 类型无 gin `form:"-"` 语义，直接作 In 会重新引入 query 污染注入面，切换列入 Batch 4 重评。图表 `bi_chart.config` 已升级为带 `version:1` 的文档（`frontend/src/lib/chartConfigSchema.ts` 的 `ChartConfigDocument` + `migrateChartConfig`），旧结构在加载时自动迁移（`fieldId` 由位置 `field-N` 改为稳定列名），ShareView 据此渲染新结构图表；图表查询请求线不含 `config` 字段（Batch 3 已移除从未生效的 pie 合并比例死链，`query.PieProcessor.MergeOtherBelowRatio` 能力保留但未接线）。
+契约工程（Batch 2/3）：`api/openapi.yaml` 是前后端接口的单一事实源，`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。**前端运行时类型已切换到生成物打底（Batch 3）**：`frontend/src/api/index.ts` 的实体/响应/请求类型 alias 到 `components['schemas']`，窄联合处用薄手写层（`Omit<G.X,'type'> & { type: Union }`）重收紧；已判死的声明（手写 `typeConfig`——wire 实为 snake `type_config` 且前端零消费、`ColumnInfo` 幽灵字段、`GeneratedSQL` 等）随迁移删除。三条静默红线仍有效：生成 `*Response` 是信封包装（裸 payload 对应 `ChartDataResult` 等去后缀类型，禁按名替换）、`*FormData` 是 UI 数组约定保留手写、store `QueryConfig` 为 camelCase UI 模型不换。后端 handler In/Out 仍为 handler-local 镜像（json tag 由 `contract_parity_test.go` 反射守卫），**未**切换到 `idls.*`——生成 Go 类型无 gin `form:"-"` 语义，直接作 In 会重新引入 query 污染注入面，切换列入 Batch 4 重评。图表 `bi_chart.config` 已升级为带 `version:2` 的文档（`frontend/src/lib/chartConfigSchema.ts` 的 `ChartConfigDocument` + `migrateChartConfig`），旧结构在加载时自动迁移（`fieldId` 由位置 `field-N` 改为列的稳定 id `DatasetColumn.id`），ShareView 据此渲染新结构图表；图表查询请求线不含 `config` 字段（Batch 3 已移除从未生效的 pie 合并比例死链，`query.PieProcessor.MergeOtherBelowRatio` 能力保留但未接线）。
+
+⚠️ **`make api-gen` 的「前端」半步当前必然失败**（不是环境问题）：`openapi-typescript@7.13.0` 依赖 `typescript` 包的运行时导出 `ts.factory`，而本仓 `typescript@7` 没有它 → `TypeError: Cannot read properties of undefined`。崩溃发生在写文件之前（生成物不会被写坏）。绕过方式见 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) 的「版本与依赖」（入库）；彻底修法是把生成器与 `typescript@7` 解耦（独立 package.json 或钉一个 TS 5 别名），属独立改动。**后端那半步正常**，且只输出被 cfg 允许的子集（不含 `DashboardFilter*` 等 layout schema）。无论走哪条路，重跑生成后都要 `diff` 生成物，确认只漂了本次改动。
 
 `backend/internal/router/router.go` 的泛型路由（`RegisterGetRoute`/`RegisterPostRoute`/`RegisterPutRoute`/`RegisterDeleteRoute`）**已启用并接入 40 个 API 端点**（datasource 11 + dataset 9 + chart 8 + share 4 + queryrecord 2 + dashboard 6；chart 的 `/:id/references` 由 dashboard handler 提供但归属 chart 资源；dataset 的 `PUT /:id` 为 Batch 3 补齐，修复前端编辑保存 404 的 ghost route）。签名 `API[In,Out] func(req Request[In], res *Response[Out]) error`——`res` 为指针，值传递会静默丢弃 handler 写入。路由器按 HTTP 方法自动绑定 JSON body（POST/PUT/PATCH 绑定，GET/DELETE 不绑定）+ query 参数，并统一包装 `response` 信封；handler 内部不再手写 `response.*`（2 个例外：`/health` 在 cmd/main.go 用裸 `r.GET`+`response.Success`；share `View` 返回 302 重定向，无法套 JSON 信封；**且只在纯 API 模式下才注册** —— 托管前端时 `/share/<token>` 归前端路由，若后端插一条同路径的 302 会抢先把页面挡掉）。迁移样板见 `handler/datasource.go` 顶部 package doc；已接受的两类"不可消除差异"（bind 错误文本含 struct 名、双非法输入时 body 绑定错误优先于 path）由 baseline 测试钉死（8 个 path+body 端点 × 双非法 Empty/Malformed 变体全覆盖）。handler 入参用 handler-local In 镜像 struct（entity 不带 `form:"-"`，否则 query 参数会污染 body），其与 entity 的 json tag 一致性由 `internal/handler/contract_parity_test.go` 反射守卫。PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例）：payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
 
@@ -46,17 +48,59 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 ```
 frontend/src/
-├── api/           # API 端点封装（29 个接口，复用 lib/api/client 的单一 axios 实例）
+├── api/           # API 端点封装（40 个接口，复用 lib/api/client 的单一 axios 实例）
 ├── store/         # Zustand 状态管理
 ├── pages/         # 页面组件
-├── components/    # 可复用组件
+├── components/    # 可复用组件（日期筛选器在 components/DateFilter/，过滤弹窗在 components/ChartBuilder/）
 ├── idls/          # API 类型定义（现仅 gen_types.ts 生成物；Batch 2 已删除手写 chart/dataset/datasource/share.ts）
-├── lib/           # 工具库（API 客户端在 lib/api/client.ts；图表配置 schema 在 lib/chartConfigSchema.ts）
+├── lib/           # 工具库（API 客户端在 lib/api/client.ts；图表配置 schema 在 lib/chartConfigSchema.ts；日期筛选语义在 lib/dateFilter.ts）
 ├── i18n/          # 国际化
 └── styles/        # 全局样式
 ```
 
 路径别名：`@/*` 映射到 `./src/*`。
+
+### 日期筛选（components/DateFilter + lib/dateFilter）
+
+对齐火山引擎智能数据洞察的「日期筛选」，供图表查询页与仪表盘盘级筛选器共用：
+
+- **`lib/dateFilter.ts` 是语义单一事实源**（纯逻辑、零 UI 依赖）：五种模式（动态日期 / 固定日期 /
+  高级 / 特殊值 / 单个日期）、粒度（年-月-日 / 年-月 / 年-周，datetime 额外给小时）、全套快捷选项、
+  周计算逻辑、`resolveDateFilter`（意图 → 具体区间）、`formatDateFilter*`（芯片摘要 / 时间预览）。
+- **`DateFilterEditor` 是两个外壳共用的编辑体**：`DateFilterModal`（完整弹窗）与
+  `DateFilterControl`（配置完成后留在页面上的行内控件）。不要给两者各写一份编辑逻辑。
+- **意图与快照分离，两端各自解析同一个意图**：`FilterCondition.date` 存的是**意图**（`最近 7 天`），
+  图表查询页在构造请求时解析（`expandDateFilterIntent`）；后端读 config 的路径（分享页 / 仪表盘）
+  在 `internal/query/datefilter.go` 里解析 —— 所以动态日期在所有路径上都是动态的。
+  后端那份是 TS 语义的**镜像**，靠双端共读的用例表
+  `frontend/src/lib/__fixtures__/dateFilterCases.json` 防漂移（`datefilter_test.go` +
+  `dateFilter.cases.test.ts` 各跑一遍）；改语义必须同时改两边。
+  `materializeDateFilterSnapshot` 写下的区间快照**已不是取数依据**，只作「不认识 `date` 的下游」的兜底。
+- 区间一律输出 `YYYY-MM-DD`（datetime/小时粒度到秒），展示格式只在 UI 层。
+  区间口径统一以「昨天」为数据上界（`本周`=本周首日~昨天、`本月`=本月 1 日~昨天）。
+- 日期字段拖入「筛选」区进日期筛选弹窗；`FilterCondition.fieldId` 存的是**列的稳定 id**
+  （`DatasetColumn.id`，形如 `0000i529`），**不是列名**——列名只用于展示与 SQL 输出别名。
+
+### 仪表盘盘级筛选器
+
+`components/DashboardFilterBlock/` + `lib/dashboardFilterValue.ts`（取值下发契约），
+日期族的语义与控件复用 `components/DateFilter/`：
+
+- **三族**（`filterWidgetFamily` ↔ `classifyFieldKind`）：`date` 用日期控件（行内浮层切换 +
+  「配置」进完整弹窗）、`string` 用枚举多/单选（候选值实查该列）、`number` 用算子下拉 + 数值输入。
+  三条链路的取值下发是**同一条**，只有控件形态与算子词表分族（`FAMILY_OPERATORS`）。
+- **布局侧**：`DashboardFilterWidget`（`type: 'filter'`）带 `binding.datasetId + binding.column`
+  （**column 是列 ID**，见 `dashboardLayoutSchema.ts` 的注释——盘级条件与图表自身条件的
+  「覆盖可见标识」判定靠它求交集）、`label`、`dataType`、`operator`、`multi`、
+  `defaultValue`（该筛选器的默认选中值，重开盘时做控件初值；日期族是 `DateFilterValue`，
+  其余族是数组）与日期族专有的 `date.granularity/weekStart`。
+- **下发侧**：`POST /api/dashboards/{id}/query` 只收**筛选器当前取值** `{widgetId, value[]}`，
+  与图表自身条件的合并由后端单点完成（PRD §6.3）。取值形状必须按算子分流：
+  `in/notIn` 数组、`between` 两元素、**其余标量算子一元素**、`isNull/notNull` 靠「数组非空」
+  表示已激活 —— 见 `lib/dashboardFilterValue.ts` 与后端 `service/dashboard/query.go` 的 `buildOverrides`。
+- **两个已知边界**：① 未落库的筛选器后端读不到（盘级取数按已落库 layout 建索引），
+  块上会提示「保存仪表盘后生效」；② 盘级筛选每个筛选器每次查询最多产生**一条**合并条件，
+  所以「包含空日期」（区间 OR IS NULL）在仪表盘侧表达不出来。
 
 ## 常用命令
 
@@ -101,9 +145,9 @@ make clean             # 清理 dist、node_modules、backend/bin
 npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 
 - 根目录与 `frontend/` 的 `package.json` 都带 `preinstall` 钩子调用 `scripts/only-pnpm.mjs`。该脚本读 `npm_config_user_agent`，非 pnpm 直接退出码 1 中止安装，并顺手删除 npm/yarn 在 preinstall 之前就写下的 `package-lock.json` / `yarn.lock`。
-- `packageManager` 字段钉死 `pnpm@12.4.2`（根 + frontend 一致），`.npmrc` 开启 `package-manager-strict`。⚠️ 本机 pnpm 若由 Homebrew 装的是 11.x，`package-manager-strict` 会直接拒绝执行 —— 先 `brew upgrade pnpm`。
+- `packageManager` 字段钉死 `pnpm@12.4.2`（根 + frontend 一致），`.npmrc` 开启 `package-manager-strict`。⚠️ 若本地 pnpm 版本低于钉死的版本，`package-manager-strict` 会直接拒绝执行 —— 升级到钉死版本即可。
 - **依赖事实源只有 `pnpm-lock.yaml`**（根一份、`frontend/` 一份）。其他 lockfile 已在 `.gitignore` 屏蔽，不要提交。
-- store 在 `~/Library/pnpm/store`，`frontend/node_modules` 走硬链接。
+- pnpm 全局 store 默认在本机用户目录下，`frontend/node_modules` 走硬链接。
 
 ⚠️ **`pnpm install` 在 lock 未变时直接跳过（"Already up to date"），不会清理孤儿。** `--force` 同样无效。若 `node_modules/.pnpm` 里出现 `pnpm why <pkg>@<ver>` 查不到的包（历史遗留的旧大版本），必须**先删掉 `node_modules` 再 install** 才能真正重建。
 
@@ -137,9 +181,9 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 
 ### 反思与记录
 
-- 开始工作前先读 `./MEMORY.md`，获取历史经验。
+- 开始工作前先读 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md)（技术坑，按场景查），并查阅本地工作笔记中的工作方式红线，获取历史经验。
 - 主动反思，不依赖用户指出问题。当意识到自己可能犯错、可能需要改进时，就进行反思记录。
-- 反思后将根因和教训追加到 `./MEMORY.md`，避免同类错误重复发生。
+- 反思后将根因和教训追加到本地工作笔记（当日 `YYYY-MM-DD.md` 或红线文件），**本机笔记一律写入本地工作笔记目录、不再写入仓库**，避免同类错误重复发生。
 
 ### 目标驱动执行
 
@@ -159,7 +203,7 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 - **测试**: 后端新增功能或修复 bug 后必须补充单元测试，提交前运行 `go test -race ./...`。
 - **Bug 修复测试**: 每个 bug 修复前先写能复现问题的失败测试，修复后再确认测试通过。前后都要有对应单元测试。
 - **代码可测试性**: 设计代码必须具备可测试性，禁止提交无法测试的代码。
-- **文档同步**: 大型业务逻辑调整或架构调整必须同步更新 `docs/*.md`、`README.md`、`AGENTS.md` 等文档。
+- **文档同步**: 大型业务逻辑调整或架构调整必须同步更新 `docs/` 下的相关文档（四区分区见 `docs/AGENTS.md`）、`README.md`、`AGENTS.md`。
 - **Pre-commit 钩子**: Husky 在前端运行 `lint-staged`，对暂存的 `.ts/.tsx` 文件执行 `biome check`。
 
 ## 零容忍
@@ -234,18 +278,26 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 
 | 文档 | 说明 |
 |------|------|
-| [docs/setup.md](docs/setup.md) | 环境搭建、运行命令 |
-| [docs/architecture.md](docs/architecture.md) | 目录结构、技术栈、图表查询与可视化语义分层 |
-| [docs/api.md](docs/api.md) | API 接口文档（统一规范，含图表查询兼容协议与目标契约草案） |
-| [docs/api-spec.md](docs/api-spec.md) | API 规范详情（含图表查询契约演进草案） |
-| [docs/chart-builder-plan.md](docs/chart-builder-plan.md) | 图表构建器功能设计与契约演进方向 |
-| [docs/coding-style.md](docs/coding-style.md) | 代码风格指南 |
-| [docs/todo.md](docs/todo.md) | 开发任务清单 |
+| [docs/getting-started/overview.md](docs/getting-started/overview.md) | 核心概念、应用场景与对外 roadmap |
+| [docs/getting-started/quick-start.md](docs/getting-started/quick-start.md) | 极简上手（一条命令跑起来） |
+| [docs/user-guide/configuration.md](docs/user-guide/configuration.md) | 配置与参数字典 |
+| [docs/user-guide/features.md](docs/user-guide/features.md) | 核心功能使用说明（含「为什么做这个功能」） |
+| [docs/deployment/docker.md](docs/deployment/docker.md) | 容器与 Docker Compose |
+| [docs/deployment/production.md](docs/deployment/production.md) | 生产环境部署实践 |
+| [docs/developer-guide/architecture.md](docs/developer-guide/architecture.md) | 系统架构 + 关键设计决策 |
+| [docs/developer-guide/api.md](docs/developer-guide/api.md) | API 接口文档（叙述性视图；契约事实源是 api/openapi.yaml） |
+| [docs/developer-guide/chart-query-design.md](docs/developer-guide/chart-query-design.md) | 图表查询链路设计（契约模型 / SQL 生成 / 处理器） |
+| [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) | 排障（外部开发者也会踩的坑） |
+| [docs/developer-guide/backlog.md](docs/developer-guide/backlog.md) | 活跃待办 / 方言能力矩阵 |
+| [docs/developer-guide/dev-setup.md](docs/developer-guide/dev-setup.md) | 环境搭建、运行命令 |
+| [docs/developer-guide/design-system.md](docs/developer-guide/design-system.md) | 前端表面系统规范（页面骨架、色彩、字体、组件样式） |
+| [docs/developer-guide/contributing.md](docs/developer-guide/contributing.md) | 贡献流程 + 代码风格 + 提交前门禁 |
+
+分区索引与维护规则见 `docs/AGENTS.md`。目录另存有一部分**不入库**的本机材料（历史规划、竞品调研等），只作本地参考；入库文档不得链接这类本机文件。
 
 ## 已知限制
 
-- 前端无 ESLint/Prettier 配置（使用 Biome）
 - 后端无 golangci-lint 配置
 - 缺少端到端测试
-- **数据源方言能力验证不均衡**：4 种外部数据源（postgresql/mysql/clickhouse/starrocks）连接与元数据读取均已实现，但**只有 PostgreSQL 有真实能力懒探针**。MySQL/StarRocks 已升级为"只升不降 + nil 保底"探针（无实例时行为等于保守基线，不回归），ClickHouse 刻意保持静态（剩余布尔能力已是文档-true、percentile 需语义校验）。受能力门控的图表落地参差：**boxplot 仅 PG 端到端可用**（StarRocks percentile 策略已实测但翻转需实例；CH 待语义校验；MySQL 无标量 percentile 路径暂不支持）；pivot 全源可用（GROUPING SETS 缺失时自动回退 UNION ALL）。详见 `docs/todo.md` §八。不要向未列明实例验证的后端过度声称图表支持。
+- **数据源方言能力验证不均衡**：4 种外部数据源（postgresql/mysql/clickhouse/starrocks）连接与元数据读取均已实现，但**只有 PostgreSQL 有真实能力懒探针**。MySQL/StarRocks 已升级为"只升不降 + nil 保底"探针（无实例时行为等于保守基线，不回归），ClickHouse 刻意保持静态（剩余布尔能力已是文档-true、percentile 需语义校验）。受能力门控的图表落地参差：**boxplot 仅 PG 端到端可用**（StarRocks percentile 策略已实测但翻转需实例；CH 待语义校验；MySQL 无标量 percentile 路径暂不支持）；pivot 全源可用（GROUPING SETS 缺失时自动回退 UNION ALL）。不要向未列明实例验证的后端过度声称图表支持。
 

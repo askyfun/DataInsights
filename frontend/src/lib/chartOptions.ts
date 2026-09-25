@@ -148,7 +148,57 @@ function toPieValue(value: unknown): number | undefined {
 }
 
 /** 截断 "+0000 UTC" 后缀，保留日期+时间（模块级常量：保证同输入产出引用相等的 option） */
-const truncateUtcSuffix = (val: string) => String(val).replace(/\s*\+\d{4}\s*UTC$/, '');
+const truncateUtcSuffix = (val: string) => {
+  let out = String(val).replace(/\s*\+\d{4}\s*UTC$/, '');
+  // ISO 午夜零点（2026-01-01T00:00:00Z）→ 仅显示日期部分
+  out = out.replace(/T00:00:00(\.\d+)?Z?$/, '');
+  // 其余 ISO 时间戳（2026-01-01T08:30:00Z）→ 空格分隔、去尾 Z
+  return out.replace('T', ' ').replace(/Z$/, '');
+};
+
+/**
+ * 判断 x 轴值是否为可排序的时间戳：全部命中 ISO 日期前缀（YYYY-MM-DD...）时
+ * 返回按时间升序的排列索引，否则返回 null（非时间维度保持后端原始顺序）。
+ */
+function temporalSortOrder(values: readonly unknown[]): number[] | null {
+  const isoDatePattern = /^\d{4}-\d{2}-\d{2}([T\s]\d{2}:\d{2}:\d{2})?/;
+  const times: number[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string' || !isoDatePattern.test(value)) {
+      return null;
+    }
+    const time = Date.parse(value);
+    if (Number.isNaN(time)) {
+      return null;
+    }
+    times.push(time);
+  }
+  if (times.length === 0) {
+    return null;
+  }
+  // 稳定排序：时间相同时保持原相对顺序
+  return times
+    .map((time, index) => ({ time, index }))
+    .sort((a, b) => a.time - b.time || a.index - b.index)
+    .map((item) => item.index);
+}
+
+/**
+ * 时间维度的类目轴按时间升序重排（D3 修复）：后端 GROUP BY 不保证有序，
+ * 折线/面积图直接消费会呈现锯齿假象。x_axis 与各 series.data 是平行数组，
+ * 必须用同一份排列索引同步重排。非时间维度原样返回。
+ */
+function sortByTemporalAxis(axis: AxisResponse): AxisResponse {
+  const order = temporalSortOrder(axis.x_axis);
+  if (!order) {
+    return axis;
+  }
+  return {
+    ...axis,
+    x_axis: order.map((i) => axis.x_axis[i]),
+    series: axis.series.map((s) => ({ ...s, data: order.map((i) => s.data[i]) })),
+  };
+}
 
 /**
  * bar/line/area 的堆叠渲染：stack='normal' 时每条 series 打 stack:'total'；
@@ -224,7 +274,8 @@ export function buildChartOption(
     return null;
   }
 
-  const labelOf = (name: string) => labels[name] || name;
+  // 只认自有键：列名恰为 __proto__/toString 等继承成员时不得穿透原型链
+  const labelOf = (name: string) => Object.getOwnPropertyDescriptor(labels, name)?.value || name;
   // echarts 6 起，setOption 显式传入 `color: undefined` 会在 option 合并时覆盖掉
   // 默认调色板（实测 model.get('color') 变 undefined），导致所有系列无填充色——
   // 图例/坐标轴正常但扇区/柱体完全透明。因此空 colors 时必须完全不带 color 键，
@@ -353,7 +404,7 @@ export function buildChartOption(
           return null;
         }
         // 'x_axis' 判别已将该臂收窄为 ChartAxisResponse。
-        const axis: AxisResponse = data;
+        const axis: AxisResponse = sortByTemporalAxis(data);
         const categoryAxis = {
           type: 'category' as const,
           data: axis.x_axis,
@@ -481,7 +532,7 @@ export function buildChartOption(
           return null;
         }
         // 'x_axis' 判别已将该臂收窄为 ChartAxisResponse。
-        const axis: AxisResponse = data;
+        const axis: AxisResponse = sortByTemporalAxis(data);
         // series→slot 映射：后端 AxisProcessor 逐指标产出一条 series，
         // name = metric.ResolveAlias()（默认等于列名）。据 metricSlots 建立「指标列名 →
         // yAxisIndex」映射（primary_values→0、secondary_values→1），再按 series.name 反查。

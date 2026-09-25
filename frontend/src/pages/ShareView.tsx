@@ -8,7 +8,7 @@ import {
 import { Button, Card, Input, Result, Space, Spin, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Chart, type ChartDataResponse, chartsApi, sharesApi } from '../api';
+import { Chart, type ChartDataResponse, chartsApi, datasetsApi, sharesApi } from '../api';
 import ChartView from '../components/ChartView/ChartView';
 import LoadingPlaceholder from '../components/LoadingPlaceholder';
 import PageHeader from '../components/PageHeader';
@@ -33,6 +33,8 @@ const ShareView: React.FC = () => {
   const [shareInfo, setShareInfo] = useState<ShareInfo | null>(null);
   const [chart, setChart] = useState<Chart | null>(null);
   const [chartData, setChartData] = useState<ChartDataResponse>([]);
+  // 列 ID → 列名：持久化配置引用列 ID，负载键与输出别名是列名，渲染前需翻译一次
+  const [fieldNames, setFieldNames] = useState<Record<string, string>>({});
   const [chartDataLoading, setChartDataLoading] = useState(false);
   const [needsPassword, setNeedsPassword] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -47,8 +49,23 @@ const ShareView: React.FC = () => {
         chartsApi.getChartData(chartId),
       ]);
 
-      setChart(chartResponse.data.data);
+      const loadedChart = chartResponse.data.data;
+      setChart(loadedChart);
       setChartData(dataResponse.data.data);
+
+      // 字段列表用于把配置里的列 ID 换成列名。取不到（数据集被删/无权限）时保持空映射，
+      // ChartView 会回落 field 本身，页面仍可渲染。
+      try {
+        const columnsResponse = await datasetsApi.getColumns(loadedChart.dataset_id);
+        const names: Record<string, string> = {};
+        for (const column of columnsResponse.data.data ?? []) {
+          names[column.id] = column.name;
+        }
+        setFieldNames(names);
+      } catch (columnError) {
+        console.error('Failed to fetch dataset columns:', columnError);
+        setFieldNames({});
+      }
     } catch (error: any) {
       console.error('Failed to fetch chart:', error);
     } finally {
@@ -213,7 +230,7 @@ const ShareView: React.FC = () => {
         {chartDataLoading || !chart ? (
           <LoadingPlaceholder text="Loading chart data..." />
         ) : (
-          <ChartView chart={chart} data={chartData} />
+          <ChartView chart={chart} data={chartData} fieldNames={fieldNames} />
         )}
       </Card>
     </div>

@@ -43,7 +43,7 @@ func BuildBoxplotStatsQuery(
 ) (string, []any, error) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 	return qb.buildBoxplotStatsQuery(ast, valueField, caps)
 }
 
@@ -105,7 +105,7 @@ func BuildBoxplotOutliersQuery(
 ) (string, []any) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 	return qb.buildBoxplotOutliersQuery(ast, valueField, lower, upper)
 }
 
@@ -140,7 +140,7 @@ func BuildBoxplotOutlierCountQuery(
 ) (string, []any) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(dialect)
-	qb.columnMappings = ast.ColumnMappings
+	qb.withASTIndex(ast)
 	return qb.buildBoxplotOutlierCountQuery(ast, valueField, lower, upper)
 }
 

@@ -37,6 +37,7 @@ console-errors.txt
 
 # ZCode / Mimosa plugin runtime state
 .zcode/
+.zcodeignore
 .mimosa/
 
 # Debug/trace files
@@ -65,8 +66,7 @@ CLAUDE.md
 frontend/CLAUDE.md
 MEMORY.md
 docs/pitfalls.md
-docs/todo.md
+docs/backlog.md
 deliverables/
-docs/DataWind/
-docs/plans/
+docs/archive/
 docs/superpowers/

@@ -33,8 +33,8 @@ describe('swapDimensionGroups', () => {
     useStore.getState().swapDimensionGroups(0, 1);
 
     const groups = dimensionGroups();
-    expect(groups[0].bindings).toEqual([{ bindingId: 'b-1', field: 'month' }]);
-    expect(groups[1].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
+    expect(groups[0].bindings).toEqual([{ bindingId: 'b-1', fieldId: 'month' }]);
+    expect(groups[1].bindings).toEqual([{ bindingId: 'b-0', fieldId: 'region' }]);
   });
 
   it('组 id 保持不变，只有 bindings 换位', () => {
@@ -64,7 +64,7 @@ describe('swapDimensionGroups', () => {
     useStore.getState().swapDimensionGroups(0, 1);
 
     expect(dimensionGroups()[0].bindings).toEqual([]);
-    expect(dimensionGroups()[1].bindings).toEqual([{ bindingId: 'b-0', field: 'region' }]);
+    expect(dimensionGroups()[1].bindings).toEqual([{ bindingId: 'b-0', fieldId: 'region' }]);
   });
 
   it('下标相同或越界时不做任何变更', () => {

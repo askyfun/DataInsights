@@ -35,9 +35,9 @@ const v1FilterConfig = `{"chartType":"bar","query":{
 	"dimensionGroups":[{"id":"g1","fields":["region"]}],
 	"metricGroups":[{"id":"g2","fields":["amount"]}],
 	"filters":[
-		{"field":"region","operator":"in","value":["华东"]},
-		{"field":"amount","operator":"gt","value":100},
-		{"field":"region","operator":"eq","value":"华南"}
+		{"fieldId":"region","operator":"in","value":["华东"]},
+		{"fieldId":"amount","operator":"gt","value":100},
+		{"fieldId":"region","operator":"eq","value":"华南"}
 	]}}`
 
 // TestChartQueryContextMissing 行不存在是「不存在」这一态的信息，不是错误：

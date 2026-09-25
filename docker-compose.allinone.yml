@@ -1,0 +1,73 @@
+# All-in-One：Data Insights + PostgreSQL + StarRocks 一键启动，适合本地试用 / Demo。
+#
+# 用法：
+#   docker compose -f docker-compose.allinone.yml up --build
+#
+# 停止并清除数据：
+#   docker compose -f docker-compose.allinone.yml down -v
+#
+# 连接方式：
+#   Data Insights : http://localhost:23352
+#   PostgreSQL    : postgres://insights:insights123@localhost:5432/insights
+#   StarRocks     : mysql -h127.0.0.1 -P9030 -uroot  （无密码）
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: data-insights-aio-postgres
+    environment:
+      POSTGRES_USER: insights
+      POSTGRES_PASSWORD: insights123
+      POSTGRES_DB: insights
+    ports:
+      - "5432:5432"
+    volumes:
+      - aio_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insights"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  starrocks:
+    image: starrocks/allin1-ubuntu:3.3-latest
+    container_name: data-insights-aio-starrocks
+    ports:
+      - "9030:9030"   # MySQL 协议
+      - "8030:8030"   # FE HTTP
+    volumes:
+      - aio_sr_fe:/opt/starrocks/fe/meta
+      - aio_sr_be:/opt/starrocks/be/storage
+    healthcheck:
+      test: ["CMD", "mysql", "-h", "127.0.0.1", "-P", "9030", "-uroot", "-e", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+    container_name: data-insights-aio-app
+    environment:
+      DATABASE_URL: postgres://insights:insights123@postgres:5432/insights?sslmode=disable
+      PORT: ${PORT:-23352}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      SECURITY_KEY: ${SECURITY_KEY:-}
+    ports:
+      - "${PORT:-23352}:${PORT:-23352}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  aio_pg:
+  aio_sr_fe:
+  aio_sr_be:

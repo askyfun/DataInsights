@@ -14,7 +14,7 @@ import type { FieldGroup, QueryConfig } from '@/store';
 
 const group = (id: string, fields: string[]): FieldGroup => ({
   id,
-  bindings: fields.map((field, index) => ({ bindingId: `${id}-b-${index}`, field })),
+  bindings: fields.map((fieldId, index) => ({ bindingId: `${id}-b-${index}`, fieldId })),
 });
 
 const makeConfig = (
@@ -28,7 +28,7 @@ const makeConfig = (
 });
 
 const bindingFields = (group: FieldGroup | undefined) =>
-  (group?.bindings ?? []).map((binding) => binding.field);
+  (group?.bindings ?? []).map((binding) => binding.fieldId);
 
 describe('normalizeQueryConfigForChartType', () => {
   it('透视表 → 表格：列维度字段搬进行维度，而不是被裁掉', () => {
@@ -51,8 +51,8 @@ describe('normalizeQueryConfigForChartType', () => {
     );
 
     expect(next.dimensionGroups[0].bindings).toEqual([
-      { bindingId: 'rows-b-0', field: 'region' },
-      { bindingId: 'columns-b-0', field: 'month' },
+      { bindingId: 'rows-b-0', fieldId: 'region' },
+      { bindingId: 'columns-b-0', fieldId: 'month' },
     ]);
   });
 
@@ -98,8 +98,8 @@ describe('normalizeQueryConfigForChartType', () => {
     expect(bindingFields(next.dimensionGroups[0])).toEqual(['region', 'city']);
     // bindingId 原样保留：别名/单位/格式等按 bindingId 索引的元数据不脱钩
     expect(next.dimensionGroups[0].bindings).toEqual([
-      { bindingId: 'x_axis-b-0', field: 'region' },
-      { bindingId: 'color_group-b-0', field: 'city' },
+      { bindingId: 'x_axis-b-0', fieldId: 'region' },
+      { bindingId: 'color_group-b-0', fieldId: 'city' },
     ]);
   });
 

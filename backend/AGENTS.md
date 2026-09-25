@@ -19,16 +19,17 @@ backend/
 │   ├── webui/           # 前端产物托管与路径分流（挂 NoRoute；命中文件→返回，未命中→index.html，保留前缀→JSON 404）
 │   ├── database/        # DB 初始化（pgx + bun）和迁移
 │   ├── handler/         # Gin HTTP 处理器（请求绑定、响应格式化）
-│   ├── service/         # 业务逻辑层（按领域拆分：chart, dataset, datasource, share）
+│   ├── service/         # 业务逻辑层（按领域拆分：chart, dashboard, dataset, datasource, share, queryrecord）
 │   ├── domain/entity/   # 领域实体和接口定义
-│   ├── model/           # bun ORM 模型（bi_datasource, bi_dataset, bi_chart, bi_share）
-│   ├── idls/            # 请求/响应 DTO 定义
+│   ├── model/           # bun ORM 模型（bi_datasource, bi_dataset, bi_chart, bi_share, bi_dashboard, bi_query, bi_setting）
+│   ├── idls/            # gen_types.go（由 make api-gen 从 api/openapi.yaml 生成的请求/响应 DTO）
 │   ├── query/           # SQL 查询构建、执行和结果处理
+│   ├── keystore/        # SECURITY_KEY 解析与持久化（留空则首次随机生成、落 bi_setting 表）
+│   ├── crypto/          # AES-GCM 加解密（密钥来自 keystore）
 │   ├── datasource/      # 数据源驱动抽象（Driver/Connection 接口）
 │   ├── router/          # 泛型路由注册工具（RegisterRoute[In, Out]）
-│   ├── response/        # 统一响应格式（code/msg/trace/data）
-│   └── middleware/       # 中间件（预留）
-├── migrations/          # 数据库迁移脚本
+│   └── response/        # 统一响应格式（code/msg/trace/data）
+├── migrations/          # 数据库迁移脚本（goose 版本化，embed.FS 内嵌）
 └── bin/                 # 编译输出
 ```
 
@@ -45,7 +46,7 @@ handler → service → domain/entity
 - **service**: 业务逻辑，操作 model 和 datasource。每个领域一个子包。
 - **domain/entity**: 领域实体结构体和 service 接口定义。
 - **model**: bun ORM 模型，直接映射数据库表。
-- **query**: SQL 查询构建器（Builder）、执行器（Executor）和结果处理器（Processor）。
+- **query**: SQL 查询构建（`bun_builder.go` 为图表 SQL 唯一出口）、执行器（Executor）和结果处理器（Processor）。
 - **datasource**: 数据库驱动接口（Driver/Connection），支持 PostgreSQL、ClickHouse、MySQL、StarRocks。
 
 ## 关键设计模式
@@ -53,6 +54,8 @@ handler → service → domain/entity
 ### 泛型路由注册
 
 `router/router.go` 提供 `RegisterRoute[In, Out]` 泛型函数，自动绑定 query 参数和 JSON body，统一包装响应。
+
+> 无独立 `middleware/` 包：requestID、CORS、Sentry 中间件均在 `cmd/main.go` 装配处定义并 `r.Use(...)` 挂载。
 
 ### 数据源驱动
 
@@ -63,14 +66,17 @@ handler → service → domain/entity
 
 ### 查询处理
 
-`query/` 包包含完整的查询管道：
+`query/` 包包含完整的查询管道（手写字符串 SQL builder 已删除，`bun_builder.go` 是图表 SQL 的唯一出口）：
 - `types.go` — 类型定义（ChartType, MetricConfig, FilterConfig 等）
-- `builder.go` — SQL Builder（SELECT/FROM/WHERE/GROUP BY/ORDER BY/LIMIT）
-- `bun_builder.go` — 使用 bun 框架的 SQL 构建器
-- `executor.go` — 查询执行器，编排 Builder → 数据源执行 → Processor
-- `processor.go` — 结果处理器（Table, Pie, Axis, Scatter, Pivot）
-- `dialect.go` — SQL 方言适配
-- `ast.go` — SQL AST 节点
+- `ast.go` — QueryAST 节点定义
+- `planner.go` — QuerySpec → PlannedAST 的查询规划
+- `chart_spec.go` — 图表规格定义
+- `bun_builder.go` — 使用 bun 框架的参数化 SQL 构建器（含 `bun_builder_{pivot,boxplot,histogram}.go` 各图表路径）
+- `raw.go` — 原始 SQL 构造（表预览、字段分布等）
+- `executor.go` — 查询执行器，编排 AST → 数据源执行 → Processor
+- `processor.go` / `processor_pivot.go` / `processor_stats.go` — 结果处理器（Table, Pie, Axis, Scatter, Pivot, Stats）
+- `datefilter.go` — 前端 `lib/dateFilter.ts` 日期语义的 Go 侧镜像（分享页/仪表盘后端读 config 解析日期意图），与 TS 共读用例表 `frontend/src/lib/__fixtures__/dateFilterCases.json` 防漂移
+- `dialect.go` — SQL 方言适配（仅 `DialectType`/`ParseDialect`/`BuildQueryStringWithBun`）
 
 ### 统一响应格式
 
@@ -120,17 +126,22 @@ go test -race ./...                        # 带竞态检测运行测试
 | `bi_dataset_lineage` | 数据集血缘关系 |
 | `bi_chart` | 图表配置 |
 | `bi_share` | 分享链接 |
+| `bi_dashboard` | 仪表盘配置（layout_json 12 列栅格） |
+| `bi_query` | 查询记录（queryrecord 领域） |
+| `bi_setting` | 运行期设置（keystore 持久化 SECURITY_KEY） |
 
 ## API 路由
 
-所有路由前缀 `/api`，除 `GET /share/:token`（分享查看页面）和 `GET /health`（健康检查）。
+所有路由前缀 `/api`，除 `GET /health`（健康检查，cmd/main.go）和 `GET /share/:token`（分享查看页 302，仅纯 API 模式注册）外，共 **40 个端点** 经泛型路由注册（datasource 11 + dataset 9 + chart 8 + share 4 + queryrecord 2 + dashboard 6）。
 
 | 领域 | 路由 |
 |------|------|
-| Datasource | CRUD + test, tables, columns, preview, field-distribution |
-| Dataset | CRUD + columns, preview, query |
-| Chart | CRUD + data, query |
-| Share | list, create, get-by-token |
+| Datasource (11) | CRUD + test, tables, columns, table data, preview, field-distribution |
+| Dataset (9) | CRUD + columns(读/写), preview, query |
+| Chart (8) | CRUD + data, query, references（references 由 dashboard handler 提供，归属 chart 资源） |
+| Share (4) | list, create, get-by-token, verify |
+| QueryRecord (2) | save, get |
+| Dashboard (6) | CRUD + query（`POST /api/dashboards/{id}/query` 盘级批量取数） |
 
 ## 约束
 

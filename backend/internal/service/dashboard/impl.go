@@ -177,7 +177,7 @@ func (s *dashboardService) Update(ctx context.Context, id string, in entity.Dash
 
 	// ⚠️ 整行 WherePK 更新必须 ExcludeColumn("deleted_at")：模型里的 DeletedAt 是
 	// 零值（本就未读/未设置），让它进 SET 子句会写出 NULL，把已软删的行当场复活
-	// （docs/pitfalls.md T-9）。WHERE 上的 deleted_at IS NULL 同时兜住「更新已删行」。
+	// （docs/developer-guide/troubleshooting.md 的「架构红线」T-9）。WHERE 上的 deleted_at IS NULL 同时兜住「更新已删行」。
 	if _, err := s.db.NewUpdate().Model(m).
 		WherePK().
 		Where("deleted_at IS NULL").
@@ -193,7 +193,7 @@ func (s *dashboardService) Update(ctx context.Context, id string, in entity.Dash
 //
 // It deliberately does not go through a full-row UPDATE — an explicit
 // `SET deleted_at = now()` cannot resurrect an already deleted row with zero
-// values, which is the failure mode documented as T-9 in docs/pitfalls.md.
+// values, which is the failure mode documented in docs/developer-guide/troubleshooting.md (T-9).
 // Re-deleting (0 rows affected) is idempotent and answers no error.
 func (s *dashboardService) Delete(ctx context.Context, id string) error {
 	if _, err := s.db.NewUpdate().

@@ -443,6 +443,123 @@ func TestQueryMultiValueSwitchesToInOperator(t *testing.T) {
 	}
 }
 
+// TestQueryBetweenSplitsPairValue 区间算子（日期筛选 `最近 7 天`、数值区间）的二元组
+// 必须拆成 Value + ValueEnd 两个绑定参数（bun_builder 的 FilterBetween 分支就吃这两个），
+// 且这条规则要排在「多值降级为 in」之前 —— 否则区间会被吃成 `IN (下界, 上界)`。
+func TestQueryBetweenSplitsPairValue(t *testing.T) {
+	cases := []struct {
+		name         string
+		value        []any
+		wantOp       string
+		wantValue    any
+		wantValueEnd any
+	}{
+		{
+			name:         "二元组 → between + ValueEnd",
+			value:        []any{"2026-09-18", "2026-09-24"},
+			wantOp:       "between",
+			wantValue:    "2026-09-18",
+			wantValueEnd: "2026-09-24",
+		},
+		{
+			name:         "缺一端 → 保持 between 且 ValueEnd 为空（恒假区间，不静默放大结果集）",
+			value:        []any{"2026-09-18"},
+			wantOp:       "between",
+			wantValue:    "2026-09-18",
+			wantValueEnd: nil,
+		}, {
+			name:         "三个值 → 降级为 in（区间语义已不成立）",
+			value:        []any{"2026-09-18", "2026-09-24", "2026-10-01"},
+			wantOp:       "in",
+			wantValue:    []any{"2026-09-18", "2026-09-24", "2026-10-01"},
+			wantValueEnd: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, mock, _ := newTestService(t)
+			expectDashboardRead(t, mock, layoutDoc(layoutChart("w-1", 42), layoutFilter("f-1", 7, "sale_date", "between")))
+
+			fake := &fakeChartProvider{metaFn: func(_ context.Context, _ int) (*entity.ChartQueryContext, error) {
+				return &entity.ChartQueryContext{Exists: true, DatasetID: 7}, nil
+			}}
+			svc.chartProvider = fake
+
+			if _, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+				Filters: []entity.DashboardQueryFilter{{WidgetID: "f-1", Value: tc.value}},
+			}); err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			overrides, _ := fake.overridesFor(42)
+			if len(overrides) != 1 {
+				t.Fatalf("overrides = %#v, want 1 条", overrides)
+			}
+			if overrides[0].Operator != tc.wantOp {
+				t.Errorf("operator = %q, want %q", overrides[0].Operator, tc.wantOp)
+			}
+			if !reflect.DeepEqual(overrides[0].Value, tc.wantValue) {
+				t.Errorf("value = %#v, want %#v", overrides[0].Value, tc.wantValue)
+			}
+			if !reflect.DeepEqual(overrides[0].ValueEnd, tc.wantValueEnd) {
+				t.Errorf("value_end = %#v, want %#v", overrides[0].ValueEnd, tc.wantValueEnd)
+			}
+		})
+	}
+}
+
+// TestQueryScalarOperatorsUnwrapSingleValue 覆盖条件的**取值形状**按算子分流（这是 SQL 正确性的前提）：
+// 标量算子（eq/neq/gt/gte/lt/lte/like）必须收到单个标量 —— builder 对它们是 `append(f.Value)`
+// 单参数绑定，塞数组会渲染成 `col = ARRAY[...]`（PG 42883，且现有测试只断言算子字符串，长期漏检）；
+// in/notIn 相反，必须保留数组（builder 按元素展开成 `IN (?, ?, …)`）。
+func TestQueryScalarOperatorsUnwrapSingleValue(t *testing.T) {
+	cases := []struct {
+		name      string
+		operator  string
+		value     []any
+		wantOp    string
+		wantValue any
+	}{
+		{"eq + 单值 → 标量", "eq", []any{"华东"}, "eq", "华东"},
+		{"gte + 单值 → 标量（日期筛选「开始无限制」走这条）", "gte", []any{"2023-06-14"}, "gte", "2023-06-14"},
+		{"lte + 单值 → 标量", "lte", []any{"2023-06-14"}, "lte", "2023-06-14"},
+		{"like + 单值 → 标量", "like", []any{"华"}, "like", "华"},
+		{"isNull 不看值：占位 null 只是「已激活」标记", "isNull", []any{nil}, "isNull", nil},
+		{"in + 单值 → 保留数组", "in", []any{"华东"}, "in", []any{"华东"}},
+		{"notIn + 双值 → 保留数组", "notIn", []any{"华东", "华南"}, "notIn", []any{"华东", "华南"}},
+		{"eq + 双值 → 降级 in 并保留数组", "eq", []any{"华东", "华南"}, "in", []any{"华东", "华南"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, mock, _ := newTestService(t)
+			expectDashboardRead(t, mock, layoutDoc(layoutChart("w-1", 42), layoutFilter("f-1", 7, "region", tc.operator)))
+
+			fake := &fakeChartProvider{metaFn: func(_ context.Context, _ int) (*entity.ChartQueryContext, error) {
+				return &entity.ChartQueryContext{Exists: true, DatasetID: 7}, nil
+			}}
+			svc.chartProvider = fake
+
+			if _, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+				Filters: []entity.DashboardQueryFilter{{WidgetID: "f-1", Value: tc.value}},
+			}); err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			overrides, _ := fake.overridesFor(42)
+			if len(overrides) != 1 {
+				t.Fatalf("overrides = %#v, want 1 条", overrides)
+			}
+			if overrides[0].Operator != tc.wantOp {
+				t.Errorf("operator = %q, want %q", overrides[0].Operator, tc.wantOp)
+			}
+			if !reflect.DeepEqual(overrides[0].Value, tc.wantValue) {
+				t.Errorf("value 形状错误（会被 builder 当成单个绑定参数）: %#v, want %#v",
+					overrides[0].Value, tc.wantValue)
+			}
+		})
+	}
+}
+
 // TestQueryInactiveFiltersProduceNoOverrides 未激活的筛选器不产生任何覆盖：
 // 值缺失、空数组、以及「layout 里有 defaultValue 但请求没下发」三种形态都必须
 // 一视同仁——请求是取值的唯一真相源，回落默认值会让盘一打开就套用历史默认值。

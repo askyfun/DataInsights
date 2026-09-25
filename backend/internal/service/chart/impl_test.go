@@ -489,7 +489,7 @@ func newGetDataTestService(config string) (*chartService, *stubConnection, *stub
 // 取数走与 POST /api/charts/query 相同的聚合管道，dims/metrics/filters/sort/limit
 // 的映射与前端 buildChartQueryRequest 一致。
 func TestChartServiceGetData_V1ConfigRunsAggregationPipeline(t *testing.T) {
-	config := `{"version":1,"chartType":"bar","query":{"dimensionGroups":[{"id":"dim-1","fields":["region"]}],"metricGroups":[{"id":"met-1","fields":["amount"]}],"filters":[{"field":"region","operator":"eq","value":"华北","logic":"and"}],"sort":{"field":"amount","order":"desc"},"limit":5},"fieldMeta":{"amount":{"aggregation":"sum","alias":"Revenue"}}}`
+	config := `{"version":1,"chartType":"bar","query":{"dimensionGroups":[{"id":"dim-1","fields":["region"]}],"metricGroups":[{"id":"met-1","fields":["amount"]}],"filters":[{"fieldId":"region","operator":"eq","value":"华北","logic":"and"}],"sort":{"field":"amount","order":"desc"},"limit":5},"fieldMeta":{"amount":{"aggregation":"sum","alias":"Revenue"}}}`
 	service, conn, executor := newGetDataTestService(config)
 
 	result, err := service.GetData(context.Background(), 7)
@@ -784,7 +784,7 @@ func newTestInt(v int) *int { return &v }
 // 结构 + bindingId 键 fieldMeta）解析出的平铺请求：dims/metrics 列名、按
 // bindingId 取 aggregation/alias（缺省 sum/列名）、filters/sort/limit 透传，ok=true。
 func TestChartDataQueryFromConfig_V2BindingsFlatten(t *testing.T) {
-	config := `{"version":2,"chartType":"bar","title":"t","query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","field":"region"},{"bindingId":"b-1","field":"product"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-2","field":"amount"},{"bindingId":"b-3","field":"qty"}]}],"filters":[{"field":"region","operator":"eq","value":"华北","logic":"and"}],"sort":{"field":"amount","order":"desc"},"limit":5},"fieldMeta":{"b-2":{"aggregation":"avg","alias":"客单价"},"b-3":{}},"style":{},"queryOptions":{}}`
+	config := `{"version":2,"chartType":"bar","title":"t","query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","fieldId":"region"},{"bindingId":"b-1","fieldId":"product"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-2","fieldId":"amount"},{"bindingId":"b-3","fieldId":"qty"}]}],"filters":[{"fieldId":"region","operator":"eq","value":"华北","logic":"and"}],"sort":{"field":"amount","order":"desc"},"limit":5},"fieldMeta":{"b-2":{"aggregation":"avg","alias":"客单价"},"b-3":{}},"style":{},"queryOptions":{}}`
 	chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "line", Config: config}
 
 	req, ok := chartDataQueryFromConfig(chart)
@@ -825,7 +825,7 @@ func TestChartDataQueryFromConfig_V2BindingsFlatten(t *testing.T) {
 // TestChartDataQueryFromConfig_V2ChartTypeFallback 验证 v2 文档缺 chartType 时
 // 回落到 chart 行的 chart_type（与 v1 路径对称）。
 func TestChartDataQueryFromConfig_V2ChartTypeFallback(t *testing.T) {
-	config := `{"version":2,"query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","field":"amount"}]}]},"fieldMeta":{}}`
+	config := `{"version":2,"query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","fieldId":"amount"}]}]},"fieldMeta":{}}`
 	chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "pie", Config: config}
 
 	req, ok := chartDataQueryFromConfig(chart)
@@ -845,7 +845,7 @@ func TestChartDataQueryFromConfig_V2ChartTypeFallback(t *testing.T) {
 // （指标 = fieldMeta[bindingId].alias 或列名；维度 = 列名）；悬挂 bindingId 丢弃 sort；
 // Task 0-3~1-7 窗口期文档的 field 键原样透传（行为与改动前一致）。
 func TestChartDataQueryFromConfig_V2SortBindingID(t *testing.T) {
-	baseDoc := `"version":2,"query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","field":"region"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-1","field":"amount"},{"bindingId":"b-2","field":"qty"}]}],"filters":[],%s},"fieldMeta":{"b-1":{"aggregation":"sum","alias":"客单价"}}`
+	baseDoc := `"version":2,"query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","fieldId":"region"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-1","fieldId":"amount"},{"bindingId":"b-2","fieldId":"qty"}]}],"filters":[],%s},"fieldMeta":{"b-1":{"aggregation":"sum","alias":"客单价"}}`
 
 	for _, tc := range []struct {
 		name      string
@@ -906,7 +906,7 @@ func TestChartDataQueryFromConfig_V2SortBindingID(t *testing.T) {
 // TestChartServiceGetData_V2ConfigRunsAggregationPipeline 验证 v2 持久化文档的
 // 分享取数（GetData）不再因找不到 "fields" 键静默失效，而是走聚合管道。
 func TestChartServiceGetData_V2ConfigRunsAggregationPipeline(t *testing.T) {
-	config := `{"version":2,"chartType":"bar","query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","field":"region"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-1","field":"amount"}]}],"filters":[],"limit":5},"fieldMeta":{"b-1":{"aggregation":"sum","alias":"Revenue"}}}`
+	config := `{"version":2,"chartType":"bar","query":{"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","fieldId":"region"}]}],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-1","fieldId":"amount"}]}],"filters":[],"limit":5},"fieldMeta":{"b-1":{"aggregation":"sum","alias":"Revenue"}}}`
 	service, conn, executor := newGetDataTestService(config)
 
 	result, err := service.GetData(context.Background(), 7)
@@ -983,12 +983,12 @@ func TestChartDataQueryFromConfig_QueryOptionsRoundTrip(t *testing.T) {
 	}{
 		{
 			"v2 camelCase normalized",
-			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","field":"amount"}]}]},"fieldMeta":{},"queryOptions":{"binCount":10,"binWidth":2.5}}`,
+			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","fieldId":"amount"}]}]},"fieldMeta":{},"queryOptions":{"binCount":10,"binWidth":2.5}}`,
 			map[string]any{"bin_count": float64(10), "bin_width": 2.5},
 		},
 		{
 			"v2 snake_case passthrough",
-			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","field":"amount"}]}]},"fieldMeta":{},"queryOptions":{"bin_count":7}}`,
+			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","fieldId":"amount"}]}]},"fieldMeta":{},"queryOptions":{"bin_count":7}}`,
 			map[string]any{"bin_count": float64(7)},
 		},
 		{
@@ -998,7 +998,7 @@ func TestChartDataQueryFromConfig_QueryOptionsRoundTrip(t *testing.T) {
 		},
 		{
 			"empty section yields nil",
-			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","field":"amount"}]}]},"fieldMeta":{},"queryOptions":{}}`,
+			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","fieldId":"amount"}]}]},"fieldMeta":{},"queryOptions":{}}`,
 			nil,
 		},
 	} {

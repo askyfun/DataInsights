@@ -146,9 +146,11 @@ type ChartDataResult struct {
 
 // ChartDimensionField 维度字段绑定（query.DimensionField）。
 type ChartDimensionField struct {
-	// BindingId 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。
+	// BindingId 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一字段在不同槽位/组里有不同的 binding_id。
 	BindingId *string `json:"binding_id,omitempty"`
-	Field     string  `json:"field"`
+
+	// Field 数据集列的 **id**（不是展示名）；SQL 输出别名与响应负载键才用展示名。
+	Field string `json:"field"`
 
 	// Granularity 时间粒度（day / week / month 等）；执行前按方言校验（ValidateGranularity）。
 	Granularity *string `json:"granularity,omitempty"`
@@ -193,12 +195,14 @@ type ChartMetricField struct {
 	Agg   string  `json:"agg"`
 	Alias *string `json:"alias,omitempty"`
 
-	// BindingId 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一列名在不同槽位/组里有不同的 binding_id。
+	// BindingId 绑定实例的唯一标识（对应前端 BindingInstance.bindingId），同一字段在不同槽位/组里有不同的 binding_id。
 	BindingId *string `json:"binding_id,omitempty"`
-	Field     string  `json:"field"`
-	Format    *string `json:"format,omitempty"`
-	Label     *string `json:"label,omitempty"`
-	Unit      *string `json:"unit,omitempty"`
+
+	// Field 数据集列的 **id**（不是展示名）；SQL 输出别名与响应负载键才用展示名。
+	Field  string  `json:"field"`
+	Format *string `json:"format,omitempty"`
+	Label  *string `json:"label,omitempty"`
+	Unit   *string `json:"unit,omitempty"`
 }
 
 // ChartMetricGroup 指标组（query.MetricGroup）。
@@ -516,11 +520,18 @@ type Dataset struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// DatasetColumn 数据集列定义（entity.DatasetColumn）；JSON 字段名为 snake_case 的 type_config。
+// DatasetColumn 数据集列定义（entity.DatasetColumn）；JSON 字段名为 snake_case 的 type_config。 id 是列的**稳定标识**（8 位 base36 短 ID，由后端分配后不再变化），name 是 **可变的展示名**：图表配置、shard_keys 与查询请求一律引用 id，展示时才由 id 解析回 name。列未落库时后端在首次读取时分配 id 并物化。
 type DatasetColumn struct {
 	Comment string `json:"comment"`
-	Expr    string `json:"expr"`
-	Name    string `json:"name"`
+
+	// Expr SQL 表达式。物理列的 expr 即来源表列名，改展示名不应改动 expr。
+	Expr string `json:"expr"`
+
+	// Id 列的稳定标识；由后端分配，客户端只读回传，不可自行生成或改写。
+	Id string `json:"id"`
+
+	// Name 可变展示名。同一数据集内必须唯一（后端在 PUT /columns 校验）。
+	Name string `json:"name"`
 
 	// Role "dimension" 或 "metric"。
 	Role string `json:"role"`

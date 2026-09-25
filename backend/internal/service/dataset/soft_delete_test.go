@@ -116,6 +116,36 @@ func TestDatasetListFiltersDeletedAt(t *testing.T) {
 	}
 }
 
+// TestDatasetListOrdersByIDDesc 先红：List 之前不带 ORDER BY，PostgreSQL 返回的是
+// 堆物理序——UPDATE 写新行版本追加到堆尾，编辑过的数据集会漂到列表后面，用户看到
+// 的"随机顺序"就是这么来的。修复：显式 ORDER BY id DESC，让新建/导入的靠前且稳定。
+// 只喂 1 行即可，本用例断言的是 SQL 文本而非行序（sqlmock 不重排结果集）。
+func TestDatasetListOrdersByIDDesc(t *testing.T) {
+	var executed []string
+	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(datasetCaptureMatcher(&executed)))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer sqlDB.Close()
+	db := bun.NewDB(sqlDB, pgdialect.New())
+	s := &datasetService{db: db}
+
+	mock.ExpectQuery(`SELECT .* FROM "bi_dataset"`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "datasource_id", "query_type", "created_at", "updated_at"}).
+			AddRow(2, "b", 1, "table", nil, nil))
+
+	if _, err := s.List(context.Background(), 0, 0); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+	sel := findStmt(executed, "SELECT")
+	if !strings.Contains(sel, "ORDER BY id DESC") {
+		t.Fatalf("List must order by id DESC, got: %s", sel)
+	}
+}
+
 // TestDatasetGetByIDReturnsNotFoundForDeleted 验证软删后 GetByID 返回 NotFound。
 func TestDatasetGetByIDReturnsNotFoundForDeleted(t *testing.T) {
 	var executed []string

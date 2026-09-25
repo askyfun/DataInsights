@@ -2,6 +2,7 @@ import { CloseOutlined, PlusOutlined } from '@ant-design/icons';
 import { useDroppable } from '@dnd-kit/core';
 import { Button, Dropdown, Tag } from 'antd';
 import React from 'react';
+import { formatDateFilterSummary } from '@/lib/dateFilter';
 import type { ChartField, FilterCondition, FilterOperator } from '@/store';
 import { fieldTagColor } from './DraggableField';
 import { dropZoneId, dropZoneSurfaceStyle } from './dropZoneStyles';
@@ -37,6 +38,14 @@ export const OPERATOR_LABELS: Partial<Record<FilterOperator, string>> = {
 
 /** 条件的单行摘要：芯片右侧的只读说明，点击整行进弹窗改。 */
 export function describeFilter(filter: FilterCondition): string {
+  // 日期筛选取意图的摘要（`最近 7 天`），而不是 operator/value 那套兜底快照。
+  if (filter.date) {
+    return formatDateFilterSummary(filter.date.value, {
+      granularity: filter.date.granularity,
+      weekStart: filter.date.weekStart,
+      withTime: filter.date.withTime,
+    });
+  }
   const { operator } = filter;
   const label = OPERATOR_LABELS[operator] ?? operator;
   if (operator === 'isNull' || operator === 'isNotNull') {
@@ -75,8 +84,9 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
     data: { type: 'filter', groupIndex: 0 },
   });
 
-  // 过滤条件只存列名，回查字段对象是为了拿到类型/日期信息以决定标签颜色。
-  const fieldByName = new Map(availableFields.map((field) => [field.name, field]));
+  // 过滤条件存的是列的稳定 id（`DatasetColumn.id`），回查字段对象是为了拿类型/日期信息
+  // 决定标签颜色与展示名。按 id 查而不是按列名查：列名可变，改名不该让芯片失去颜色与名字。
+  const fieldById = new Map(availableFields.map((field) => [field.id, field]));
 
   const dropdownItems = availableFields.map((field) => ({
     key: field.name,
@@ -121,7 +131,7 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
       )}
 
       {filters.map((filter) => {
-        const field = fieldByName.get(filter.field);
+        const field = fieldById.get(filter.fieldId);
         return (
           <div
             key={filter.id}
@@ -169,7 +179,7 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
                   textOverflow: 'ellipsis',
                 }}
               >
-                {filter.field || '未选择字段'}
+                {field?.name ?? filter.fieldId ?? '未选择字段'}
               </Tag>
               <span
                 data-testid={`filter-summary-${filter.id}`}

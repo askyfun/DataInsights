@@ -379,12 +379,16 @@ type chartConfigV1 struct {
 // chartConfigFilter 兼容文档内的两种 value 区间键：保存自运行时 FilterCondition
 // 时为 camelCase（valueEnd），wire 风格 JSON 为 snake_case（value_end）。
 type chartConfigFilter struct {
-	Field      string `json:"field"`
+	Field      string `json:"fieldId"`
 	Operator   string `json:"operator"`
 	Value      any    `json:"value"`
 	ValueEnd   any    `json:"value_end"`
 	ValueEndCC any    `json:"valueEnd"`
 	Logic      string `json:"logic"`
+	// Date 是日期筛选的**意图**（前端 FilterCondition.date）。存在时它是权威：取数时按当前
+	// 时间现算区间，`operator`/`value` 只是「不认识意图的下游」的兜底快照（保存那一刻写下的）。
+	// 没有它就会让仪表盘/分享页的「最近 7 天」永远停在保存那天 —— 见 query.ResolveDateFilter。
+	Date *query.DateFilterIntent `json:"date"`
 }
 
 // chartConfigV2 是 bi_chart.config 持久化 v2 文档（Task 0-3 起前端保存的形状）中
@@ -418,12 +422,13 @@ type chartConfigSort struct {
 }
 
 // chartConfigBindingGroup v2 文档字段组：bindings 为带 bindingId 的字段实例
-// （对应前端 BindingInstance，键为 camelCase bindingId）。
+// （对应前端 BindingInstance，键为 camelCase bindingId）。fieldId 是数据集列的
+// 稳定 id（列名是可变展示名，不进持久化引用）。
 type chartConfigBindingGroup struct {
 	ID       string `json:"id"`
 	Bindings []struct {
 		BindingID string `json:"bindingId"`
-		Field     string `json:"field"`
+		Field     string `json:"fieldId"`
 	} `json:"bindings"`
 }
 
@@ -582,7 +587,7 @@ func resolveV2DocSort(sort *chartConfigSort, doc *chartConfigV2) *entity.SortCon
 }
 
 // buildConfigQueryRequest 组装持久化 config 解析出的平铺请求（v1/v2 共用尾段）：
-// 过滤条件转换（valueEnd/value_end 双键兼容）、chartType 缺失时回退 chart 行的
+// 过滤条件转换（valueEnd/value_end 双键兼容 + 日期意图现算）、chartType 缺失时回退 chart 行的
 // chart_type、limit>0 转为 page=1 的分页。
 func buildConfigQueryRequest(
 	chart *model.Chart,
@@ -593,8 +598,15 @@ func buildConfigQueryRequest(
 	sort *entity.SortConfig,
 	limit int,
 ) *entity.ChartQueryRequest {
+	// 一次请求共用同一个 now：多条日期条件必须落在同一个「今天」上，否则跨零点会出现
+	// 同一次查询里两条条件算在不同的日期基准上（前端构造请求时也是同一个 now）。
+	now := time.Now()
 	filters := make([]entity.Filter, 0, len(rawFilters))
 	for _, f := range rawFilters {
+		if f.Date != nil {
+			filters = append(filters, resolveConfigDateFilter(f, now)...)
+			continue
+		}
 		valueEnd := f.ValueEnd
 		if valueEnd == nil {
 			valueEnd = f.ValueEndCC
@@ -625,6 +637,61 @@ func buildConfigQueryRequest(
 		req.Pagination = &entity.Pagination{Page: 1, PageSize: limit}
 	}
 	return req
+}
+
+// resolveConfigDateFilter 把一条带日期意图的持久化条件现算成下发的过滤项。
+//
+// 与前端 `expandDateFilterIntent`（frontend/src/lib/dateFilter.ts）逐字段对应：
+//   - 区间 → `between`（Value/ValueEnd 两个绑定参数）；单侧无限制 → `gte`/`lte`（单个标量）；
+//   - `isNull`/`isNotNull` 的语义全在算子里，Value 给空串（builder 不看它）；
+//   - 「包含空日期」→ 追加一条 IS NULL 并用 OR 连接，与前面的区间构成 `区间 OR IS NULL`。
+//
+// 解析不出任何条件时（未选择、「所有日期」、起止同时无限制、畸形意图）**整条丢弃**：
+// 这与前端查询路径的行为一致 —— 那条条件本就等价于「没有这条筛选」，而不是等价于某个谓词。
+// 刻意**不回落** operator/value：未选择的日期条件在内存态里被兜底成「等值空串」，
+// 回落会把「不过滤」变成「查出 0 行」—— 正是这次改动要消灭的那种静默错数。
+func resolveConfigDateFilter(f chartConfigFilter, now time.Time) []entity.Filter {
+	intent := f.Date
+	resolved := query.ResolveDateFilter(
+		intent.Value,
+		intent.Granularity,
+		query.DateWeekStartOr(intent.WeekStart),
+		intent.WithTime,
+		now,
+	)
+	if resolved.Operator == "" {
+		return nil
+	}
+
+	logic := f.Logic
+	if logic == "" {
+		logic = "and"
+	}
+
+	var value, valueEnd any
+	switch resolved.Operator {
+	case "between":
+		value, valueEnd = resolved.Start, resolved.End
+	case "gte":
+		value = resolved.Start
+	case "lte":
+		value = resolved.End
+	default:
+		// isNull / isNotNull：builder 不看 Value，留空串只是保持「Filter 三件套」齐全。
+		value = ""
+	}
+
+	out := []entity.Filter{{
+		Field:    f.Field,
+		Operator: resolved.Operator,
+		Value:    value,
+		ValueEnd: valueEnd,
+		Logic:    logic,
+	}}
+	if resolved.IncludeEmpty {
+		out = append(out, entity.Filter{Field: f.Field, Operator: "isNull", Value: "", Logic: "or"})
+	}
+	return out
 }
 
 // getPlannerSource 获取 QueryPlanner 生成 AST 所需的数据源。
