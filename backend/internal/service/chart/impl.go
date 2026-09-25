@@ -2,7 +2,9 @@ package chart
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -30,7 +32,18 @@ type Service interface {
 
 	// Data operations
 	GetData(ctx context.Context, id int) (entity.ChartDataResult, error)
+	// GetDataWithFilterOverrides behaves exactly like GetData except that, right
+	// before execution, the supplied filters replace the chart's own conditions
+	// on the same fields (dashboard runtime merge, PRD §8.3 / D5–D7). The
+	// persisted chart config is never rewritten.
+	GetDataWithFilterOverrides(ctx context.Context, id int, overrides []entity.Filter) (entity.ChartDataResult, error)
 	Query(ctx context.Context, req *entity.ChartQueryRequest) (entity.ChartDataResult, error)
+
+	// ChartQueryContext 汇总仪表盘取一块所需的图表元信息：行是否存在 / 是否已软删
+	// （决定占位状态）、所属数据集（决定盘级筛选是否适用）、以及图表自身过滤条件用到的
+	// 列名（决定 overriddenFields 可见标识）。三件事一次查完，因为它们同源于一次
+	// config 解析。
+	ChartQueryContext(ctx context.Context, id int) (*entity.ChartQueryContext, error)
 
 	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
 	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
@@ -151,6 +164,22 @@ func (s *chartService) Delete(ctx context.Context, id int) error {
 // of the bound dataset): those configs carry positional field ids whose column
 // names are not recoverable server-side, and the share view renders them.
 func (s *chartService) GetData(ctx context.Context, id int) (entity.ChartDataResult, error) {
+	return s.getData(ctx, id, nil)
+}
+
+// GetDataWithFilterOverrides 与 GetData 走同一条"解析 config → 构造请求 → 执行"
+// 的管道，唯一区别是在执行之前用 overrides 覆盖图表自身同字段的过滤条件
+// （仪表盘运行期合并，PRD §8.3 / D5–D7）。合并只作用于本次查询请求，
+// **绝不写回 bi_chart.config**。
+func (s *chartService) GetDataWithFilterOverrides(
+	ctx context.Context, id int, overrides []entity.Filter,
+) (entity.ChartDataResult, error) {
+	return s.getData(ctx, id, overrides)
+}
+
+func (s *chartService) getData(
+	ctx context.Context, id int, overrides []entity.Filter,
+) (entity.ChartDataResult, error) {
 	chart, err := s.getChartModelFn(ctx, id)
 	if err != nil {
 		return entity.ChartDataResult{}, err
@@ -173,11 +202,20 @@ func (s *chartService) GetData(ctx context.Context, id int) (entity.ChartDataRes
 	defer conn.Close()
 
 	if req, ok := chartDataQueryFromConfig(chart); ok {
-		return s.executeQueryOnConn(ctx, conn, dataset, dsModel, req)
+		return s.executeQueryOnConn(ctx, conn, dataset, dsModel, applyFilterOverrides(req, overrides))
 	}
 
 	// Fallback path (documented above): build query based on dataset type via
-	// the query package.
+	// the query package. It emits `SELECT * FROM <source> LIMIT 100` and carries
+	// no filter clause at all, so there is nothing for an override to replace.
+	// Refuse loudly rather than returning rows that silently ignore the
+	// dashboard's filters — an invisible mismatch here would look like "the
+	// filter simply matches everything".
+	if len(overrides) > 0 {
+		return entity.ChartDataResult{}, fmt.Errorf(
+			"chart %d has no queryable config; dashboard filters cannot be applied", id,
+		)
+	}
 	source := getPlannerSource(dataset)
 	if source == "" {
 		return entity.ChartDataResult{}, fmt.Errorf("dataset has no valid query_sql or table_name")
@@ -189,6 +227,56 @@ func (s *chartService) GetData(ctx context.Context, id int) (entity.ChartDataRes
 	}
 
 	return entity.ChartDataResult{Data: result.Rows}, nil
+}
+
+// ChartQueryContext 一次查完仪表盘取一块所需的图表元信息（见 Service 接口注释）。
+//
+// 三态判定的关键是那句「**故意不带** deleted_at IS NULL」：带软删过滤就只剩
+// 「存在」一种答案，永远分不出 chart_missing（从未存在）与 chart_deleted（已软删），
+// 而这两态在盘里要渲染成不同的占位。所以这里绕开 getChartModelFn（那条路径带软删
+// 过滤），直接用 s.db 读整行。
+//
+// 行不存在不是错误：调用方拿到的是一份「不存在」的元信息（Exists=false），
+// 据此把该块标成占位状态即可，不该让整个盘跟着失败。
+func (s *chartService) ChartQueryContext(ctx context.Context, id int) (*entity.ChartQueryContext, error) {
+	m := &model.Chart{ID: id}
+	err := s.db.NewSelect().Model(m).WherePK().Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &entity.ChartQueryContext{Exists: false}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chart query context: %w", err)
+	}
+
+	// OwnFilterFields 复用与取数完全同一条 config 解析，避免「合并用一套字段、
+	// 展示用另一套」的漂移。解析失败（旧结构 / 损坏 JSON / 空组）不是错误：图表
+	// 没有自身筛选是正常情况，留空切片即可。
+	ownFields := []string{}
+	if req, ok := chartDataQueryFromConfig(m); ok {
+		ownFields = dedupeFilterFields(req.Filters)
+	}
+
+	return &entity.ChartQueryContext{
+		Exists:          true,
+		Deleted:         m.DeletedAt.Valid,
+		DatasetID:       m.DatasetID,
+		OwnFilterFields: ownFields,
+	}, nil
+}
+
+// dedupeFilterFields 取过滤条件的列名，去重且保持首次出现顺序（同名多条件只算一个
+// 字段；顺序稳定让 overriddenFields 的输出可预期）。
+func dedupeFilterFields(filters []entity.Filter) []string {
+	out := make([]string, 0, len(filters))
+	seen := make(map[string]struct{}, len(filters))
+	for _, f := range filters {
+		if _, dup := seen[f.Field]; dup {
+			continue
+		}
+		seen[f.Field] = struct{}{}
+		out = append(out, f.Field)
+	}
+	return out
 }
 
 // Query executes a chart query

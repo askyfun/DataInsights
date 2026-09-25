@@ -7,14 +7,15 @@ import {
   GlobalOutlined,
   MenuOutlined,
 } from '@ant-design/icons';
-import { Button, Card, Drawer, Empty, Layout, Menu, Select, Space, Typography } from 'antd';
+import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import PageHeader from './components/PageHeader';
 import { useLocale } from './i18n/useLocale';
 import ChartBuilder from './pages/ChartBuilder';
 import ChartsPage from './pages/Charts';
+import DashboardEditor from './pages/DashboardEditor';
+import DashboardsPage from './pages/Dashboards';
 import DatasetPage from './pages/Dataset';
 import DatasetDetail from './pages/DatasetDetail';
 import DatasetEdit from './pages/DatasetEdit';
@@ -188,25 +189,9 @@ const App: React.FC = () => {
               图表构建页自带三栏自绘底色，会完整覆盖这一层。 */}
           <Content id="main-content" style={{ background: 'var(--dr-canvas)', minHeight: 280 }}>
             <Routes>
-              <Route
-                path="/"
-                element={
-                  <div className="dr-page">
-                    <PageHeader
-                      icon={<DashboardOutlined />}
-                      title={intl.formatMessage({ id: 'nav.dashboard' })}
-                    />
-                    <Card>
-                      <div className="dr-state">
-                        <Empty
-                          image={Empty.PRESENTED_IMAGE_SIMPLE}
-                          description={intl.formatMessage({ id: 'home.welcome' })}
-                        />
-                      </div>
-                    </Card>
-                  </div>
-                }
-              />
+              {/* 首页即仪表盘列表（导航项 nav.dashboard 一直指向 /）。 */}
+              <Route path="/" element={<DashboardsPage />} />
+              <Route path="/dashboards/:id" element={<DashboardEditor />} />
               <Route path="/datasources" element={<DatasourcePage />} />
               <Route path="/datasources/:id" element={<DatasourceDetailPage />} />
               <Route path="/datasets" element={<DatasetPage />} />

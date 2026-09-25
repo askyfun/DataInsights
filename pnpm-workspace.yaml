@@ -1,0 +1,7 @@
+packages:
+  - frontend
+
+overrides:
+  # openapi-typescript 7.x 依赖 typescript ^5 的 JS factory API；
+  # typescript 7 已移除该 API，仅对 openapi-typescript 子树压回 TS5。
+  openapi-typescript>typescript: ^5.9.3

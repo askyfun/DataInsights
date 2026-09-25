@@ -432,6 +432,138 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/charts/{id}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 图表被仪表盘引用计数
+         * @description 返回引用了该图表的未软删仪表盘（含总数与 id/name 列表），供删除图表前的
+         *     「该图表被 N 个仪表盘引用」提示。**提示不阻断删除**（PRD D2 / R-75）。
+         *
+         *     判定方式是 layout_json 的 jsonb 存在性查询（`@?` + jsonpath），逐块匹配
+         *     widgets[*].chartId，配合 idx_dashboard_layout_gin（jsonb_path_ops）索引；
+         *     绝不用文本子串匹配。
+         *
+         *     路由挂在 charts 分组（资源归属方是图表），实现由 dashboard handler 提供，
+         *     因为它扫的是 bi_dashboard 表。{id} 非法 → 20100。
+         */
+        get: operations["listChartReferences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dashboards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 仪表盘列表
+         * @description 分页返回未软删仪表盘（`deleted_at IS NULL`），按 `created_at DESC, id DESC`
+         *     排序（与迁移 00005 的 partial 索引 idx_dashboard_not_deleted 同口径）。
+         *     无结果时 data 为空数组。
+         *
+         *     分页参数与数据源/数据集/图表列表一致（limit 缺省 100、≤0 或 >1000 回落 100；
+         *     offset 缺省 0、负数归一为 0）。
+         */
+        get: operations["listDashboards"];
+        put?: never;
+        /**
+         * 创建仪表盘
+         * @description id 由后端生成（UUIDv7 字符串，非自增；见迁移 00005 与 PRD §6.5），请求体
+         *     不接受 id。status 缺省 `draft`，layout_json 缺省 `{"version":1,"widgets":[]}`。
+         *
+         *     校验：layout_json 非空且不是合法 JSON → 20100（列是 JSONB，否则会以 500
+         *     的形式从 PostgreSQL 冒出来）；name 只受列宽（VARCHAR(255)）约束，后端不做
+         *     非空强校验。
+         */
+        post: operations["createDashboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dashboards/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取仪表盘详情
+         * @description 返回实体，layout_json 是布局文档的字符串形态（列是 JSONB，API 面是 string）。
+         *     id 非法（非 UUID）→ 20100；不存在或已软删 → 20300。
+         */
+        get: operations["getDashboard"];
+        /**
+         * 更新仪表盘（未提供的字段保留存量）
+         * @description 请求体四个字段（name/description/layout_json/status）**全部可选**：缺省或
+         *     null 表示保留存量值，不是清零——与本仓库 datasource 密码、dataset 可选
+         *     元数据的「未提供则保留」约定一致（AGENTS.md）。显式空串会写空串
+         *     （description 的空串落库为 NULL，这是它唯一可达的「清空」形态）。
+         *
+         *     updated_at 由后端显式前进（表无触发器），created_at 不变。
+         *     layout_json 的校验与创建一致；id 非法 → 20100，不存在/已软删 → 20300。
+         */
+        put: operations["updateDashboard"];
+        post?: never;
+        /**
+         * 删除仪表盘（软删）
+         * @description 软删：只打 `deleted_at = now()`，**绝不物理删除**，且幂等（重复删除影响 0 行
+         *     不报错）。仪表盘是引用图的叶子，**无级联目标**（PRD §6.4）：它引用的图表
+         *     一行都不动，正在引用它的别的东西也不存在。
+         */
+        delete: operations["deleteDashboard"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dashboards/{id}/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 仪表盘批量取数
+         * @description 按 layout_json 逐块取数，并在后端完成盘级筛选与图表自身筛选的合并
+         *     （PRD §6.3 / §8.3 / R-74）：运行期覆盖 + 追加，**绝不写回
+         *     bi_chart.config**；前端不解析 chart config、不下发合并结果。
+         *
+         *     - 请求 filters 是筛选器取值的唯一真相源：请求里没出现的筛选器一律视为
+         *       未激活（**不回落 layout 的 defaultValue**），未激活不参与合并不触发覆盖。
+         *     - 适用条件是 (binding.datasetId, binding.column) 命中该图表的数据集
+         *       （PRD §11-2 的二元组口径），避免跨数据集同名字段静默误伤。
+         *     - 逐块返回结果，单块失败不整盘失败（该块 status = error 并带 message）。
+         *     - 图表不存在 / 已软删的块不取数，分别返回 status = chart_missing /
+         *       chart_deleted，且**保留该 widget 的 x/y/w/h 原位**（PRD D2），
+         *       由前端渲染占位块。
+         *     - layout_json 归前端所有：后端只做防御性投影读取，解析不出的布局返回空
+         *       results 而不是报错。
+         */
+        post: operations["queryDashboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/shares": {
         parameters: {
             query?: never;
@@ -815,8 +947,11 @@ export interface components {
         DatasetColumn: {
             name: string;
             expr: string;
-            /** @description 标准数据类型（int/float/decimal/string/date/datetime/array/dict/boolean 等）。 */
-            type: string;
+            /**
+             * @description 统一规范数据类型（8 类，与后端 model.StandardDataTypes 对齐）。 历史词
+             * number/json/unknown 由后端归一为 float/map/string，不再出现。
+             */
+            type: "float" | "integer" | "boolean" | "string" | "date" | "datetime" | "array" | "map";
             type_config: components["schemas"]["TypeConfig"];
             comment: string;
             /** @description "dimension" 或 "metric"。 */
@@ -1358,9 +1493,173 @@ export interface components {
         QueryRecordResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["QueryRecord"];
         };
+        /** @description 仪表盘响应实体（entity.Dashboard）。layout_json 是布局文档（DashboardLayout） 的字符串形态：列是 JSONB，API 面是 string，与 Chart.config 同款约定。 owner_id / tenant_id 是对内列，不在读出口。已软删的行不会出现在任何读出口。 */
+        Dashboard: {
+            /**
+             * @description UUIDv7 字符串（非自增；PRD §6.5 一次性不可逆决策），由后端生成。
+             * @example 0198f2c3-4d5e-7a6b-8c9d-0e1f2a3b4c5d
+             */
+            id: string;
+            name: string;
+            /** @description 无描述时为 null（空串与 null 落库后不可区分，都记为 NULL）。 */
+            description: string | null;
+            /**
+             * @description 布局文档的 JSON 字符串（结构见 DashboardLayout）。缺省 {"version":1,"widgets":[]}，后端不解释其内容。
+             *     ⚠️ 列是 jsonb，PostgreSQL 会规范化键序与空白：写接口（POST/PUT）把请求 里的原文回显给你，读接口（GET/list）返回的是库里的规范形态。两者 JSON 语义等价（前端按 DashboardLayout 解析即可），但**不要按字节比对**。
+             */
+            layout_json: string;
+            /** @description 发布状态位（PRD R-73 / D9）。v1 只会出现 draft（新建缺省，UI 不暴露 切换入口）；published 为将来分享预留。后端不做枚举强校验。 */
+            status: string;
+            /** @description RFC3339。 */
+            created_at: string;
+            /** @description RFC3339；由后端在每次更新时显式前进（表无触发器）。 */
+            updated_at: string;
+        };
+        /** @description POST /api/dashboards 请求体（entity.DashboardCreateRequest）。不含 id： 主键由后端生成 UUIDv7。 */
+        DashboardCreateRequest: {
+            name: string;
+            /** @description 缺省或空串落库为 NULL。 */
+            description?: string | null;
+            /** @description 布局文档的 JSON 字符串；缺省/空串后端填 {"version":1,"widgets":[]}。 非空但不是合法 JSON → 20100。 */
+            layout_json?: string;
+            /** @description 缺省 draft。 */
+            status?: string;
+        };
+        /** @description PUT /api/dashboards/{id} 请求体（entity.DashboardUpdateRequest）。四个字段 **全部可选且都是「未提供则保留」**：缺省或 null 保持存量值（不是全量覆盖）， 与本仓库 datasource 密码、dataset 可选元数据同例。description 传空串表示 清空为 NULL。 */
+        DashboardUpdateRequest: {
+            name?: string;
+            /** @description 缺省/null 保留存量；空串清空为 NULL；非空写入。 */
+            description?: string | null;
+            /** @description 缺省/null 保留存量；非空但不是合法 JSON → 20100。 */
+            layout_json?: string;
+            /** @description 缺省/null 保留存量。 */
+            status?: string;
+        };
+        /** @description layout_json 的解析后形态（PRD §6.2）。前端用 migrateDashboardLayout 做迁移： 任何输入（空串 / 损坏 JSON / 非对象）都返回合法 v1 文档，绝不抛异常；version 未知时按 v1 尽力解析。后端不做解析。 */
+        DashboardLayout: {
+            /**
+             * @description 文档版本；当前为 1。
+             * @example 1
+             */
+            version: number;
+            /** @description 仅持久化列数，供将来扩容判别。 */
+            grid?: {
+                /**
+                 * @description 栅格列数；当前固定 12。
+                 * @example 12
+                 */
+                cols?: number;
+            };
+            widgets: components["schemas"]["DashboardWidget"][];
+        };
+        /**
+         * @description 盘内一块 widget，按 type 判别（chart | text | filter）：本 schema 是三者的 扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用 markdown，filter 用 binding/label/dataType/operator/multi/defaultValue。
+         *     契约上这是 oneOf-with-discriminator 语义，但生成物刻意不落成 union 类型： Go 侧为不引入 oapi-codegen/runtime 依赖（与 ChartDataResult.data 同款取舍）， TS 侧消费方按 type 手动收窄。
+         *     硬约束：widgetId 盘内唯一且**绝不等于 chartId**（PRD D1，同一 chartId 可以在 同一盘里出现多次，各自独立 x/y/w/h）；chart 块只存引用不存快照。
+         */
+        DashboardWidget: {
+            /**
+             * @description 盘内唯一主键；前端用 crypto.randomUUID() 生成，非 chartId。
+             * @example w-3f9c
+             */
+            widgetId: string;
+            /** @enum {string} */
+            type: "chart" | "text" | "filter";
+            /** @description react-grid-layout 左上角列坐标（0 起）。 */
+            x: number;
+            /** @description react-grid-layout 左上角行坐标（0 起）。 */
+            y: number;
+            /** @description 宽度（列数），取值 [1,12]。 */
+            w: number;
+            /** @description 高度（行数）。 */
+            h: number;
+            /** @description type=chart 必填。引用 bi_chart.id 的反向关系，**不是快照**：图表改了盘内实时跟随，图表软删后该块保留原位并渲染占位。 */
+            chartId?: number;
+            /** @description 可选，仅覆盖显示标题，不写回图表。 */
+            titleOverride?: string | null;
+            /** @description type=text 的 Markdown 内容；渲染前必须 sanitize（raw HTML 一律剔除）。 */
+            markdown?: string;
+            binding?: components["schemas"]["DashboardFilterBinding"];
+            /** @description type=filter 的显示名。 */
+            label?: string;
+            /** @description type=filter 绑定字段的数据类型（如 string / number / date）。 */
+            dataType?: string;
+            /** @description type=filter 的算子（如 in）；与图表过滤算子同一词表见 Filter.operator。 */
+            operator?: string;
+            /** @description type=filter 是否允许多选。 */
+            multi?: boolean;
+            /** @description type=filter 的默认选中值。**空数组 = 未激活**：未激活的筛选器不参与合并、 不触发覆盖（PRD §8.3 步骤 2），否则拖入一个筛选器会莫名抹掉图表默认条件。 */
+            defaultValue?: unknown[];
+        };
+        /** @description 盘级筛选器的绑定粒度：数据集字段。按 (datasetId, column) 二元组命中同数据集的 图表（PRD §11-2 的推荐口径，避免跨数据集同名字段静默误伤）。 */
+        DashboardFilterBinding: {
+            datasetId: number;
+            /** @description 绑定列名（列名即字段标识；改列名会使该筛选器断链，属已接受的约定）。 */
+            column: string;
+        };
+        /** @description POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。 */
+        DashboardQueryFilter: {
+            /** @description 对应布局里 type=filter 的 widgetId。 */
+            widgetId: string;
+            /** @description 当前选中值；空数组等同于未激活。 */
+            value?: unknown[];
+        };
+        /** @description POST /api/dashboards/{id}/query 请求体（PRD §6.3）。前端只下筛选器的当前值， **不解析 chart config、不下发合并结果**：筛选合并是后端单点逻辑（可测）。 */
+        DashboardQueryRequest: {
+            filters?: components["schemas"]["DashboardQueryFilter"][];
+        };
+        /** @description 单块取数结果（PRD §6.3）。单块失败不整盘失败。 */
+        DashboardQueryResult: {
+            widgetId: string;
+            /** @description 被引用图表的 id；图表不存在时可能是原始引用值。 */
+            chartId: number;
+            /** @description ok（成功）/ chart_deleted（图表已软删，块保留原位渲染占位）/ chart_missing（chart_id 不存在）/ error（该块取数失败）。 */
+            status: string;
+            /** @description 成功时与 POST /api/charts/query **响应里的 data 字段**同形（即完整的 ChartDataResult：含内层 data 与 select_sql），消费方按 chart_type 判别内层形状； chart_deleted / chart_missing / error 时为 null。 */
+            data?: unknown;
+            /** @description 本块实际生效的盘级筛选字段（去重、保序）。 */
+            appliedFields?: string[];
+            /** @description 本块被盘级筛选覆盖掉的图表自身同字段条件（appliedFields 与图表自身过滤字段的 交集）。竞析建议的「覆盖可见标识」，PRD §11-1a。 */
+            overriddenFields?: string[];
+            /** @description 仅 status=error 时出现，携带该块取数失败的原因。单块失败不让整盘失败， 因此原因只在这里暴露，不占用全局错误码。 */
+            message?: string;
+        };
+        /** @description GET /api/dashboards 响应：data 为 Dashboard 数组。 */
+        DashboardListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Dashboard"][];
+        };
+        /** @description 仪表盘 CRUD 响应：data 为单个 Dashboard。 */
+        DashboardResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["Dashboard"];
+        };
+        /** @description POST /api/dashboards/{id}/query 响应：data.results 为逐块结果数组，顺序与 layout 里 type=chart 的块一致（前端据 widgetId 归位）。单块失败不整盘失败： 该块 status=error 并带 message，其余块照常返回；无图表块（或无图表块的合法 布局）返回空数组。 */
+        DashboardQueryResponse: components["schemas"]["Envelope"] & {
+            data: {
+                results: components["schemas"]["DashboardQueryResult"][];
+            };
+        };
+        /** @description GET /api/charts/{id}/references 的业务负载（entity.ChartReference）： 引用某图表的未软删仪表盘。提示不阻断删除（PRD D2 / R-75）。 */
+        ChartReference: {
+            /** @description 引用该图表的仪表盘数，等于 dashboards 的长度。 */
+            count: number;
+            /** @description 引用方身份（id + name）；无引用时为空数组。 */
+            dashboards: components["schemas"]["ChartReferenceItem"][];
+        };
+        /** @description 引用方仪表盘的最小身份（删除提示只需要这两项）。 */
+        ChartReferenceItem: {
+            /** @description 仪表盘 UUID。 */
+            id: string;
+            name: string;
+        };
+        /** @description GET /api/charts/{id}/references 响应：Envelope 特化 data 为 ChartReference。 */
+        ChartReferenceResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["ChartReference"];
+        };
     };
     responses: never;
     parameters: {
+        /** @description 仪表盘 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+        DashboardId: string;
         /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
         DatasourceId: number;
         /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
@@ -2072,6 +2371,178 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChartQueryResponse"];
+                };
+            };
+        };
+    };
+    listChartReferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 图表 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["ChartId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；无引用时 data 为 {count: 0, dashboards: []} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartReferenceResponse"];
+                };
+            };
+        };
+    };
+    listDashboards: {
+        parameters: {
+            query?: {
+                /** @description 每页条数；缺省 100，≤0 或 >1000 后端回落为 100。 */
+                limit?: number;
+                /** @description 偏移量；缺省 0，负数被后端归一化为 0。 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardListResponse"];
+                };
+            };
+        };
+    };
+    createDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为新建 Dashboard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardResponse"];
+                };
+            };
+        };
+    };
+    getDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 仪表盘 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+                id: components["parameters"]["DashboardId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardResponse"];
+                };
+            };
+        };
+    };
+    updateDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 仪表盘 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+                id: components["parameters"]["DashboardId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为更新后的 Dashboard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardResponse"];
+                };
+            };
+        };
+    };
+    deleteDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 仪表盘 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+                id: components["parameters"]["DashboardId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为 {status: "ok"} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+        };
+    };
+    queryDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 仪表盘 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+                id: components["parameters"]["DashboardId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；成功 data.results 为逐块结果数组（顺序与 layout 的图表块一致） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardQueryResponse"];
                 };
             };
         };

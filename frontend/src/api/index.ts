@@ -242,6 +242,23 @@ export interface QueryRecordSaveRequest {
   duration_ms?: number;
 }
 
+// Dashboards API types
+// 与 Chart 同款约定：layout_json 在库里是 JSONB、在 API 面是 JSON 字符串，
+// 前端一律经 migrateDashboardLayout 解析，不做手工 JSON.parse 校验。
+export type Dashboard = G['Dashboard'];
+export type DashboardCreateRequest = G['DashboardCreateRequest'];
+export type DashboardUpdateRequest = G['DashboardUpdateRequest'];
+export type DashboardQueryRequest = G['DashboardQueryRequest'];
+// 注意命名陷阱：这里取的是**单块结果**（DashboardQueryResult 是 block schema），
+// 接口的 Envelope 同名类型是 G['DashboardQueryResponse']（见文件头迁移规则）。
+export type DashboardQueryResult = G['DashboardQueryResult'];
+// 命名陷阱（同上方 *Response 规则）：生成物里的 `*Response` 是**完整信封**
+// （Envelope & { data: ... }），而 apiClient 的 `ApiResponse<T>` 自己就带一层信封并把
+// data 重收紧为 T —— 故泛型只能传「裸 payload」即该 schema 的 data 字段本身。
+// 直接传 G['DashboardQueryResponse'] 会套成两层，`res.data.data.results` 取不到。
+export type DashboardQueryResults = G['DashboardQueryResponse']['data'];
+export type ChartReference = G['ChartReference'];
+
 // Datasources API
 export const datasourcesApi = {
   // Get all datasources
@@ -457,6 +474,51 @@ export const chartsApi = {
     request: ChartQueryRequest
   ): Promise<AxiosResponse<ApiResponse<ChartQueryResponse>>> => {
     return apiClient.post<ApiResponse<ChartQueryResponse>>('/api/charts/query', request);
+  },
+
+  // 引用该图表的仪表盘（PRD R-75）：删除前的提示数据源，提示不阻断删除（D2）。
+  getReferences: (id: number): Promise<AxiosResponse<ApiResponse<ChartReference>>> => {
+    return apiClient.get<ApiResponse<ChartReference>>(`/api/charts/${id}/references`);
+  },
+};
+
+// Dashboards API（PRD §6.3）：仪表盘只**引用**图表（存 chartId），不存快照。
+export const dashboardsApi = {
+  // Get all dashboards
+  getAll: (): Promise<AxiosResponse<ApiResponse<Dashboard[]>>> => {
+    return apiClient.get<ApiResponse<Dashboard[]>>('/api/dashboards');
+  },
+
+  // Get single dashboard
+  getById: (id: string): Promise<AxiosResponse<ApiResponse<Dashboard>>> => {
+    return apiClient.get<ApiResponse<Dashboard>>(`/api/dashboards/${id}`);
+  },
+
+  // Create dashboard（缺省 status='draft'、layout_json 为空 v1 文档）
+  create: (data: DashboardCreateRequest): Promise<AxiosResponse<ApiResponse<Dashboard>>> => {
+    return apiClient.post<ApiResponse<Dashboard>>('/api/dashboards', data);
+  },
+
+  // Update dashboard（未提供的字段保留存量，不是全量覆盖）
+  update: (
+    id: string,
+    data: DashboardUpdateRequest
+  ): Promise<AxiosResponse<ApiResponse<Dashboard>>> => {
+    return apiClient.put<ApiResponse<Dashboard>>(`/api/dashboards/${id}`, data);
+  },
+
+  // Delete dashboard（软删）
+  remove: (id: string): Promise<AxiosResponse<ApiResponse<{ status: string }>>> => {
+    return apiClient.delete<ApiResponse<{ status: string }>>(`/api/dashboards/${id}`);
+  },
+
+  // 批量取数：后端逐块复用 service/chart 管道，单块失败不整盘失败。
+  // filters 的合并是后端单点逻辑，前端只下发筛选器当前值（v1 恒为空数组）。
+  query: (
+    id: string,
+    data: DashboardQueryRequest
+  ): Promise<AxiosResponse<ApiResponse<DashboardQueryResults>>> => {
+    return apiClient.post<ApiResponse<DashboardQueryResults>>(`/api/dashboards/${id}/query`, data);
   },
 };
 

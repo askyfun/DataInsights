@@ -37,13 +37,15 @@ func jsonTagTypes(v any) map[string]reflect.Type {
 
 // 迁移后的 handler 用本地镜像 struct 绑定 JSON body（共享领域实体不能携带
 // form:"-" 标签，见 datasetQueryIn / chartCreateIn / chartQueryIn /
-// datasetCreateIn / datasetUpdateIn 的注释），镜像与实体靠人工同步。本测试
-// 是漂移防护，按镜像意图分两档：
+// dashboardCreateIn / dashboardUpdateIn / dashboardQueryIn / datasetCreateIn /
+// datasetUpdateIn 的注释），镜像与实体靠人工同步。本测试是漂移防护，按镜像意图
+// 分两档：
 //
 //  1. subset=false（精确副本）：datasetQueryIn / chartCreateIn /
-//     chartQueryIn 当前都是实体 json 表面的精确副本（无省略字段），断言
-//     "集合相等"：任何一侧新增/删除/改名 json 字段都会使本测试失败，除非
-//     同步修改另一侧或（若确属有意裁剪）转为第 2 档并注明裁剪原因。
+//     chartQueryIn / dashboardCreateIn / dashboardUpdateIn / dashboardQueryIn
+//     当前都是实体 json 表面的精确副本（无省略字段），断言 "集合相等"：任何一侧
+//     新增/删除/改名 json 字段都会使本测试失败，除非同步修改另一侧或（若确属有意
+//     裁剪）转为第 2 档并注明裁剪原因。
 //  2. subset=true（有意裁剪）：datasetCreateIn / datasetUpdateIn 只承载
 //     entity.Dataset 的客户端可编辑面——id/created_at/updated_at 为服务端
 //     所有，quality_rules 由服务端默认 "[]"，accelerate_config /
@@ -61,6 +63,9 @@ func TestMirrorEntityJSONTagParity(t *testing.T) {
 		{"chartCreateIn / entity.Chart", chartCreateIn{}, entity.Chart{}, false},
 		{"chartQueryIn / entity.ChartQueryRequest", chartQueryIn{}, entity.ChartQueryRequest{}, false},
 		{"querySaveIn / entity.QueryRecordSaveRequest", querySaveIn{}, entity.QueryRecordSaveRequest{}, false},
+		{"dashboardCreateIn / entity.DashboardCreateRequest", dashboardCreateIn{}, entity.DashboardCreateRequest{}, false},
+		{"dashboardUpdateIn / entity.DashboardUpdateRequest", dashboardUpdateIn{}, entity.DashboardUpdateRequest{}, false},
+		{"dashboardQueryIn / entity.DashboardQueryRequest", dashboardQueryIn{}, entity.DashboardQueryRequest{}, false},
 		{"datasetCreateIn / entity.Dataset", datasetCreateIn{}, entity.Dataset{}, true},
 		{"datasetUpdateIn / entity.Dataset", datasetUpdateIn{}, entity.Dataset{}, true},
 	}

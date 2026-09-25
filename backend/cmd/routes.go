@@ -7,6 +7,7 @@ import (
 	"data-insights/internal/handler"
 	"data-insights/internal/router"
 	"data-insights/internal/service/chart"
+	"data-insights/internal/service/dashboard"
 	"data-insights/internal/service/dataset"
 	"data-insights/internal/service/datasource"
 	"data-insights/internal/service/queryrecord"
@@ -27,6 +28,10 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool)
 	dsChartSvc.SetSecurityKey(securityKey)
 	dsShareSvc := share.NewService(db)
 	dsQuerySvc := queryrecord.NewService(db)
+	dsDashboardSvc := dashboard.NewService(db)
+	// 盘级批量取数（POST /api/dashboards/{id}/query）逐块复用图表取数管道：
+	// 注入在装配期完成，dashboard 侧只依赖一个窄接口（见 service/dashboard/query.go）。
+	dsDashboardSvc.SetChartProvider(dsChartSvc)
 
 	// Initialize handlers
 	datasourceHandler := handler.NewDatasourceHandler(dsSvc)
@@ -34,6 +39,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool)
 	chartHandler := handler.NewChartHandler(dsChartSvc)
 	shareHandler := handler.NewShareHandler(dsShareSvc)
 	queryHandler := handler.NewQueryHandler(dsQuerySvc)
+	dashboardHandler := handler.NewDashboardHandler(dsDashboardSvc)
 
 	// API routes
 	api := r.Group("/api")
@@ -73,6 +79,9 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool)
 	router.RegisterDeleteRoute(charts, "/:id", chartHandler.Delete)
 	router.RegisterGetRoute(charts, "/:id/data", chartHandler.GetData)
 	router.RegisterPostRoute(charts, "/query", chartHandler.Query)
+	// Chart-side reference count (dashboard handler: it scans
+	// bi_dashboard.layout_json, but the route belongs to the chart resource).
+	router.RegisterGetRoute(charts, "/:id/references", dashboardHandler.ListChartReferences)
 
 	// Share routes (generic router)
 	shares := api.Group("/shares")
@@ -86,6 +95,17 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool)
 	queries := api.Group("/queries")
 	router.RegisterPostRoute(queries, "", queryHandler.Save)
 	router.RegisterGetRoute(queries, "/:q", queryHandler.Get)
+
+	// Dashboard routes (generic router): 12 列栅格容器的 CRUD 与软删。
+	// {id} 是 UUID 字符串（非自增），非法形态由 handler 转 20100。
+	// /:id/query 是盘级批量取数：筛选合并在后端完成，逐块返回结果（PRD §6.3/§8.3）。
+	dashboards := api.Group("/dashboards")
+	router.RegisterGetRoute(dashboards, "", dashboardHandler.List)
+	router.RegisterPostRoute(dashboards, "", dashboardHandler.Create)
+	router.RegisterGetRoute(dashboards, "/:id", dashboardHandler.Get)
+	router.RegisterPutRoute(dashboards, "/:id", dashboardHandler.Update)
+	router.RegisterDeleteRoute(dashboards, "/:id", dashboardHandler.Delete)
+	router.RegisterPostRoute(dashboards, "/:id/query", dashboardHandler.Query)
 
 	// Share view route (no /api prefix). Not a generic route on purpose: its
 	// success response is a 302 redirect, which the JSON-envelope router
