@@ -73,11 +73,20 @@ const renderModal = (props: Partial<Props> = {}) => {
 };
 
 describe('classifyFieldKind', () => {
-  it('按数据类型三分类', () => {
-    expect(classifyFieldKind('timestamp without time zone')).toBe('date');
+  it('按规范数据类型三分类（历史词同步归一）', () => {
+    // 规范词表
     expect(classifyFieldKind('date')).toBe('date');
-    expect(classifyFieldKind('double')).toBe('number');
+    expect(classifyFieldKind('datetime')).toBe('date');
+    expect(classifyFieldKind('integer')).toBe('number');
+    expect(classifyFieldKind('float')).toBe('number');
+    expect(classifyFieldKind('string')).toBe('string');
+    expect(classifyFieldKind('boolean')).toBe('string');
+    // 历史词/原始列类型归一
+    expect(classifyFieldKind('timestamp')).toBe('date');
+    expect(classifyFieldKind('timestamp without time zone')).toBe('date');
+    expect(classifyFieldKind('number')).toBe('number');
     expect(classifyFieldKind('bigint')).toBe('number');
+    expect(classifyFieldKind('double')).toBe('number');
     expect(classifyFieldKind('character varying')).toBe('string');
     expect(classifyFieldKind('text')).toBe('string');
   });

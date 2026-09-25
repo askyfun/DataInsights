@@ -21,7 +21,7 @@ func FuzzZZTypeMappers(f *testing.F) {
 		&StarRocksMapper{}, &PostgreSQLMapper{}, &MySQLMapper{}, &ClickHouseMapper{},
 	}
 	valid := map[StandardDataType]bool{
-		TypeNumber: true, TypeInteger: true, TypeBoolean: true, TypeString: true,
+		TypeFloat: true, TypeInteger: true, TypeBoolean: true, TypeString: true,
 		TypeDate: true, TypeDateTime: true, TypeArray: true, TypeMap: true,
 		TypeJSON: true, TypeUnknown: true,
 	}
@@ -58,7 +58,7 @@ func FuzzZZInferExpressionResultType(f *testing.F) {
 		f.Add(s)
 	}
 	valid := map[StandardDataType]bool{
-		TypeNumber: true, TypeInteger: true, TypeBoolean: true, TypeString: true,
+		TypeFloat: true, TypeInteger: true, TypeBoolean: true, TypeString: true,
 		TypeDate: true, TypeDateTime: true, TypeArray: true, TypeMap: true,
 		TypeJSON: true, TypeUnknown: true,
 	}

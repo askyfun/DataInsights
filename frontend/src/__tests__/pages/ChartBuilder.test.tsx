@@ -243,7 +243,7 @@ describe('ChartBuilder', () => {
           {
             name: 'revenue',
             expr: 'revenue',
-            type: 'number',
+            type: 'float',
             comment: '',
             role: 'metric',
           },
@@ -740,8 +740,8 @@ describe('ChartBuilder', () => {
         trace: '',
         data: [
           { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
-          { name: 'growth', expr: 'growth', type: 'number', comment: '', role: 'metric' },
+          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
+          { name: 'growth', expr: 'growth', type: 'float', comment: '', role: 'metric' },
         ],
       })
     );
@@ -1077,7 +1077,7 @@ describe('ChartBuilder', () => {
         data: [
           { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
           { name: 'city', expr: 'city', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
         ],
       })
     );
@@ -1150,7 +1150,7 @@ describe('ChartBuilder', () => {
         trace: '',
         data: [
           { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
         ],
       })
     );
@@ -1216,8 +1216,8 @@ describe('ChartBuilder', () => {
         trace: '',
         data: [
           { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
-          { name: 'growth', expr: 'growth', type: 'number', comment: '', role: 'metric' },
+          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
+          { name: 'growth', expr: 'growth', type: 'float', comment: '', role: 'metric' },
         ],
       })
     );
@@ -1297,8 +1297,8 @@ describe('ChartBuilder', () => {
         trace: '',
         data: [
           { name: 'month', expr: 'month', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
-          { name: 'growth', expr: 'growth', type: 'number', comment: '', role: 'metric' },
+          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
+          { name: 'growth', expr: 'growth', type: 'float', comment: '', role: 'metric' },
         ],
       })
     );
@@ -1406,7 +1406,7 @@ describe('ChartBuilder', () => {
         trace: '',
         data: [
           { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
-          { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+          { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
         ],
       })
     );
@@ -1560,7 +1560,7 @@ describe('ChartBuilder', () => {
           data: [
             { name: 'region', expr: 'region', type: 'string', comment: '', role: 'dimension' },
             { name: 'month', expr: 'month', type: 'integer', comment: '', role: 'dimension' },
-            { name: 'revenue', expr: 'revenue', type: 'number', comment: '', role: 'metric' },
+            { name: 'revenue', expr: 'revenue', type: 'float', comment: '', role: 'metric' },
           ],
         })
       );

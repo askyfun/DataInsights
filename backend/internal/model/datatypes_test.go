@@ -4,6 +4,37 @@ import (
 	"testing"
 )
 
+func TestNormalizeStandardType(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  StandardDataType
+	}{
+		{"legacy number", "number", TypeFloat},
+		{"legacy json", "json", TypeMap},
+		{"float", "float", TypeFloat},
+		{"integer", "integer", TypeInteger},
+		{"boolean", "boolean", TypeBoolean},
+		{"string", "string", TypeString},
+		{"date", "date", TypeDate},
+		{"datetime", "datetime", TypeDateTime},
+		{"array", "array", TypeArray},
+		{"map", "map", TypeMap},
+		{"unknown legacy", "unknown", TypeString},
+		{"empty", "", TypeString},
+		{"unrecognized", "uuid", TypeString},
+		{"case insensitive", "DateTime", TypeDateTime},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeStandardType(tt.input); got != tt.want {
+				t.Errorf("NormalizeStandardType(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStarRocksMapper_ToStandard(t *testing.T) {
 	m := &StarRocksMapper{}
 
@@ -11,48 +42,50 @@ func TestStarRocksMapper_ToStandard(t *testing.T) {
 		name       string
 		sourceType string
 		want       StandardDataType
-		wantErr    bool
 	}{
 		// 数值类型
-		{"int", "int", TypeInteger, false},
-		{"bigint", "bigint", TypeInteger, false},
-		{"tinyint", "tinyint", TypeInteger, false},
-		{"smallint", "smallint", TypeInteger, false},
-		{"largeint", "largeint", TypeInteger, false},
-		{"float", "float", TypeNumber, false},
-		{"double", "double", TypeNumber, false},
-		{"decimal", "decimal", TypeNumber, false},
-		{"decimal with params", "decimal(10,2)", TypeNumber, false},
+		{"int", "int", TypeInteger},
+		{"bigint", "bigint", TypeInteger},
+		{"tinyint", "tinyint", TypeInteger},
+		{"smallint", "smallint", TypeInteger},
+		{"largeint", "largeint", TypeInteger},
+		{"float", "float", TypeFloat},
+		{"double", "double", TypeFloat},
+		{"decimal", "decimal", TypeFloat},
+		{"decimal with params", "decimal(10,2)", TypeFloat},
+		{"decimalv2", "decimalv2", TypeFloat},
 
 		// 布尔类型
-		{"bool", "bool", TypeBoolean, false},
-		{"boolean", "boolean", TypeBoolean, false},
+		{"bool", "bool", TypeBoolean},
+		{"boolean", "boolean", TypeBoolean},
 
 		// 字符串类型
-		{"varchar", "varchar", TypeString, false},
-		{"string", "string", TypeString, false},
-		{"char", "char", TypeString, false},
+		{"varchar", "varchar", TypeString},
+		{"string", "string", TypeString},
+		{"char", "char", TypeString},
 
 		// 日期时间类型
-		{"date", "date", TypeDate, false},
-		{"datetime", "datetime", TypeDateTime, false},
-		{"timestamp", "timestamp", TypeDateTime, false},
+		{"date", "date", TypeDate},
+		{"datetime", "datetime", TypeDateTime},
+		{"timestamp", "timestamp", TypeDateTime},
 
 		// 复杂类型
-		{"array", "array", TypeArray, false},
-		{"map", "map", TypeMap, false},
-		{"json", "json", TypeJSON, false},
+		{"array", "array", TypeArray},
+		{"array with params", "array<int>", TypeArray},
+		{"map", "map", TypeMap},
+		{"map with params", "map<string,int>", TypeMap},
+		{"json", "json", TypeMap},
 
-		// 未知类型
-		{"unknown", "unknown_type", TypeUnknown, true},
-		{"empty", "", TypeUnknown, true},
+		// 失配折叠为 string
+		{"unknown", "unknown_type", TypeString},
+		{"empty", "", TypeString},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := m.ToStandard(tt.sourceType)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ToStandard() error = %v, wantErr %v", err, tt.wantErr)
+			if err != nil {
+				t.Errorf("ToStandard() error = %v", err)
 				return
 			}
 			if got != tt.want {
@@ -71,8 +104,8 @@ func TestStarRocksMapper_ToSource(t *testing.T) {
 		config  TypeConfig
 		want    string
 	}{
-		{"number default", TypeNumber, TypeConfig{}, "double"},
-		{"number with precision", TypeNumber, TypeConfig{Precision: 10, Scale: 2}, "decimal(10,2)"},
+		{"float default", TypeFloat, TypeConfig{}, "double"},
+		{"float with precision", TypeFloat, TypeConfig{Precision: 10, Scale: 2}, "decimal(10,2)"},
 		{"integer", TypeInteger, TypeConfig{}, "bigint"},
 		{"boolean", TypeBoolean, TypeConfig{}, "boolean"},
 		{"string", TypeString, TypeConfig{}, "varchar"},
@@ -80,7 +113,6 @@ func TestStarRocksMapper_ToSource(t *testing.T) {
 		{"datetime", TypeDateTime, TypeConfig{}, "datetime"},
 		{"array", TypeArray, TypeConfig{}, "array"},
 		{"map", TypeMap, TypeConfig{}, "map"},
-		{"json", TypeJSON, TypeConfig{}, "json"},
 	}
 
 	for _, tt := range tests {
@@ -100,45 +132,55 @@ func TestPostgreSQLMapper_ToStandard(t *testing.T) {
 		name       string
 		sourceType string
 		want       StandardDataType
-		wantErr    bool
 	}{
 		// 数值类型
-		{"integer", "integer", TypeInteger, false},
-		{"smallint", "smallint", TypeInteger, false},
-		{"bigint", "bigint", TypeInteger, false},
-		{"real", "real", TypeNumber, false},
-		{"double precision", "double precision", TypeNumber, false},
-		{"numeric", "numeric", TypeNumber, false},
-		{"decimal", "decimal", TypeNumber, false},
-		{"numeric with params", "numeric(10,2)", TypeNumber, false},
+		{"integer", "integer", TypeInteger},
+		{"smallint", "smallint", TypeInteger},
+		{"bigint", "bigint", TypeInteger},
+		{"real", "real", TypeFloat},
+		{"double precision", "double precision", TypeFloat},
+		{"numeric", "numeric", TypeFloat},
+		{"decimal", "decimal", TypeFloat},
+		{"numeric with params", "numeric(10,2)", TypeFloat},
+		{"money", "money", TypeFloat},
 
 		// 布尔类型
-		{"boolean", "boolean", TypeBoolean, false},
-		{"bool", "bool", TypeBoolean, false},
+		{"boolean", "boolean", TypeBoolean},
+		{"bool", "bool", TypeBoolean},
 
 		// 字符串类型
-		{"varchar", "varchar", TypeString, false},
-		{"text", "text", TypeString, false},
-		{"char", "char", TypeString, false},
+		{"varchar", "varchar", TypeString},
+		{"character varying", "character varying", TypeString},
+		{"text", "text", TypeString},
+		{"char", "char", TypeString},
+		{"uuid", "uuid", TypeString},
+		{"time", "time", TypeString},
+		{"time without time zone", "time without time zone", TypeString},
+		{"interval", "interval", TypeString},
 
 		// 日期时间类型
-		{"date", "date", TypeDate, false},
-		{"timestamp", "timestamp", TypeDateTime, false},
-		{"timestamptz", "timestamptz", TypeDateTime, false},
+		{"date", "date", TypeDate},
+		{"timestamp", "timestamp", TypeDateTime},
+		{"timestamp without time zone", "timestamp without time zone", TypeDateTime},
+		{"timestamp with time zone", "timestamp with time zone", TypeDateTime},
+		{"timestamptz", "timestamptz", TypeDateTime},
 
 		// 复杂类型
-		{"json", "json", TypeJSON, false},
-		{"jsonb", "jsonb", TypeJSON, false},
+		{"json", "json", TypeMap},
+		{"jsonb", "jsonb", TypeMap},
+		{"integer array", "integer[]", TypeArray},
+		{"text array", "text[]", TypeArray},
 
-		// 未知类型
-		{"unknown", "unknown", TypeUnknown, true},
+		// 失配折叠为 string
+		{"unknown", "unknown", TypeString},
+		{"empty", "", TypeString},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := m.ToStandard(tt.sourceType)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ToStandard() error = %v, wantErr %v", err, tt.wantErr)
+			if err != nil {
+				t.Errorf("ToStandard() error = %v", err)
 				return
 			}
 			if got != tt.want {
@@ -157,14 +199,15 @@ func TestPostgreSQLMapper_ToSource(t *testing.T) {
 		config  TypeConfig
 		want    string
 	}{
-		{"number default", TypeNumber, TypeConfig{}, "numeric"},
-		{"number with precision", TypeNumber, TypeConfig{Precision: 10, Scale: 2}, "numeric(10,2)"},
+		{"float default", TypeFloat, TypeConfig{}, "numeric"},
+		{"float with precision", TypeFloat, TypeConfig{Precision: 10, Scale: 2}, "numeric(10,2)"},
 		{"integer", TypeInteger, TypeConfig{}, "bigint"},
 		{"boolean", TypeBoolean, TypeConfig{}, "boolean"},
 		{"string", TypeString, TypeConfig{}, "varchar"},
 		{"date", TypeDate, TypeConfig{}, "date"},
 		{"datetime", TypeDateTime, TypeConfig{}, "timestamp"},
-		{"json", TypeJSON, TypeConfig{}, "jsonb"},
+		{"array", TypeArray, TypeConfig{}, "array"},
+		{"map", TypeMap, TypeConfig{}, "jsonb"},
 	}
 
 	for _, tt := range tests {
@@ -184,47 +227,51 @@ func TestMySQLMapper_ToStandard(t *testing.T) {
 		name       string
 		sourceType string
 		want       StandardDataType
-		wantErr    bool
 	}{
 		// 数值类型
-		{"int", "int", TypeInteger, false},
-		{"tinyint", "tinyint", TypeInteger, false},
-		{"smallint", "smallint", TypeInteger, false},
-		{"mediumint", "mediumint", TypeInteger, false},
-		{"bigint", "bigint", TypeInteger, false},
-		{"float", "float", TypeNumber, false},
-		{"double", "double", TypeNumber, false},
-		{"decimal", "decimal", TypeNumber, false},
-		{"decimal with params", "decimal(10,2)", TypeNumber, false},
+		{"int", "int", TypeInteger},
+		{"tinyint", "tinyint", TypeInteger},
+		{"smallint", "smallint", TypeInteger},
+		{"mediumint", "mediumint", TypeInteger},
+		{"bigint", "bigint", TypeInteger},
+		{"bigint unsigned", "bigint unsigned", TypeInteger},
+		{"int with params unsigned", "int(11) unsigned", TypeInteger},
+		{"float", "float", TypeFloat},
+		{"double", "double", TypeFloat},
+		{"decimal", "decimal", TypeFloat},
+		{"decimal with params", "decimal(10,2)", TypeFloat},
 
 		// 布尔类型（特殊处理）
-		{"bool", "bool", TypeBoolean, false},
-		{"boolean", "boolean", TypeBoolean, false},
-		{"tinyint(1)", "tinyint(1)", TypeBoolean, false},
+		{"bool", "bool", TypeBoolean},
+		{"boolean", "boolean", TypeBoolean},
+		{"tinyint(1)", "tinyint(1)", TypeBoolean},
 
 		// 字符串类型
-		{"varchar", "varchar", TypeString, false},
-		{"char", "char", TypeString, false},
-		{"text", "text", TypeString, false},
-		{"enum", "enum('a','b')", TypeString, false},
+		{"varchar", "varchar", TypeString},
+		{"varchar with params", "varchar(255)", TypeString},
+		{"char", "char", TypeString},
+		{"text", "text", TypeString},
+		{"enum", "enum('a','b')", TypeString},
 
 		// 日期时间类型
-		{"date", "date", TypeDate, false},
-		{"datetime", "datetime", TypeDateTime, false},
-		{"timestamp", "timestamp", TypeDateTime, false},
+		{"date", "date", TypeDate},
+		{"datetime", "datetime", TypeDateTime},
+		{"timestamp", "timestamp", TypeDateTime},
+		{"year", "year", TypeInteger},
 
 		// 复杂类型
-		{"json", "json", TypeJSON, false},
+		{"json", "json", TypeMap},
 
-		// 未知类型
-		{"unknown", "unknown", TypeUnknown, true},
+		// 失配折叠为 string
+		{"unknown", "unknown", TypeString},
+		{"empty", "", TypeString},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := m.ToStandard(tt.sourceType)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ToStandard() error = %v, wantErr %v", err, tt.wantErr)
+			if err != nil {
+				t.Errorf("ToStandard() error = %v", err)
 				return
 			}
 			if got != tt.want {
@@ -243,14 +290,15 @@ func TestMySQLMapper_ToSource(t *testing.T) {
 		config  TypeConfig
 		want    string
 	}{
-		{"number default", TypeNumber, TypeConfig{}, "decimal"},
-		{"number with precision", TypeNumber, TypeConfig{Precision: 10, Scale: 2}, "decimal(10,2)"},
+		{"float default", TypeFloat, TypeConfig{}, "decimal"},
+		{"float with precision", TypeFloat, TypeConfig{Precision: 10, Scale: 2}, "decimal(10,2)"},
 		{"integer", TypeInteger, TypeConfig{}, "bigint"},
 		{"boolean", TypeBoolean, TypeConfig{}, "tinyint(1)"},
 		{"string", TypeString, TypeConfig{}, "varchar"},
 		{"date", TypeDate, TypeConfig{}, "date"},
 		{"datetime", TypeDateTime, TypeConfig{}, "datetime"},
-		{"json", TypeJSON, TypeConfig{}, "json"},
+		{"array", TypeArray, TypeConfig{}, "json"},
+		{"map", TypeMap, TypeConfig{}, "json"},
 	}
 
 	for _, tt := range tests {
@@ -270,50 +318,58 @@ func TestClickHouseMapper_ToStandard(t *testing.T) {
 		name       string
 		sourceType string
 		want       StandardDataType
-		wantErr    bool
 	}{
 		// 数值类型
-		{"int8", "int8", TypeInteger, false},
-		{"int16", "int16", TypeInteger, false},
-		{"int32", "int32", TypeInteger, false},
-		{"int64", "int64", TypeInteger, false},
-		{"int256", "int256", TypeInteger, false},
-		{"uint8", "uint8", TypeInteger, false},
-		{"uint64", "uint64", TypeInteger, false},
-		{"float32", "float32", TypeNumber, false},
-		{"float64", "float64", TypeNumber, false},
-		{"decimal", "decimal", TypeNumber, false},
-		{"decimal with params", "decimal(10,2)", TypeNumber, false},
+		{"int8", "int8", TypeInteger},
+		{"int16", "int16", TypeInteger},
+		{"int32", "int32", TypeInteger},
+		{"int64", "int64", TypeInteger},
+		{"int256", "int256", TypeInteger},
+		{"uint8", "uint8", TypeInteger},
+		{"uint64", "uint64", TypeInteger},
+		{"float32", "float32", TypeFloat},
+		{"float64", "float64", TypeFloat},
+		{"decimal", "decimal", TypeFloat},
+		{"decimal with params", "decimal(10,2)", TypeFloat},
 
 		// 布尔类型
-		{"bool", "bool", TypeBoolean, false},
+		{"bool", "bool", TypeBoolean},
 
 		// 字符串类型
-		{"string", "string", TypeString, false},
-		{"fixedstring", "FixedString(16)", TypeString, false},
-		{"uuid", "UUID", TypeString, false},
+		{"string", "string", TypeString},
+		{"fixedstring", "FixedString(16)", TypeString},
+		{"uuid", "UUID", TypeString},
 
 		// 日期时间类型
-		{"date", "date", TypeDate, false},
-		{"date32", "date32", TypeDate, false},
-		{"datetime", "datetime", TypeDateTime, false},
-		{"datetime64", "DateTime64", TypeDateTime, false},
+		{"date", "date", TypeDate},
+		{"date32", "date32", TypeDate},
+		{"datetime", "datetime", TypeDateTime},
+		{"datetime64", "DateTime64", TypeDateTime},
+		{"datetime64 with params", "DateTime64(3)", TypeDateTime},
 
 		// 复杂类型
-		{"array", "Array(Int8)", TypeArray, false},
-		{"map", "Map(String, Int32)", TypeMap, false},
-		{"json", "JSON", TypeJSON, false},
-		{"object json", "Object('json')", TypeJSON, false},
+		{"array", "Array(Int8)", TypeArray},
+		{"map", "Map(String, Int32)", TypeMap},
+		{"json", "JSON", TypeMap},
+		{"object json", "Object('json')", TypeMap},
 
-		// 未知类型
-		{"unknown", "unknown", TypeUnknown, true},
+		// Nullable / LowCardinality 包装
+		{"nullable string", "Nullable(String)", TypeString},
+		{"nullable int64", "Nullable(Int64)", TypeInteger},
+		{"nullable datetime64", "Nullable(DateTime64(3))", TypeDateTime},
+		{"lowcardinality string", "LowCardinality(String)", TypeString},
+		{"lowcardinality nested nullable", "LowCardinality(Nullable(String))", TypeString},
+
+		// 失配折叠为 string
+		{"unknown", "unknown", TypeString},
+		{"empty", "", TypeString},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _, err := m.ToStandard(tt.sourceType)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ToStandard() error = %v, wantErr %v", err, tt.wantErr)
+			if err != nil {
+				t.Errorf("ToStandard() error = %v", err)
 				return
 			}
 			if got != tt.want {
@@ -332,8 +388,8 @@ func TestClickHouseMapper_ToSource(t *testing.T) {
 		config  TypeConfig
 		want    string
 	}{
-		{"number default", TypeNumber, TypeConfig{}, "float64"},
-		{"number with precision", TypeNumber, TypeConfig{Precision: 10, Scale: 2}, "decimal(10,2)"},
+		{"float default", TypeFloat, TypeConfig{}, "float64"},
+		{"float with precision", TypeFloat, TypeConfig{Precision: 10, Scale: 2}, "decimal(10,2)"},
 		{"integer", TypeInteger, TypeConfig{}, "int64"},
 		{"boolean", TypeBoolean, TypeConfig{}, "bool"},
 		{"string", TypeString, TypeConfig{}, "string"},
@@ -341,7 +397,6 @@ func TestClickHouseMapper_ToSource(t *testing.T) {
 		{"datetime", TypeDateTime, TypeConfig{}, "datetime"},
 		{"array", TypeArray, TypeConfig{}, "array"},
 		{"map", TypeMap, TypeConfig{}, "map"},
-		{"json", TypeJSON, TypeConfig{}, "json"},
 	}
 
 	for _, tt := range tests {
@@ -392,7 +447,7 @@ func TestStandardDataType_Helpers(t *testing.T) {
 		isDateTime bool
 		isComplex  bool
 	}{
-		{"number", TypeNumber, true, false, false},
+		{"float", TypeFloat, true, false, false},
 		{"integer", TypeInteger, true, false, false},
 		{"boolean", TypeBoolean, false, false, false},
 		{"string", TypeString, false, false, false},
@@ -400,7 +455,6 @@ func TestStandardDataType_Helpers(t *testing.T) {
 		{"datetime", TypeDateTime, false, true, false},
 		{"array", TypeArray, false, false, true},
 		{"map", TypeMap, false, false, true},
-		{"json", TypeJSON, false, false, true},
 	}
 
 	for _, tt := range tests {
@@ -424,21 +478,21 @@ func TestInferExpressionResultType(t *testing.T) {
 		expr string
 		want StandardDataType
 	}{
-		{"SUM", "SUM(price)", TypeNumber},
-		{"AVG", "AVG(amount)", TypeNumber},
+		{"SUM", "SUM(price)", TypeFloat},
+		{"AVG", "AVG(amount)", TypeFloat},
 		{"COUNT", "COUNT(*)", TypeInteger},
-		{"MAX", "MAX(score)", TypeNumber},
-		{"MIN", "MIN(value)", TypeNumber},
+		{"MAX", "MAX(score)", TypeFloat},
+		{"MIN", "MIN(value)", TypeFloat},
 		{"CONCAT", "CONCAT(first_name, last_name)", TypeString},
 		{"UPPER", "UPPER(name)", TypeString},
 		{"LOWER", "LOWER(title)", TypeString},
 		{"LENGTH", "LENGTH(text)", TypeInteger},
 		{"YEAR", "YEAR(created_at)", TypeInteger},
 		{"MONTH", "MONTH(birth_date)", TypeInteger},
-		{"ROUND", "ROUND(price, 2)", TypeNumber},
-		{"ABS", "ABS(value)", TypeNumber},
-		{"arithmetic multiply", "price * quantity", TypeNumber},
-		{"arithmetic add", "amount + tax", TypeNumber},
+		{"ROUND", "ROUND(price, 2)", TypeFloat},
+		{"ABS", "ABS(value)", TypeFloat},
+		{"arithmetic multiply", "price * quantity", TypeFloat},
+		{"arithmetic add", "amount + tax", TypeFloat},
 		{"arithmetic modulo", "count % 10", TypeInteger},
 		{"string concat operator", "first_name || last_name", TypeString},
 	}

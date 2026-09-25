@@ -1,6 +1,7 @@
 import { CloseOutlined, SettingOutlined } from '@ant-design/icons';
 import { Dropdown, Tag } from 'antd';
 import React from 'react';
+import { isDateTimeType, normalizeDataType } from '@/lib/dataTypes';
 import type { ChartField } from '@/store';
 
 export interface FieldPillProps {
@@ -51,7 +52,7 @@ const FieldPill: React.FC<FieldPillProps> = ({
 }) => {
   const getColorByType = () => {
     if (fieldType === 'dimension') {
-      if (field.dataType === 'date' || field.dataType === 'timestamp') {
+      if (isDateTimeType(normalizeDataType(field.dataType))) {
         return 'purple';
       }
       return 'blue';

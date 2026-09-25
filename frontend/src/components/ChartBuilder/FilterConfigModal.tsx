@@ -16,23 +16,19 @@ import {
 import dayjs, { type Dayjs } from 'dayjs';
 import React, { useEffect, useMemo, useState } from 'react';
 import { datasetsApi } from '@/api';
+import { classifyFieldKind, normalizeDataType } from '@/lib/dataTypes';
 import type { ChartField, FilterCondition, FilterOperator } from '@/store';
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
-/** 字段数据类型三分类：决定弹窗内的输入控件族。 */
+/** 字段数据类型三分类：决定弹窗内的输入控件族。实现在 lib/dataTypes，此处转发。 */
 export type FilterValueKind = 'date' | 'number' | 'string';
 
-export function classifyFieldKind(dataType: string): FilterValueKind {
-  const t = dataType?.toLowerCase() ?? '';
-  if (/date|timestamp|\btime\b/.test(t)) return 'date';
-  if (/int|float|double|decimal|numeric|real|number/.test(t)) return 'number';
-  return 'string';
-}
+export { classifyFieldKind };
 
-/** 日期字段是否带时间部分（timestamp/datetime 用 datetimepicker）。 */
-const hasTimePart = (dataType: string): boolean => /timestamp|datetime/i.test(dataType ?? '');
+/** 日期字段是否带时间部分（datetime 用 datetimepicker）。 */
+const hasTimePart = (dataType: string): boolean => normalizeDataType(dataType) === 'datetime';
 
 const DATE_FORMAT = 'YYYY-MM-DD';
 const DATETIME_FORMAT = 'YYYY-MM-DD HH:mm:ss';

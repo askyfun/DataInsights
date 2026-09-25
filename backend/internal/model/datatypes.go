@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -15,7 +16,7 @@ type StandardDataType string
 
 const (
 	// 数值类型
-	TypeNumber  StandardDataType = "number"  // 数值（含小数）
+	TypeFloat   StandardDataType = "float"   // 浮点数（含小数/精度数值）
 	TypeInteger StandardDataType = "integer" // 整数
 	TypeBoolean StandardDataType = "boolean" // 布尔值
 
@@ -28,16 +29,16 @@ const (
 
 	// 复杂类型
 	TypeArray StandardDataType = "array" // 数组
-	TypeMap   StandardDataType = "map"   // 字典
-	TypeJSON  StandardDataType = "json"  // JSON
+	TypeMap   StandardDataType = "map"   // 字典（JSON 对象等）
 
-	// 未知类型
+	// 兼容占位：历史词表中的 unknown/json，经 NormalizeStandardType 折叠后不再产生
 	TypeUnknown StandardDataType = "unknown"
+	TypeJSON    StandardDataType = "json"
 )
 
-// StandardDataTypes 所有支持的标准化类型
+// StandardDataTypes 所有支持的标准化类型（对外规范词表，不含兼容占位）
 var StandardDataTypes = []StandardDataType{
-	TypeNumber,
+	TypeFloat,
 	TypeInteger,
 	TypeBoolean,
 	TypeString,
@@ -45,20 +46,41 @@ var StandardDataTypes = []StandardDataType{
 	TypeDateTime,
 	TypeArray,
 	TypeMap,
-	TypeJSON,
+}
+
+// NormalizeStandardType 将任意存量/输入类型值归一为规范词表：
+// number→float、json→map，unknown/空/未识别一律折叠为 string。
+func NormalizeStandardType(s string) StandardDataType {
+	switch StandardDataType(strings.TrimSpace(strings.ToLower(s))) {
+	case TypeFloat, StandardDataType("number"):
+		return TypeFloat
+	case TypeInteger:
+		return TypeInteger
+	case TypeBoolean:
+		return TypeBoolean
+	case TypeDate:
+		return TypeDate
+	case TypeDateTime:
+		return TypeDateTime
+	case TypeArray:
+		return TypeArray
+	case TypeMap, TypeJSON:
+		return TypeMap
+	default:
+		return TypeString
+	}
 }
 
 // TypeCategory 类型的分类
 var TypeCategory = map[StandardDataType]string{
-	TypeNumber:   "数值",
-	TypeInteger:  "数值",
-	TypeBoolean:  "数值",
-	TypeString:   "文本",
-	TypeDate:     "日期时间",
-	TypeDateTime: "日期时间",
-	TypeArray:    "复杂类型",
-	TypeMap:      "复杂类型",
-	TypeJSON:     "复杂类型",
+	TypeFloat:     "数值",
+	TypeInteger:   "数值",
+	TypeBoolean:   "数值",
+	TypeString:    "文本",
+	TypeDate:      "日期时间",
+	TypeDateTime:  "日期时间",
+	TypeArray:     "复杂类型",
+	TypeMap:       "复杂类型",
 }
 
 // ============================================================
@@ -77,15 +99,14 @@ type TypeConfig struct {
 // GetDisplayName 获取类型的显示名称
 func (t StandardDataType) GetDisplayName() string {
 	names := map[StandardDataType]string{
-		TypeNumber:   "数值",
-		TypeInteger:  "整数",
+		TypeFloat:   "浮点数",
+		TypeInteger: "整数",
 		TypeBoolean:  "布尔值",
 		TypeString:   "字符串",
 		TypeDate:     "日期",
 		TypeDateTime: "日期时间",
 		TypeArray:    "数组",
 		TypeMap:      "字典",
-		TypeJSON:     "JSON",
 	}
 	if name, ok := names[t]; ok {
 		return name
@@ -95,7 +116,7 @@ func (t StandardDataType) GetDisplayName() string {
 
 // IsNumeric 判断是否为数值类型
 func (t StandardDataType) IsNumeric() bool {
-	return t == TypeNumber || t == TypeInteger
+	return t == TypeFloat || t == TypeInteger
 }
 
 // IsDateTime 判断是否为日期时间类型
@@ -105,7 +126,7 @@ func (t StandardDataType) IsDateTime() bool {
 
 // IsComplex 判断是否为复杂类型
 func (t StandardDataType) IsComplex() bool {
-	return t == TypeArray || t == TypeMap || t == TypeJSON
+	return t == TypeArray || t == TypeMap
 }
 
 // ============================================================
@@ -136,12 +157,16 @@ var starRocksTypeMap = map[string]StandardDataType{
 	"tinyint":   TypeInteger,
 	"smallint":  TypeInteger,
 	"int":       TypeInteger,
+	"integer":   TypeInteger,
 	"bigint":    TypeInteger,
 	"largeint":  TypeInteger,
-	"float":     TypeNumber,
-	"double":    TypeNumber,
-	"decimal":   TypeNumber,
-	"decimalv2": TypeNumber,
+	"float":     TypeFloat,
+	"double":    TypeFloat,
+	"decimal":   TypeFloat,
+	"decimalv2": TypeFloat,
+	"decimal32": TypeFloat,
+	"decimal64": TypeFloat,
+	"decimal128": TypeFloat,
 
 	// 布尔类型
 	"bool":    TypeBoolean,
@@ -154,27 +179,49 @@ var starRocksTypeMap = map[string]StandardDataType{
 	"binary":    TypeString,
 	"varbinary": TypeString,
 
+	// 复杂类型
+	"array": TypeArray,
+	"map":   TypeMap,
+	"json":  TypeMap,
+
 	// 日期时间类型
 	"date":      TypeDate,
 	"datetime":  TypeDateTime,
 	"timestamp": TypeDateTime,
+}
 
-	// 复杂类型
-	"array": TypeArray,
-	"map":   TypeMap,
-	"json":  TypeJSON,
+// parsePrecisionConfig 从 decimal(10,2) 形式中提取精度配置；无精度时返回零值。
+func parsePrecisionConfig(sourceType string) TypeConfig {
+	idx := strings.Index(sourceType, "(")
+	end := strings.LastIndex(sourceType, ")")
+	if idx < 0 || end <= idx {
+		return TypeConfig{}
+	}
+	parts := strings.Split(sourceType[idx+1:end], ",")
+	if len(parts) != 2 {
+		return TypeConfig{}
+	}
+	precision, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	scale, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil || precision <= 0 || scale < 0 {
+		return TypeConfig{}
+	}
+	return TypeConfig{Precision: precision, Scale: scale}
 }
 
 func (m *StarRocksMapper) ToStandard(sourceType string) (StandardDataType, TypeConfig, error) {
 	sourceType = strings.ToLower(strings.TrimSpace(sourceType))
 
+	// 剥掉 NOT NULL 之类修饰后缀
+	if idx := strings.IndexAny(sourceType, " \t"); idx > 0 {
+		sourceType = strings.TrimSpace(sourceType[:idx])
+	}
+
 	// 处理带参数的数值类型 (如 int(11), tinyint(2))
-	// 先提取基础类型
 	if idx := strings.Index(sourceType, "("); idx > 0 {
 		baseType := sourceType[:idx]
-		// 检查基础类型是否在映射表中
 		if stdType, ok := starRocksTypeMap[baseType]; ok {
-			return stdType, TypeConfig{}, nil
+			return stdType, parsePrecisionConfig(sourceType), nil
 		}
 	}
 
@@ -186,21 +233,17 @@ func (m *StarRocksMapper) ToStandard(sourceType string) (StandardDataType, TypeC
 		return TypeMap, TypeConfig{}, nil
 	}
 
-	// 处理 decimal(p,s)
-	if strings.HasPrefix(sourceType, "decimal") {
-		return TypeNumber, TypeConfig{}, nil
-	}
-
 	stdType, ok := starRocksTypeMap[sourceType]
 	if !ok {
-		return TypeUnknown, TypeConfig{}, fmt.Errorf("unknown StarRocks type: %s", sourceType)
+		// 失配折叠为 string（fail-open 到最通用类型）
+		return TypeString, TypeConfig{}, nil
 	}
 	return stdType, TypeConfig{}, nil
 }
 
 func (m *StarRocksMapper) ToSource(stdType StandardDataType, config TypeConfig) string {
 	switch stdType {
-	case TypeNumber:
+	case TypeFloat:
 		if config.Precision > 0 && config.Scale > 0 {
 			return fmt.Sprintf("decimal(%d,%d)", config.Precision, config.Scale)
 		}
@@ -219,8 +262,6 @@ func (m *StarRocksMapper) ToSource(stdType StandardDataType, config TypeConfig) 
 		return "array"
 	case TypeMap:
 		return "map"
-	case TypeJSON:
-		return "json"
 	default:
 		return "varchar"
 	}
@@ -242,14 +283,16 @@ var postgresTypeMap = map[string]StandardDataType{
 	"smallint":         TypeInteger,
 	"smallserial":      TypeInteger,
 	"integer":          TypeInteger,
+	"int":              TypeInteger,
 	"serial":           TypeInteger,
 	"bigint":           TypeInteger,
 	"bigserial":        TypeInteger,
-	"real":             TypeNumber,
-	"double":           TypeNumber,
-	"double precision": TypeNumber,
-	"numeric":          TypeNumber,
-	"decimal":          TypeNumber,
+	"real":             TypeFloat,
+	"double":           TypeFloat,
+	"double precision": TypeFloat,
+	"numeric":          TypeFloat,
+	"decimal":          TypeFloat,
+	"money":            TypeFloat,
 
 	// 布尔类型
 	"boolean": TypeBoolean,
@@ -261,43 +304,50 @@ var postgresTypeMap = map[string]StandardDataType{
 	"varchar":           TypeString,
 	"character varying": TypeString,
 	"text":              TypeString,
+	"uuid":              TypeString,
+	"bytea":             TypeString,
+	"time":              TypeString,
+	"time without time zone":      TypeString,
 
 	// 日期时间类型
-	"date":        TypeDate,
-	"time":        TypeString,
-	"timestamp":   TypeDateTime,
-	"timestamptz": TypeDateTime,
-	"timetz":      TypeDateTime,
+	"date":     TypeDate,
+	"timestamp": TypeDateTime,
+	"timestamp without time zone": TypeDateTime,
+	"timestamp with time zone":    TypeDateTime,
+	"timestamptz":                 TypeDateTime,
+	"timetz":                      TypeString,
+	"time with time zone":         TypeString,
+	"interval":                    TypeString,
 
 	// 复杂类型
-	"array": TypeArray,
-	"json":  TypeJSON,
-	"jsonb": TypeJSON,
+	"json":  TypeMap,
+	"jsonb": TypeMap,
 }
 
 func (m *PostgreSQLMapper) ToStandard(sourceType string) (StandardDataType, TypeConfig, error) {
 	sourceType = strings.ToLower(strings.TrimSpace(sourceType))
 
-	// 处理 array 类型
-	if strings.HasPrefix(sourceType, "array") {
+	// 处理 array 形式：integer[] / character varying[] 等
+	if strings.HasSuffix(sourceType, "[]") || strings.HasPrefix(sourceType, "array") {
 		return TypeArray, TypeConfig{}, nil
 	}
 
-	// 处理 numeric(p,s)
+	// 处理 numeric(p,s) / decimal(p,s)
 	if strings.HasPrefix(sourceType, "numeric") || strings.HasPrefix(sourceType, "decimal") {
-		return TypeNumber, TypeConfig{}, nil
+		return TypeFloat, parsePrecisionConfig(sourceType), nil
 	}
 
 	stdType, ok := postgresTypeMap[sourceType]
 	if !ok {
-		return TypeUnknown, TypeConfig{}, fmt.Errorf("unknown PostgreSQL type: %s", sourceType)
+		// 失配折叠为 string（fail-open 到最通用类型）
+		return TypeString, TypeConfig{}, nil
 	}
 	return stdType, TypeConfig{}, nil
 }
 
 func (m *PostgreSQLMapper) ToSource(stdType StandardDataType, config TypeConfig) string {
 	switch stdType {
-	case TypeNumber:
+	case TypeFloat:
 		if config.Precision > 0 {
 			return fmt.Sprintf("numeric(%d,%d)", config.Precision, config.Scale)
 		}
@@ -315,8 +365,6 @@ func (m *PostgreSQLMapper) ToSource(stdType StandardDataType, config TypeConfig)
 	case TypeArray:
 		return "array"
 	case TypeMap:
-		return "jsonb"
-	case TypeJSON:
 		return "jsonb"
 	default:
 		return "varchar"
@@ -342,13 +390,13 @@ var mysqlTypeMap = map[string]StandardDataType{
 	"int":       TypeInteger,
 	"integer":   TypeInteger,
 	"bigint":    TypeInteger,
-	"float":     TypeNumber,
-	"double":    TypeNumber,
-	"real":      TypeNumber,
-	"decimal":   TypeNumber,
-	"dec":       TypeNumber,
-	"numeric":   TypeNumber,
-	"fixed":     TypeNumber,
+	"float":     TypeFloat,
+	"double":    TypeFloat,
+	"real":      TypeFloat,
+	"decimal":   TypeFloat,
+	"dec":       TypeFloat,
+	"numeric":   TypeFloat,
+	"fixed":     TypeFloat,
 
 	// 布尔类型（MySQL 用 tinyint(1) 表示）
 	"bool":       TypeBoolean,
@@ -367,6 +415,7 @@ var mysqlTypeMap = map[string]StandardDataType{
 	"blob":       TypeString,
 	"enum":       TypeString,
 	"set":        TypeString,
+	"json":       TypeMap,
 
 	// 日期时间类型
 	"date":      TypeDate,
@@ -374,14 +423,15 @@ var mysqlTypeMap = map[string]StandardDataType{
 	"timestamp": TypeDateTime,
 	"time":      TypeString,
 	"year":      TypeInteger,
-
-	// 复杂类型
-	"json":  TypeJSON,
-	"array": TypeArray, // MySQL 8.0+ 支持
 }
 
 func (m *MySQLMapper) ToStandard(sourceType string) (StandardDataType, TypeConfig, error) {
 	sourceType = strings.ToLower(strings.TrimSpace(sourceType))
+
+	// 剥掉 unsigned/zerofill 等修饰后缀（bigint unsigned / int(11) unsigned）
+	if idx := strings.Index(sourceType, " "); idx > 0 {
+		sourceType = sourceType[:idx]
+	}
 
 	// 处理 tinyint(1) 作为布尔
 	if sourceType == "tinyint(1)" {
@@ -390,7 +440,7 @@ func (m *MySQLMapper) ToStandard(sourceType string) (StandardDataType, TypeConfi
 
 	// 处理 decimal(p,s) 或 numeric(p,s)
 	if strings.HasPrefix(sourceType, "decimal") || strings.HasPrefix(sourceType, "numeric") || strings.HasPrefix(sourceType, "dec") || strings.HasPrefix(sourceType, "fixed") {
-		return TypeNumber, TypeConfig{}, nil
+		return TypeFloat, parsePrecisionConfig(sourceType), nil
 	}
 
 	// 处理 enum 和 set
@@ -398,26 +448,28 @@ func (m *MySQLMapper) ToStandard(sourceType string) (StandardDataType, TypeConfi
 		return TypeString, TypeConfig{}, nil
 	}
 
-	// 处理 char(n)
-	if strings.HasPrefix(sourceType, "char") {
-		return TypeString, TypeConfig{}, nil
-	}
-
-	// 处理 varchar(n)
-	if strings.HasPrefix(sourceType, "varchar") {
+	// 处理 char(n) / varchar(n)
+	if strings.HasPrefix(sourceType, "char") || strings.HasPrefix(sourceType, "varchar") {
 		return TypeString, TypeConfig{}, nil
 	}
 
 	stdType, ok := mysqlTypeMap[sourceType]
 	if !ok {
-		return TypeUnknown, TypeConfig{}, fmt.Errorf("unknown MySQL type: %s", sourceType)
+		// 再剥掉参数形式重试（int(11) → int）
+		if idx := strings.Index(sourceType, "("); idx > 0 {
+			stdType, ok = mysqlTypeMap[sourceType[:idx]]
+		}
+	}
+	if !ok {
+		// 失配折叠为 string（fail-open 到最通用类型）
+		return TypeString, TypeConfig{}, nil
 	}
 	return stdType, TypeConfig{}, nil
 }
 
 func (m *MySQLMapper) ToSource(stdType StandardDataType, config TypeConfig) string {
 	switch stdType {
-	case TypeNumber:
+	case TypeFloat:
 		if config.Precision > 0 && config.Scale > 0 {
 			return fmt.Sprintf("decimal(%d,%d)", config.Precision, config.Scale)
 		}
@@ -435,8 +487,6 @@ func (m *MySQLMapper) ToSource(stdType StandardDataType, config TypeConfig) stri
 	case TypeArray:
 		return "json"
 	case TypeMap:
-		return "json"
-	case TypeJSON:
 		return "json"
 	default:
 		return "varchar"
@@ -468,9 +518,9 @@ var clickHouseTypeMap = map[string]StandardDataType{
 	"uint64":  TypeInteger,
 	"uint128": TypeInteger,
 	"uint256": TypeInteger,
-	"float32": TypeNumber,
-	"float64": TypeNumber,
-	"decimal": TypeNumber,
+	"float32": TypeFloat,
+	"float64": TypeFloat,
+	"decimal": TypeFloat,
 
 	// 布尔类型
 	"bool": TypeBoolean,
@@ -493,26 +543,59 @@ var clickHouseTypeMap = map[string]StandardDataType{
 	"map":            TypeMap,
 	"tuple":          TypeArray,
 	"nested":         TypeMap,
-	"json":           TypeJSON,
-	"object":         TypeJSON,
-	"object('json')": TypeJSON,
+	"json":           TypeMap,
+	"object":         TypeMap,
+	"object('json')": TypeMap,
 }
 
 func (m *ClickHouseMapper) ToStandard(sourceType string) (StandardDataType, TypeConfig, error) {
 	sourceType = strings.ToLower(strings.TrimSpace(sourceType))
 
+	// 剥掉 Nullable(String) / LowCardinality(String) 包装（可循环嵌套）
+	for {
+		if inner, ok := unwrapWrapper(sourceType, "nullable"); ok {
+			sourceType = inner
+			continue
+		}
+		if inner, ok := unwrapWrapper(sourceType, "lowcardinality"); ok {
+			sourceType = inner
+			continue
+		}
+		break
+	}
+
 	// 处理 decimal(p,s)
 	if strings.HasPrefix(sourceType, "decimal") {
-		return TypeNumber, TypeConfig{}, nil
+		return TypeFloat, parsePrecisionConfig(sourceType), nil
 	}
 
 	// 处理 array(T)
-	if strings.HasPrefix(sourceType, "array") {
+	if strings.HasPrefix(sourceType, "array(") || sourceType == "array" {
 		return TypeArray, TypeConfig{}, nil
 	}
 
 	// 处理 map(K,V)
-	if strings.HasPrefix(sourceType, "map") {
+	if strings.HasPrefix(sourceType, "map(") || sourceType == "map" {
+		return TypeMap, TypeConfig{}, nil
+	}
+
+	// 处理 Tuple(...)
+	if strings.HasPrefix(sourceType, "tuple") {
+		return TypeArray, TypeConfig{}, nil
+	}
+
+	// 处理 Nested(...) — 结构上等价于对象
+	if strings.HasPrefix(sourceType, "nested") {
+		return TypeMap, TypeConfig{}, nil
+	}
+
+	// 处理 DateTime64(p[, tz])
+	if strings.HasPrefix(sourceType, "datetime64") {
+		return TypeDateTime, TypeConfig{}, nil
+	}
+
+	// 处理 Object('json')
+	if strings.HasPrefix(sourceType, "object") {
 		return TypeMap, TypeConfig{}, nil
 	}
 
@@ -521,26 +604,25 @@ func (m *ClickHouseMapper) ToStandard(sourceType string) (StandardDataType, Type
 		return TypeString, TypeConfig{}, nil
 	}
 
-	// 处理 Tuple
-	if strings.HasPrefix(sourceType, "tuple") {
-		return TypeArray, TypeConfig{}, nil
-	}
-
-	// 处理 DateTime64
-	if strings.HasPrefix(sourceType, "datetime64") {
-		return TypeDateTime, TypeConfig{}, nil
-	}
-
 	stdType, ok := clickHouseTypeMap[sourceType]
 	if !ok {
-		return TypeUnknown, TypeConfig{}, fmt.Errorf("unknown ClickHouse type: %s", sourceType)
+		// 失配折叠为 string（fail-open 到最通用类型）
+		return TypeString, TypeConfig{}, nil
 	}
 	return stdType, TypeConfig{}, nil
 }
 
+// unwrapWrapper 剥掉 wrapper(inner) 形式的外壳，返回内部类型。
+func unwrapWrapper(sourceType, wrapper string) (string, bool) {
+	if !strings.HasPrefix(sourceType, wrapper+"(") || !strings.HasSuffix(sourceType, ")") {
+		return "", false
+	}
+	return strings.TrimSpace(sourceType[len(wrapper)+1 : len(sourceType)-1]), true
+}
+
 func (m *ClickHouseMapper) ToSource(stdType StandardDataType, config TypeConfig) string {
 	switch stdType {
-	case TypeNumber:
+	case TypeFloat:
 		if config.Precision > 0 && config.Scale > 0 {
 			return fmt.Sprintf("decimal(%d,%d)", config.Precision, config.Scale)
 		}
@@ -559,8 +641,6 @@ func (m *ClickHouseMapper) ToSource(stdType StandardDataType, config TypeConfig)
 		return "array"
 	case TypeMap:
 		return "map"
-	case TypeJSON:
-		return "json"
 	default:
 		return "string"
 	}
@@ -618,11 +698,11 @@ type VirtualField struct {
 // SupportedExpression 支持的表达式函数
 var SupportedExpressions = map[string]StandardDataType{
 	// 聚合函数
-	"SUM":   TypeNumber,
-	"AVG":   TypeNumber,
+	"SUM":   TypeFloat,
+	"AVG":   TypeFloat,
 	"COUNT": TypeInteger,
-	"MAX":   TypeNumber,
-	"MIN":   TypeNumber,
+	"MAX":   TypeFloat,
+	"MIN":   TypeFloat,
 
 	// 字符串操作
 	"CONCAT":    TypeString,
@@ -643,11 +723,11 @@ var SupportedExpressions = map[string]StandardDataType{
 	"TIMESTAMPDIFF": TypeInteger,
 
 	// 数值操作
-	"ROUND": TypeNumber,
-	"ABS":   TypeNumber,
+	"ROUND": TypeFloat,
+	"ABS":   TypeFloat,
 	"FLOOR": TypeInteger,
 	"CEIL":  TypeInteger,
-	"POWER": TypeNumber,
+	"POWER": TypeFloat,
 	"MOD":   TypeInteger,
 
 	// 条件判断
@@ -686,7 +766,7 @@ func InferExpressionResultType(expr string) StandardDataType {
 	arithmeticOps := []string{"+", "-", "*", "/", "%"}
 	for _, op := range arithmeticOps {
 		if strings.Contains(expr, op) {
-			return TypeNumber
+			return TypeFloat
 		}
 	}
 

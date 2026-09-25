@@ -1,6 +1,7 @@
 import { arrayMove } from '@dnd-kit/sortable';
 import { message } from 'antd';
 import { create } from 'zustand';
+import { isNumericType, normalizeDataType } from '@/lib/dataTypes';
 import {
   Chart,
   ChartDataResponse,
@@ -627,14 +628,8 @@ export const useStore = create<AppState>((set) => ({
       const fields: ChartField[] = columns.map((col: DatasetColumn) => ({
         id: col.name,
         name: col.name,
-        type:
-          col.role ||
-          (['int', 'float', 'decimal', 'numeric', 'double', 'real'].includes(
-            col.type?.toLowerCase() ?? ''
-          )
-            ? 'metric'
-            : 'dimension'),
-        dataType: col.type,
+        type: col.role || (isNumericType(normalizeDataType(col.type)) ? 'metric' : 'dimension'),
+        dataType: normalizeDataType(col.type),
         comment: col.comment,
       }));
 

@@ -167,8 +167,8 @@ func TestGetColumnsSQLDatasetDerivesFromQuery(t *testing.T) {
 		t.Fatalf("unexpected column names: %v", cols)
 	}
 	for _, col := range cols {
-		if col.Type != "unknown" {
-			t.Errorf("column %q type = %q, want %q", col.Name, col.Type, "unknown")
+		if col.Type != "string" {
+			t.Errorf("column %q type = %q, want %q", col.Name, col.Type, "string")
 		}
 		if col.Role != "dimension" {
 			t.Errorf("column %q role = %q, want dimension", col.Name, col.Role)
@@ -249,7 +249,7 @@ func TestMapDatasetColumnsUsesDatasourceMapper(t *testing.T) {
 
 	wantTypes := map[string]string{
 		"year":       "integer",
-		"gdp_total":  "number",
+		"gdp_total":  "float",
 		"region":     "string",
 		"created_at": "date",
 	}

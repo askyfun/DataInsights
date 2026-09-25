@@ -2,6 +2,7 @@ import { CalendarOutlined, FontSizeOutlined, NumberOutlined } from '@ant-design/
 import { useDraggable } from '@dnd-kit/core';
 import { Tag, Tooltip } from 'antd';
 import React from 'react';
+import { classifyFieldKind, isDateTimeType, normalizeDataType } from '@/lib/dataTypes';
 import type { ChartField } from '@/store';
 
 export interface DraggableFieldProps {
@@ -22,7 +23,7 @@ export interface FieldDragPreviewProps {
  */
 export const fieldTagColor = (field: ChartField): 'blue' | 'purple' | 'green' => {
   if (field.type === 'dimension') {
-    if (field.dataType === 'date' || field.dataType === 'timestamp') {
+    if (isDateTimeType(normalizeDataType(field.dataType))) {
       return 'purple';
     }
     return 'blue';
@@ -54,10 +55,8 @@ const DATA_TYPE_ICONS = {
 } as const;
 
 const fieldDataTypeIcon = (field: ChartField) => {
-  const t = (field.dataType ?? '').toLowerCase();
-  if (/date|timestamp|\btime\b/.test(t)) return DATA_TYPE_ICONS.date;
-  if (/int|float|double|decimal|numeric|real|number/.test(t)) return DATA_TYPE_ICONS.number;
-  return DATA_TYPE_ICONS.string;
+  const kind = classifyFieldKind(field.dataType);
+  return DATA_TYPE_ICONS[kind];
 };
 
 /**

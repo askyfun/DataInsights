@@ -160,10 +160,13 @@ func (s *datasetService) GetColumns(ctx context.Context, id int) ([]entity.Datas
 		return nil, err
 	}
 
-	// If columns are already saved, return them
+	// If columns are already saved, return them（历史 number/json/unknown 词在此归一）
 	if ds.Columns != "" && ds.Columns != "[]" {
 		var savedColumns []entity.DatasetColumn
 		if err := json.Unmarshal([]byte(ds.Columns), &savedColumns); err == nil && len(savedColumns) > 0 {
+			for i := range savedColumns {
+				savedColumns[i].Type = string(model.NormalizeStandardType(savedColumns[i].Type))
+			}
 			return savedColumns, nil
 		}
 	}
@@ -219,6 +222,9 @@ func mapDatasetColumns(dbColumns []datasource.ColumnInfo, dsType string) []entit
 	result := make([]entity.DatasetColumn, len(dbColumns))
 	for i, col := range dbColumns {
 		stdType, typeConfig, _ := mapper.ToStandard(col.Type)
+		// 统一归一为规范词表（float/integer/boolean/string/date/datetime/array/map），
+		// 失配/unknown 折叠 string，兼容历史 number/json 词。
+		stdType = model.NormalizeStandardType(string(stdType))
 		result[i] = entity.DatasetColumn{
 			Name: col.Name,
 			// 裸标识符：方言引号由查询层（safeIdentifier/方言 builder）负责，
@@ -494,11 +500,7 @@ func toDatasetModel(e *entity.Dataset) *model.Dataset {
 }
 
 func inferRole(dataType string) string {
-	lowerType := dataType
-	if lowerType == "int" || lowerType == "integer" ||
-		lowerType == "float" || lowerType == "double" ||
-		lowerType == "decimal" || lowerType == "numeric" ||
-		lowerType == "real" || lowerType == "number" {
+	if model.StandardDataType(dataType).IsNumeric() {
 		return "metric"
 	}
 	return "dimension"

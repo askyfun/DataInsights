@@ -32,17 +32,8 @@ export interface DatasourceFormData {
 // 数据集模式
 export type DatasetMode = 'direct' | 'accelerated';
 
-// 数据类型
-export type DataType =
-  | 'int'
-  | 'float'
-  | 'decimal'
-  | 'string'
-  | 'date'
-  | 'datetime'
-  | 'array'
-  | 'dict'
-  | 'boolean';
+// 数据类型（统一规范词表，单一事实源在 lib/dataTypes）
+export type { DataType } from '../lib/dataTypes';
 
 // 列角色
 export type ColumnRole = 'dimension' | 'metric';

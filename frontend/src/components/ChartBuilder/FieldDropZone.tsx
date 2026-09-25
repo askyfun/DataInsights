@@ -8,6 +8,7 @@ import {
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { Button, Dropdown, Tag } from 'antd';
 import React, { useState } from 'react';
+import { isDateTimeType, normalizeDataType } from '@/lib/dataTypes';
 import type { BoundField, ChartField } from '@/store';
 import { type DropZoneType, dropZoneId, dropZoneSurfaceStyle } from './dropZoneStyles';
 
@@ -116,7 +117,7 @@ const FieldPillInline: React.FC<FieldPillInlineProps> = ({
 
   const getColor = () => {
     if (fieldType === 'dimension') {
-      return field.dataType === 'date' || field.dataType === 'timestamp' ? 'purple' : 'blue';
+      return isDateTimeType(normalizeDataType(field.dataType)) ? 'purple' : 'blue';
     }
     return 'green';
   };

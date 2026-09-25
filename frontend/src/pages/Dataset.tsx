@@ -45,6 +45,7 @@ import {
 import { toStandardType } from '../api/datatypes';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
+import { isNumericType, normalizeDataType } from '../lib/dataTypes';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
@@ -204,12 +205,13 @@ const DatasetPage: React.FC = () => {
 
   const dataTypes: { value: DataType; label: string }[] = [
     { value: 'string', label: intl.formatMessage({ id: 'dataType.string' }) },
-    { value: 'int', label: intl.formatMessage({ id: 'dataType.integer' }) },
+    { value: 'integer', label: intl.formatMessage({ id: 'dataType.integer' }) },
     { value: 'float', label: intl.formatMessage({ id: 'dataType.float' }) },
-    { value: 'decimal', label: intl.formatMessage({ id: 'dataType.decimal' }) },
+    { value: 'boolean', label: intl.formatMessage({ id: 'dataType.boolean' }) },
     { value: 'date', label: intl.formatMessage({ id: 'dataType.date' }) },
     { value: 'datetime', label: intl.formatMessage({ id: 'dataType.datetime' }) },
-    { value: 'boolean', label: intl.formatMessage({ id: 'dataType.boolean' }) },
+    { value: 'array', label: intl.formatMessage({ id: 'dataType.array' }) },
+    { value: 'map', label: intl.formatMessage({ id: 'dataType.map' }) },
   ];
 
   const handleOpenVirtualFieldModal = (field?: DatasetColumn) => {
@@ -414,11 +416,7 @@ const DatasetPage: React.FC = () => {
         expr: `\`${col.name}\``,
         type: toStandardType(col.data_type || 'varchar', datasourceType),
         comment: col.comment || '',
-        role: ['int', 'bigint', 'float', 'decimal', 'numeric', 'double', 'real'].includes(
-          col.data_type?.toLowerCase() ?? ''
-        )
-          ? 'metric'
-          : 'dimension',
+        role: isNumericType(normalizeDataType(col.data_type)) ? 'metric' : 'dimension',
       }));
 
       setDatasetColumns(defaultColumns);
@@ -1063,20 +1061,20 @@ const DatasetPage: React.FC = () => {
                       <Select.Option value="string">
                         {intl.formatMessage({ id: 'dataType.string' })}
                       </Select.Option>
-                      <Select.Option value="int">
+                      <Select.Option value="integer">
                         {intl.formatMessage({ id: 'dataType.integer' })}
                       </Select.Option>
                       <Select.Option value="float">
                         {intl.formatMessage({ id: 'dataType.float' })}
+                      </Select.Option>
+                      <Select.Option value="boolean">
+                        {intl.formatMessage({ id: 'dataType.boolean' })}
                       </Select.Option>
                       <Select.Option value="date">
                         {intl.formatMessage({ id: 'dataType.date' })}
                       </Select.Option>
                       <Select.Option value="datetime">
                         {intl.formatMessage({ id: 'dataType.datetime' })}
-                      </Select.Option>
-                      <Select.Option value="boolean">
-                        {intl.formatMessage({ id: 'dataType.boolean' })}
                       </Select.Option>
                     </Select>
                   ),
