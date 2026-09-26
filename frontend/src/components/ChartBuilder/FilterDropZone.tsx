@@ -114,18 +114,6 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
       data-testid="filter-drop-zone"
       style={dropZoneSurfaceStyle('filter', isOver)}
     >
-      {/* + 固定在最左（与维度/指标行的行首对齐），提示文案与条件芯片依次排在其右 */}
-      {availableFields.length > 0 && (
-        <Dropdown menu={{ items: dropdownItems }} trigger={['click']} placement="bottomLeft">
-          <Button
-            type="dashed"
-            size="small"
-            icon={<PlusOutlined />}
-            onClick={(e) => e.preventDefault()}
-          />
-        </Dropdown>
-      )}
-
       {filters.length === 0 && (
         <span style={{ color: 'var(--dr-text-3)', fontSize: 13 }}>{emptyText}</span>
       )}
@@ -208,6 +196,18 @@ const FilterDropZone: React.FC<FilterDropZoneProps> = ({
           </div>
         );
       })}
+
+      {/* + 恒在字段组末尾（与维度/指标容器同构）：空态时跟在提示文案后，有条件时跟在最后一个芯片后 */}
+      {availableFields.length > 0 && (
+        <Dropdown menu={{ items: dropdownItems }} trigger={['click']} placement="bottomLeft">
+          <Button
+            type="dashed"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={(e) => e.preventDefault()}
+          />
+        </Dropdown>
+      )}
     </div>
   );
 };
