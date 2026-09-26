@@ -73,6 +73,7 @@ import FilterConfigModal, {
   type FilterConfigPatch,
 } from '../components/ChartBuilder/FilterConfigModal';
 import FilterDropZone from '../components/ChartBuilder/FilterDropZone';
+import FilterValueControl from '../components/ChartBuilder/FilterValueControl';
 import KpiCard from '../components/ChartBuilder/KpiCard';
 import PivotTable from '../components/ChartBuilder/PivotTable';
 import QueryConfigRow from '../components/ChartBuilder/QueryConfigRow';
@@ -1443,6 +1444,9 @@ const ChartBuilder: React.FC = () => {
         operator: (primary?.operator ?? 'eq') as FilterCondition['operator'],
         value: primary?.value ?? '',
         valueEnd: primary?.value_end,
+        // 「作为筛选器」统一落条件顶层（date.asFilter/label 保留作旧数据兼容）。
+        asFilter: intent.asFilter,
+        filterLabel: intent.label,
       };
     },
     []
@@ -1496,11 +1500,14 @@ const ChartBuilder: React.FC = () => {
   );
 
   /**
-   * 「作为时间范围筛选器」的日期条件在预览区上方出一枚行内控件
-   * （对齐火山引擎智能洞察「在图表上显示日期筛选框」）。浮层里改条件即时生效、不设确认。
+   * 「作为筛选器」的条件在预览区上方出一枚行内控件（对齐火山引擎智能洞察）。
+   * 三族通用：日期族用 DateFilterControl，字符串/数值族用 FilterValueControl。
+   * 浮层里改条件即时生效、不设确认。旧图表的勾选存在 date.asFilter，渲染时兜底读取。
    */
   const renderDateFilterBar = () => {
-    const controls = queryConfig.filters.filter((filter) => filter.date?.asFilter === true);
+    const controls = queryConfig.filters.filter(
+      (filter) => filter.asFilter === true || filter.date?.asFilter === true
+    );
     if (controls.length === 0) return null;
     return (
       <div
@@ -1509,30 +1516,44 @@ const ChartBuilder: React.FC = () => {
       >
         {controls.map((filter) => {
           const date = filter.date;
-          if (!date) return null;
           const field = chartBuilderFields.find((candidate) => candidate.id === filter.fieldId);
+          // 日期意图仍是权威的日期条件（含只写了 date.asFilter 的旧数据）走日期控件。
+          if (date?.asFilter === true) {
+            return (
+              <DateFilterControl
+                key={filter.id}
+                label={filter.filterLabel || date.label || field?.name || filter.fieldId}
+                value={date.value}
+                settings={{
+                  granularity: date.granularity,
+                  weekStart: date.weekStart,
+                  withTime: date.withTime,
+                }}
+                withTime={date.withTime}
+                allowModeSwitch
+                allowClear
+                onChange={(next: DateFilterValue) =>
+                  updateFilter(filter.id, dateIntentSnapshotPatch({ ...date, value: next }))
+                }
+                onClear={() =>
+                  updateFilter(
+                    filter.id,
+                    dateIntentSnapshotPatch({ ...date, value: { kind: 'dynamic' } })
+                  )
+                }
+              />
+            );
+          }
+          if (!field || date) return null;
+          const kind = classifyFieldKind(field.dataType);
+          if (kind === 'date') return null; // 日期意图缺失的日期条件没有行内编辑语义
           return (
-            <DateFilterControl
+            <FilterValueControl
               key={filter.id}
-              label={date.label || field?.name || filter.fieldId}
-              value={date.value}
-              settings={{
-                granularity: date.granularity,
-                weekStart: date.weekStart,
-                withTime: date.withTime,
-              }}
-              withTime={date.withTime}
-              allowModeSwitch
-              allowClear
-              onChange={(next: DateFilterValue) =>
-                updateFilter(filter.id, dateIntentSnapshotPatch({ ...date, value: next }))
-              }
-              onClear={() =>
-                updateFilter(
-                  filter.id,
-                  dateIntentSnapshotPatch({ ...date, value: { kind: 'dynamic' } })
-                )
-              }
+              field={field}
+              filter={filter}
+              datasetId={selectedDatasetId}
+              onChange={(patch) => updateFilter(filter.id, patch)}
             />
           );
         })}

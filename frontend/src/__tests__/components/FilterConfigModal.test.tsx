@@ -127,7 +127,12 @@ describe('FilterConfigModal', () => {
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
 
     await waitFor(() => {
-      expect(onOk).toHaveBeenCalledWith({ operator: 'in', value: ['200', '300'] });
+      expect(onOk).toHaveBeenCalledWith({
+        operator: 'in',
+        value: ['200', '300'],
+        asFilter: false,
+        filterLabel: '',
+      });
     });
   });
 
@@ -137,13 +142,23 @@ describe('FilterConfigModal', () => {
 
     fireEvent.change(screen.getByTestId('filter-modal-number'), { target: { value: '1000' } });
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
-    expect(onOk).toHaveBeenCalledWith({ operator: 'gte', value: 1000 });
-
+    expect(onOk).toHaveBeenCalledWith({
+      operator: 'gte',
+      value: 1000,
+      asFilter: false,
+      filterLabel: '',
+    });
     fireEvent.click(screen.getByText('区间'));
     fireEvent.change(screen.getByTestId('filter-modal-min'), { target: { value: '10' } });
     fireEvent.change(screen.getByTestId('filter-modal-max'), { target: { value: '20' } });
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
-    expect(onOk).toHaveBeenLastCalledWith({ operator: 'between', value: 10, valueEnd: 20 });
+    expect(onOk).toHaveBeenLastCalledWith({
+      operator: 'between',
+      value: 10,
+      valueEnd: 20,
+      asFilter: false,
+      filterLabel: '',
+    });
   });
 
   it('字符串字段：枚举模式实查候选值，文本框输入上抛 in 数组', async () => {
@@ -167,7 +182,12 @@ describe('FilterConfigModal', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
     await waitFor(() => {
-      expect(onOk).toHaveBeenCalledWith({ operator: 'in', value: ['比亚迪'] });
+      expect(onOk).toHaveBeenCalledWith({
+        operator: 'in',
+        value: ['比亚迪'],
+        asFilter: false,
+        filterLabel: '',
+      });
     });
   });
 
@@ -194,17 +214,27 @@ describe('FilterConfigModal', () => {
     // 未勾选反选：保留
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
     await waitFor(() => {
-      expect(onOk).toHaveBeenCalledWith({ operator: 'in', value: ['100'] });
+      expect(onOk).toHaveBeenCalledWith({
+        operator: 'in',
+        value: ['100'],
+        asFilter: false,
+        filterLabel: '',
+      });
     });
 
-    // 勾选反选：排除
+    // 勾选反选：排除（弹窗现有两个 checkbox——反选与「作为筛选器」，按 testid 定位）
     fireEvent.click(screen.getByTestId('filter-modal-notin'));
     // antd Checkbox 的 testid 落在根 label，勾选状态看内部 input
-    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(screen.getByTestId('filter-modal-notin')).toBeChecked();
     expect(screen.getByTestId('filter-modal-summary')).toHaveTextContent('将排除 1 个值');
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
     await waitFor(() => {
-      expect(onOk).toHaveBeenLastCalledWith({ operator: 'notIn', value: ['100'] });
+      expect(onOk).toHaveBeenLastCalledWith({
+        operator: 'notIn',
+        value: ['100'],
+        asFilter: false,
+        filterLabel: '',
+      });
     });
   });
 
@@ -217,7 +247,7 @@ describe('FilterConfigModal', () => {
       initial: makeInitial({ operator: 'notIn', value: ['100', '200'] }),
     });
 
-    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(screen.getByTestId('filter-modal-notin')).toBeChecked();
     expect(screen.getByTestId('filter-modal-summary')).toHaveTextContent('将排除 2 个值');
   });
 
@@ -256,7 +286,12 @@ describe('FilterConfigModal · 无值算子（isNull / isNotNull）', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
-    expect(onOk).toHaveBeenCalledWith({ operator: 'isNull', value: null });
+    expect(onOk).toHaveBeenCalledWith({
+      operator: 'isNull',
+      value: null,
+      asFilter: false,
+      filterLabel: '',
+    });
   });
 
   it('数值字段：回显已有 isNull 时算子不被改写，确定即上抛 isNull', () => {
@@ -267,7 +302,12 @@ describe('FilterConfigModal · 无值算子（isNull / isNotNull）', () => {
     expect(screen.queryByTestId('filter-modal-number')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
-    expect(onOk).toHaveBeenCalledWith({ operator: 'isNull', value: null });
+    expect(onOk).toHaveBeenCalledWith({
+      operator: 'isNull',
+      value: null,
+      asFilter: false,
+      filterLabel: '',
+    });
   });
 
   it('数值字段：回显已有 isNotNull 时确定即上抛 isNotNull', () => {
@@ -277,7 +317,12 @@ describe('FilterConfigModal · 无值算子（isNull / isNotNull）', () => {
     expect(screen.getByTestId('filter-modal-operator')).toHaveTextContent('不为空');
 
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
-    expect(onOk).toHaveBeenCalledWith({ operator: 'isNotNull', value: null });
+    expect(onOk).toHaveBeenCalledWith({
+      operator: 'isNotNull',
+      value: null,
+      asFilter: false,
+      filterLabel: '',
+    });
   });
 
   it('字符串字段：回显已有 isNull 时不回落到枚举模式，确定即上抛 isNull', () => {
@@ -293,12 +338,85 @@ describe('FilterConfigModal · 无值算子（isNull / isNotNull）', () => {
     expect(screen.getByTestId('filter-modal-operator')).toHaveTextContent('为空');
 
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
-    expect(onOk).toHaveBeenCalledWith({ operator: 'isNull', value: null });
+    expect(onOk).toHaveBeenCalledWith({
+      operator: 'isNull',
+      value: null,
+      asFilter: false,
+      filterLabel: '',
+    });
   });
 
   it('日期字段：回显已有 isNull 时算子不被改写（不得静默变成 eq）', () => {
     renderModal({ field: DATE_FIELD, initial: makeInitial({ operator: 'isNull', value: null }) });
 
     expect(screen.getByTestId('filter-modal-operator')).toHaveTextContent('为空');
+  });
+});
+
+/**
+ * 「作为筛选器」（全族通用，2026-09-27）：勾选后条件顶层带 asFilter/filterLabel，
+ * 图表预览区上方渲染行内筛选控件（渲染侧见 FilterValueControl / ChartBuilder）。
+ */
+describe('FilterConfigModal · 作为筛选器', () => {
+  beforeEach(() => {
+    mockedQuery.mockReset();
+    mockedQuery.mockResolvedValue({ data: { code: 0, data: [] } } as never);
+  });
+
+  it('默认不勾选，patch 上抛 asFilter: false', () => {
+    const onOk = vi.fn();
+    renderModal({ onOk });
+
+    expect(screen.getByTestId('filter-modal-as-filter')).not.toBeChecked();
+    expect(screen.queryByTestId('filter-modal-filter-label')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('filter-modal-number'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }));
+    expect(onOk).toHaveBeenCalledWith({
+      operator: 'gte',
+      value: 5,
+      asFilter: false,
+      filterLabel: '',
+    });
+  });
+
+  it('勾选后出显示名称输入，patch 上抛 asFilter: true 与自定义名称', () => {
+    const onOk = vi.fn();
+    renderModal({ onOk, field: STRING_FIELD });
+
+    fireEvent.click(screen.getByTestId('filter-modal-as-filter'));
+    expect(screen.getByTestId('filter-modal-filter-label')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('filter-modal-filter-label'), {
+      target: { value: '品牌筛选' },
+    });
+    fireEvent.change(screen.getByTestId('filter-modal-extra'), { target: { value: '比亚迪' } });
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }));
+    expect(onOk).toHaveBeenCalledWith({
+      operator: 'in',
+      value: ['比亚迪'],
+      asFilter: true,
+      filterLabel: '品牌筛选',
+    });
+  });
+
+  it('编辑已勾选条件时勾选态与显示名称回显，取消勾选上抛 asFilter: false', () => {
+    const onOk = vi.fn();
+    renderModal({
+      onOk,
+      initial: makeInitial({ operator: 'gte', value: 5, asFilter: true, filterLabel: '销售额' }),
+    });
+
+    expect(screen.getByTestId('filter-modal-as-filter')).toBeChecked();
+    expect(screen.getByTestId('filter-modal-filter-label')).toHaveValue('销售额');
+
+    fireEvent.click(screen.getByTestId('filter-modal-as-filter'));
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }));
+    expect(onOk).toHaveBeenCalledWith({
+      operator: 'gte',
+      value: 5,
+      asFilter: false,
+      filterLabel: '销售额',
+    });
   });
 });

@@ -261,6 +261,14 @@ export interface FilterCondition {
    * （由 `materializeDateFilterSnapshot` 在保存时填）。见 `@/lib/dateFilter`。
    */
   date?: DateFilterIntent;
+  /**
+   * 「作为筛选器」：图表预览区上方渲染一枚行内筛选控件（全族通用）。
+   * 日期族历史数据把它存在 `date.asFilter`，渲染时对旧数据兜底读取；
+   * 新写入一律落这里（含日期族）。
+   */
+  asFilter?: boolean;
+  /** 行内筛选控件的显示名称；空缺时回退字段名。 */
+  filterLabel?: string;
 }
 
 // 图表配置接口

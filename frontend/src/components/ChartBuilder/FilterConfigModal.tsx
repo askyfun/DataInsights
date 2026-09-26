@@ -87,6 +87,10 @@ export interface FilterConfigPatch {
   operator: FilterOperator;
   value: unknown;
   valueEnd?: unknown;
+  /** 「作为筛选器」：图表预览区上方渲染行内筛选控件（全族通用，见 FilterCondition.asFilter）。 */
+  asFilter: boolean;
+  /** 行内控件显示名称；空串时渲染回退字段名。 */
+  filterLabel: string;
 }
 
 export interface FilterConfigModalProps {
@@ -142,6 +146,9 @@ const FilterConfigModal: React.FC<FilterConfigModalProps> = ({
   const [notInChecked, setNotInChecked] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
+  // 「作为筛选器」：勾选后图表预览区上方出一件行内筛选控件；显示名称留空回退字段名。
+  const [asFilter, setAsFilter] = useState(false);
+  const [filterLabel, setFilterLabel] = useState('');
 
   // 打开时按已有条件 / 字段类型重置内部状态。
   useEffect(() => {
@@ -198,6 +205,8 @@ const FilterConfigModal: React.FC<FilterConfigModalProps> = ({
       }
     }
     setExtraLines('');
+    setAsFilter(init?.asFilter ?? false);
+    setFilterLabel(init?.filterLabel ?? '');
   }, [open, field, initial, isNew]);
 
   const needCandidates =
@@ -496,7 +505,7 @@ const FilterConfigModal: React.FC<FilterConfigModalProps> = ({
       cancelText="取消"
       okButtonProps={{ disabled: !canOk }}
       onOk={() => {
-        if (patch) onOk(patch);
+        if (patch) onOk({ ...patch, asFilter, filterLabel: filterLabel.trim() });
       }}
       onCancel={onCancel}
       width={480}
@@ -506,6 +515,28 @@ const FilterConfigModal: React.FC<FilterConfigModalProps> = ({
       maskTransitionName=""
     >
       {renderBody()}
+      <Divider style={{ margin: '12px 0' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Checkbox
+          checked={asFilter}
+          onChange={(e) => setAsFilter(e.target.checked)}
+          data-testid="filter-modal-as-filter"
+        >
+          作为筛选器
+        </Checkbox>
+        {asFilter && (
+          <>
+            <Text type="secondary">显示名称：</Text>
+            <Input
+              placeholder={field?.name}
+              value={filterLabel}
+              onChange={(e) => setFilterLabel(e.target.value)}
+              style={{ width: 200 }}
+              data-testid="filter-modal-filter-label"
+            />
+          </>
+        )}
+      </div>
     </Modal>
   );
 };
