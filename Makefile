@@ -122,16 +122,19 @@ docker-build:
 	@echo "$(YELLOW)构建 Data Insights 单镜像...$(NC)"
 	docker build -t data-insights .
 
+# Docker：一键体验环境（Docker Hub 发布镜像 + PostgreSQL），见 docker-compose.allinone.yml
+COMPOSE_FILE := docker-compose.allinone.yml
+
 docker-up:
 	@echo "$(YELLOW)启动 Docker 容器...$(NC)"
-	docker compose up -d --build
+	docker compose -f $(COMPOSE_FILE) up -d
 
 docker-down:
 	@echo "$(YELLOW)停止 Docker 容器...$(NC)"
-	docker compose down
+	docker compose -f $(COMPOSE_FILE) down
 
 docker-logs:
-	docker compose logs -f
+	docker compose -f $(COMPOSE_FILE) logs -f
 
 # 不用 Docker 也能验证「单进程同时提供 API 与页面」：先构建前端产物，
 # 再让后端托管 frontend/dist。端口与镜像一致（23352）。

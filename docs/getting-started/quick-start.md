@@ -44,19 +44,19 @@ docker run -d -p 23352:23352 --env-file .env --name data-insights kzzhr/datainsi
 
 ## 4. 方式三：Docker Compose 一键起全套
 
-[`docker-compose.hub.yml`](../../docker-compose.hub.yml) 把 Data Insights 与 PostgreSQL 一起拉起来，零外部依赖：
+[`docker-compose.allinone.yml`](../../docker-compose.allinone.yml) 把 Data Insights 与 PostgreSQL 一起拉起来，零外部依赖：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.hub.yml
-docker compose -f docker-compose.hub.yml up -d
+curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.allinone.yml
+docker compose -f docker-compose.allinone.yml up -d
 ```
 
-若本地已有仓库，直接 `docker compose -f docker-compose.hub.yml up -d` 即可（不必再下载）。
+若本地已有仓库，直接 `docker compose -f docker-compose.allinone.yml up -d` 即可（不必再下载）。
 
-- 默认用 `latest`，钉版本：`TAG=vX.Y.Z docker compose -f docker-compose.hub.yml up -d`（版本号见 [Releases](https://github.com/askyfun/DataInsights/releases)）。
+- 默认用 `latest`，钉版本：`TAG=vX.Y.Z docker compose -f docker-compose.allinone.yml up -d`（版本号见 [Releases](https://github.com/askyfun/DataInsights/releases)）。
 - 数据存在命名卷 `postgres_data` 里：`down` 保留数据，`down -v` 才清空。
 - 变量覆盖优先级（高 → 低）：shell 环境变量 > 同目录 `.env` > 文件内默认值。
-- ⚠️ 库里用的是公开的演示密码 `insights123`，且 PostgreSQL **默认不映射到宿主机**。要用本机客户端连进去看表、换端口（`PORT`）、改数据库密码，都在该文件注释里标了位置。
+- ⚠️ 库里用的是公开的演示密码 `insights123`，仅本地体验用。要用本机客户端连进去看表、换端口（`PORT`）、改数据库密码，都在该文件注释里标了位置。
 
 ## 5. 方式四：从源码运行
 
@@ -64,13 +64,10 @@ docker compose -f docker-compose.hub.yml up -d
 git clone https://github.com/askyfun/DataInsights.git
 cd DataInsights
 
-make docker-up      # = docker compose up -d --build（首次构建约 5–10 分钟）
-make docker-down    # 停止
-make docker-logs    # 看日志
+make install         # 装前后端依赖（只用 pnpm）
+make dev             # 前端 23351 + 后端 23352，一起起
 ```
 
-- 这条路径用的是仓库根的 [`docker-compose.yml`](../../docker-compose.yml)：从**源码构建**，不是拉镜像。
-- 想连带一个现成的 StarRocks 试用，用 [`docker-compose.allinone.yml`](../../docker-compose.allinone.yml)：`docker compose -f docker-compose.allinone.yml up --build`。
 - 只用 Dockerfile 手工构建与运行（自备 PostgreSQL，见[容器部署](../deployment/docker.md)）：
 
 ```bash
@@ -87,8 +84,7 @@ make install
 make dev
 ```
 
-> `make dev` 会先检查 23351 / 23352 是否被占用并快速失败；`make dev-backend` 依赖 `air`（未安装时先 `go install github.com/air-verse/air@latest`）。`DATABASE_URL` 没配时后端会直接退出（连带把前端一起带走），没有现成 PostgreSQL 就 `docker compose up -d postgres` 只起仓库自带的那个。
-> 上面 `make docker-up` 用的是仓库根的 [`docker-compose.yml`](../../docker-compose.yml)（**从源码构建**）；方式三那份 `docker-compose.hub.yml` 是**拉现成镜像**，别混。
+> `make dev` 会先检查 23351 / 23352 是否被占用并快速失败；`make dev-backend` 依赖 `air`（未安装时先 `go install github.com/air-verse/air@latest`）。`DATABASE_URL` 没配时后端会直接退出（连带把前端一起带走），没有现成 PostgreSQL 就用方式三的 Compose 起一个（`docker compose -f docker-compose.allinone.yml up -d postgres`）。
 > 逐步命令、工具链与数据库准备见[本地开发环境](../developer-guide/dev-setup.md)，全部命令见 `make help`。
 
 ## 6. 连上你的第一个数据源 → 建数据集 → 拖图

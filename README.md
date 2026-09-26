@@ -11,19 +11,13 @@
 - **仪表盘 v1** — 12 列栅格布局，图表块 / 文本块 / 盘级筛选器，一次请求多块联动取数
 - **查询记录** — 每次查询落库（内容 hash 去重）并生成短码直链，"地址栏即分享"
 
-> 完整功能说明与「为什么这样设计」见 [docs/user-guide/features.md](docs/user-guide/features.md)。
+> 完整功能说明见 [docs/user-guide/features.md](docs/user-guide/features.md)。
 
 ## 快速开始
 
-四种方式，从「只想看看」到「自己动手改」，挑一种即可。**还没装 PostgreSQL、只想最快看到界面 → 直接看方式三。** 跑起来后都访问 <http://localhost:23352>（方式四的开发模式是前端 23351）。
-
-> ⚠️ **部署前必读**：本项目**无登录、无鉴权**，定位是单团队**内网**自助分析工具 —— **不要暴露到公网**。任何能访问 23352 的人都能读写全部数据源与数据集。部署到他人可达的主机上之前，至少改掉数据库密码、别把 PostgreSQL 端口映射出来，其余见[生产部署](docs/deployment/production.md)。
-
-> 方式二、方式三用的是[发布流水线](docs/deployment/release.md)产出的镜像（**版本号以 [Releases](https://github.com/askyfun/DataInsights/releases) 页为准**）；方式四从源码构建，不依赖镜像。
-
 ### 方式一：在线预览站
 
-> 🚧 即将提供，先跳过。
+> 🚧 即将提供。
 
 ### 方式二：Docker 一条命令（自备 PostgreSQL）
 
@@ -35,23 +29,26 @@ docker run -d --name data-insights -p 23352:23352 \
   kzzhr/datainsights:latest
 ```
 
-- **`DATABASE_URL` 是唯一必填项**（一个可访问的 PostgreSQL），其余全部有默认值。
-- ⚠️ 上面的 `user:password@your-db-host` 是**占位串**：它非空，所以能通过启动检查，但容器连不上库 —— 会「起来了却打不开数据源」。请换成你自己的连接串。
-- 生产环境把 `latest` 换成具体版本号（`kzzhr/datainsights:vX.Y.Z`）钉住，别跟着 `latest` 漂。
-- 镜像支持 `linux/amd64` 与 `linux/arm64`（Apple Silicon 原生跑，无需模拟）。
-
 ### 方式三：Docker Compose 一键起全套（含 PostgreSQL）
 
 一条命令把 Data Insights 与 PostgreSQL 一起拉起来，不用自己准备数据库：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.hub.yml
-docker compose -f docker-compose.hub.yml up -d
+curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.allinone.yml
+docker compose -f docker-compose.allinone.yml up -d
 ```
 
-- 默认用 `latest`；钉版本：`TAG=vX.Y.Z docker compose -f docker-compose.hub.yml up -d`。
+- 默认用 `latest`；钉版本：`TAG=vX.Y.Z docker compose -f docker-compose.allinone.yml up -d`。
 - 数据落在命名卷 `postgres_data` 里，`down` 不会删，加 `-v` 才清空。
 - 要用本机客户端连这个数据库、想换端口、想改数据库密码：都在这份文件的注释里标了位置。
+- **生产环境**建议换成外部高可用 PostgreSQL，只跑 app 一个容器即可：
+
+```bash
+docker run -d --name data-insights \
+  -p 23352:23352 \
+  -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
+  kzzhr/datainsights:latest
+```
 
 ### 方式四：从源码运行
 
@@ -59,21 +56,12 @@ docker compose -f docker-compose.hub.yml up -d
 git clone https://github.com/askyfun/DataInsights.git
 cd DataInsights
 
-make docker-up        # = docker compose up -d --build，从源码构建镜像（首次约 5–10 分钟）
-make docker-down      # 停止
-make docker-logs      # 看日志
-```
-
-日常改代码用开发模式（前后端热重载）：
-
-```bash
 make install          # 装前后端依赖（只用 pnpm）
 make dev              # 前端 23351 + 后端 23352，一起起
 ```
 
-- 前置：**pnpm**、**`air`**（未装先 `go install github.com/air-verse/air@latest`）、一个**可访问的 PostgreSQL**（不想另外装就用 `docker compose up -d postgres` 只起仓库自带的那个）。`DATABASE_URL` 缺失时后端会直接退出。
-- 上面 `make docker-up` 用的是仓库根的 [`docker-compose.yml`](docker-compose.yml)，**从源码构建**；方式三那份 `docker-compose.hub.yml` 是**拉现成镜像**，别混。
-- 常用命令一览：`make help`。想连带一个现成的 StarRocks 试用，用 [docker-compose.allinone.yml](docker-compose.allinone.yml)。
+- 前置：**pnpm**、**`air`**（未装先 `go install github.com/air-verse/air@latest`）、一个**可访问的 PostgreSQL**。`DATABASE_URL` 缺失时后端会直接退出。
+- 常用命令一览：`make help`。
 
 > 四种方式的完整步骤与「连上第一个数据源 → 建数据集 → 拖图」：[docs/getting-started/quick-start.md](docs/getting-started/quick-start.md)
 > 本地环境准备（工具链、数据库、逐条命令）：[docs/developer-guide/dev-setup.md](docs/developer-guide/dev-setup.md)

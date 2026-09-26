@@ -29,54 +29,25 @@
 
 发布镜像由 [GitHub Actions 发布流水线](release.md)自动构建推送，**架构、tag 规则与推送目标都以那份文档为准**。
 
-## 3. Compose：拉发布镜像一键起全套
+## 3. Compose：一键起全套（发布镜像 + PostgreSQL）
 
-[`docker-compose.hub.yml`](../../docker-compose.hub.yml) 起 **PostgreSQL + app** 两个服务，app 直接用发布镜像（不构建）：
+[`docker-compose.allinone.yml`](../../docker-compose.allinone.yml) 起 **PostgreSQL + app** 两个服务，app 直接用发布镜像（不构建）：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.hub.yml
-docker compose -f docker-compose.hub.yml up -d
+curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.allinone.yml
+docker compose -f docker-compose.allinone.yml up -d
 
 # 钉版本
-TAG=v1.0.0 docker compose -f docker-compose.hub.yml up -d
+TAG=v1.0.0 docker compose -f docker-compose.allinone.yml up -d
 ```
 
 - 零外部依赖：所有环境变量都有默认值，**不需要 `.env` 即可启动**。
 - 数据落在命名卷 `postgres_data`：`down` 保留，`down -v` 清空。
-- ⚠️ 库里是公开的演示密码 `insights123`，PostgreSQL **默认不映射到宿主机**。放到他人可达的主机上前先改密码（并同步改 app 的 `DATABASE_URL`）。本项目**无登录、无鉴权**，不要暴露到公网 —— 见[生产部署](production.md)。
-
-## 4. Compose：从源码构建
-
-[`docker-compose.yml`](../../docker-compose.yml) 同样是 PostgreSQL + 一个 app 服务，但 app 是 `build:` 出来的：
-
-```bash
-make docker-up      # = docker compose up -d --build
-make docker-logs    # 查看日志
-make docker-down    # 停止
-```
-
-- 变量覆盖优先级（高 → 低）：① shell 环境变量；② 仓库根 `.env`（compose 自动读来做插值）；③ `docker-compose.yml` 里的默认值。
+- ⚠️ 库里是公开的演示密码 `insights123`，仅本地体验用；放到他人可达的主机上前先改密码（并同步改 app 的 `DATABASE_URL`），或换成外部数据库只跑 app。本项目**无登录、无鉴权**，不要暴露到公网 —— 见[生产部署](production.md)。
+- 变量覆盖优先级（高 → 低）：① shell 环境变量；② 同目录 `.env`（compose 自动读来做插值）；③ 文件内默认值。
 - 容器内监听端口与宿主机映射端口一致，由 `PORT` 统一控制。
 
-## 5. All-in-One（含 StarRocks，试用 / Demo）
-
-`docker-compose.allinone.yml` 额外带一个 StarRocks，适合本地试用（从源码构建）：
-
-```bash
-docker compose -f docker-compose.allinone.yml up --build
-# 停止并清除数据
-docker compose -f docker-compose.allinone.yml down -v
-```
-
-连接方式：
-
-| 服务 | 地址 |
-|------|------|
-| Data Insights | <http://localhost:23352> |
-| PostgreSQL | `postgres://insights:insights123@localhost:5432/insights` |
-| StarRocks | `mysql -h127.0.0.1 -P9030 -uroot`（无密码） |
-
-## 6. 直接用 Docker（自备 PostgreSQL）
+## 4. 直接用 Docker（自备 PostgreSQL）
 
 ```bash
 # 拉发布镜像（或先 docker build -t data-insights . 自建）
@@ -92,7 +63,7 @@ docker run -d -p 23352:23352 --env-file .env --name data-insights kzzhr/datainsi
 
 `DATABASE_URL` 是**唯一必填项**。生产构建默认同源，**不需要** CORS 白名单；只有前后端分开部署时才用 `VITE_API_BASE_URL` 烧入外部 API 地址。
 
-## 7. 镜像构建细节
+## 5. 镜像构建细节
 
 `Dockerfile` 分三个阶段：
 
@@ -110,7 +81,7 @@ docker run -d -p 23352:23352 --env-file .env --name data-insights kzzhr/datainsi
 - `VITE_*` 只能以 **build arg** 传入（构建期内联），容器起来后再给环境变量没有任何作用。
 - 健康检查直接探同一端口的 `/health`（同一进程，无需额外探活工具）；`PORT` 可在运行时覆盖。
 
-## 8. 排障
+## 6. 排障
 
 - **端口冲突**：宿主 23352 被占用时改 `PORT`（compose 的 `ports` 映射已随之同步）。
 - **构建缓存**：改了依赖清单后仍怀疑命中旧缓存时，用 `docker build --no-cache ...` 重建。

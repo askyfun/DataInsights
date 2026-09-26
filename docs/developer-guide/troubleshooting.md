@@ -41,7 +41,7 @@
 
 - **唯一配置来源 = 环境变量**；`backend/etc/` 已删，**别再引入 config.toml / yaml**。优先级：内置默认 < 根 `.env` < 真实 env；键名清单的唯一事实源是 `.env.example`（后端 6 个**无前缀**，前端只有 `VITE_SENTRY_DSN` / `VITE_API_BASE_URL`）。**空串 = 未设置**。
 - ⚠️ **监听地址不是配置项**，固定 `0.0.0.0`；`HOST` env **有意忽略**且有用例钉死 —— 别加回来。
-- ⚠️ compose 通过根 `.env` 做变量插值（若存在）；所有运行时变量都有默认值，**不强制要求 `.env` 文件**；**改 `PORT` 已自动同步到 `docker-compose.yml` 的 `ports`**，无需手工改映射。
+- ⚠️ compose 通过根 `.env` 做变量插值（若存在）；所有运行时变量都有默认值，**不强制要求 `.env` 文件**；**改 `PORT` 已自动同步到 `docker-compose.allinone.yml` 的 `ports`**，无需手工改映射。
 - ⚠️ godotenv **不覆盖已存在的 env**（"真实 env > `.env`"就靠它），别改 override。⚠️ 测试里 `t.Setenv(k,"")` **≠** unset（会挡住 `.env` 值）→ 走 `LoadDotEnv` 的用例必须用 `os.Unsetenv`。
 - ⚠️ `VITE_*` 是**构建期内联**，改完必须重 build，**绝不可放密钥**；为空则**完全跳过 `Sentry.init`**。它与后端 `SENTRY_DSN` 是两个独立项目。
 - 根 `Dockerfile` 三阶段（`backend/`、`frontend/` 各自的 Dockerfile 与 nginx.conf 已删），**构建上下文 = 仓库根**；⚠️ `.dockerignore` **必须排除 `.env`**，否则 Vite 会把 `VITE_*` 内联进浏览器包。

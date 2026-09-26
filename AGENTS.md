@@ -134,7 +134,7 @@ make dev               # 前后端同时启动，带热重载（air）
 make dev-frontend      # 仅前端
 make build             # 前后端构建
 make docker-build      # 构建单镜像（前端+后端编译进同一个镜像）
-make docker-up         # docker compose 启动所有服务（自动 --build）
+make docker-up         # docker compose -f docker-compose.allinone.yml 启动（发布镜像 + PostgreSQL）
 make docker-down       # 停止服务
 make docker-logs       # 查看日志
 make clean             # 清理 dist、node_modules、backend/bin
@@ -270,8 +270,7 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
   - 缓存策略继承原来的 nginx 配置语义：`assets/` 下带内容哈希的产物 `immutable` 长缓存，其余 `no-cache`。
   - 静态目录**配错即启动失败**（`webui.New` 读不到 `index.html` 就退出），不会跑起来之后整站 404。
   - 镜像自带的只有 `STATIC_DIR=/app/web`（代码默认值是"空 = 只提供 API"，必须显式指）；监听地址/端口的内置默认值本就是 `0.0.0.0:23352`，无需重复声明。其余全部运行时注入。
-- `docker compose`: `docker-compose.yml` — PostgreSQL（端口 5432）+ **一个 app 服务**（23352，前后端同容器）；后端只认 `DATABASE_URL`（裸名即 12-factor 标准名，无前缀历史包袱）。
-- `docker compose`（发布镜像路径）: `docker-compose.hub.yml` — 同样两个服务，但 app 是 `image: kzzhr/datainsights:${TAG:-latest}`（**不构建**），给只想跑起来的使用者。镜像由 `.github/workflows/release.yml` 手动触发发布（校验版本号 + 双端测试 → 冒烟 → 推 amd64/arm64 镜像到 Docker Hub → 打 tag + 建 Release），运维手册见 `docs/deployment/release.md`。
+- `docker compose`（唯一一份，`docker-compose.allinone.yml`）: PostgreSQL（端口 5432，本地体验用）+ **一个 app 服务**（23352，前后端同容器），app 用 Docker Hub 发布镜像 `kzzhr/datainsights:${TAG:-latest}` **不构建**；生产环境换外部高可用 PostgreSQL 只跑 app（见 README）。镜像由 `.github/workflows/release.yml` 手动触发发布（校验版本号 + 双端测试 → 冒烟 → 推 amd64/arm64 镜像到 Docker Hub → 打 tag + 建 Release），运维手册见 `docs/deployment/release.md`。
 - 本地不起 Docker 也能验证同一形态：`make serve`（构建前端产物后 `STATIC_DIR=../frontend/dist go run ./cmd`）。不设 `STATIC_DIR` 时后端退化为纯 API 服务，此时 `/share/:token` 才会注册。
 - ⚠️ **`frontend/vite.config.js` / `.d.ts` 是 tsc 产物，且会遮蔽 `vite.config.ts`**（Vite 解析 `vite.config.js` 优先于 `.ts`）。曾出现改了 `.ts` 却完全不生效的情况。发现配置改动「没反应」时先 `ls frontend/vite.config.*`，删掉这两个文件再验证。
 

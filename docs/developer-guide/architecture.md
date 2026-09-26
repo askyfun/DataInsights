@@ -65,7 +65,7 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 │   └── go.mod
 ├── Dockerfile                # 单镜像：前端产物 + Go 二进制（无 nginx，单进程单端口）
 ├── Makefile
-└── docker-compose.yml
+└── docker-compose.allinone.yml  # 发布镜像 + PostgreSQL 一键体验环境
 ```
 
 ## 关键约束

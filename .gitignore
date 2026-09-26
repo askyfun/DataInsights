@@ -29,7 +29,6 @@ node_modules/
 package-lock.json
 npm-shrinkwrap.json
 yarn.lock
-.opencode/
 
 # IDE and tools
 .kilo/
