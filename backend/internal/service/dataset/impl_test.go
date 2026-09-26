@@ -22,6 +22,7 @@ import (
 // stubConnection 实现 datasource.Connection，用于替换真实驱动。
 type stubConnection struct {
 	executeSQL    string
+	executeArgs   []any
 	executeErr    error
 	resultColumns []string
 	resultRows    []map[string]any
@@ -55,6 +56,7 @@ func (s *stubConnection) Capabilities(ctx context.Context) (*datasource.DialectC
 
 func (s *stubConnection) Execute(ctx context.Context, query string, args ...any) (*datasource.QueryResult, error) {
 	s.executeSQL = query
+	s.executeArgs = args
 	if s.executeErr != nil {
 		return nil, s.executeErr
 	}

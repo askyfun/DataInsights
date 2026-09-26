@@ -155,3 +155,74 @@ func TestHistogramBinOptions(t *testing.T) {
 		})
 	}
 }
+
+// TestHistogramProcessor_ProcessBinsGrouped 验证分组直方图（2026-09-26）装配：
+// 每个维度值组合一份 bins；顶层 Bins 为跨系列总计数；同 bin 多系列计数不丢不重；
+// NULL 维度值渲染为空串参与分组；dimCount=0 时与旧 ProcessBins 完全一致（无 groups）。
+func TestHistogramProcessor_ProcessBinsGrouped(t *testing.T) {
+	rows := []map[string]any{
+		{"d0": "East", "bin": float64(0), "cnt": int64(3)},
+		{"d0": "West", "bin": float64(0), "cnt": int64(2)},
+		{"d0": "East", "bin": float64(1), "cnt": int64(4)},
+		{"d0": nil, "bin": float64(1), "cnt": int64(1)},
+	}
+	resp, err := (&HistogramProcessor{}).ProcessBinsGrouped(rows, 0, 10, 2, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 顶层：跨系列总计数
+	wantTotals := []HistogramBin{{BinStart: 0, BinEnd: 10, Count: 5}, {BinStart: 10, BinEnd: 20, Count: 5}}
+	for i, b := range resp.Bins {
+		if b != wantTotals[i] {
+			t.Errorf("totals[%d]: expected %+v, got %+v", i, wantTotals[i], b)
+		}
+	}
+
+	// 分组：East {3,4}、West {2,0}、NULL→"" {0,1}；顺序按首次出现。
+	if len(resp.Groups) != 3 {
+		t.Fatalf("expected 3 groups, got %d: %+v", len(resp.Groups), resp.Groups)
+	}
+	wantGroupBins := map[string][2]int64{"East": {3, 4}, "West": {2, 0}, "": {0, 1}}
+	wantOrder := []string{"East", "West", ""}
+	for i, g := range resp.Groups {
+		if g.Name != wantOrder[i] {
+			t.Errorf("group[%d] name: expected %q, got %q", i, wantOrder[i], g.Name)
+		}
+		want := wantGroupBins[g.Name]
+		if len(g.Bins) != 2 || g.Bins[0].Count != want[0] || g.Bins[1].Count != want[1] {
+			t.Errorf("group %q bins: expected %v, got %+v", g.Name, want, g.Bins)
+		}
+	}
+
+	// 不变式：sum(group bins) == totals
+	var groupSum int64
+	for _, g := range resp.Groups {
+		for _, b := range g.Bins {
+			groupSum += b.Count
+		}
+	}
+	var totalSum int64
+	for _, b := range resp.Bins {
+		totalSum += b.Count
+	}
+	if groupSum != totalSum {
+		t.Errorf("invariant broken: group sum %d != total sum %d", groupSum, totalSum)
+	}
+}
+
+// TestHistogramProcessor_ProcessBinsGrouped_ZeroDims_NoGroups dimCount=0 时
+// 行为必须与旧 ProcessBins 完全一致（不产出 groups，顶层即总数）。
+func TestHistogramProcessor_ProcessBinsGrouped_ZeroDims_NoGroups(t *testing.T) {
+	rows := []map[string]any{{"bin": float64(0), "cnt": int64(7)}}
+	resp, err := (&HistogramProcessor{}).ProcessBinsGrouped(rows, 0, 5, 1, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Bins[0].Count != 7 {
+		t.Errorf("expected count 7, got %d", resp.Bins[0].Count)
+	}
+	if len(resp.Groups) != 0 {
+		t.Errorf("expected no groups, got %+v", resp.Groups)
+	}
+}

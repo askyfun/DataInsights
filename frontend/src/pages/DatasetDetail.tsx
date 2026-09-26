@@ -33,6 +33,7 @@ import { useIntl } from 'react-intl';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { DatasetColumn } from '../api';
 import { DatasetPreview, datasetsApi } from '../api';
+import ClickToEdit from '../components/ClickToEdit';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
@@ -165,6 +166,16 @@ const DatasetDetailPage: React.FC = () => {
     setSavingColumns(true);
     try {
       await datasetsApi.updateColumns(datasetId, trimmed);
+      // 字段改名/描述变更后热刷新图表构建页的字段缓存：store 里的 chartBuilderFields
+      // 是跨路由共享的快照，若它正属于本数据集，就地重拉——否则用户回到图表查询页时，
+      // 查询配置里的字段芯片/筛选芯片仍显示旧名（预览区域走查询响应、会自动更新）。
+      const builderState = useStore.getState();
+      if (
+        builderState.chartBuilderFieldsDatasetId === datasetId &&
+        builderState.chartBuilderFields.length > 0
+      ) {
+        await builderState.fetchDatasetFields(datasetId);
+      }
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
@@ -296,46 +307,34 @@ const DatasetDetailPage: React.FC = () => {
       title: intl.formatMessage({ id: 'field.name' }),
       dataIndex: 'name',
       key: 'name',
-      width: 240,
+      width: 260,
       render: (name: string, record: DatasetColumn) => (
-        <Space orientation="vertical" size={2} style={{ maxWidth: 220 }}>
-          <Space size={4}>
-            {record.expr && record.expr !== record.name && (
-              <FunctionOutlined style={{ color: '#722ed1' }} />
-            )}
-            {/* 字段名可改：id 是稳定引用键，改名只影响展示与 SQL 输出别名 */}
-            <Input
-              value={name}
-              onChange={(event) => handleColumnNameChange(record.id, event.target.value)}
-              style={{
-                width: 170,
-                // 与图表构建页的字段语义同源：维度蓝 / 指标绿
-                color: record.role === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)',
-              }}
-            />
-          </Space>
-          <Space size={4} wrap>
-            {isShardKey(record) && (
-              <Tag color="orange" style={{ marginInlineEnd: 0 }}>
-                {intl.formatMessage({ id: 'field.shardKey' })}
-              </Tag>
-            )}
-            {record.expr && record.expr !== record.name && (
-              <Tag color="purple" style={{ marginInlineEnd: 0 }}>
-                {intl.formatMessage({ id: 'field.virtual' })}
-              </Tag>
-            )}
-            {record.role === 'dimension' && (
-              <Tag color="blue" style={{ marginInlineEnd: 0 }}>
-                {intl.formatMessage({ id: 'field.dimension' })}
-              </Tag>
-            )}
-            {record.role === 'metric' && (
-              <Tag color="purple" style={{ marginInlineEnd: 0 }}>
-                {intl.formatMessage({ id: 'field.metric' })}
-              </Tag>
-            )}
-          </Space>
+        // 单行布局：虚拟字段图标 + 可点开即改的字段名 + 附属小标签（分片/虚拟）。
+        // 维度/指标不再在这里重复显示——role 列的开关与语义色已承载该信息。
+        <Space size={4} style={{ maxWidth: 240 }} wrap>
+          {record.expr && record.expr !== record.name && (
+            <FunctionOutlined style={{ color: 'var(--dr-date)' }} aria-hidden />
+          )}
+          <ClickToEdit
+            value={name}
+            onChange={(value) => handleColumnNameChange(record.id, value)}
+            placeholder={intl.formatMessage({ id: 'field.pleaseEnterFieldName' })}
+            // 与图表构建页的字段语义同源：维度蓝 / 指标绿
+            color={record.role === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)'}
+            testId={`field-name-${record.id}`}
+            ariaLabel={intl.formatMessage({ id: 'field.name' })}
+            style={{ maxWidth: 130 }}
+          />
+          {isShardKey(record) && (
+            <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+              {intl.formatMessage({ id: 'field.shardKey' })}
+            </Tag>
+          )}
+          {record.expr && record.expr !== record.name && (
+            <Tag color="purple" style={{ marginInlineEnd: 0 }}>
+              {intl.formatMessage({ id: 'field.virtual' })}
+            </Tag>
+          )}
         </Space>
       ),
     },
@@ -344,12 +343,13 @@ const DatasetDetailPage: React.FC = () => {
       dataIndex: 'comment',
       key: 'comment',
       render: (comment: string, record: any) => (
-        <Input
+        // 与字段名列同一套「点开即改」交互：默认像只读文本，点击出现光标可直接打字。
+        <ClickToEdit
           value={comment}
+          onChange={(value) => handleColumnCommentChange(record.id, value)}
           placeholder={intl.formatMessage({ id: 'field.descriptionPlaceholder' })}
-          variant="borderless"
-          onChange={(event) => handleColumnCommentChange(record.id, event.target.value)}
-          style={{ width: '100%', paddingInline: 0 }}
+          testId={`field-comment-${record.id}`}
+          ariaLabel={intl.formatMessage({ id: 'field.description' })}
         />
       ),
     },
@@ -399,9 +399,9 @@ const DatasetDetailPage: React.FC = () => {
             handleColumnRoleChange(record.id, checked ? 'metric' : 'dimension')
           }
           style={{
-            // 只在「指标」态染色（指标绿）；「维度」态交回 antd 默认灰，
-            // 否则内联色会把两个状态涂成同一个颜色、状态差异反而丢失。
-            backgroundColor: role === 'metric' ? 'var(--dr-metric)' : undefined,
+            // 角色语义色统一：指标绿 / 维度蓝（与字段名文字色、图表构建页同源），
+            // 不再让「维度」态落回 antd 默认灰——灰在本页易与禁用态混淆。
+            backgroundColor: role === 'metric' ? 'var(--dr-metric)' : 'var(--dr-dim)',
           }}
         />
       ),

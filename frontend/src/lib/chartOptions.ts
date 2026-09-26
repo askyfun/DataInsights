@@ -438,6 +438,25 @@ export function buildChartOption(
         const histogram: HistogramResponse = data;
         // 直方图用纵向条（类目轴在 y、自上而下排列），与柱状图（类目沿 x 横向展开、
         // 易联想到时间轴）在视觉语义上区分：柱状图看趋势，直方图看分布。
+        // 分组直方图（2026-09-26）：响应带 groups（请求拖入了分组维度）时，
+        // 每个维度值一个系列、按 bin 堆叠——与"分组柱状图"的系列语义同源；
+        // 无 groups 保持单系列（顶层 bins）。
+        const histogramGroups = histogram.groups ?? [];
+        const histogramSeries = histogramGroups.length
+          ? histogramGroups.map((group) => ({
+              name: group.name,
+              type: 'bar' as const,
+              stack: 'histogram-groups',
+              data: group.bins.map((bin) => bin.count),
+            }))
+          : [
+              {
+                // value 槽位列名在 context.metrics[0]；缺失（防御）回退 'count'
+                name: labelOf(context.metrics[0] ?? 'count'),
+                type: 'bar' as const,
+                data: histogram.bins.map((bin) => bin.count),
+              },
+            ];
         return {
           ...commonOptions,
           xAxis: { type: 'value' as const },
@@ -446,14 +465,7 @@ export function buildChartOption(
             data: histogram.bins.map((bin) => `${bin.bin_start} ~ ${bin.bin_end}`),
             inverse: true,
           },
-          series: [
-            {
-              // value 槽位列名在 context.metrics[0]；缺失（防御）回退 'count'
-              name: labelOf(context.metrics[0] ?? 'count'),
-              type: 'bar' as const,
-              data: histogram.bins.map((bin) => bin.count),
-            },
-          ],
+          series: histogramSeries,
           ...colorOf(),
         };
       }

@@ -12,6 +12,9 @@ const (
 	histogramMaxAlias   = "mx"  // 阶段1 MAX(field)
 	histogramCountAlias = "cnt" // 阶段1 COUNT(*) / 阶段2 每箱计数
 	histogramBinAlias   = "bin" // 阶段2 FLOOR 分箱索引
+	// histogramDimAliasPrefix 分组直方图（2026-09-26）里第 i 个分组维度的输出列别名
+	// （d0/d1/...）：引号保留别名，processor 按这些名字逐字读行键。
+	histogramDimAliasPrefix = "d"
 )
 
 // BuildHistogramStatsQuery 生成直方图阶段1（统计）查询：
@@ -77,33 +80,65 @@ func (qb *BunQueryBuilder) buildHistogramStatsQuery(ast *QueryAST, valueField st
 // 但确定性输出便于断言与调试）。忽略 ast.Sort/Pagination/Limit：分箱必须覆盖
 // 过滤后的完整数据集。
 func BuildHistogramBinQuery(dialect DialectType, ast *QueryAST, valueField string, minValue, binWidth float64) (string, []any) {
+	return BuildHistogramBinQueryGrouped(dialect, ast, valueField, minValue, binWidth, nil)
+}
+
+// BuildHistogramBinQueryGrouped 生成直方图阶段2 查询，dims 非空时按维度分组（分组直方图）：
+//
+//	dims 为空（无分组）：
+//	    SELECT "bin", COUNT(*) AS "cnt" FROM (...) AS _hist_bins GROUP BY "bin" ORDER BY "bin"
+//	dims 非空：
+//	    SELECT "d0"[, "d1"...], "bin", COUNT(*) AS "cnt"
+//	    FROM (SELECT <dim0 expr> AS "d0"[, <dim1 expr> AS "d1"...], FLOOR((<field> - ?) / ?) AS "bin"
+//	          FROM <source> WHERE <filters>) AS _hist_bins
+//	    GROUP BY "d0"[, "d1"...], "bin" ORDER BY "d0"[, "d1"...], "bin"
+//
+// 维度表达式沿用通用 builder 的 renderDimensionGroupBy（含时间粒度的方言渲染），
+// 并用引号保留别名 d0/d1/... 固定行键——processor 逐字读取。GROUP BY 仍走派生表列
+// （与无分组路径同一裁定，见 BuildHistogramBinQuery doc）。minValue/binWidth 与过滤值
+// 一律参数化 args；args 顺序：[minValue, binWidth, 过滤参数...]。
+func BuildHistogramBinQueryGrouped(dialect DialectType, ast *QueryAST, valueField string, minValue, binWidth float64, dims []DimensionExprAST) (string, []any) {
 	qb := NewBunQueryBuilder()
 	qb.SetDialect(dialect)
 	qb.withASTIndex(ast)
-	return qb.buildHistogramBinQuery(ast, valueField, minValue, binWidth)
+	return qb.buildHistogramBinQuery(ast, valueField, minValue, binWidth, dims)
 }
 
-func (qb *BunQueryBuilder) buildHistogramBinQuery(ast *QueryAST, valueField string, minValue, binWidth float64) (string, []any) {
+func (qb *BunQueryBuilder) buildHistogramBinQuery(ast *QueryAST, valueField string, minValue, binWidth float64, dims []DimensionExprAST) (string, []any) {
 	var args []any
 	var sb strings.Builder
 
 	field := safeIdentifier(ast.GetMetricFieldExpr(valueField))
 	binCol := qb.quoteResultAlias(histogramBinAlias)
 
-	// 内层派生表：FLOOR 分箱索引 + 参数化 (minValue, binWidth) + 过滤。
+	dimAliases := make([]string, len(dims))
+	for i := range dimAliases {
+		dimAliases[i] = qb.quoteResultAlias(fmt.Sprintf("%s%d", histogramDimAliasPrefix, i))
+	}
+
+	// 内层派生表：分组维度表达式 + FLOOR 分箱索引 + 参数化 (minValue, binWidth) + 过滤。
 	args = append(args, minValue, binWidth)
+	innerSelects := make([]string, 0, len(dims)+1)
+	for i, dim := range dims {
+		innerSelects = append(innerSelects,
+			fmt.Sprintf("%s AS %s", qb.renderDimensionGroupBy(dim), dimAliases[i]))
+	}
+	innerSelects = append(innerSelects,
+		fmt.Sprintf("FLOOR((%s - ?) / ?) AS %s", field, binCol))
+	// 外层 SELECT：dims 非空时 d0..dn 在前，bin 恒在其后，最后为 COUNT(*) AS "cnt"。
+	outerSelects := append(append([]string{}, dimAliases...), binCol,
+		fmt.Sprintf("COUNT(*) AS %s", qb.quoteResultAlias(histogramCountAlias)))
 	sb.WriteString("SELECT ")
-	sb.WriteString(binCol)
-	sb.WriteString(fmt.Sprintf(", COUNT(*) AS %s FROM (SELECT FLOOR((%s - ?) / ?) AS %s FROM %s",
-		qb.quoteResultAlias(histogramCountAlias), field, binCol, histogramSourceSQL(ast)))
+	sb.WriteString(strings.Join(outerSelects, ", "))
+	sb.WriteString(fmt.Sprintf(" FROM (SELECT %s FROM %s", strings.Join(innerSelects, ", "), histogramSourceSQL(ast)))
 	if where := qb.buildWhereClause(ast, &args); where != "" {
 		sb.WriteString(" WHERE ")
 		sb.WriteString(where)
 	}
 	sb.WriteString(") AS _hist_bins GROUP BY ")
-	sb.WriteString(binCol)
+	sb.WriteString(strings.Join(append(append([]string{}, dimAliases...), binCol), ", "))
 	sb.WriteString(" ORDER BY ")
-	sb.WriteString(binCol)
+	sb.WriteString(strings.Join(append(append([]string{}, dimAliases...), binCol), ", "))
 
 	return sb.String(), args
 }

@@ -135,3 +135,49 @@ func TestBuildHistogram_FieldExprResolution(t *testing.T) {
 		t.Fatalf("injection leaked into SQL: %s", evilSQL)
 	}
 }
+
+// TestBuildHistogramBinQuery_Grouped_FullSQL 钉死分组直方图（2026-09-26）阶段2 SQL：
+// 分组维度表达式以引号保留别名 d0 进内层 SELECT，外层 SELECT d0, bin, COUNT(*)，
+// GROUP BY / ORDER BY 均引用派生表列（d0..., bin）——与无分组路径同一裁定。
+func TestBuildHistogramBinQuery_Grouped_FullSQL(t *testing.T) {
+	spec := &QuerySpec{
+		Dimensions: []DimensionExpr{{Field: "region"}},
+		Metrics:    []MetricExpr2{{Field: "amount", Agg: AggSum, Alias: "total"}},
+	}
+	ast := NewQueryPlanner().PlanAST("orders", SourceTypeTable, spec)
+
+	sql, args := BuildHistogramBinQueryGrouped(DialectPostgreSQL, ast, "amount", 0, 12.5, ast.DimensionExprs)
+
+	want := `SELECT "d0", "bin", COUNT(*) AS "cnt" ` +
+		`FROM (SELECT region AS "d0", FLOOR((amount - ?) / ?) AS "bin" FROM orders) AS _hist_bins ` +
+		`GROUP BY "d0", "bin" ORDER BY "d0", "bin"`
+	if sql != want {
+		t.Fatalf("unexpected SQL\nwant: %s\n got: %s", want, sql)
+	}
+	wantArgs := []any{float64(0), float64(12.5)}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("expected %d args, got %d: %v", len(wantArgs), len(args), args)
+	}
+	for i := range wantArgs {
+		if args[i] != wantArgs[i] {
+			t.Errorf("args[%d]: expected %v, got %v", i, wantArgs[i], args[i])
+		}
+	}
+}
+
+// TestBuildHistogramBinQuery_NoDims_Unchanged 形状回归：dims 为空时与旧
+// BuildHistogramBinQuery 逐字一致（分组能力不得改动既有 wire 形状）。
+func TestBuildHistogramBinQuery_NoDims_Unchanged(t *testing.T) {
+	ast := histogramPlanAST(
+		[]MetricExpr2{{Field: "amount", Agg: AggSum, Alias: "total"}},
+		nil,
+	)
+	newSQL, newArgs := BuildHistogramBinQueryGrouped(DialectPostgreSQL, ast, "amount", 3, 2, nil)
+	oldSQL, oldArgs := BuildHistogramBinQuery(DialectPostgreSQL, ast, "amount", 3, 2)
+	if newSQL != oldSQL {
+		t.Fatalf("no-dims SQL drifted\nold: %s\nnew: %s", oldSQL, newSQL)
+	}
+	if len(newArgs) != len(oldArgs) {
+		t.Fatalf("args drift: old %v new %v", oldArgs, newArgs)
+	}
+}

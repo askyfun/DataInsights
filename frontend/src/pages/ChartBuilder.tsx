@@ -3,6 +3,7 @@ import {
   BarChartOutlined,
   CodeOutlined,
   DownOutlined,
+  ExportOutlined,
   FieldBinaryOutlined,
   FunctionOutlined,
   LinkOutlined,
@@ -2313,9 +2314,38 @@ const ChartBuilder: React.FC = () => {
   };
 
   const handleDatasetChange = (value: number | null) => {
+    // 重新选择同一个数据集也要重拉字段：字段改名发生在数据集详情页时，本页 store
+    // 里的 chartBuilderFields 是旧快照——而「同值赋值」不会触发 selectedDatasetId
+    // 的 effect。不重拉的话查询配置里的字段芯片会一直显示旧名。
+    if (value !== null && value === selectedDatasetId) {
+      void fetchDatasetFields(value);
+    }
     setSelectedDatasetId(value);
     setEditingChartId(null);
   };
+
+  /**
+   * 数据集菜单行右侧的「跳转详情」按钮：新窗口打开 /datasets/:id。
+   * 调用场景：桌面端数据集 Dropdown 与移动端 Select 的每一行。
+   * 主要逻辑：stopPropagation + preventDefault，避免触发所在行的选中行为；
+   * window.open(_, '_blank') 新窗口打开，不丢当前查询页的工作现场。
+   */
+  const renderDatasetJumpAction = (datasetId: number, datasetName: string) => (
+    <Button
+      type="text"
+      size="small"
+      icon={<ExportOutlined />}
+      aria-label={`在新窗口打开数据集 ${datasetName}`}
+      title="在新窗口打开数据集详情"
+      data-testid={`dataset-jump-${datasetId}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        window.open(`/datasets/${datasetId}`, '_blank');
+      }}
+      style={{ marginLeft: 'auto', flexShrink: 0 }}
+    />
+  );
 
   const renderPreview = () => {
     // pivot v2（交叉表形状 cells+col_headers+row_headers）走 PivotTable。按响应形状
@@ -2465,6 +2495,23 @@ const ChartBuilder: React.FC = () => {
               options={datasets.map((ds) => ({
                 value: ds.id,
                 label: ds.name,
+                // 每行右侧的跳转按钮：optionRender 渲染在选项行内，与桌面端 Dropdown 同一交互。
+                optionRender: () => (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {ds.name}
+                    </span>
+                    {renderDatasetJumpAction(ds.id, ds.name)}
+                  </span>
+                ),
               }))}
             />
           </div>
@@ -2599,7 +2646,26 @@ const ChartBuilder: React.FC = () => {
             trigger={['click']}
             placement="bottomLeft"
             menu={{
-              items: datasets.map((ds) => ({ key: String(ds.id), label: ds.name })),
+              // 每行 = 数据集名（点击切换）+ 右侧跳转按钮（新窗口开详情页）。
+              items: datasets.map((ds) => ({
+                key: String(ds.id),
+                label: (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {ds.name}
+                    </span>
+                    {renderDatasetJumpAction(ds.id, ds.name)}
+                  </span>
+                ),
+              })),
               selectedKeys: selectedDatasetId != null ? [String(selectedDatasetId)] : [],
               onClick: ({ key }) => handleDatasetChange(Number(key)),
             }}

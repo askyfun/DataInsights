@@ -126,13 +126,20 @@ describe('chartDefinitions 分组维度槽位下线（2026-09-19）', () => {
 });
 
 describe('chartDefinitions histogram（R-57）', () => {
-  it('单个 value 指标槽位、maxFields 1、无维度槽位（对齐后端 Metrics[0].Field）', () => {
+  it('分组维度(可选) + 单个 value 指标槽位 maxFields 1（2026-09-26 起支持维度组，对齐后端 Metrics[0].Field）', () => {
     const definition = chartDefinitions.histogram;
 
     expect(definition.type).toBe('histogram');
     expect(definition.label).toBe('直方图');
     expect(definition.styleKeys).toEqual(['colors']);
     expect(definition.fieldGroups).toEqual([
+      {
+        id: 'group',
+        kind: 'dimension',
+        label: '分组维度',
+        emptyText: '可选：拖入维度按其值拆分分布，或点击+添加',
+        minGroups: 1,
+      },
       {
         id: 'value',
         kind: 'metric',

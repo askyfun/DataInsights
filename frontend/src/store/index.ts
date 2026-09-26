@@ -331,6 +331,8 @@ export interface AppState {
 
   // Chart Builder State
   chartBuilderFields: ChartField[];
+  /** chartBuilderFields 所属的数据集 id（null = 尚未加载）：改名保存后据此判断要不要热刷新。 */
+  chartBuilderFieldsDatasetId: number | null;
   chartBuilderFieldsLoading: boolean;
   chartBuilderConfig: ChartConfig;
   chartData: ChartDataResponse;
@@ -463,6 +465,7 @@ export const useStore = create<AppState>((set) => ({
 
   // Initial state - Chart Builder
   chartBuilderFields: [],
+  chartBuilderFieldsDatasetId: null,
   chartBuilderFieldsLoading: false,
   chartBuilderConfig: {
     chartType: 'table',
@@ -491,7 +494,9 @@ export const useStore = create<AppState>((set) => ({
   },
   chartQueryOptions: {},
   chartQueryResponse: null,
-  tablePagination: { page: 1, pageSize: 10, total: 0 },
+  // 表格/透视表默认一页 100 条（用户约定）：服务端分页的 page_size 初始值，
+  // 首次查询即按 100 条拉取，减少翻页次数。
+  tablePagination: { page: 1, pageSize: 100, total: 0 },
   tableColumns: [],
 
   // Selected items
@@ -633,7 +638,7 @@ export const useStore = create<AppState>((set) => ({
 
   // Chart Builder actions
   fetchDatasetFields: async (datasetId: number) => {
-    set({ chartBuilderFieldsLoading: true });
+    set({ chartBuilderFieldsLoading: true, chartBuilderFieldsDatasetId: datasetId });
     try {
       const response = await datasetsApi.getColumns(datasetId);
       const columns = response.data.data;
@@ -651,7 +656,11 @@ export const useStore = create<AppState>((set) => ({
 
       set({ chartBuilderFields: fields, chartBuilderFieldsLoading: false });
     } catch (_error: any) {
-      set({ chartBuilderFields: [], chartBuilderFieldsLoading: false });
+      set({
+        chartBuilderFields: [],
+        chartBuilderFieldsDatasetId: null,
+        chartBuilderFieldsLoading: false,
+      });
     }
   },
 
@@ -676,6 +685,8 @@ export const useStore = create<AppState>((set) => ({
   resetChartBuilder: () => {
     set({
       chartBuilderFields: [],
+      chartBuilderFieldsDatasetId: null,
+      chartBuilderFieldsLoading: false,
       chartBuilderConfig: {
         chartType: 'table',
         xAxisField: null,
@@ -700,6 +711,9 @@ export const useStore = create<AppState>((set) => ({
         tableRowSize: 'small',
       },
       chartQueryOptions: {},
+      // 重置时一并复位分页：上一个数据集遗留的 total/page 会让新会话的表格
+      // 显示错误的总数与页码（此前只改字段、漏掉分页）。
+      tablePagination: { page: 1, pageSize: 100, total: 0 },
     });
   },
 

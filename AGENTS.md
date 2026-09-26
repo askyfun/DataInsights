@@ -30,19 +30,19 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
 | Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `SECURITY_KEY`） |
 
-查询链路：handler → service → `query` 包（AST + bun_builder / raw.go）→ datasource 驱动。`Connection.Execute(ctx, sql string, args ...any)` 已支持参数化执行，bun_builder 是图表 SQL 的唯一出口，值参数一律通过 args 传递；标识符使用白名单校验（裸名 `datasource.IsValidIdentifier`，query 包 `safeIdentifier` 额外允许成对引号包裹的标识符）。`dialect.go` 的手写字符串 SQL builder（`SQLBuilder`/`baseSQLBuilder`/`BuildQueryString` 及各方言 builder）已作为死代码删除，仅保留 `DialectType`/`ParseDialect`/`BuildQueryStringWithBun`；聚合表达式 `aggExprPattern` 收紧为显式函数白名单（`count|sum|avg|min|max`），杜绝 `pg_sleep(1)` 之类经列 `FieldExpr` 注入任意函数名。
+查询链路：handler → service → `query` 包（AST + bun_builder / raw.go）→ datasource 驱动。**SQL 构造红线（参数化、标识符白名单、聚合函数白名单）的完整规则见 `backend/AGENTS.md`「查询处理」**，此处只记横切面：bun_builder 是图表 SQL 的唯一出口，`dialect.go` 的手写字符串 SQL builder 已作为死代码删除，仅保留 `DialectType`/`ParseDialect`/`BuildQueryStringWithBun`。
 
 契约工程（Batch 2/3）：`api/openapi.yaml` 是前后端接口的单一事实源，`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。**前端运行时类型已切换到生成物打底（Batch 3）**：`frontend/src/api/index.ts` 的实体/响应/请求类型 alias 到 `components['schemas']`，窄联合处用薄手写层（`Omit<G.X,'type'> & { type: Union }`）重收紧；已判死的声明（手写 `typeConfig`——wire 实为 snake `type_config` 且前端零消费、`ColumnInfo` 幽灵字段、`GeneratedSQL` 等）随迁移删除。三条静默红线仍有效：生成 `*Response` 是信封包装（裸 payload 对应 `ChartDataResult` 等去后缀类型，禁按名替换）、`*FormData` 是 UI 数组约定保留手写、store `QueryConfig` 为 camelCase UI 模型不换。后端 handler In/Out 仍为 handler-local 镜像（json tag 由 `contract_parity_test.go` 反射守卫），**未**切换到 `idls.*`——生成 Go 类型无 gin `form:"-"` 语义，直接作 In 会重新引入 query 污染注入面，切换列入 Batch 4 重评。图表 `bi_chart.config` 已升级为带 `version:2` 的文档（`frontend/src/lib/chartConfigSchema.ts` 的 `ChartConfigDocument` + `migrateChartConfig`），旧结构在加载时自动迁移（`fieldId` 由位置 `field-N` 改为列的稳定 id `DatasetColumn.id`），ShareView 据此渲染新结构图表；图表查询请求线不含 `config` 字段（Batch 3 已移除从未生效的 pie 合并比例死链，`query.PieProcessor.MergeOtherBelowRatio` 能力保留但未接线）。
 
 ⚠️ **`make api-gen` 的「前端」半步当前必然失败**（不是环境问题）：`openapi-typescript@7.13.0` 依赖 `typescript` 包的运行时导出 `ts.factory`，而本仓 `typescript@7` 没有它 → `TypeError: Cannot read properties of undefined`。崩溃发生在写文件之前（生成物不会被写坏）。绕过方式见 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) 的「版本与依赖」（入库）；彻底修法是把生成器与 `typescript@7` 解耦（独立 package.json 或钉一个 TS 5 别名），属独立改动。**后端那半步正常**，且只输出被 cfg 允许的子集（不含 `DashboardFilter*` 等 layout schema）。无论走哪条路，重跑生成后都要 `diff` 生成物，确认只漂了本次改动。
 
-`backend/internal/router/router.go` 的泛型路由（`RegisterGetRoute`/`RegisterPostRoute`/`RegisterPutRoute`/`RegisterDeleteRoute`）**已启用并接入 40 个 API 端点**（datasource 11 + dataset 9 + chart 8 + share 4 + queryrecord 2 + dashboard 6；chart 的 `/:id/references` 由 dashboard handler 提供但归属 chart 资源；dataset 的 `PUT /:id` 为 Batch 3 补齐，修复前端编辑保存 404 的 ghost route）。签名 `API[In,Out] func(req Request[In], res *Response[Out]) error`——`res` 为指针，值传递会静默丢弃 handler 写入。路由器按 HTTP 方法自动绑定 JSON body（POST/PUT/PATCH 绑定，GET/DELETE 不绑定）+ query 参数，并统一包装 `response` 信封；handler 内部不再手写 `response.*`（2 个例外：`/health` 在 cmd/main.go 用裸 `r.GET`+`response.Success`；share `View` 返回 302 重定向，无法套 JSON 信封；**且只在纯 API 模式下才注册** —— 托管前端时 `/share/<token>` 归前端路由，若后端插一条同路径的 302 会抢先把页面挡掉）。迁移样板见 `handler/datasource.go` 顶部 package doc；已接受的两类"不可消除差异"（bind 错误文本含 struct 名、双非法输入时 body 绑定错误优先于 path）由 baseline 测试钉死（8 个 path+body 端点 × 双非法 Empty/Malformed 变体全覆盖）。handler 入参用 handler-local In 镜像 struct（entity 不带 `form:"-"`，否则 query 参数会污染 body），其与 entity 的 json tag 一致性由 `internal/handler/contract_parity_test.go` 反射守卫。PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例）：payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
+`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 40 个 API 端点**；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
 
 `datasource/` 包实现了 `Driver` 接口用于多数据库后端——新增驱动只需实现该接口。
 
-数据库 schema 由 goose 版本化迁移管理（`backend/migrations/00001_init_schema.sql`，通过 `embed.FS` 内嵌），`model.CreateTables` 已删除；事务统一走 `database.WithTx`。
+数据库 schema 由 goose 版本化迁移管理（`backend/migrations/`，通过 `embed.FS` 内嵌），事务统一走 `database.WithTx`。
 
-运维与安全已落地：Sentry 通过 `SENTRY_DSN` 接通（sentrygin Repanic）；CORS 默认放开所有来源（平台 API 无登录态，CORS 不构成安全边界），`CORS_ALLOWED_ORIGINS` 填了非空白名单则只回显名单内来源，供将来引入认证后收紧；requestID 中间件返回非全零 ID；datasource 密码 AES-GCM 加密存储，API 响应中 `password` 字段 `json:"-"` 不外泄，share 使用 bcrypt 哈希并对外暴露 `has_password` 契约。
+运维与安全（Sentry / CORS / 加密存储 / share bcrypt）见 `backend/AGENTS.md`「运维与安全」。
 
 ### 前端结构
 
@@ -104,40 +104,16 @@ frontend/src/
 
 ## 常用命令
 
+命令细节（go test 单测、biome 各子命令等）见 `backend/AGENTS.md` 与 `frontend/AGENTS.md`，此处只留高频项：
+
 ```bash
-# 前端
-cd frontend && pnpm install
-pnpm dev               # 开发服务器，端口 23351
-pnpm build             # tsc + vite 构建
-pnpm format            # biome 格式化
-pnpm lint              # biome lint 检查
-pnpm check             # biome 完整检查（lint + 格式化）
-pnpm test              # vitest 运行测试
-pnpm build:check       # biome check + vitest（提交前验证）
-
-# 后端（推荐走 Makefile）
-make install-backend   # 安装 Go 依赖
-make dev-backend       # 开发服务器，端口 23352（使用 air 热重载）
-make build-backend     # 构建后端二进制
+make dev               # 前后端同时启动，带热重载（air），前端 23351 / 后端 23352
 make serve             # 本地验证单进程形态：构建前端后由后端托管 frontend/dist（单端口 23352）
-
-# 直接调 go 命令（需要时）
-cd backend && go mod download
-go run ./cmd                               # 开发服务器，端口 23352（写成 cmd/main.go 会缺 routes.go）
-go build -o bin/server ./cmd               # 构建后端二进制
-go test ./...                              # 运行所有测试
-go test -v ./path/to/pkg -run TestName     # 运行单个测试
-go test -race ./...                        # 带竞态检测运行测试
-
-# Makefile（项目根目录）
-make dev               # 前后端同时启动，带热重载（air）
-make dev-frontend      # 仅前端
 make build             # 前后端构建
-make docker-build      # 构建单镜像（前端+后端编译进同一个镜像）
-make docker-up         # docker compose -f docker-compose.allinone.yml 启动（发布镜像 + PostgreSQL）
-make docker-down       # 停止服务
-make docker-logs       # 查看日志
-make clean             # 清理 dist、node_modules、backend/bin
+make docker-build / docker-up / docker-down / docker-logs / clean
+
+cd backend && go test ./...        # 后端测试（提交前 go test -race ./...）
+cd frontend && pnpm build:check    # 前端提交前验证（biome check + vitest）
 ```
 
 ## 包管理器：只用 pnpm

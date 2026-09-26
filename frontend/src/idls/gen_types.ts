@@ -1224,8 +1224,15 @@ export interface components {
                 [key: string]: number;
             };
         };
-        /** @description 直方图响应（query.HistogramResponse，Task 3-1a 实现，R-57）。chart_type=histogram 时 ChartDataResult.data 的形状：两阶段分箱查询（阶段1 MIN/MAX/COUNT → 阶段2 FLOOR((field-min)/bin_width) 分组计数）产出。bins 为补全后的完整 连续分箱序列（无行的 bin 以 count=0 占位），sum(bins[].count) == 参与分箱的 数值行数；空数据集返回 bins=[]。被分箱字段为 metrics[0].field（对该列的 原始数值分箱计数，不做 SUM/AVG 聚合）；bin_count（默认 20）/bin_width 经请求的 query_options 传入。 */
+        /** @description 直方图响应（query.HistogramResponse，Task 3-1a 实现，R-57；2026-09-26 增加分组）。chart_type=histogram 时 ChartDataResult.data 的形状：两阶段分箱查询（阶段1 MIN/MAX/COUNT → 阶段2 FLOOR((field-min)/bin_width) 分组计数）产出。bins 为补全后的完整 连续分箱序列（无行的 bin 以 count=0 占位），sum(bins[].count) == 参与分箱的 数值行数；空数据集返回 bins=[]。被分箱字段为 metrics[0].field（对该列的 原始数值分箱计数，不做 SUM/AVG 聚合）；bin_count（默认 20）/bin_width 经请求的 query_options 传入。请求携带维度（v1 dims）时额外返回 groups：每个维度值组合一个系列，各系列 bins 与顶层 bins 同长度同边界，顶层 bins 为跨系列总计数。 */
         ChartHistogramResponse: {
+            bins: components["schemas"]["ChartHistogramBin"][];
+            /** @description 分组直方图系列（query.HistogramGroup）。仅在请求携带维度时出现；name 为维度值组合（多维度用 " - " 连接，NULL 渲染为空串），按首次出现排序。 */
+            groups?: components["schemas"]["ChartHistogramGroup"][];
+        };
+        /** @description 分组直方图的单个系列（query.HistogramGroup）：Name 为维度值组合， Bins 与顶层 bins 同长度同边界、只含该系列的计数。 */
+        ChartHistogramGroup: {
+            name: string;
             bins: components["schemas"]["ChartHistogramBin"][];
         };
         /** @description 直方图分箱（query.HistogramBin）。区间为 [bin_start, bin_end) 半开、 相邻 bin 首尾相接（bin_end[i] == bin_start[i+1]）；等于最大值的边界行 归入最后一个 bin（浮点边界钳制，末 bin 实际闭区间）。所有值相同的 单值数据集产出单个 bin（宽度兜底 1，或用户 bin_width）。 */

@@ -230,3 +230,75 @@ describe('FilterConfigModal', () => {
     expect(screen.getByTestId('filter-modal-max')).toHaveValue('99');
   });
 });
+
+/**
+ * #111 回归：`isNull` / `isNotNull` 是无值算子，此前三个算子白名单都不含它们，
+ * 导致「有创建入口吗」「编辑已存条件会不会被静默改写」两条都坏。
+ */
+describe('FilterConfigModal · 无值算子（isNull / isNotNull）', () => {
+  beforeEach(() => {
+    mockedQuery.mockReset();
+    mockedQuery.mockResolvedValue({ data: { code: 0, data: [] } } as never);
+  });
+
+  it('数值字段：可创建「为空」，值区不渲染输入控件', async () => {
+    const onOk = vi.fn();
+    renderModal({ onOk });
+
+    // 从比较模式下拉里选中「为空」
+    expect(screen.getByTestId('filter-modal-number')).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByTestId('filter-modal-operator'));
+    fireEvent.click(await screen.findByTitle('为空'));
+
+    // 无值算子下值区不应再渲染输入控件
+    await waitFor(() => {
+      expect(screen.queryByTestId('filter-modal-number')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }));
+    expect(onOk).toHaveBeenCalledWith({ operator: 'isNull', value: null });
+  });
+
+  it('数值字段：回显已有 isNull 时算子不被改写，确定即上抛 isNull', () => {
+    const onOk = vi.fn();
+    renderModal({ onOk, initial: makeInitial({ operator: 'isNull', value: null }) });
+
+    expect(screen.getByTestId('filter-modal-operator')).toHaveTextContent('为空');
+    expect(screen.queryByTestId('filter-modal-number')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }));
+    expect(onOk).toHaveBeenCalledWith({ operator: 'isNull', value: null });
+  });
+
+  it('数值字段：回显已有 isNotNull 时确定即上抛 isNotNull', () => {
+    const onOk = vi.fn();
+    renderModal({ onOk, initial: makeInitial({ operator: 'isNotNull', value: null }) });
+
+    expect(screen.getByTestId('filter-modal-operator')).toHaveTextContent('不为空');
+
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }));
+    expect(onOk).toHaveBeenCalledWith({ operator: 'isNotNull', value: null });
+  });
+
+  it('字符串字段：回显已有 isNull 时不回落到枚举模式，确定即上抛 isNull', () => {
+    const onOk = vi.fn();
+    renderModal({
+      field: STRING_FIELD,
+      onOk,
+      initial: makeInitial({ fieldId: STRING_FIELD.name, operator: 'isNull', value: null }),
+    });
+
+    // 不回落到枚举模式（枚举模式下值为空则确定按钮被禁用，等于无法编辑）
+    expect(screen.queryByTestId('filter-modal-extra')).not.toBeInTheDocument();
+    expect(screen.getByTestId('filter-modal-operator')).toHaveTextContent('为空');
+
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }));
+    expect(onOk).toHaveBeenCalledWith({ operator: 'isNull', value: null });
+  });
+
+  it('日期字段：回显已有 isNull 时算子不被改写（不得静默变成 eq）', () => {
+    renderModal({ field: DATE_FIELD, initial: makeInitial({ operator: 'isNull', value: null }) });
+
+    expect(screen.getByTestId('filter-modal-operator')).toHaveTextContent('为空');
+  });
+});

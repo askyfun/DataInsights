@@ -53,7 +53,13 @@ handler → service → domain/entity
 
 ### 泛型路由注册
 
-`router/router.go` 提供 `RegisterRoute[In, Out]` 泛型函数，自动绑定 query 参数和 JSON body，统一包装响应。
+`router/router.go` 提供 `RegisterRoute[In, Out]` 泛型函数（`RegisterGetRoute`/`RegisterPostRoute`/`RegisterPutRoute`/`RegisterDeleteRoute`），自动绑定 query 参数和 JSON body，统一包装响应。**40 个 API 端点已全部经此注册**（datasource 11 + dataset 9 + chart 8 + share 4 + queryrecord 2 + dashboard 6）。
+
+- 签名 `API[In,Out] func(req Request[In], res *Response[Out]) error`——`res` 为指针，值传递会静默丢弃 handler 写入。
+- 路由器按 HTTP 方法自动绑定 JSON body（POST/PUT/PATCH 绑定，GET/DELETE 不绑定）+ query 参数；handler 内部不再手写 `response.*`。例外只有 2 个：`/health` 在 cmd/main.go 用裸 `r.GET`+`response.Success`；share `View` 返回 302 重定向且**只在纯 API 模式下注册**（托管前端时 `/share/<token>` 归前端路由，后端同路径 302 会抢先把页面挡掉）。
+- handler 入参用 handler-local In 镜像 struct（entity 不带 `form:"-"`，否则 query 参数会污染 body），其与 entity 的 json tag 一致性由 `internal/handler/contract_parity_test.go` 反射守卫。
+- 已接受的两类"不可消除差异"（bind 错误文本含 struct 名、双非法输入时 body 绑定错误优先于 path）由 baseline 测试钉死（8 个 path+body 端点 × 双非法 Empty/Malformed 变体全覆盖）。迁移样板见 `handler/datasource.go` 顶部 package doc。
+- PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例）：payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
 
 > 无独立 `middleware/` 包：requestID、CORS、Sentry 中间件均在 `cmd/main.go` 装配处定义并 `r.Use(...)` 挂载。
 
@@ -67,6 +73,8 @@ handler → service → domain/entity
 ### 查询处理
 
 `query/` 包包含完整的查询管道（手写字符串 SQL builder 已删除，`bun_builder.go` 是图表 SQL 的唯一出口）：
+
+- **参数化红线**：值参数一律通过 `Connection.Execute(ctx, sql string, args ...any)` 的 args 传递；标识符使用白名单校验（裸名 `datasource.IsValidIdentifier`，query 包 `safeIdentifier` 额外允许成对引号包裹的标识符）；聚合表达式 `aggExprPattern` 收紧为显式函数白名单（`count|sum|avg|min|max`），杜绝 `pg_sleep(1)` 之类经列 `FieldExpr` 注入任意函数名。
 - `types.go` — 类型定义（ChartType, MetricConfig, FilterConfig 等）
 - `ast.go` — QueryAST 节点定义
 - `planner.go` — QuerySpec → PlannedAST 的查询规划
@@ -105,15 +113,7 @@ go test -race ./...                        # 带竞态检测运行测试
 
 ## 配置加载
 
-优先级由低到高：**内置默认值 < `.env` 文件 < 真实系统环境变量**。
-
-**没有配置文件。** `etc/` 目录已删除，`config.go` 不再依赖 go-toml。理由：容器化部署下每个要用户填的值都必须能从外部注入（`--env-file` / compose `env_file` / K8s env），多一份 TOML 只会让"改了没生效"变得难查。
-
-- 入口：`cmd/main.go` 先 `config.LoadDotEnv(...)`，再 `Config.Load()`。`-env` 指定 .env（默认依次探测 `./.env`、`../.env`，覆盖"从仓库根启动"和"从 backend/ 启动"两种情形）。
-- `.env` 默认落在**仓库根**（`../.env`），由 godotenv 加载且**不覆盖**已存在的环境变量 —— 这就是"真实环境变量 > .env"的实现方式，也是 `docker run --env-file` / K8s env 能覆盖它的原因。
-- 环境变量（**无前缀**）：`PORT` / `DATABASE_URL` / `SECURITY_KEY` / `SENTRY_DSN` / `CORS_ALLOWED_ORIGINS`（留空 = CORS 放开所有来源，见 `cmd/main.go` `corsMiddleware`） / `STATIC_DIR`。**空字符串一律视为"未设置"**，所以 .env 里留空占位不会打掉内置默认值（Port `23352`；监听地址固定 `0.0.0.0`，不提供 env 覆盖）。
-- `DATABASE_URL` 是**唯一必填项**：`main.go` 在 `Load()` 之后显式检查，为空即 `os.Exit(1)` 并提示变量名。
-- `STATIC_DIR` 指向前端构建产物目录（镜像里是 `/app/web`）。**留空 = 只提供 API**，此时 `SetupRoutes` 才会注册 `/share/:token` 那条 302 落地页；配了静态目录则 `/share/<token>` 归前端路由（分享页本身就是 SPA 的 `/share/:token`，后端同路径的 302 会把它挡掉）。目录配错（读不到 `index.html`）同样 `os.Exit(1)`。
+优先级、变量字典、fail-fast 语义与容器注入方式的**完整说明见根 `AGENTS.md` 的「配置」一节**（单一事实源，不要在本文件重复展开）。后端侧要点：装配逻辑全在 `internal/config/config.go` 的 `Load()`；启动参数只有 `-env`（默认依次探测 `./.env`、`../.env`）；`STATIC_DIR` 留空 = 只提供 API，此时 `SetupRoutes` 才注册 `/share/:token` 302 落地页，目录配错（读不到 `index.html`）启动即退出。
 
 ⚠️ **写测试的坑**：`t.Setenv(k, "")` 只是把变量设成"存在但为空"，而 godotenv 的语义是"已存在的变量一律不覆盖" —— 两者相遇会让 `.env` 里的值被空壳挡住。凡是要经过 `LoadDotEnv` 的用例必须用 `os.Unsetenv`（测试里的 `unsetEnv` helper），不能图省事用 `clearEnv`。
 
@@ -142,6 +142,18 @@ go test -race ./...                        # 带竞态检测运行测试
 | Share (4) | list, create, get-by-token, verify |
 | QueryRecord (2) | save, get |
 | Dashboard (6) | CRUD + query（`POST /api/dashboards/{id}/query` 盘级批量取数） |
+
+## 数据库与迁移
+
+数据库 schema 由 goose 版本化迁移管理（`backend/migrations/00001_init_schema.sql`，通过 `embed.FS` 内嵌），`model.CreateTables` 已删除；事务统一走 `database.WithTx`。
+
+## 运维与安全
+
+- Sentry 通过 `SENTRY_DSN` 接通（sentrygin Repanic）。
+- CORS 默认放开所有来源（平台 API 无登录态，CORS 不构成安全边界）；`CORS_ALLOWED_ORIGINS` 填了非空白名单则只回显名单内来源，供将来引入认证后收紧。
+- requestID 中间件返回非全零 ID。
+- datasource 密码 AES-GCM 加密存储（密钥见根「配置」的 `SECURITY_KEY` 说明），API 响应中 `password` 字段 `json:"-"` 不外泄。
+- share 使用 bcrypt 哈希并对外暴露 `has_password` 契约。
 
 ## 约束
 

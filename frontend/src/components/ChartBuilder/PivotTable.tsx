@@ -140,7 +140,16 @@ const PivotTable: React.FC<PivotTableProps> = ({ data, loading, columnLabels }) 
         dataSource={dataSource}
         columns={columns}
         rowClassName={rowClassName}
-        pagination={false}
+        // 透视表同样默认一页 100 条（与表格图一致）。行数少时 hideOnSinglePage
+        // 收起分页条，视觉上与"无分页"的旧行为无异；小计/合计行按 dataSource
+        // 顺序落在最后一页（合计恒在数据之后，不会跑到前面去）。
+        pagination={{
+          defaultPageSize: 100,
+          showSizeChanger: true,
+          pageSizeOptions: ['50', '100', '200'],
+          hideOnSinglePage: true,
+          showTotal: (total) => `总计 ${total} 条`,
+        }}
         bordered
         size="small"
         scroll={{ x: 'max-content' }}

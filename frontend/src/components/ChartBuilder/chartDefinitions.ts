@@ -306,6 +306,16 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     styleKeys: ['colors'],
     fieldGroups: [
       {
+        // 分组维度（2026-09-26）：可选槽位。留空 = 经典直方图（对单列数值分箱计数）；
+        // 拖入维度 = 每个维度值一个系列（后端 GROUP BY 维度 + bin，前端堆叠渲染）。
+        // 走 v1 平铺协议（dims 直传），无具名槽位语义。
+        id: 'group',
+        kind: 'dimension',
+        label: '分组维度',
+        emptyText: '可选：拖入维度按其值拆分分布，或点击+添加',
+        minGroups: 1,
+      },
+      {
         // 单个 metric 槽位、maxFields:1，对齐后端取 Metrics[0].Field 分箱、每箱 COUNT(*)。
         id: 'value',
         kind: 'metric',

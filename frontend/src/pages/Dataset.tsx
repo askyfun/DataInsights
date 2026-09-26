@@ -44,6 +44,7 @@ import {
   TableInfo,
 } from '../api';
 import { toStandardType } from '../api/datatypes';
+import { ListSearch, makeTimeSorter } from '../components/listPage';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { isNumericType, normalizeDataType } from '../lib/dataTypes';
@@ -607,16 +608,10 @@ const DatasetPage: React.FC = () => {
     );
   });
 
-  // 时间列排序：空值/非法日期沉底，同键值时按 id 兜底——本机实测有 21 条数据集的
-  // created_at 完全相同（两批批量导入），只按时间排会同键抖动、看起来像排序坏了。
-  const compareTimeAsc = (a: string, b: string) => {
-    const ta = Date.parse(a);
-    const tb = Date.parse(b);
-    const va = Number.isNaN(ta) ? Number.NEGATIVE_INFINITY : ta;
-    const vb = Number.isNaN(tb) ? Number.NEGATIVE_INFINITY : tb;
-    if (va === vb) return 0;
-    return va < vb ? -1 : 1;
-  };
+  // 时间列排序：复用列表页统一比较器 makeTimeSorter（空值/非法日期沉底 + 同键按 id
+  // 兜底）——本机曾有 21 条数据集 created_at 完全相同（批量导入），只按时间排会同键抖动。
+  const compareTimeRows = makeTimeSorter((row: Dataset) => row.created_at);
+  const compareUpdatedRows = makeTimeSorter((row: Dataset) => row.updated_at);
 
   // Table columns configuration
   const columns = [
@@ -670,14 +665,14 @@ const DatasetPage: React.FC = () => {
       title: intl.formatMessage({ id: 'dataset.createdAt' }),
       dataIndex: 'created_at',
       key: 'created_at',
-      sorter: (a: Dataset, b: Dataset) => compareTimeAsc(a.created_at, b.created_at) || b.id - a.id,
+      sorter: (a: Dataset, b: Dataset) => compareTimeRows(a, b) || b.id - a.id,
       render: (text: string) => formatDateTime(text),
     },
     {
       title: intl.formatMessage({ id: 'dataset.updatedAt' }),
       dataIndex: 'updated_at',
       key: 'updated_at',
-      sorter: (a: Dataset, b: Dataset) => compareTimeAsc(a.updated_at, b.updated_at) || b.id - a.id,
+      sorter: (a: Dataset, b: Dataset) => compareUpdatedRows(a, b) || b.id - a.id,
       render: (text: string) => formatDateTime(text),
     },
     {
@@ -749,37 +744,40 @@ const DatasetPage: React.FC = () => {
 
       <Card>
         <div className="dr-card-toolbar">
-          <Space wrap>
-            <Input.Search
-              placeholder={intl.formatMessage({ id: 'dataset.searchPlaceholder' })}
-              allowClear
-              style={{ width: 300 }}
-              onChange={(e) => setSearchText(e.target.value)}
-              value={searchText}
-            />
-            <Select
-              allowClear
-              placeholder={intl.formatMessage({ id: 'dataset.datasource' })}
-              style={{ width: 180 }}
-              value={filterDatasourceId}
-              onChange={(value) => setFilterDatasourceId(value)}
-              options={(Array.isArray(datasources) ? datasources : []).map((d) => ({
-                label: d.name,
-                value: d.id,
-              }))}
-            />
-            <Select
-              allowClear
-              placeholder={intl.formatMessage({ id: 'dataset.queryType' })}
-              style={{ width: 140 }}
-              value={filterQueryType}
-              onChange={(value) => setFilterQueryType(value)}
-              options={[
-                { label: intl.formatMessage({ id: 'dataset.queryType.table' }), value: 'table' },
-                { label: intl.formatMessage({ id: 'dataset.queryType.sql' }), value: 'sql' },
-              ]}
-            />
-          </Space>
+          <ListSearch
+            placeholder={intl.formatMessage({ id: 'dataset.searchPlaceholder' })}
+            value={searchText}
+            onChange={setSearchText}
+            extra={
+              <>
+                <Select
+                  allowClear
+                  placeholder={intl.formatMessage({ id: 'dataset.datasource' })}
+                  style={{ width: 180 }}
+                  value={filterDatasourceId}
+                  onChange={(value) => setFilterDatasourceId(value)}
+                  options={(Array.isArray(datasources) ? datasources : []).map((d) => ({
+                    label: d.name,
+                    value: d.id,
+                  }))}
+                />
+                <Select
+                  allowClear
+                  placeholder={intl.formatMessage({ id: 'dataset.queryType' })}
+                  style={{ width: 140 }}
+                  value={filterQueryType}
+                  onChange={(value) => setFilterQueryType(value)}
+                  options={[
+                    {
+                      label: intl.formatMessage({ id: 'dataset.queryType.table' }),
+                      value: 'table',
+                    },
+                    { label: intl.formatMessage({ id: 'dataset.queryType.sql' }), value: 'sql' },
+                  ]}
+                />
+              </>
+            }
+          />
         </div>
 
         <Table

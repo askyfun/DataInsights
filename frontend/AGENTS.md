@@ -15,8 +15,16 @@ frontend/src/
 ├── api/
 │   ├── index.ts          # API 模块封装（datasourcesApi/datasetsApi/chartsApi/dashboardsApi/sharesApi/queriesApi）；只消费 lib/api/client 的单一 axios 实例，实体/响应类型来自 idls/gen_types.ts
 │   └── datatypes.ts      # 标准数据类型系统 + 多数据库类型映射
-├── lib/api/
-│   └── client.ts         # 持有唯一 axios 实例（baseURL 由 resolveApiBaseURL 决定）+ get/post/put/del 泛型辅助
+├── lib/
+│   ├── api/client.ts     # 持有唯一 axios 实例（baseURL 由 resolveApiBaseURL 决定）+ get/post/put/del 泛型辅助
+│   ├── chartConfigSchema.ts  # bi_chart.config 的 version:2 文档 schema + migrateChartConfig（旧结构加载时自动迁移）
+│   ├── dateFilter.ts     # 日期筛选语义单一事实源（纯逻辑、零 UI 依赖；语义细节见根 AGENTS.md「日期筛选」）
+│   ├── dashboardFilterValue.ts  # 盘级筛选器取值下发契约（按算子分流 value 形状）
+│   ├── dashboardLayoutSchema.ts # 仪表盘 layout schema（filter widget 的 binding.column 是列 ID）
+│   ├── chartOptions.ts   # ECharts option 构建
+│   ├── querySpec.ts      # store QueryConfig → 后端 QuerySpec 的映射
+│   ├── format.ts         # 数值/单位格式化
+│   └── dataTypes.ts      # 数据类型工具
 ├── store/
 │   └── index.ts          # 单一 Zustand Store（全部应用状态 + 异步 actions）
 ├── idls/                 # API 类型定义（现仅 gen_types.ts 生成物；Batch 2 已删除手写类型）
@@ -33,14 +41,23 @@ frontend/src/
 │   ├── Share.tsx             # 分享链接管理
 │   └── ShareView.tsx         # 公开分享视图（密码保护）
 ├── components/
-│   └── ChartBuilder/     # 图表构建器组件
-│       ├── DraggableField.tsx    # 可拖拽字段标签（侧边栏）
-│       ├── FieldDropZone.tsx     # 可放置区域（维度/指标/过滤器）
-│       ├── FieldPill.tsx         # 字段标签（含聚合下拉菜单）
-│       ├── QueryConfigRow.tsx    # 维度/指标配置行包装
-│       ├── QueryPanel.tsx        # 多选维度/指标面板
-│       ├── FilterBuilder.tsx     # 过滤条件构建器
-│       └── TableChart.tsx        # 表格/透视图渲染器
+│   ├── ChartBuilder/     # 图表构建器组件
+│   │   ├── DraggableField.tsx    # 可拖拽字段标签（侧边栏）
+│   │   ├── FieldDropZone.tsx     # 可放置区域（维度/指标/过滤器）
+│   │   ├── FieldPill.tsx         # 字段标签（含聚合下拉菜单）
+│   │   ├── FieldSettingsModal.tsx # 指标属性弹窗（别名/单位/格式）
+│   │   ├── FilterDropZone.tsx    # 筛选区放置位
+│   │   ├── FilterConfigModal.tsx # 过滤配置弹窗（弹窗式筛选交互，文案全线"筛选"）
+│   │   ├── QueryConfigRow.tsx    # 维度/指标配置行包装
+│   │   ├── QueryPanel.tsx        # 多选维度/指标面板
+│   │   ├── KpiCard.tsx           # KPI 卡片
+│   │   ├── PivotTable.tsx        # 透视表
+│   │   ├── TableChart.tsx        # 表格/透视图渲染器
+│   │   └── chartDefinitions.ts   # 图表类型定义
+│   ├── DateFilter/       # 日期筛选（DateFilterModal 完整弹窗 + DateFilterControl 行内控件，共用 DateFilterEditor 编辑体）
+│   ├── DashboardFilterBlock/ # 仪表盘盘级筛选器（块 + 添加筛选器弹窗）
+│   ├── ChartView/        # 图表渲染容器
+│   └── ClickToEdit.tsx / ModalFooter.tsx / LoadingPlaceholder.tsx / PageHeader.tsx / listPage.tsx  # 公共组件
 ├── i18n/
 │   └── useLocale.ts      # 国际化 hook + 中英文消息字典
 ├── styles/

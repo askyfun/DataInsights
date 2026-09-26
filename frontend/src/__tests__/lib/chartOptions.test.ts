@@ -1116,6 +1116,46 @@ describe('buildChartOption：histogram 直方图（R-57）', () => {
     );
     expect(option.series[0].name).toBe('count');
   });
+
+  // 分组直方图（2026-09-26）：响应带 groups 时每维度值一个系列、按 bin 堆叠；
+  // 类目轴仍用顶层 bins（各系列 bins 与其同长度同边界）。
+  it('groups 渲染为按 bin 堆叠的多系列', () => {
+    const groupedPayload = {
+      bins: [
+        { bin_start: 0, bin_end: 10, count: 5 },
+        { bin_start: 10, bin_end: 20, count: 5 },
+      ],
+      groups: [
+        {
+          name: 'East',
+          bins: [
+            { bin_start: 0, bin_end: 10, count: 3 },
+            { bin_start: 10, bin_end: 20, count: 4 },
+          ],
+        },
+        {
+          name: 'West',
+          bins: [
+            { bin_start: 0, bin_end: 10, count: 2 },
+            { bin_start: 10, bin_end: 20, count: 1 },
+          ],
+        },
+      ],
+    };
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'histogram',
+        groupedPayload,
+        baseStyle,
+        {},
+        { title: '', dimensions: ['region'], metrics: ['amount'] }
+      )
+    );
+    expect(option.series).toEqual([
+      { name: 'East', type: 'bar', stack: 'histogram-groups', data: [3, 4] },
+      { name: 'West', type: 'bar', stack: 'histogram-groups', data: [2, 1] },
+    ]);
+  });
 });
 
 describe('buildChartOption：funnel 漏斗图（R-59）', () => {

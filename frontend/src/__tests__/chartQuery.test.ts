@@ -51,7 +51,9 @@ describe('executeChartQuery stores the structured payload verbatim', () => {
     vi.clearAllMocks();
     useStore.getState().resetChartBuilder();
     useStore.setState({
-      tablePagination: { page: 1, pageSize: 10, total: 0 },
+      // 与 store 默认一致（100）：本组用例断言「pivot 不触碰分页」，预设值必须
+      // 跟随默认值演进，否则断言的是预设而非默认。
+      tablePagination: { page: 1, pageSize: 100, total: 0 },
       tableColumns: [],
       chartQueryResponse: null,
     });
@@ -153,7 +155,7 @@ describe('executeChartQuery stores the structured payload verbatim', () => {
     const state = useStore.getState();
     expect(state.chartData).toEqual(pivotPayload);
     expect(state.tableColumns).toEqual(['region', 'city', 'revenue']);
-    expect(state.tablePagination).toEqual({ page: 1, pageSize: 10, total: 0 });
+    expect(state.tablePagination).toEqual({ page: 1, pageSize: 100, total: 0 });
   });
 
   it('查询失败：chartData 回落空数组（联合的 unknown[] 臂）', async () => {

@@ -3,6 +3,7 @@ package query
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 // processor_stats.go 承载统计分布族图型的 processor（plan §7）。
@@ -44,6 +45,18 @@ func (p *HistogramProcessor) Process(rows []map[string]any, dims []string, metri
 //   - NULL bin（值列为 NULL 的行经 FLOOR 归入 NULL 组）不计入数值分箱，跳过；
 //     直方图只对数值分箱，该口径下"总数"指非 NULL 数值行。
 func (p *HistogramProcessor) ProcessBins(rows []map[string]any, minValue, binWidth float64, numBins int) (*HistogramResponse, error) {
+	return p.ProcessBinsGrouped(rows, minValue, binWidth, numBins, 0)
+}
+
+// ProcessBinsGrouped 组装直方图（含分组，2026-09-26）。dimCount 为分组维度个数：
+//   - dimCount==0：与旧 ProcessBins 完全一致（顶层 bins，无 groups）；
+//   - dimCount>0：行里除 "bin"/"cnt" 外还有 d0..d{dimCount-1} 的维度值列；
+//     按维度值组合（" - " 连接，NULL/缺失渲染为空串）拆成每系列一份 bins，
+//     顶层 Bins 为跨系列总计数——sum(Groups[i].Bins.Count) == Bins[i].Count 不变式。
+//
+// clampBin 把 FLOOR 的浮点越界索引钳进 [0, numBins-1]（首/末 bin 吸收），
+// NULL bin（值列 NULL 行）不计入数值分箱，跳过——口径与无分组路径一致。
+func (p *HistogramProcessor) ProcessBinsGrouped(rows []map[string]any, minValue, binWidth float64, numBins, dimCount int) (*HistogramResponse, error) {
 	if numBins < 1 {
 		return nil, fmt.Errorf("histogram numBins must be >= 1, got %d", numBins)
 	}
@@ -51,34 +64,87 @@ func (p *HistogramProcessor) ProcessBins(rows []map[string]any, minValue, binWid
 		return nil, fmt.Errorf("histogram bin_width must be positive, got %v", binWidth)
 	}
 
-	counts := make([]int64, numBins)
-	for _, row := range rows {
+	// newBins 补全 numBins 个连续 bin（空 bin 以 Count=0 占位，x 轴连续）。
+	newBins := func() []HistogramBin {
+		bins := make([]HistogramBin, numBins)
+		for i := 0; i < numBins; i++ {
+			bins[i] = HistogramBin{
+				BinStart: minValue + float64(i)*binWidth,
+				BinEnd:   minValue + float64(i+1)*binWidth,
+			}
+		}
+		return bins
+	}
+	clampBin := func(row map[string]any) (idx int, cnt int64, ok bool, err error) {
 		binVal, ok := toFloat64(row[histogramBinAlias])
 		if !ok {
-			continue // NULL bin（值列 NULL 行），见 doc comment
+			return 0, 0, false, nil // NULL bin（值列 NULL 行），见 doc comment
 		}
-		cnt, ok := toFloat64(row[histogramCountAlias])
+		cntF, ok := toFloat64(row[histogramCountAlias])
 		if !ok {
-			return nil, fmt.Errorf("histogram bin count is not numeric: %v", row[histogramCountAlias])
+			return 0, 0, false, fmt.Errorf("histogram bin count is not numeric: %v", row[histogramCountAlias])
 		}
-		idx := int(math.Floor(binVal))
+		idx = int(math.Floor(binVal))
 		if idx < 0 {
 			idx = 0
 		} else if idx >= numBins {
 			idx = numBins - 1
 		}
-		counts[idx] += int64(cnt)
+		return idx, int64(cntF), true, nil
 	}
 
-	bins := make([]HistogramBin, numBins)
-	for i := 0; i < numBins; i++ {
-		bins[i] = HistogramBin{
-			BinStart: minValue + float64(i)*binWidth,
-			BinEnd:   minValue + float64(i+1)*binWidth,
-			Count:    counts[i],
+	if dimCount <= 0 {
+		bins := newBins()
+		for _, row := range rows {
+			idx, cnt, ok, err := clampBin(row)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			bins[idx].Count += cnt
 		}
+		return &HistogramResponse{Bins: bins}, nil
 	}
-	return &HistogramResponse{Bins: bins}, nil
+
+	// 分组路径：先按维度值组合聚合，再逐系列组装 bins。
+	dimKeys := make([]string, dimCount)
+	for i := range dimKeys {
+		dimKeys[i] = fmt.Sprintf("%s%d", histogramDimAliasPrefix, i)
+	}
+	totals := newBins()
+	groupCounts := make(map[string][]int64)
+	var groupOrder []string
+	for _, row := range rows {
+		idx, n, ok, err := clampBin(row)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		totals[idx].Count += n
+
+		values := extractDimValues(row, dimKeys)
+		name := strings.Join(values, " - ")
+		if _, exists := groupCounts[name]; !exists {
+			groupCounts[name] = make([]int64, numBins)
+			groupOrder = append(groupOrder, name)
+		}
+		groupCounts[name][idx] += n
+	}
+
+	groups := make([]HistogramGroup, 0, len(groupOrder))
+	for _, name := range groupOrder {
+		counts := groupCounts[name]
+		bins := newBins()
+		for i := range bins {
+			bins[i].Count = counts[i]
+		}
+		groups = append(groups, HistogramGroup{Name: name, Bins: bins})
+	}
+	return &HistogramResponse{Bins: totals, Groups: groups}, nil
 }
 
 // histogramBinOptions 从请求的 query_options 解析分箱参数（executor histogram

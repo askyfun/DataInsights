@@ -290,9 +290,11 @@ describe('ChartBuilder', () => {
           data: {
             columns: ['region'],
             data: [{ region: 'East' }],
+            // page_size 与 store 默认一致（100）：响应若改写 pageSize 会经
+            // autoQuery effect 的 tablePagination.pageSize 依赖再补一次查询。
             pagination: {
               page: 1,
-              page_size: 10,
+              page_size: 100,
               total: 42,
               total_pages: 5,
             },
@@ -335,7 +337,7 @@ describe('ChartBuilder', () => {
     expect(mockExecuteChartQuery).toHaveBeenCalledWith(
       expect.objectContaining({
         chart_type: 'table',
-        pagination: { page: 1, page_size: 10 },
+        pagination: { page: 1, page_size: 100 },
       })
     );
   });

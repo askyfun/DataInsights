@@ -194,7 +194,19 @@ type KpiResponse struct {
 // HistogramResponse 直方图响应（R-57，plan §3.3）：Bins 为补全后的完整分箱序列
 // （空 bin 以 Count=0 占位，x 轴连续），sum(Bins[i].Count) == 参与分箱的数值行数。
 // 字段与 api/openapi.yaml 的 ChartHistogramResponse schema 逐一对应。
+// Groups 为分组直方图（请求携带 dims 时，2026-09-26）：每个维度值组合一个系列，
+// 各系列 bins 与顶层 Bins 同长度同边界；顶层 Bins 此时是跨系列的总计数，
+// sum(Groups[i].Bins.Count) == Bins[i].Count。无 dims 时 Groups 不出现（omitempty）。
 type HistogramResponse struct {
+	Bins   []HistogramBin   `json:"bins"`
+	Groups []HistogramGroup `json:"groups,omitempty"`
+}
+
+// HistogramGroup 分组直方图的单个系列：Name 为维度值组合（多维度用 " - " 连接，
+// NULL 值渲染为空串），Bins 与顶层 bins 同长度同边界、只含该系列的计数。
+// 与 openapi ChartHistogramGroup schema 对应。
+type HistogramGroup struct {
+	Name string         `json:"name"`
 	Bins []HistogramBin `json:"bins"`
 }
 

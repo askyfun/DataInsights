@@ -370,25 +370,29 @@ func (s *datasetService) Preview(ctx context.Context, id int) (*entity.PreviewRe
 	}, nil
 }
 
-// Query executes a query on a dataset
+// Query executes a query on a dataset.
+//
+// 只服务「维度去重取数」：SQL 由 query.BuildDatasetDistinctQuery 按 config 构造
+// （dimension_groups 决定 SELECT/GROUP BY，filters/sort/limit 照常生效，列引用按列 ID
+// 解析）。此前这里完全忽略 config，只发 `SELECT * FROM <source> LIMIT n`，把整行全列
+// 回传再由前端本地去重（issue #110）。
 func (s *datasetService) Query(ctx context.Context, id int, config entity.QueryConfig) ([]map[string]any, error) {
-	ds, err := s.getDatasetModel(ctx, id)
+	ds, err := s.getDatasetModelFn(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	dsModel, err := s.getDatasourceModel(ctx, ds.DatasourceID)
+	dsModel, err := s.getDatasourceModelFn(ctx, ds.DatasourceID)
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := s.connect(ctx, dsModel)
+	conn, err := s.connectFn(ctx, dsModel)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 
-	// Build query SQL via the query package; limit <= 0 omits the LIMIT clause.
 	var source string
 	sourceType := query.SourceTypeTable
 	if ds.QueryType == "sql" && ds.QuerySQL.Valid {
@@ -398,9 +402,18 @@ func (s *datasetService) Query(ctx context.Context, id int, config entity.QueryC
 		source = ds.TableName.String
 	}
 
-	sql := query.WrapPreviewSQL(source, sourceType, config.Limit)
+	sql, args, err := query.BuildDatasetDistinctQuery(
+		query.ParseDialect(dsModel.Type),
+		ds.Columns,
+		source,
+		sourceType,
+		config,
+	)
+	if err != nil {
+		return nil, err
+	}
 
-	result, err := conn.Execute(ctx, sql)
+	result, err := conn.Execute(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}

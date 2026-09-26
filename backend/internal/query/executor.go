@@ -328,14 +328,16 @@ func (e *Executor) executeHistogram(ctx context.Context, dialect DialectType, as
 		binWidth = (mx - mn) / float64(binCount)
 	}
 
-	binSQL, binArgs := BuildHistogramBinQuery(dialect, ast, valueField, mn, binWidth)
+	binSQL, binArgs := BuildHistogramBinQueryGrouped(dialect, ast, valueField, mn, binWidth, ast.DimensionExprs)
 	slog.Debug("executing histogram bin query", "sql", binSQL, "args", binArgs)
 	binResult, err := e.conn.Execute(ctx, binSQL, binArgs...)
 	if err != nil {
 		return ExecutorResult{}, fmt.Errorf("histogram bin query failed: %v", err)
 	}
 
-	resp, err := (&HistogramProcessor{}).ProcessBins(binResult.Rows, mn, binWidth, numBins)
+	// 请求带维度（v1 平铺 dims / v2 dimension_groups 都会进 ast.DimensionExprs）时
+	// 按维度分组产出每系列 bins；dimCount 与分组 builder 使用的维度列表同源。
+	resp, err := (&HistogramProcessor{}).ProcessBinsGrouped(binResult.Rows, mn, binWidth, numBins, len(ast.DimensionExprs))
 	if err != nil {
 		return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
 	}

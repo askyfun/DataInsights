@@ -37,6 +37,7 @@
 | `developer-guide/backlog.md` | 活跃待办 / 方言能力矩阵 | 活跃项推进或新增能力缺口时 |
 | `developer-guide/dev-setup.md` | 本地开发环境搭建（依赖、数据库、启动命令） | 前置依赖、端口、Makefile 目标或包管理约束变化时 |
 | `developer-guide/design-system.md` | 前端表面系统规范（页面骨架、色彩、字体、组件样式） | 全站视觉主题、共享样式或 antd 主题令牌调整时 |
+| `developer-guide/list-page-conventions.md` | 列表页交互规范（搜索/排序/标题跳转/分页/内联编辑与复用件） | 新增列表页、或列表复用件交互变化时 |
 | `developer-guide/contributing.md` | 贡献流程、提交前门禁与语言级编码规范 | 引入新工具链、团队约定或门禁变化时 |
 | `AGENTS.md` | 本目录索引与维护规则 | 本目录增删文档时 |
 

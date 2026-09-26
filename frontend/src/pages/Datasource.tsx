@@ -24,8 +24,9 @@ import {
 } from 'antd';
 import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { DatasourceFormData, DatasourceType } from '../api';
+import { ListSearch, makeTimeSorter, standardListPagination } from '../components/listPage';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
@@ -40,6 +41,7 @@ const DatasourcePage: React.FC = () => {
   const [testLoading, setTestLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [searchText, setSearchText] = useState('');
 
   const {
     datasources,
@@ -138,23 +140,42 @@ const DatasourcePage: React.FC = () => {
     return typeMap[type] || { label: type, color: 'blue' };
   };
 
+  // 与数据集/图表列表同口径的客户端关键字过滤（名称 / 类型 / 主机 / 数据库名）。
+  const keyword = searchText.trim().toLowerCase();
+  const visibleDatasources = (Array.isArray(datasources) ? datasources : []).filter((ds) => {
+    if (!keyword) return true;
+    return (
+      ds.name.toLowerCase().includes(keyword) ||
+      (ds.type ?? '').toLowerCase().includes(keyword) ||
+      (ds.host ?? '').toLowerCase().includes(keyword) ||
+      (ds.database_name ?? '').toLowerCase().includes(keyword)
+    );
+  });
+
   const columns = [
     {
       title: 'ID',
       dataIndex: 'id',
       key: 'id',
       width: 60,
+      // 默认视图与数据集/图表列表对齐：id 降序，新建的排最前。
+      sorter: (a: any, b: any) => a.id - b.id,
+      defaultSortOrder: 'descend' as const,
     },
     {
       title: intl.formatMessage({ id: 'datasource.name' }),
       dataIndex: 'name',
       key: 'name',
+      sorter: (a: any, b: any) => a.name.localeCompare(b.name) || b.id - a.id,
       render: (text: string, record: any) => {
         const typeInfo = getTypeInfo(record.type);
         return (
           <Space>
             <DatabaseOutlined />
-            <Text strong>{text}</Text>
+            {/* 与数据集列表一致：标题即详情页入口 */}
+            <Link to={`/datasources/${record.id}`}>
+              <Text strong>{text}</Text>
+            </Link>
             <Tag color={typeInfo.color}>{typeInfo.label}</Tag>
           </Space>
         );
@@ -186,6 +207,7 @@ const DatasourcePage: React.FC = () => {
       title: intl.formatMessage({ id: 'datasource.createdAt' }),
       dataIndex: 'created_at',
       key: 'created_at',
+      sorter: makeTimeSorter((row: any) => row.created_at),
       render: (text: string) => formatDateTime(text),
     },
     {
@@ -264,16 +286,19 @@ const DatasourcePage: React.FC = () => {
       />
 
       <Card>
+        <div className="dr-card-toolbar">
+          <ListSearch
+            placeholder={intl.formatMessage({ id: 'datasource.searchPlaceholder' })}
+            value={searchText}
+            onChange={setSearchText}
+          />
+        </div>
         <Table
           columns={columns}
-          dataSource={Array.isArray(datasources) ? datasources : []}
+          dataSource={visibleDatasources}
           rowKey="id"
           loading={datasourcesLoading}
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showTotal: (total) => `Total ${total} items`,
-          }}
+          pagination={standardListPagination}
           locale={{
             emptyText: intl.formatMessage({ id: 'common.noData' }),
           }}
