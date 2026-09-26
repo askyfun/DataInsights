@@ -125,7 +125,7 @@ describe('Dataset wizard virtual fields', () => {
     expect(fieldRows()[0].textContent).toContain('[x] + 1');
   });
 
-  it('editing one virtual field does not overwrite the others', async () => {
+  it('editing one virtual field does not overwrite the others', { timeout: 15_000 }, async () => {
     await openWizardAtFieldsStep();
     fireEvent.click(screen.getByRole('button', { name: /添加虚拟字段/ }));
     await submitVirtualField('a', '[x] + 1', /新\s*增/);

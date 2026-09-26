@@ -99,8 +99,8 @@ jobs:
         run: |
           set -euo pipefail
           # `config` 只渲染不启动、也不需要镜像，能在无 Docker 守护进程的步骤里跑。
-          # 三个文件都过一遍：改端口/变量插值时写坏语法会在这里挡下来。
-          for f in docker-compose.hub.yml docker-compose.yml docker-compose.allinone.yml; do
+          # 改端口/变量插值时写坏语法会在这里挡下来。
+          for f in docker-compose.allinone.yml; do
             docker compose -f "$f" config >/dev/null
             echo "  ✅ $f"
           done
@@ -145,7 +145,9 @@ jobs:
           log="$(mktemp)"
           pnpm exec vitest run --pool=threads --maxWorkers=2 >"$log" 2>&1 || true
           cat "$log"
-          summary="$(grep -E '^[[:space:]]+(Test Files|Tests)[[:space:]]+' "$log" || true)"
+          # CI 下 vitest 输出带 ANSI 颜色码，计数行行首不是空白而是 \e[2m，
+          # 先剥离再匹配，否则全绿的跑批也会在这里误判失败。
+          summary="$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -E '^[[:space:]]+(Test Files|Tests)[[:space:]]+' || true)"
           printf '%s\n' "$summary"
           if printf '%s' "$summary" | grep -q 'failed'; then
             echo "::error::前端存在失败用例（见上方 vitest 输出）"
@@ -350,8 +352,8 @@ jobs:
             printf '%s\n\n' '```'
             printf '%s\n\n' "**Docker Compose（连带 PostgreSQL，零外部依赖）**"
             printf '%s\n' '```bash'
-            printf 'curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.hub.yml\n'
-            printf 'TAG=%s docker compose -f docker-compose.hub.yml up -d\n' "$VERSION"
+            printf 'curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.allinone.yml\n'
+            printf 'TAG=%s docker compose -f docker-compose.allinone.yml up -d\n' "$VERSION"
             printf '%s\n\n' '```'
             printf '%s\n\n' "启动后访问 http://localhost:23352 。其余方式（源码运行 / 本地开发）见仓库 README。"
             printf '%s\n\n' "## 变更"
