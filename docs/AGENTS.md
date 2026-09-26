@@ -10,7 +10,7 @@
 |------|------|------|
 | 新手入门 | `getting-started/` | 核心概念、应用场景、对外 roadmap 与极简上手 |
 | 用户指南 | `user-guide/` | 配置字典与核心功能使用说明（含「为什么做这个功能」） |
-| 部署指南 | `deployment/` | 容器 / Compose 与生产环境部署实践 |
+| 部署指南 | `deployment/` | 容器 / Compose、发布流程与生产环境部署实践 |
 | 开发者指南 | `developer-guide/` | 架构、API、图表查询设计、排障、本地环境、活跃待办、贡献规范、表面系统（摊平、无子目录） |
 
 ## 入库 vs 本机（红线）
@@ -24,10 +24,11 @@
 | 文件 | 用途 | 维护时机 |
 |------|------|----------|
 | `getting-started/overview.md` | 核心概念、应用场景与对外 roadmap | 产品定位、核心概念或对外路线调整时 |
-| `getting-started/quick-start.md` | 极简上手（一条命令跑起来） | 上手路径或前置条件变化时 |
+| `getting-started/quick-start.md` | 极简上手（四条部署路径的完整步骤：预览站 / 单条 Docker / Compose / 源码） | 上手路径、镜像来源或前置条件变化时 |
 | `user-guide/configuration.md` | 配置与参数字典 | 环境变量、默认值或配置优先级变化时 |
 | `user-guide/features.md` | 核心功能使用说明（含「为什么做」） | 新增 / 调整面向用户的功能时 |
-| `deployment/docker.md` | 容器与 Docker Compose | 镜像形态、Compose 或构建细节变化时 |
+| `deployment/docker.md` | 容器镜像（发布镜像与本地构建两条路）、Compose、镜像构建细节 | 镜像形态、Compose、镜像来源或构建细节变化时 |
+| `deployment/release.md` | 发布流程（打 tag、推 Docker Hub 镜像、建 Release）与失败处置 | 发布工作流、镜像命名/架构、Secrets 或版本号规则变化时 |
 | `deployment/production.md` | 生产环境部署实践 | 部署形态、安全实践或可观测性变化时 |
 | `developer-guide/architecture.md` | 系统架构 + 关键设计决策 | 新增分层 / 目录、查询链路、部署形态或关键决策变更时 |
 | `developer-guide/api.md` | API 接口文档（叙述性视图；契约事实源是 `../api/openapi.yaml`） | 新增或修改端点时，与 `../api/openapi.yaml` 同步更新 |

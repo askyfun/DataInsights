@@ -1,11 +1,12 @@
 # .github AGENTS.md
 
-GitHub Actions CI/CD 工作流配置，基于 OpenCode AI Agent 实现自动化开发流程。
+GitHub Actions 工作流配置：一部分是基于 OpenCode AI Agent 的自动化开发流程，另一部分是人工触发的发布流水线。
 
 ## 工作流清单
 
 | 文件 | 触发方式 | 用途 |
 |------|----------|------|
+| `release.yml` | 手动（`workflow_dispatch`，填版本号） | 发布：校验版本号 + 双端测试 → 构建并冒烟 → 推多架构镜像到 Docker Hub → 打 tag + 建 Release。手册见 `docs/deployment/release.md` |
 | `opencode-comment.yml` | Issue/PR 评论含 `/oc` 或 `/opencode` | 响应式 AI Agent，处理评论中的指令 |
 | `opencode-review.yml` | PR 创建/同步/重新打开 | 自动代码审查（代码质量、潜在 bug、改进建议） |
 | `opencode-cycle-hourly.yml` | 每 4 小时 + 手动触发 | 多 Agent 开发周期（PM → Architect → Developer → QA） |
@@ -40,8 +41,11 @@ PM Agent → Architect Agent → Developer Agent → QA Agent
 
 ## 配置
 
-- AI 模型: `minimax-cn-coding-plan/MiniMax-M2.5`
-- 密钥: `MINIMAX_API_KEY`（Secrets）
+- AI 模型: `minimax-cn-coding-plan/MiniMax-M2.5`（仅 opencode 系列工作流用）
+- 密钥（Secrets）：
+  - `MINIMAX_API_KEY` —— opencode 系列工作流的模型密钥
+  - `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` —— `release.yml` 推送镜像用（令牌需 Read & Write）；可选 Variable `VITE_SENTRY_DSN` 用于构建期内联前端 Sentry
+  - `GITHUB_TOKEN` 由 Actions 自动提供，无需手工配置（`release` job 需要 `contents: write` 才打得动 tag）
 - 运行环境: `ubuntu-latest`
-- Go / Node 版本：工作流自身**不构建**产品产物，产品构建版本以仓库根 `Dockerfile` 为准（`golang:1.27-alpine` + `node:24-alpine` = **Go 1.27 / Node 24**）。
-- `opencode-cycle-hourly.yml`（qa-agent）与 `opencode-developer-single.yml` 里的 `setup-go@v5` / `setup-node@v4` 步骤钉在 **Go 1.27 / Node 24**（供 agent 跑测试），与仓库根 `Dockerfile` 的产品构建版本一致。
+- Go / Node 版本：opencode 系列工作流**不构建**产品产物，只跑测试；`release.yml` 会真正构建产品镜像，但镜像内的 Go / Node 版本以仓库根 `Dockerfile` 为准（`golang:1.27-alpine` + `node:24-alpine` = **Go 1.27 / Node 24**），工作流里的 `setup-go` / `setup-node` 只是给测试与静态检查提供同版本运行时。
+- `release.yml`、`opencode-cycle-hourly.yml`（qa-agent）与 `opencode-developer-single.yml` 里的 `setup-go@v5` / `setup-node@v4` 步骤钉在 **Go 1.27 / Node 24**（供测试），与仓库根 `Dockerfile` 的产品构建版本一致 —— 改 Dockerfile 基础镜像时这几处要一起改。

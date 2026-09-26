@@ -14,16 +14,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/askyfun/DataRay.git"
+    "url": "git+https://github.com/askyfun/DataInsights.git"
   },
   "keywords": [],
   "author": "",
   "license": "GPL-3.0-only",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/askyfun/DataRay/issues"
+    "url": "https://github.com/askyfun/DataInsights/issues"
   },
-  "homepage": "https://github.com/askyfun/DataRay#readme",
+  "homepage": "https://github.com/askyfun/DataInsights#readme",
   "devDependencies": {
     "husky": "^9.1.7"
   }

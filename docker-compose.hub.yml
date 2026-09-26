@@ -1,0 +1,69 @@
+# Data Insights 一键部署（拉取 Docker Hub 上的发布镜像，不构建源码）
+#
+# ⚠️ 本项目**无登录、无鉴权**，定位是单团队**内网**工具：不要把这个端口暴露到公网。
+#    下面的 PostgreSQL 用的是公开的演示密码，且默认**不**映射到宿主机。
+#
+# 与 docker-compose.yml 的区别：
+#   · docker-compose.yml      —— 从**本仓库源码**构建镜像，给想改代码的人用
+#   · 本文件（docker-compose.hub.yml）—— 直接用 Docker Hub 上的**已发布镜像**，给只想跑起来的人用
+#
+# 用法（不需要克隆仓库）：
+#   curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.hub.yml
+#   docker compose -f docker-compose.hub.yml up -d
+#
+# 钉住某个版本（推荐用于长期运行的环境；版本号见 GitHub Releases）：
+#   TAG=vX.Y.Z docker compose -f docker-compose.hub.yml up -d
+#
+# 停止：            docker compose -f docker-compose.hub.yml down
+# 停止并清除数据：  docker compose -f docker-compose.hub.yml down -v
+#
+# 启动后访问 http://localhost:23352 。
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: data-insights-postgres
+    environment:
+      # ⚠️ 演示用默认凭据。放到他人可达的主机上前必须改掉，并同步改下面 app 的 DATABASE_URL。
+      POSTGRES_USER: insights
+      POSTGRES_PASSWORD: insights123
+      POSTGRES_DB: insights
+    # 默认**不**把 5432 映射到宿主机：app 走 compose 网络直连 postgres，映射出来只会让
+    # 「密码是公开默认值」的数据库多一个入口。要用本机客户端连进去看表，自行取消注释：
+    # ports:
+    #   - "5432:5432"
+    volumes:
+      # 数据落在这个命名卷里，down 不会删，只有 down -v 才清。
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insights"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    # TAG 不设则用 latest。镜像支持 linux/amd64 与 linux/arm64。
+    image: kzzhr/datainsights:${TAG:-latest}
+    container_name: data-insights-app
+    # 后端不读任何配置文件，所有配置都从环境变量进来。以下变量可三种方式覆盖
+    # （优先级高 → 低）：① shell 环境变量；② 同目录 .env；③ 本文件里的默认值。
+    environment:
+      # 唯一必填项。compose 网络内数据库就是服务名 postgres，默认值已指向下面的 PostgreSQL。
+      DATABASE_URL: ${DATABASE_URL:-postgres://insights:insights123@postgres:5432/insights?sslmode=disable}
+      PORT: ${PORT:-23352}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      # 数据源密码的 AES-256 加密密钥。留空 = 首次启动自动随机生成并持久化到数据库，
+      # 容器重建也能复用；长期运行的环境建议显式设置一个固定值（openssl rand -hex 32）。
+      SECURITY_KEY: ${SECURITY_KEY:-}
+    ports:
+      # 容器内监听端口与宿主机映射端口保持一致，由 PORT 统一控制。
+      - "${PORT:-23352}:${PORT:-23352}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

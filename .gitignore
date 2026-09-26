@@ -20,6 +20,8 @@ frontend/dist/
 .env
 .env.*
 !.env.example
+# harness-board 看板的本机绑定（board.sh init 生成）
+.board.env
 
 # Dependencies
 node_modules/

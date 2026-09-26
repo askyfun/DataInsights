@@ -271,6 +271,7 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
   - 静态目录**配错即启动失败**（`webui.New` 读不到 `index.html` 就退出），不会跑起来之后整站 404。
   - 镜像自带的只有 `STATIC_DIR=/app/web`（代码默认值是"空 = 只提供 API"，必须显式指）；监听地址/端口的内置默认值本就是 `0.0.0.0:23352`，无需重复声明。其余全部运行时注入。
 - `docker compose`: `docker-compose.yml` — PostgreSQL（端口 5432）+ **一个 app 服务**（23352，前后端同容器）；后端只认 `DATABASE_URL`（裸名即 12-factor 标准名，无前缀历史包袱）。
+- `docker compose`（发布镜像路径）: `docker-compose.hub.yml` — 同样两个服务，但 app 是 `image: kzzhr/datainsights:${TAG:-latest}`（**不构建**），给只想跑起来的使用者。镜像由 `.github/workflows/release.yml` 手动触发发布（校验版本号 + 双端测试 → 冒烟 → 推 amd64/arm64 镜像到 Docker Hub → 打 tag + 建 Release），运维手册见 `docs/deployment/release.md`。
 - 本地不起 Docker 也能验证同一形态：`make serve`（构建前端产物后 `STATIC_DIR=../frontend/dist go run ./cmd`）。不设 `STATIC_DIR` 时后端退化为纯 API 服务，此时 `/share/:token` 才会注册。
 - ⚠️ **`frontend/vite.config.js` / `.d.ts` 是 tsc 产物，且会遮蔽 `vite.config.ts`**（Vite 解析 `vite.config.js` 优先于 `.ts`）。曾出现改了 `.ts` 却完全不生效的情况。发现配置改动「没反应」时先 `ls frontend/vite.config.*`，删掉这两个文件再验证。
 
@@ -279,10 +280,11 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 | 文档 | 说明 |
 |------|------|
 | [docs/getting-started/overview.md](docs/getting-started/overview.md) | 核心概念、应用场景与对外 roadmap |
-| [docs/getting-started/quick-start.md](docs/getting-started/quick-start.md) | 极简上手（一条命令跑起来） |
+| [docs/getting-started/quick-start.md](docs/getting-started/quick-start.md) | 极简上手（四条部署路径：预览站 / 单条 Docker / Compose / 源码） |
 | [docs/user-guide/configuration.md](docs/user-guide/configuration.md) | 配置与参数字典 |
 | [docs/user-guide/features.md](docs/user-guide/features.md) | 核心功能使用说明（含「为什么做这个功能」） |
-| [docs/deployment/docker.md](docs/deployment/docker.md) | 容器与 Docker Compose |
+| [docs/deployment/docker.md](docs/deployment/docker.md) | 容器镜像（发布镜像 / 本地构建）、Docker Compose |
+| [docs/deployment/release.md](docs/deployment/release.md) | 发布流程（打 tag + 推镜像到 Docker Hub + 建 Release） |
 | [docs/deployment/production.md](docs/deployment/production.md) | 生产环境部署实践 |
 | [docs/developer-guide/architecture.md](docs/developer-guide/architecture.md) | 系统架构 + 关键设计决策 |
 | [docs/developer-guide/api.md](docs/developer-guide/api.md) | API 接口文档（叙述性视图；契约事实源是 api/openapi.yaml） |

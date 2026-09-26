@@ -49,5 +49,5 @@ cp .env.example .env    # 然后按需修改
 
 - ⚠️ **`VITE_*` 是「构建期内联」**：值在 `vite build` 时被写进 JS 产物，改完必须重新 build 才生效；也正因如此**绝不可**在里面放密钥。
 - ⚠️ `.dockerignore` **必须排除 `.env`**，否则 Vite 会把 `VITE_*` 内联进浏览器包。
-- compose 会读根 `.env` **做变量插值**（`docker-compose.yml` 里的 `${...}`），同时又用 `env_file` 把整份变量注入容器 —— 别把无关工具的变量混进这个文件。
+- compose 读根 `.env` **只用于变量插值**（`docker-compose.yml` / `docker-compose.hub.yml` 里的 `${...}`），本身**不挂 `env_file`**：进容器的只有 `environment:` 里逐个 `${...}` 引用的那几项，其余变量不影响容器。所以**别把无关工具的变量混进这个文件**。
 - 静态托管下 `/api`、`/mcp`、`/health` 及其子路径走后端（匹配不到即 JSON 404，**不会回落成 HTML**），其余路径查 `STATIC_DIR` 里的文件、未命中回落 `index.html` 交给前端路由。带内容哈希的 `assets/` 产物走 `immutable` 长缓存，其余 `no-cache`。

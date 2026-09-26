@@ -15,6 +15,7 @@
 | 本地环境搭建与运行命令 | [`docs/developer-guide/dev-setup.md`](docs/developer-guide/dev-setup.md) |
 | 架构与关键设计决策（含「为什么这样设计」） | [`docs/developer-guide/architecture.md`](docs/developer-guide/architecture.md) |
 | 排障（外部开发者也会踩的坑） | [`docs/developer-guide/troubleshooting.md`](docs/developer-guide/troubleshooting.md) |
+| 发布一个版本（打 tag + 推镜像到 Docker Hub） | [`docs/deployment/release.md`](docs/deployment/release.md) |
 | 活跃待办与数据源方言能力矩阵 | [`docs/developer-guide/backlog.md`](docs/developer-guide/backlog.md) |
 | 前端表面系统规范 | [`docs/developer-guide/design-system.md`](docs/developer-guide/design-system.md) |
 | 图表查询链路设计 | [`docs/developer-guide/chart-query-design.md`](docs/developer-guide/chart-query-design.md) |

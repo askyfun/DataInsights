@@ -1,0 +1,392 @@
+# Data Insights 发布流水线
+#
+# 手动触发（版本号自己填）→ 校验版本号 + 跑测试 → 构建镜像并冒烟 → 推送多架构镜像到
+# Docker Hub → 打 git tag 并创建 GitHub Release。
+#
+# 触发：Actions → Release → Run workflow，在「Use workflow from」里选要发布的 ref（默认 master）。
+#
+# 首次使用前需在仓库配置两个 Secret（Settings → Secrets and variables → Actions）：
+#   DOCKERHUB_USERNAME  Docker Hub 用户名（即镜像命名空间的 kzzhr）
+#   DOCKERHUB_TOKEN     Docker Hub 访问令牌（Account Settings → Personal access tokens，权限需 Read & Write）
+# 可选 Variable：
+#   VITE_SENTRY_DSN     前端 Sentry DSN，构建期内联进产物；不配则不启用 Sentry
+#
+# 完整操作手册（含失败处置与撤回一个版本）见 docs/deployment/release.md。
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（同时用作 git tag 与镜像 tag），形如 v1.2.3'
+        required: true
+        type: string
+      prerelease:
+        description: '预发布：不移动 latest 标签，Release 标记为 Pre-release'
+        required: false
+        default: false
+        type: boolean
+
+# 同一版本号不允许并发跑两次（后到的排队等前一个结束，而不是踩掉它）
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  # 镜像位置：改这里一处即可（同时影响推送、Release 说明与列表输出）
+  IMAGE: kzzhr/datainsights
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. 门禁：版本号可用性 + 双端测试。任何一步失败都不会产生 tag 或推镜像。
+  # ---------------------------------------------------------------------------
+  verify:
+    name: 校验版本号与测试
+    runs-on: ubuntu-latest
+    # 前端测试单独就要 8–11 分钟（大头是模块加载与 jsdom 环境初始化，用例本身只占 2–3%），
+    # 再加上依赖安装、biome、go test -race 的首次编译，30 分钟容易贴边。
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验版本号格式与 tag 可用性
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # 只放行 vX.Y.Z 与 vX.Y.Z-预发布后缀：Docker tag 不允许任意字符，
+          # 先卡住比推到一半失败划算。后缀首字符必须是字母数字，挡掉 `v1.2.3-.` 这类怪名字。
+          if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'; then
+            echo "::error::版本号 '$VERSION' 不合法，要求形如 v1.2.3 或 v1.2.3-rc.1"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "::error::tag $VERSION 已存在。换个版本号；要撤回已发布的版本见 docs/deployment/release.md"
+            exit 1
+          fi
+          echo "版本号 \`$VERSION\` 可用，开始跑测试。" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 检查 Docker Hub 凭据已配置
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 凭据只在最后一步才用到，先探一次：否则要跑完十几分钟构建才发现没配。
+          # 注意用 env 传值、不要内联进脚本，避免令牌里的特殊字符被 shell 解释。
+          missing=""
+          [ -n "$DOCKERHUB_USERNAME" ] || missing="$missing DOCKERHUB_USERNAME"
+          [ -n "$DOCKERHUB_TOKEN" ] || missing="$missing DOCKERHUB_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少仓库 Secret:${missing}（Settings → Secrets and variables → Actions → New repository secret）"
+            exit 1
+          fi
+          echo "Docker Hub 凭据已配置。" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 登录 Docker Hub（验证令牌真的可用）
+        # 只查非空挡不住「令牌权限不足 / 已被吊销 / 用户名写错」——那种错要等
+        # image-smoke 跑完四十分钟才会在 publish 暴露。这里先真登一次，几分钟内就失败。
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 校验 compose 文件可渲染
+        run: |
+          set -euo pipefail
+          # `config` 只渲染不启动、也不需要镜像，能在无 Docker 守护进程的步骤里跑。
+          # 三个文件都过一遍：改端口/变量插值时写坏语法会在这里挡下来。
+          for f in docker-compose.hub.yml docker-compose.yml docker-compose.allinone.yml; do
+            docker compose -f "$f" config >/dev/null
+            echo "  ✅ $f"
+          done
+          echo "✅ compose 文件均可渲染" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: backend/go.sum
+
+      - name: 后端测试（含竞态检测）
+        working-directory: backend
+        # 需要真实数据库的集成用例（TEST_DATABASE_URL 未设置时 t.Skip）不在此列，
+        # 因此这里不额外起 PostgreSQL。
+        run: go test -race ./...
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 启用 corepack 并按 packageManager 取 pnpm
+        run: |
+          corepack enable
+          echo "COREPACK_ENABLE_DOWNLOAD_PROMPT=0" >> "$GITHUB_ENV"
+
+      - name: 前端依赖
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: 前端静态检查（biome）
+        working-directory: frontend
+        run: pnpm check
+
+      - name: 前端测试
+        working-directory: frontend
+        # ⚠️ 不能只看退出码。本仓有一条既有的未处理错误（jsdom 环境拆除期 react-dom 调度出的
+        # 宏任务晚于环境销毁执行，抛 `ReferenceError: window is not defined`），它会让**全绿**
+        # 的跑批也以退出码 1 收场（Node 22 / Node 24 均可复现）。因此门禁只认用例计数：
+        # 出现任何 failed 就红，且必须真的存在 passed 计数（挡掉「跑都没跑起来」）。
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          pnpm exec vitest run --pool=threads --maxWorkers=2 >"$log" 2>&1 || true
+          cat "$log"
+          summary="$(grep -E '^[[:space:]]+(Test Files|Tests)[[:space:]]+' "$log" || true)"
+          printf '%s\n' "$summary"
+          if printf '%s' "$summary" | grep -q 'failed'; then
+            echo "::error::前端存在失败用例（见上方 vitest 输出）"
+            exit 1
+          fi
+          printf '%s' "$summary" | grep -Eq 'Test Files[[:space:]]+[0-9]+ passed \('
+          printf '%s' "$summary" | grep -Eq 'Tests[[:space:]]+[0-9]+ passed \('
+          echo "前端测试通过（仅按用例计数判定，已忽略仓库既有的未处理错误）" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 2. 构建镜像并真跑一遍。单测过不代表镜像能起——Dockerfile、STATIC_DIR、
+  #    静态产物缺漏这类问题只有把容器跑起来才暴露。
+  # ---------------------------------------------------------------------------
+  image-smoke:
+    name: 构建镜像 + 冒烟验证
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: insights
+          POSTGRES_PASSWORD: insights123
+          POSTGRES_DB: insights
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U insights"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建镜像（仅本机架构，供冒烟用）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:smoke
+          build-args: |
+            VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }}
+          # 与下面的多架构推送共用同一份 gha 缓存，第二遍构建只需补差集。
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 启动容器并探活 /health
+        run: |
+          set -euo pipefail
+          # --network host：容器内直连 runner 的 127.0.0.1，thus 能访问上面的 postgres 服务容器。
+          docker run -d --name smoke --network host \
+            -e "DATABASE_URL=postgres://insights:insights123@127.0.0.1:5432/insights?sslmode=disable" \
+            "$IMAGE:smoke"
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:23352/health >/dev/null 2>&1; then
+              echo "✅ /health 就绪（第 ${i} 次探测）"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::镜像启动后 /health 一直未就绪"
+          docker logs smoke || true
+          exit 1
+
+      - name: 验证首页由同一进程提供
+        run: |
+          set -euo pipefail
+          # 「单镜像单进程同时提供 API 与页面」是这个项目对外承诺的形态，
+          # STATIC_DIR 或前端产物缺失都会在这里暴露。
+          # 不用 `curl | head`：head 读满即退出会让 curl 吃 SIGPIPE(141)，
+          # 叠加 pipefail 会把整条 pipeline 判成失败（偶发、难查）。
+          html="$(curl -fsS http://127.0.0.1:23352/)"
+          [ -n "$html" ] || { echo "::error::首页返回空"; exit 1; }
+          printf '%s' "$html" | head -5
+          printf '%s' "$html" | grep -qi '<div id=' || echo "::warning::首页里没看到挂载点，请人工确认（不阻塞）"
+          echo "✅ 首页由同一进程返回" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 收集容器日志（失败时也留档）
+        if: always()
+        run: docker logs smoke 2>&1 | tail -50 || true
+
+  # ---------------------------------------------------------------------------
+  # 3. 推送多架构镜像到 Docker Hub。到这一步产物才真正对外可见，
+  #    因此 tag 与 Release 都排在它后面。
+  # ---------------------------------------------------------------------------
+  publish:
+    name: 推送镜像到 Docker Hub
+    needs: image-smoke
+    runs-on: ubuntu-latest
+    # arm64 走 QEMU 模拟，最贵的是前端（pnpm install + tsc + vite build 里的
+    # esbuild/rollup 二进制）——首次跑缓存是冷的，60 分钟容易贴边，留出余量。
+    # 真的超时的话：先只发 amd64（改下面的 platforms），或改用原生 arm64 runner。
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 计算镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ inputs.version }}
+            type=raw,value=latest,enable=${{ !inputs.prerelease }}
+          labels: |
+            org.opencontainers.image.title=Data Insights
+            org.opencontainers.image.description=拖拽式 BI 可视化分析平台
+            org.opencontainers.image.url=https://github.com/askyfun/DataInsights
+            org.opencontainers.image.documentation=https://github.com/askyfun/DataInsights/blob/master/docs/deployment/docker.md
+
+      - name: 构建并推送（linux/amd64 + linux/arm64）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # 关掉 provenance/SBOM 附带清单：让推上去的就是一个干净的多架构 manifest，
+          # 老的 docker 客户端与部分镜像代理对附带清单支持不佳。
+          provenance: false
+          sbom: false
+
+      - name: 记录推送结果
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### 已推送镜像"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 4. 打 tag 并创建 GitHub Release。排在推送之后：镜像真的在 Docker Hub 上了，
+  #    才让这个版本号对外存在。
+  # ---------------------------------------------------------------------------
+  release:
+    name: 打 tag 与创建 GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # 打 tag + 建 Release 需要写权限；工作流其余部分只读。
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要历史来算「上一个 tag 到本次」的提交列表。
+          fetch-depth: 0
+
+      - name: 在当前 commit 上打 tag 并推送
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 显式指向本次运行的 SHA：即使 checkout 后有人推了新提交，tag 也不会漂。
+          git tag -a "$VERSION" -m "Release $VERSION" "$GITHUB_SHA"
+          git push origin "refs/tags/$VERSION"
+
+      - name: 生成 Release 说明
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          prev_tag="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          if [ -n "$prev_tag" ]; then
+            range="$prev_tag..HEAD"
+            from_line="自 $prev_tag 起的变更："
+          else
+            range="HEAD"
+            from_line="首个发布版本。"
+          fi
+          {
+            printf '%s\n\n' "## 安装"
+            printf '%s\n\n' "**仅 Docker（自备 PostgreSQL）**"
+            printf '%s\n' '```bash'
+            printf 'docker pull %s:%s\n' "$IMAGE" "$VERSION"
+            printf 'docker run -d --name data-insights -p 23352:23352 -e DATABASE_URL=%s %s:%s\n' \
+              "'postgres://user:password@your-db-host:5432/dbname?sslmode=disable'" "$IMAGE" "$VERSION"
+            printf '%s\n\n' '```'
+            printf '%s\n\n' "**Docker Compose（连带 PostgreSQL，零外部依赖）**"
+            printf '%s\n' '```bash'
+            printf 'curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.hub.yml\n'
+            printf 'TAG=%s docker compose -f docker-compose.hub.yml up -d\n' "$VERSION"
+            printf '%s\n\n' '```'
+            printf '%s\n\n' "启动后访问 http://localhost:23352 。其余方式（源码运行 / 本地开发）见仓库 README。"
+            printf '%s\n\n' "## 变更"
+            printf '%s\n\n' "$from_line"
+            git log --no-merges --pretty='- %s (%h)' "$range"
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # --verify-tag：tag 由上一步推上去，不让 gh 自行按默认分支创建，
+          # 避免打出一个与本次构建 commit 不一致的 tag。
+          args=(--title "$VERSION" --notes-file release-notes.md --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$VERSION" "${args[@]}"
+
+      - name: 汇总
+        env:
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          kind="正式版"
+          [ "$PRERELEASE" = "true" ] && kind="预发布"
+          {
+            echo "### 发布完成（${kind}）"
+            echo
+            echo "- git tag：\`$VERSION\`"
+            echo "- GitHub Release：\`$VERSION\`"
+            echo "- 镜像：\`$IMAGE:$VERSION\`"
+          } >> "$GITHUB_STEP_SUMMARY"
