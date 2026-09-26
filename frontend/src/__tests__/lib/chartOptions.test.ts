@@ -1,6 +1,11 @@
 import type { EChartsOption } from 'echarts';
 import { describe, expect, it } from 'vitest';
-import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '@/lib/chartOptions';
+import {
+  buildChartOption,
+  DARK_CHART_PALETTE,
+  isEmptyPayload,
+  normalizeChartStyle,
+} from '@/lib/chartOptions';
 
 /**
  * buildChartOption 是共享渲染器的唯一出口（D3 修复）。
@@ -11,17 +16,26 @@ import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '@/lib/cha
 // option 结构的测试视图：先经 unknown 收窄，避免对 ECharts 巨型联合做断言
 interface AxisOptionView {
   title: { text: string };
+  // 主题取色（chartPalette）落在以下结构上；仅本文件的主题用例读取。
+  textStyle: { color: string };
+  tooltip: { trigger: string; backgroundColor: string };
+  legend: { orient: string; left: string; textStyle: { color: string } };
   xAxis: {
     type: string;
     data?: (string | number)[];
     name?: string;
-    axisLabel?: { rotate?: number; formatter?: (val: string) => string };
+    axisLabel?: { rotate?: number; formatter?: (val: string) => string; color?: string };
+    axisLine?: { lineStyle?: { color?: string } };
+    splitLine?: { lineStyle?: { color?: string } };
   };
   yAxis: {
     type: string;
     name?: string;
     data?: (string | number)[];
-    axisLabel?: { rotate?: number; formatter?: (val: string) => string };
+    inverse?: boolean;
+    axisLabel?: { rotate?: number; formatter?: (val: string) => string; color?: string };
+    axisLine?: { lineStyle?: { color?: string } };
+    splitLine?: { lineStyle?: { color?: string } };
   };
   series: {
     name?: string;
@@ -219,7 +233,8 @@ describe('buildChartOption：结构化聚合响应（正常路径）', () => {
       )
     );
     expect(option.tooltip).toEqual({ trigger: 'item', formatter: '{b}: {c} ({d}%)' });
-    expect(option.legend).toEqual({ orient: 'vertical', left: 'left' });
+    // 主题化后 legend 追加 textStyle.color；布局键仍须精确为 {orient, left}
+    expect(option.legend).toMatchObject({ orient: 'vertical', left: 'left' });
     expect(option.series[0]).toMatchObject({
       type: 'pie',
       radius: '50%',
@@ -1071,7 +1086,8 @@ describe('buildChartOption：histogram 直方图（R-57）', () => {
     expect(option.title.text).toBe('Distribution');
     // 直方图为横向条形：类目轴（箱区间）在 y 且 inverse 自上而下，数值轴在 x
     expect(option.xAxis.type).toBe('value');
-    expect(option.yAxis).toEqual({
+    // 主题化后 y 类目轴追加 axisLine/axisLabel；箱区间与 inverse 语义键仍须精确
+    expect(option.yAxis).toMatchObject({
       type: 'category',
       data: ['0 ~ 10', '10 ~ 20', '20 ~ 30'],
       inverse: true,
@@ -1191,7 +1207,8 @@ describe('buildChartOption：funnel 漏斗图（R-59）', () => {
       { name: 'Banana', value: 50 },
     ]);
     expect(option.tooltip).toEqual({ trigger: 'item', formatter: '{b}: {c}' });
-    expect(option.legend).toEqual({ orient: 'vertical', left: 'left' });
+    // 主题化后 legend 追加 textStyle.color；布局键仍须精确为 {orient, left}
+    expect(option.legend).toMatchObject({ orient: 'vertical', left: 'left' });
   });
 
   it('消费 style.colors 调色板', () => {
@@ -1502,5 +1519,64 @@ describe('buildChartOption：时间维度类目轴排序（D3 后续修复）', 
     expect(fmt('2026-01-01T00:00:00Z')).toBe('2026-01-01');
     expect(fmt('2026-01-01T08:30:00Z')).toBe('2026-01-01 08:30:00');
     expect(fmt('2026-01-01 12:00:00 +0000 UTC')).toBe('2026-01-01 12:00:00');
+  });
+});
+
+describe('buildChartOption：主题取色（host → 字面色值）', () => {
+  // canvas 渲染拿不到 CSS 变量，chartPalette 须在构造时把主题的 --dr-* 解析成字面值。
+  // 这里注入与 styles/index.css 同构的规则（[data-theme='dark'] .dr-chart-host），
+  // 用 jsdom 的 getComputedStyle 验证「深色宿主 → option 落到 DARK_CHART_PALETTE 值」。
+  const styleEl = document.createElement('style');
+  styleEl.textContent = `
+[data-theme='dark'] .dr-chart-host {
+  --dr-text-1: #e6e8eb;
+  --dr-text-2: #b0b7c3;
+  --dr-border-strong: #434343;
+  --dr-border: #303030;
+  --dr-surface: #1f1f1f;
+}`;
+  document.head.appendChild(styleEl);
+
+  it('深色宿主：标题/轴/网格/tooltip 取深色调色板的字面色值', () => {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    const host = document.createElement('div');
+    host.className = 'dr-chart-host';
+    document.body.appendChild(host);
+    try {
+      const option = view<AxisOptionView>(
+        buildChartOption(
+          'bar',
+          axisPayload,
+          baseStyle,
+          {},
+          { title: '', dimensions: ['product'], metrics: ['revenue'] },
+          'dark',
+          host
+        )
+      );
+      expect(option.textStyle.color).toBe(DARK_CHART_PALETTE.text);
+      expect(option.tooltip.backgroundColor).toBe(DARK_CHART_PALETTE.tooltipBg);
+      expect(option.xAxis.axisLine?.lineStyle?.color).toBe(DARK_CHART_PALETTE.axisLine);
+      expect(option.yAxis.splitLine?.lineStyle?.color).toBe(DARK_CHART_PALETTE.splitLine);
+      expect(option.yAxis.axisLabel?.color).toBe(DARK_CHART_PALETTE.axisText);
+    } finally {
+      host.remove();
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
+
+  it('无宿主（纯逻辑/非 DOM）：回落浅色，不注入深色值', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        axisPayload,
+        baseStyle,
+        {},
+        { title: '', dimensions: ['product'], metrics: ['revenue'] }
+      )
+    );
+    // 浅色兜底取近黑文本，与深色兜底明显不同
+    expect(option.textStyle.color).toBe('#1f2328');
+    expect(option.yAxis.splitLine?.lineStyle?.color).toBe('#e6e8eb');
   });
 });

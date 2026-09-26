@@ -101,6 +101,7 @@ import {
   buildQuerySpecDocument,
   parseQuerySpecDocument,
 } from '../lib/querySpec';
+import { useResolvedTheme } from '../lib/theme';
 import {
   BindingInstance,
   BoundField,
@@ -647,6 +648,15 @@ interface ChartCanvasProps {
   chartStyle: ChartStyleConfig;
 }
 
+/** 离屏主题探针样式：不影响布局，仅供 chartPalette 读取当前主题的 --dr-*。 */
+const CHART_PROBE_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  width: 0,
+  height: 0,
+  overflow: 'hidden',
+  pointerEvents: 'none',
+};
+
 /** 图表渲染错误兜底：阻止 ECharts 抛错清空整棵 React 树（白屏丢工作）。 */
 class ChartErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -681,6 +691,14 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   metricUnits,
   chartStyle,
 }) => {
+  // 主题宿主探针（与 ChartView 同一机制）：canvas 取不到 CSS 变量，须在构造 option 时
+  // 把当前主题的颜色算成字面值。resolvedTheme 入依赖 → 切主题即重建 option 实时重绘。
+  const resolvedTheme = useResolvedTheme();
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [hostEl, setHostEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setHostEl(hostRef.current);
+  }, []);
   // option 构造走共享纯函数 buildChartOption（与 ShareView 同一出口）；
   // 「字段名 → 显示名」映射依赖 store 状态（queryConfig/chartBuilderFields），
   // 在组件体内计算为纯数据 labels 后传入。
@@ -740,13 +758,30 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
             }))
         : undefined;
 
-    return buildChartOption(config.chartType, data, chartStyle, labels, {
-      title: config.title,
-      dimensions,
-      metrics,
-      metricSlots,
-    });
-  }, [chartStyle, config, data, dimensionLabels, metricAliases, metricUnits]);
+    return buildChartOption(
+      config.chartType,
+      data,
+      chartStyle,
+      labels,
+      {
+        title: config.title,
+        dimensions,
+        metrics,
+        metricSlots,
+      },
+      resolvedTheme,
+      hostEl
+    );
+  }, [
+    chartStyle,
+    config,
+    data,
+    dimensionLabels,
+    metricAliases,
+    metricUnits,
+    hostEl,
+    resolvedTheme,
+  ]);
 
   if (loading) {
     return (
@@ -811,11 +846,14 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   }
 
   return (
-    <ReactECharts
-      option={chartOption}
-      style={{ height: '100%', width: '100%' }}
-      opts={{ renderer: 'canvas' }}
-    />
+    <>
+      <div ref={hostRef} className="dr-chart-host" aria-hidden style={CHART_PROBE_STYLE} />
+      <ReactECharts
+        option={chartOption}
+        style={{ height: '100%', width: '100%' }}
+        opts={{ renderer: 'canvas' }}
+      />
+    </>
   );
 };
 
