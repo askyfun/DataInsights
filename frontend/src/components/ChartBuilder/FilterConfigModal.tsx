@@ -275,7 +275,8 @@ const FilterConfigModal: React.FC<FilterConfigModalProps> = ({
 
   const dateFmt = withTime ? DATETIME_FORMAT : DATE_FORMAT;
 
-  const buildPatch = (): FilterConfigPatch | null => {
+  // 只构造「算子+取值」；asFilter/filterLabel 在 onOk 处随勾选状态统一补齐。
+  const buildPatch = (): Omit<FilterConfigPatch, 'asFilter' | 'filterLabel'> | null => {
     if (kind === 'date') {
       if (operator === 'between') {
         if (!dateRange?.[0] || !dateRange[1]) return null;
