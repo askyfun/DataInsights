@@ -32,6 +32,9 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool)
 	// 盘级批量取数（POST /api/dashboards/{id}/query）逐块复用图表取数管道：
 	// 注入在装配期完成，dashboard 侧只依赖一个窄接口（见 service/dashboard/query.go）。
 	dsDashboardSvc.SetChartProvider(dsChartSvc)
+	// 归档文件夹树（第一期只归档仪表盘）与仪表盘同库同包，但独立成一个 service，
+	// 因为两者的生命周期守卫不同（夹要查子夹/子盘/环）。
+	dsFolderSvc := dashboard.NewFolderService(db)
 
 	// Initialize handlers
 	datasourceHandler := handler.NewDatasourceHandler(dsSvc)
@@ -40,6 +43,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool)
 	shareHandler := handler.NewShareHandler(dsShareSvc)
 	queryHandler := handler.NewQueryHandler(dsQuerySvc)
 	dashboardHandler := handler.NewDashboardHandler(dsDashboardSvc)
+	dashboardFolderHandler := handler.NewDashboardFolderHandler(dsFolderSvc)
 
 	// API routes
 	api := r.Group("/api")
@@ -106,6 +110,17 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool)
 	router.RegisterPutRoute(dashboards, "/:id", dashboardHandler.Update)
 	router.RegisterDeleteRoute(dashboards, "/:id", dashboardHandler.Delete)
 	router.RegisterPostRoute(dashboards, "/:id/query", dashboardHandler.Query)
+
+	// Dashboard folder routes (generic router): 归档树的扁平读出口 + CRUD。
+	// 独立前缀 /api/dashboard-folders（而非 dashboards 组下的静态段）：文件夹是
+	// 自己的资源，且它的 {id} 同样是 UUID，与仪表盘共用一组会让 parseID 的归属含糊。
+	// 列表不分页、不返回嵌套结构（树由前端按 parent_id 组装）。
+	dashboardFolders := api.Group("/dashboard-folders")
+	router.RegisterGetRoute(dashboardFolders, "", dashboardFolderHandler.List)
+	router.RegisterPostRoute(dashboardFolders, "", dashboardFolderHandler.Create)
+	router.RegisterGetRoute(dashboardFolders, "/:id", dashboardFolderHandler.Get)
+	router.RegisterPutRoute(dashboardFolders, "/:id", dashboardFolderHandler.Update)
+	router.RegisterDeleteRoute(dashboardFolders, "/:id", dashboardFolderHandler.Delete)
 
 	// Share view route (no /api prefix). Not a generic route on purpose: its
 	// success response is a 302 redirect, which the JSON-envelope router

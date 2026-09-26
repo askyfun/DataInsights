@@ -20,18 +20,20 @@ type Dashboard struct {
 	Description *string `json:"description"`
 	LayoutJSON  string  `json:"layout_json"`
 	Status      string  `json:"status"`
+	FolderID    *string `json:"folder_id"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
 
 // DashboardCreateRequest is the business input of POST /api/dashboards.
-// LayoutJSON / Status may be empty; the service fills in the defaults
-// (an empty v1 document / "draft").
+// LayoutJSON / Status / FolderID may be empty; the service fills in the
+// defaults (an empty v1 document / "draft" / unassigned folder).
 type DashboardCreateRequest struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description"`
 	LayoutJSON  string  `json:"layout_json"`
 	Status      string  `json:"status"`
+	FolderID    string  `json:"folder_id"`
 }
 
 // DashboardUpdateRequest is the business input of PUT /api/dashboards/{id}.
@@ -43,11 +45,18 @@ type DashboardCreateRequest struct {
 // stored value. Description has one extra reachable state: a non-nil empty
 // string clears it back to NULL, because JSON cannot distinguish "absent" from
 // "null" once both decode to nil.
+//
+// FolderID uses that same empty-string-as-clear sentinel, but it is NOT
+// documented loosely: `""` means "move out of any folder", a UUID means
+// "archive into that folder", nil means "leave the assignment alone". The
+// folder-side parent_id follows the identical three-state rule (see
+// DashboardFolderUpdateRequest) so the frontend has one move semantics.
 type DashboardUpdateRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 	LayoutJSON  *string `json:"layout_json"`
 	Status      *string `json:"status"`
+	FolderID    *string `json:"folder_id"`
 }
 
 // ChartReference is the payload of GET /api/charts/{id}/references: how many

@@ -28,6 +28,7 @@ type Dashboard struct {
 	Description sql.NullString `bun:"description" json:"description"`
 	LayoutJSON  string         `bun:"layout_json,notnull" json:"layout_json"`
 	Status      string         `bun:"status,notnull" json:"status"`
+	FolderID    sql.NullString `bun:"folder_id" json:"folder_id"`
 	OwnerID     sql.NullInt32  `bun:"owner_id" json:"owner_id"`
 	TenantID    sql.NullInt32  `bun:"tenant_id" json:"tenant_id"`
 	CreatedAt   time.Time      `bun:"created_at,notnull" json:"created_at"`

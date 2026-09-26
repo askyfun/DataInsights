@@ -104,6 +104,7 @@ const dashboard: Dashboard = {
   description: null,
   layout_json: layoutDoc,
   status: 'draft',
+  folder_id: null,
   created_at: '',
   updated_at: '',
 };

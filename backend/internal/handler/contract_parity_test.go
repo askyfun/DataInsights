@@ -66,6 +66,8 @@ func TestMirrorEntityJSONTagParity(t *testing.T) {
 		{"dashboardCreateIn / entity.DashboardCreateRequest", dashboardCreateIn{}, entity.DashboardCreateRequest{}, false},
 		{"dashboardUpdateIn / entity.DashboardUpdateRequest", dashboardUpdateIn{}, entity.DashboardUpdateRequest{}, false},
 		{"dashboardQueryIn / entity.DashboardQueryRequest", dashboardQueryIn{}, entity.DashboardQueryRequest{}, false},
+		{"dashboardFolderCreateIn / entity.DashboardFolderCreateRequest", dashboardFolderCreateIn{}, entity.DashboardFolderCreateRequest{}, false},
+		{"dashboardFolderUpdateIn / entity.DashboardFolderUpdateRequest", dashboardFolderUpdateIn{}, entity.DashboardFolderUpdateRequest{}, false},
 		{"datasetCreateIn / entity.Dataset", datasetCreateIn{}, entity.Dataset{}, true},
 		{"datasetUpdateIn / entity.Dataset", datasetUpdateIn{}, entity.Dataset{}, true},
 	}

@@ -102,6 +102,20 @@ frontend/src/
   块上会提示「保存仪表盘后生效」；② 盘级筛选每个筛选器每次查询最多产生**一条**合并条件，
   所以「包含空日期」（区间 OR IS NULL）在仪表盘侧表达不出来。
 
+### 仪表盘归档文件夹（第一期）
+
+`components/DashboardFolderTree/`（树 UI）+ `lib/dashboardFolderTree.ts`（组树与落点判定的**纯逻辑**，
+零 React 依赖）+ 后端 `service/dashboard/folder.go`，表 `bi_dashboard_folder`（migration 00007）：
+
+- **后端只出扁平数组**，树在前端按 `parent_id` 折叠：改名/移动因此都是单行写，没有派生路径要同步。
+- **`""` 是「清空归属」的显式哨兵**（`folder.parent_id` 与 `dashboard.folder_id` 同一口径）：
+  JSON 分不出「缺省」与「null」，而 PUT 遵循「未提供则保留」，所以移到根级 / 移出文件夹必须有第三种写法。
+- **两条守卫住在后端**：移动成环（沿 target 祖先链上溯，代价随深度而非子树规模）、
+  非空夹不可删（不级联，消息带剩余数量）。
+- **悬空引用不清洗**：指向已软删对象的 `parent_id` / `folder_id` 原样回显，前端退化成根级展示
+  （所以组树函数必须能处理环与悬空，见其单测）。
+- 树落点在 `pages/Dashboards.tsx`：`Layout.Sider` 左列可折叠，选中夹 = 过滤右侧表格（只算直属子项）。
+
 ## 常用命令
 
 命令细节（go test 单测、biome 各子命令等）见 `backend/AGENTS.md` 与 `frontend/AGENTS.md`，此处只留高频项：

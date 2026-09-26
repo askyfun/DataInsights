@@ -234,7 +234,7 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 | 1 | `GET /api/dashboards` | 列表：未软删，`created_at DESC, id DESC` |
 | 2 | `POST /api/dashboards` | 创建（请求体无 id）；name 必填（仅列宽约束），layout_json 非空但非法 JSON → 20100 |
 | 3 | `GET /api/dashboards/{id}` | 详情 |
-| 4 | `PUT /api/dashboards/{id}` | 更新：四字段**全部可选且"未提供则保留"**；description 空串清空为 NULL；updated_at 后端显式前进 |
+| 4 | `PUT /api/dashboards/{id}` | 更新：五字段**全部可选且"未提供则保留"**；description 空串清空为 NULL；`folder_id` 三态（缺省/null 保留、`""` 移出文件夹、UUID 归档进该夹）；updated_at 后端显式前进 |
 | 5 | `DELETE /api/dashboards/{id}` | **软删**（打 `deleted_at`，幂等，绝不物理删除；无级联目标） |
 | 6 | `POST /api/dashboards/{id}/query` | 盘级批量取数，见 6.1 |
 
@@ -252,6 +252,24 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 - 响应 `data.results[]`（顺序与 layout 图表块一致）：`widgetId / chartId / status /
   data（同 ChartDataResult，失败时 null）/ appliedFields / overriddenFields（覆盖可见标识）/ message`。
 - 布局解析不出来 → 空 `results` 而不是报错。
+
+### 6.2 仪表盘文件夹（归档树，第一期只归档仪表盘）
+
+实体 `DashboardFolder`：`id / name / parent_id / created_at / updated_at`。表 `bi_dashboard_folder`
+（migration 00007），`id` 同为 UUIDv7，`parent_id` 自引用表达树、**无 FK**（软删语义下外键会
+拒绝合法历史态）。
+
+| # | 方法与路径 | 说明 |
+|---|-----------|------|
+| 1 | `GET /api/dashboard-folders` | **扁平**全量（`created_at ASC, id ASC`，不分页）：组树归前端 `lib/dashboardFolderTree.ts`，后端不落嵌套也不落物化路径 |
+| 2 | `POST /api/dashboard-folders` | 建夹；`parent_id` 缺省/null/`""` 都是根级；父级不存在或已软删 → 20300；name 空 → 20100 |
+| 3 | `GET /api/dashboard-folders/{id}` | 详情 |
+| 4 | `PUT /api/dashboard-folders/{id}` | 改名 / 移动；`parent_id` **三态**：缺省或 null 保留、`""` 移到根级、UUID 移到该夹下；移动到自己或任意后代（成环）→ 20400 |
+| 5 | `DELETE /api/dashboard-folders/{id}` | 软删，**仅空夹可删**：仍有未软删子夹或仪表盘 → 20400（消息带剩余数量），不级联、不孤儿化 |
+
+`""` 作为「清空归属」的显式哨兵是 JSON 无法区分「缺省」与「null」的必然产物，`dashboard.folder_id`
+与 `folder.parent_id` 共用同一口径。悬空引用（指向已软删对象）**不级联清洗**：后端原样回显，
+前端把这种行退化成根级展示。
 
 ## 7. Share 分享（4 个 API 端点 + 1 个浏览器入口）
 

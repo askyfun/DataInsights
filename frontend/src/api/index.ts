@@ -248,6 +248,11 @@ export interface QueryRecordSaveRequest {
 export type Dashboard = G['Dashboard'];
 export type DashboardCreateRequest = G['DashboardCreateRequest'];
 export type DashboardUpdateRequest = G['DashboardUpdateRequest'];
+// 归档文件夹（第一期只归档仪表盘）。树由前端按 parent_id 组装，后端只回扁平数组，
+// 所以这里没有 children 字段可映射 —— 组树逻辑全在 components/DashboardFolderTree。
+export type DashboardFolder = G['DashboardFolder'];
+export type DashboardFolderCreateRequest = G['DashboardFolderCreateRequest'];
+export type DashboardFolderUpdateRequest = G['DashboardFolderUpdateRequest'];
 export type DashboardQueryRequest = G['DashboardQueryRequest'];
 // 注意命名陷阱：这里取的是**单块结果**（DashboardQueryResult 是 block schema），
 // 接口的 Envelope 同名类型是 G['DashboardQueryResponse']（见文件头迁移规则）。
@@ -519,6 +524,38 @@ export const dashboardsApi = {
     data: DashboardQueryRequest
   ): Promise<AxiosResponse<ApiResponse<DashboardQueryResults>>> => {
     return apiClient.post<ApiResponse<DashboardQueryResults>>(`/api/dashboards/${id}/query`, data);
+  },
+};
+
+// 仪表盘归档文件夹 API（第一期只归档仪表盘）。
+//
+// 三条契约要点（都在 openapi.yaml 里钉着，这里只提醒调用方）：
+//   - list 是**扁平**数组，组树在 DashboardFolderTree；
+//   - `parent_id` / `folder_id` 的 `""` 是「移到根级 / 移出文件夹」的显式哨兵，
+//     缺省或 null 才是「保留存量」—— 少发一个字段就会让拖拽静默失效；
+//   - delete 只允许空夹，非空回 20400（消息带剩余数量），拦截器会把它 reject 成
+//     Error.message，页面直接 message.error 即可，不要吞。
+export const dashboardFoldersApi = {
+  getAll: (): Promise<AxiosResponse<ApiResponse<DashboardFolder[]>>> => {
+    return apiClient.get<ApiResponse<DashboardFolder[]>>('/api/dashboard-folders');
+  },
+
+  create: (
+    data: DashboardFolderCreateRequest
+  ): Promise<AxiosResponse<ApiResponse<DashboardFolder>>> => {
+    return apiClient.post<ApiResponse<DashboardFolder>>('/api/dashboard-folders', data);
+  },
+
+  // 改名 / 移动（未提供的字段保留存量）
+  update: (
+    id: string,
+    data: DashboardFolderUpdateRequest
+  ): Promise<AxiosResponse<ApiResponse<DashboardFolder>>> => {
+    return apiClient.put<ApiResponse<DashboardFolder>>(`/api/dashboard-folders/${id}`, data);
+  },
+
+  remove: (id: string): Promise<AxiosResponse<ApiResponse<{ status: string }>>> => {
+    return apiClient.delete<ApiResponse<{ status: string }>>(`/api/dashboard-folders/${id}`);
   },
 };
 

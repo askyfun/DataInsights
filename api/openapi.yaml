@@ -36,6 +36,9 @@ tags:
     description: >-
       仪表盘管理（12 列栅格容器的 CRUD、软删，以及图表侧的「被多少个仪表盘引用」计数，
       和批量取数端点 POST /api/dashboards/{id}/query）。
+  - name: dashboard-folders
+    description: >-
+      仪表盘文件夹（树结构归档：多层嵌套 + 软删）。第一期只归档仪表盘，不归档图表。
 paths:
   /health:
     get:
@@ -851,6 +854,119 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardQueryResponse'
+  /api/dashboard-folders:
+    get:
+      tags:
+        - dashboard-folders
+      summary: 仪表盘文件夹列表（扁平，前端按 parent_id 组树）
+      description: |
+        返回全部未软删文件夹（`deleted_at IS NULL`），按 `created_at ASC, id ASC` 排序
+        （建树先序稳定）。**不做服务端组树**：树由前端用 parent_id 折叠，后端只回扁平数组。
+
+        根级以 `parent_id = null` 表达。无结果时 data 为空数组。
+        第一期不分页（归档量级小），也不支持按 parent_id 过滤。
+      operationId: listDashboardFolders
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFolderListResponse'
+    post:
+      tags:
+        - dashboard-folders
+      summary: 新建仪表盘文件夹
+      description: |
+        id 由后端生成 UUIDv7。parent_id 缺省 / null 表示根级；传 `""`（空串）同样表示
+        **根级**——这是 PUT 侧「移动回根」哨兵（见 updateDashboardFolder）在本端点的镜像，
+        创建时两者等价，都是「无父级」。
+
+        parent_id 指向的文件夹必须存在且未软删，否则 20300。name 为空 → 20100。
+      operationId: createDashboardFolder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardFolderCreateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFolderResponse'
+  /api/dashboard-folders/{id}:
+    get:
+      tags:
+        - dashboard-folders
+      summary: 获取仪表盘文件夹详情
+      description: |
+        id 非法（非 UUID）→ 20100；不存在或已软删 → 20300。
+      operationId: getDashboardFolder
+      parameters:
+        - $ref: '#/components/parameters/DashboardFolderId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFolderResponse'
+    put:
+      tags:
+        - dashboard-folders
+      summary: 更新文件夹（改名 / 移动；未提供的字段保留存量）
+      description: |
+        两个字段**全部可选且遵循「未提供则保留」**（与本仓库 dashboard / datasource 同例）：
+        - `name`：缺省或 null 保留存量；空串 → 20100。
+        - `parent_id`：**三态**。
+          - 缺省或 `null` = 保留现有父级（只改名时前端就发这一形态）。
+          - `""`（空串）= **移到根级**（清空父级）。这是 JSON 无法区分「缺省」与「null」
+            时的显式哨兵，是本仓库唯一的字符串哨兵，前后端都按此口径实现。
+          - UUID = 移到该文件夹下。
+
+        守卫（都返回业务错误，不落库）：
+        - 目标父级不存在或已软删 → 20300。
+        - 把文件夹移动到自己或自己的**任意后代**下（环）→ 20400。
+      operationId: updateDashboardFolder
+      parameters:
+        - $ref: '#/components/parameters/DashboardFolderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardFolderUpdateRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFolderResponse'
+    delete:
+      tags:
+        - dashboard-folders
+      summary: 删除仪表盘文件夹（软删，仅空夹可删）
+      description: |
+        软删：只打 `deleted_at = now()`，幂等（重复删除影响 0 行不报错）。
+
+        **第一期采用「仅空夹可删」策略**：文件夹下仍有未软删的**子文件夹**或**仪表盘**
+        时返回 20400 业务错误（消息指出还有几项），绝不级联删子夹、也绝不把子项孤儿化。
+        理由：删除是不可逆的用户动作，级联删仪表盘会连带销毁整份 layout_json 文档；
+        而「移动子项」第一期没有批量端点。前端据此在删除前先提示用户清空。
+      operationId: deleteDashboardFolder
+      parameters:
+        - $ref: '#/components/parameters/DashboardFolderId'
+      responses:
+        '200':
+          description: 'HTTP 恒 200；成功 data 为 {status: "ok"}'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
   /api/shares:
     get:
       tags:
@@ -2862,12 +2978,14 @@ components:
         仪表盘响应实体（entity.Dashboard）。layout_json 是布局文档（DashboardLayout）
         的字符串形态：列是 JSONB，API 面是 string，与 Chart.config 同款约定。
         owner_id / tenant_id 是对内列，不在读出口。已软删的行不会出现在任何读出口。
+        folder_id 是归档文件夹（第一期仅仪表盘），未归档为 null。
       required:
         - id
         - name
         - description
         - layout_json
         - status
+        - folder_id
         - created_at
         - updated_at
       properties:
@@ -2881,6 +2999,12 @@ components:
           type: string
           nullable: true
           description: 无描述时为 null（空串与 null 落库后不可区分，都记为 NULL）。
+        folder_id:
+          type: string
+          nullable: true
+          description: >-
+            所属文件夹 id；未归档（根级）为 null。指向**已软删**文件夹时后端仍原样回显
+            该 id（不做级联清洗），前端把这种行归到「未归档」桶里展示。
         layout_json:
           type: string
           description: >-
@@ -2923,10 +3047,16 @@ components:
         status:
           type: string
           description: 缺省 draft。
+        folder_id:
+          type: string
+          nullable: true
+          description: >-
+            新建时直接归档到该文件夹；缺省/null/空串都是「未归档」。指向不存在或已软删
+            的文件夹 → 20300。
     DashboardUpdateRequest:
       type: object
       description: >-
-        PUT /api/dashboards/{id} 请求体（entity.DashboardUpdateRequest）。四个字段
+        PUT /api/dashboards/{id} 请求体（entity.DashboardUpdateRequest）。五个字段
         **全部可选且都是「未提供则保留」**：缺省或 null 保持存量值（不是全量覆盖），
         与本仓库 datasource 密码、dataset 可选元数据同例。description 传空串表示
         清空为 NULL。
@@ -2943,6 +3073,13 @@ components:
         status:
           type: string
           description: 缺省/null 保留存量。
+        folder_id:
+          type: string
+          nullable: true
+          description: >-
+            **三态**（归档移动）：缺省或 null = 保留现有归档位置；`""`（空串）=
+            **移出文件夹到未归档**（与文件夹 PUT 的 parent_id 同一哨兵口径）；
+            UUID = 归档到该文件夹。目标不存在或已软删 → 20300。
     DashboardLayout:
       type: object
       description: >-
@@ -3197,6 +3334,88 @@ components:
           description: 引用方身份（id + name）；无引用时为空数组。
           items:
             $ref: '#/components/schemas/ChartReferenceItem'
+    DashboardFolder:
+      type: object
+      description: >-
+        仪表盘文件夹响应实体（entity.DashboardFolder）。树由前端按 parent_id 组装，
+        后端不落派生路径。已软删的行不会出现在任何读出口。
+      required:
+        - id
+        - name
+        - parent_id
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          description: UUIDv7 字符串（与仪表盘同款不可枚举主键），由后端生成。
+          example: 0198f2c3-4d5e-7a6b-8c9d-0e1f2a3b4c5d
+        name:
+          type: string
+        parent_id:
+          type: string
+          nullable: true
+          description: 父文件夹 id；根级为 null。
+        created_at:
+          type: string
+          description: RFC3339。
+        updated_at:
+          type: string
+          description: RFC3339；由后端在每次更新时显式前进（表无触发器）。
+    DashboardFolderCreateRequest:
+      type: object
+      description: >-
+        POST /api/dashboard-folders 请求体（entity.DashboardFolderCreateRequest）。
+        不含 id：主键由后端生成 UUIDv7。
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        parent_id:
+          type: string
+          nullable: true
+          description: >-
+            父文件夹 id；缺省/null/空串都是根级（空串在此与 null 等价——根级本来就是
+            「无父级」，不需要哨兵）。目标不存在或已软删 → 20300。
+    DashboardFolderUpdateRequest:
+      type: object
+      description: >-
+        PUT /api/dashboard-folders/{id} 请求体（entity.DashboardFolderUpdateRequest）。
+        两个字段全部可选，遵循「未提供则保留」。
+      properties:
+        name:
+          type: string
+          description: 缺省/null 保留存量；空串 → 20100（夹名不可为空）。
+        parent_id:
+          type: string
+          nullable: true
+          description: >-
+            **三态**：缺省或 null = 保留现有父级（只改名）；`""`（空串）= **移到根级**
+            （清空父级的显式哨兵）；UUID = 移到该文件夹下。目标不存在/已软删 → 20300；
+            移动到自己或任意后代（成环）→ 20400。
+    DashboardFolderListResponse:
+      description: GET /api/dashboard-folders 响应：data 为 DashboardFolder 数组（扁平）。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DashboardFolder'
+    DashboardFolderResponse:
+      description: 仪表盘文件夹 CRUD 响应：data 为单个 DashboardFolder。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/DashboardFolder'
     ChartReferenceItem:
       type: object
       description: 引用方仪表盘的最小身份（删除提示只需要这两项）。
@@ -3226,6 +3445,18 @@ components:
       required: true
       description: >-
         仪表盘 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。
+        非 UUID → 20100；格式合法但不存在/已软删 → 20300。
+      schema:
+        type: string
+        minLength: 36
+        maxLength: 36
+        pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    DashboardFolderId:
+      name: id
+      in: path
+      required: true
+      description: >-
+        仪表盘文件夹 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。
         非 UUID → 20100；格式合法但不存在/已软删 → 20300。
       schema:
         type: string
