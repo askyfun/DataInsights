@@ -74,7 +74,13 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '表格',
     resultShape: 'table',
     icon: TableOutlined,
-    styleKeys: ['tableRowSize'],
+    styleKeys: [
+      'tableRowSize',
+      'tableShowIndex',
+      'tableWordWrap',
+      'tableNullDisplay',
+      'tableFreezeDimensions',
+    ],
     fieldGroups: [
       {
         id: 'dimensions',

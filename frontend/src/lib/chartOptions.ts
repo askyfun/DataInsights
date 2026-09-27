@@ -78,6 +78,7 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
   const tableRowSize = raw.tableRowSize;
   const stack = raw.stack;
   const orientation = raw.orientation;
+  const nullDisplay = raw.tableNullDisplay;
   return {
     colors: Array.isArray(raw.colors)
       ? raw.colors.filter((color): color is string => typeof color === 'string')
@@ -89,6 +90,13 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
     // orientation/donut 同例：非法/缺失不带键，分别等价于 'vertical'/false。
     ...(orientation === 'vertical' || orientation === 'horizontal' ? { orientation } : {}),
     ...(raw.donut === true ? { donut: true } : {}),
+    // 表格展示开关（仅 table 消费）：只认 true，缺失/非法一律不带键，等价于 false/原样。
+    ...(raw.tableShowIndex === true ? { tableShowIndex: true } : {}),
+    ...(raw.tableWordWrap === true ? { tableWordWrap: true } : {}),
+    ...(raw.tableFreezeDimensions === true ? { tableFreezeDimensions: true } : {}),
+    ...(nullDisplay === 'dash' || nullDisplay === 'blank' || nullDisplay === 'zero'
+      ? { tableNullDisplay: nullDisplay }
+      : {}),
   };
 }
 

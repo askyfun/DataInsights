@@ -302,6 +302,17 @@ export interface ChartStyleConfig {
   orientation?: 'vertical' | 'horizontal';
   /** 环形图开关（仅 pie）；undefined 等价于 false（实心饼图）。 */
   donut?: boolean;
+  /** 表格序号列（仅 table）；undefined 等价于 false。 */
+  tableShowIndex?: boolean;
+  /** 表格自动换行（仅 table）；undefined 等价于 false（沿用省略号）。 */
+  tableWordWrap?: boolean;
+  /**
+   * 表格空值显示（仅 table）：把 NULL/空字符串统一渲染为占位符。
+   * undefined 等价于 'raw'（原样输出空单元格，保持既有行为）。
+   */
+  tableNullDisplay?: 'raw' | 'dash' | 'blank' | 'zero';
+  /** 表格冻结维度列（仅 table）：横向滚动时把维度列固定在左侧；undefined 等价于 false。 */
+  tableFreezeDimensions?: boolean;
 }
 
 export interface ChartQueryOptions {

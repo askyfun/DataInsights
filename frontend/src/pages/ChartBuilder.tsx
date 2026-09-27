@@ -1143,6 +1143,49 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 />
               </SettingRow>
             )}
+
+            {showStyleControl('tableShowIndex') && (
+              <SettingRow label="序号列">
+                <Switch
+                  checked={chartStyle.tableShowIndex ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableShowIndex: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('tableWordWrap') && (
+              <SettingRow label="自动换行">
+                <Switch
+                  checked={chartStyle.tableWordWrap ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableWordWrap: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('tableFreezeDimensions') && (
+              <SettingRow label="冻结维度列">
+                <Switch
+                  checked={chartStyle.tableFreezeDimensions ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableFreezeDimensions: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('tableNullDisplay') && (
+              <SettingRow label="空值显示">
+                <Select
+                  style={{ width: 160 }}
+                  value={chartStyle.tableNullDisplay ?? 'raw'}
+                  onChange={(value) => onChartStyleChange({ tableNullDisplay: value })}
+                  options={[
+                    { value: 'raw', label: '原样' },
+                    { value: 'dash', label: '横杠（--）' },
+                    { value: 'blank', label: '空白' },
+                    { value: 'zero', label: '零（0）' },
+                  ]}
+                />
+              </SettingRow>
+            )}
           </div>
         </Card>
       )}
@@ -2432,6 +2475,10 @@ const ChartBuilder: React.FC = () => {
               .filter(([, format]) => Boolean(format))
           )}
           rowSize={chartStyle.tableRowSize}
+          showIndex={chartStyle.tableShowIndex}
+          wordWrap={chartStyle.tableWordWrap}
+          nullDisplay={chartStyle.tableNullDisplay}
+          freezeDimensions={chartStyle.tableFreezeDimensions}
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
           // 排序状态受控：单一事实源是 queryConfig.sort（bindingId 引用），
           // 表头箭头只反映它，避免"看起来排了、数据没排"的不一致。

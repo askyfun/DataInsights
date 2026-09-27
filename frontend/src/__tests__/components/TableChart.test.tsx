@@ -97,3 +97,91 @@ describe('TableChart 表头排序', () => {
     expect(onPageChange).toHaveBeenCalledWith(2, 10);
   });
 });
+
+/**
+ * 表格展示增强（#121 第 1 批）：序号列 / 空值显示 / 自动换行 / 冻结维度列。
+ * 全部是渲染层行为，不涉及服务端契约。
+ */
+describe('TableChart 展示增强', () => {
+  const tdWithText = (text: string): HTMLElement | null => {
+    const node = screen.getAllByText(text)[0]?.closest('td') ?? null;
+    return node;
+  };
+
+  // 首列单元格文本，仅保留纯数字（跳过 antd v6 固定列拆分出的表头 '#' 度量行）。
+  const indexColumnValues = (container: HTMLElement): string[] =>
+    Array.from(container.querySelectorAll('.ant-table-tbody tr td:first-child'))
+      .map((td) => td.textContent ?? '')
+      .filter((text) => /^\d+$/.test(text));
+
+  it('序号列：无分页时从 1 起连续编号', () => {
+    const { container } = renderTable({ showIndex: true });
+    expect(screen.getByRole('columnheader', { name: '#' })).toBeTruthy();
+    expect(indexColumnValues(container)).toEqual(['1', '2']);
+  });
+
+  it('序号列：跨服务端分页连续编号（第 2 页从 11 起）', () => {
+    const { container } = renderTable({
+      showIndex: true,
+      pagination: { page: 2, pageSize: 10, total: 30 },
+    });
+    expect(indexColumnValues(container)).toEqual(['11', '12']);
+  });
+
+  it("空值显示 'dash'：NULL 与空串都渲染为 --", () => {
+    renderTable({
+      data: [{ region: null, revenue: '' }],
+      columns: ['region', 'revenue'],
+      dimensionNames: ['region'],
+      metricNames: ['revenue'],
+      nullDisplay: 'dash',
+    });
+    expect(screen.getAllByText('--').length).toBe(2);
+  });
+
+  it("空值显示 'zero'：NULL 渲染为 0", () => {
+    renderTable({
+      data: [{ region: null, revenue: 42 }],
+      columns: ['region', 'revenue'],
+      dimensionNames: ['region'],
+      metricNames: ['revenue'],
+      nullDisplay: 'zero',
+    });
+    expect(screen.getByText('0')).toBeTruthy();
+    expect(screen.getByText('42')).toBeTruthy();
+  });
+
+  it('空值显示缺省(raw)：不产生 -- 占位', () => {
+    renderTable({
+      data: [{ region: null, revenue: '' }],
+      columns: ['region', 'revenue'],
+      dimensionNames: ['region'],
+      metricNames: ['revenue'],
+    });
+    expect(screen.queryByText('--')).toBeNull();
+  });
+
+  it('自动换行：默认单元格省略号截断，开启后取消', () => {
+    const { container, unmount } = renderTable();
+    expect(container.querySelector('.ant-table-tbody .ant-table-cell-ellipsis')).toBeTruthy();
+    unmount();
+
+    renderTable({ wordWrap: true });
+    expect(container.querySelector('.ant-table-tbody .ant-table-cell-ellipsis')).toBeNull();
+  });
+
+  it('冻结维度列：维度列固定左侧，指标列不固定', () => {
+    renderTable({
+      dimensionNames: ['region'],
+      metricNames: ['revenue'],
+      freezeDimensions: true,
+    });
+    expect(tdWithText('East')?.className).toContain('ant-table-cell-fix-start');
+    expect(tdWithText('42')?.className).not.toContain('ant-table-cell-fix-start');
+  });
+
+  it('未开启冻结时维度列不带 fix-start', () => {
+    renderTable({ dimensionNames: ['region'], metricNames: ['revenue'] });
+    expect(tdWithText('East')?.className).not.toContain('ant-table-cell-fix-start');
+  });
+});
