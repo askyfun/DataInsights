@@ -77,6 +77,14 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		req.Metrics[i].Alias = idx.localizeAlias(req.Metrics[i].Field, req.Metrics[i].ResolveAlias())
 	}
 
+	// Top N（issue #130）：query_options.top_n 翻译进查询计划本身（AST 的
+	// Sort + Limit，由数据库完成排序截断）。未启用时零开销、路径与改动前一致。
+	if topN := parseTopN(req.QueryOptions); topN != nil {
+		if err := applyTopN(ast, topN); err != nil {
+			return ExecutorResult{}, err
+		}
+	}
+
 	if err := ast.ValidateGranularity(dialect); err != nil {
 		return ExecutorResult{}, err
 	}

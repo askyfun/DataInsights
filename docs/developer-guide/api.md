@@ -1,6 +1,6 @@
 # Data Insights API 接口文档
 
-> 最后更新：2026-09-26
+> 最后更新：2026-09-27
 
 > **契约事实源是 [`api/openapi.yaml`](../../api/openapi.yaml)**（OpenAPI 3.0.3）。本文是它的叙述性视图：
 > 端点清单、通用约定与易踩的契约细节。两者不一致时**以 yaml 为准**，并应回头修正本文。
@@ -197,8 +197,10 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
   保留进查询 AST）。
 - `filters` / `pagination` / `sort` 两协议共用。`filters` 元素键为 `operator`（**不是 op**）：
   `{id, field, operator, value, value_end?, logic}`。
-- `query_options`：目前仅 histogram 消费（`bin_count` 默认 20、`bin_width` 可选），
-  executor 直接从请求读取，不进 QuerySpec。
+- `query_options`：扩展袋。histogram 消费 `bin_count`（默认 20）/ `bin_width`；
+  Top N（#130，bar/line/area/pie）消费 `top_n: {limit, metric?, order?}` ——
+  executor 翻译进查询计划（AST 的 Sort + Limit，数据库完成排序截断）。
+  均从请求直接读取，不进 QuerySpec。
 
 响应 `data` 为 `ChartDataResult`：`{ data, select_sql, count_sql? }`——`select_sql` 成功恒返回；
 `count_sql` 仅 table + pagination 分支。内层 `data` 形状由 `chart_type` 判别（契约上 oneOf，

@@ -1,6 +1,6 @@
 # 图表构建器设计与现状
 
-> 最后更新：2026-09-26
+> 最后更新：2026-09-27
 
 > 本文原为 2026-05 的《Chart Builder 增强实现计划》，其中绝大多数内容已落地。
 > 现改写为"设计 + 现状"文档：以下描述以仓库当前代码为准（以 `backend/internal/query/`、
@@ -153,7 +153,15 @@ interface FilterConfig {
 | histogram | 两阶段分箱 + HistogramProcessor | bins 补全（空 bin 以 0 占位） |
 | boxplot / radar | 对应 processor | 受数据源方言能力门控 |
 
-## 六、饼图"其他"合并：能力保留但未接线
+## 六、Top N（issue #130）：翻译进查询计划而非事后裁剪
+
+`query/topn.go`：请求 `query_options.top_n = {limit, metric?: 列ID, order?}` 时，
+executor 在 AST 上设置 `Sort`（目标指标的输出别名，与用户手选排序共用渲染链路）与
+`Limit`，由 builder 渲染成 `ORDER BY … LIMIT N` —— 数据库完成排名截断。
+`metric` 缺省取首指标；解析不到（列 ID 与别名都不匹配）显式报错，不静默换排名依据。
+前端卡片仅在 bar/line/area/pie + 恰好一个维度时开放，恢复的文档失效时在源头清掉配置。
+
+## 七、饼图"其他"合并：能力保留但未接线
 
 `query.PieProcessor` 具备按比例阈值把小占比类目并入"其他"的能力（`MergeOtherBelowRatio`，`Process` 内消费，单测
 `TestPieProcessor_WithMergeOtherBelowRatio` 覆盖）。但图表查询的**线协议已不再携带**该阈值——
@@ -161,7 +169,7 @@ interface FilterConfig {
 `NewPieProcessor()` 在查询路径上以默认 `MergeOtherBelowRatio: 0`（即不合并）构造。该能力保留但未接线，
 重新接线需要恢复请求侧的阈值字段。
 
-## 七、各图表类型落地要点
+## 八、各图表类型落地要点
 
 - **table**：`COUNT(*)` 取总数，`LIMIT/OFFSET` 经参数化下推；前端 Ant Design Table + 分页器。
 - **pie**：聚合后按首维度分组算百分比；长尾合并见第六节（未接线）。
@@ -170,7 +178,7 @@ interface FilterConfig {
 - **pivot**：GROUPING SETS 行列转换（缺失回退 UNION ALL）。
 - **histogram**：两阶段分箱（MIN/MAX/COUNT → 分箱计数），`query_options.bin_count` / `bin_width` 经 v1 请求传入并生效。
 
-## 八、配置项
+## 九、配置项
 
 ### 8.1 Pie 图表配置
 

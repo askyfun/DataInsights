@@ -311,7 +311,7 @@ type ChartSpecQueryRequest struct {
 	// Pagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
 	Pagination *ChartPagination `json:"pagination,omitempty"`
 
-	// QueryOptions 查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go map[string]any omitempty，Task 3-1a 接线）：histogram 读取 bin_count （数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的 宽度）。executor 从请求结构体直接消费，不进入 QuerySpec/AST；其他 chart_type 忽略本节。
+	// QueryOptions 查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go map[string]any omitempty，Task 3-1a 接线）：histogram 读取 bin_count （数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的 宽度）。Top N（issue #130）读取 top_n 对象 {limit: 正整数, metric?: 列ID, order?: asc|desc}：executor 把「按指标取前 N 个维度值」 翻译进查询计划（AST 的 Sort + Limit，由数据库完成排序截断）， order 缺省 desc；指标解析不到时显式报错。executor 从请求结构体直接 消费，不进入 QuerySpec/AST；其他 chart_type 忽略本节。
 	QueryOptions *map[string]interface{} `json:"query_options,omitempty"`
 	Sort         *SortConfig             `json:"sort,omitempty"`
 
@@ -567,7 +567,9 @@ type Dataset struct {
 	Description  *string `json:"description"`
 	Id           int     `json:"id"`
 
-	// Mode 数据集取数模式："direct"（直连，默认）| "extract"（抽取，issue #118 架构预留： 数据灌入统一 StarRocks 存储、查询直查该库）。本期 extract 仅落类型与守卫， 灌数与 extract 查询路径未实现（查询会显式报错）。
+	// Mode 数据集取数模式："direct"（直连，默认）| "extract"（抽取，issue #118 架构预留：
+	// 数据灌入统一 StarRocks 存储、查询直查该库）。本期 extract 仅落类型与守卫，
+	// 灌数与 extract 查询路径未实现（查询会显式报错）。
 	Mode        string  `json:"mode"`
 	Name        string  `json:"name"`
 	PreviewData *string `json:"preview_data"`
@@ -638,7 +640,7 @@ type DatasetCreateRequest struct {
 	DatasourceId int     `json:"datasource_id"`
 	Description  *string `json:"description,omitempty"`
 
-	// Mode 为空时后端缺省 "direct"。
+	// Mode 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue
 	Mode     *string `json:"mode,omitempty"`
 	Name     string  `json:"name"`
 	QuerySql *string `json:"query_sql,omitempty"`
@@ -718,7 +720,7 @@ type DatasetUpdateRequest struct {
 	DatasourceId int     `json:"datasource_id"`
 	Description  *string `json:"description,omitempty"`
 
-	// Mode 为空时后端缺省 "direct"。
+	// Mode 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue
 	Mode     *string `json:"mode,omitempty"`
 	Name     string  `json:"name"`
 	QuerySql *string `json:"query_sql,omitempty"`

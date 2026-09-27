@@ -335,12 +335,27 @@ export interface ReferenceLine {
   name?: string;
 }
 
+/**
+ * Top N（issue #130，#116 epic 第三步）：按某指标取前 N 个维度值，翻译进查询计划
+ * （AST Sort+Limit，数据库完成排序截断）。
+ * - limit：正整数（后端钳位 ≤10000，非法即整节不生效）；
+ * - metric：排名指标的列 ID（DatasetColumn.id），缺省取首指标；
+ * - order：asc|desc，缺省 desc（「取最大的 N 个」是默认心智）。
+ */
+export interface TopNConfig {
+  limit: number;
+  metric?: string;
+  order?: 'asc' | 'desc';
+}
+
 export interface ChartQueryOptions {
   pieMergeOtherBelowRatio?: number;
   /** 直方图分箱数量（R-57）；请求 wire 上以 snake_case bin_count 发送，缺省 20。 */
   binCount?: number;
   /** 参考线（R-63）；纯前端渲染配置，不进查询 wire，随持久化文档 queryOptions 小节透传。 */
   referenceLines?: ReferenceLine[];
+  /** Top N（#130）；wire 上以 query_options.top_n 发送，仅 bar/line/area/pie 消费。 */
+  topN?: TopNConfig;
 }
 
 // 查询配置 - 支持多维度组和多指标组
