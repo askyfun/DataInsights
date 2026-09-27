@@ -197,7 +197,8 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
   保留进查询 AST）。
 - `filters` / `pagination` / `sort` 两协议共用。`filters` 元素键为 `operator`（**不是 op**）：
   `{id, field, operator, value, value_end?, logic}`。
-- `query_options`：目前仅 histogram 消费（`bin_count` 默认 20、`bin_width` 可选），
+- `query_options`：histogram 消费 `bin_count`（默认 20）/ `bin_width`；table 消费
+  `show_total`（true 时响应 `data.total` 给出合计行，见 `ChartTableResponse.total`）。
   executor 直接从请求读取，不进 QuerySpec。
 
 响应 `data` 为 `ChartDataResult`：`{ data, select_sql, count_sql? }`——`select_sql` 成功恒返回；

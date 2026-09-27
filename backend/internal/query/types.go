@@ -120,6 +120,13 @@ type TableResponse struct {
 	Columns    []string         `json:"columns"`
 	Data       []map[string]any `json:"data"`
 	Pagination TablePagination  `json:"pagination"`
+
+	// Total 合计行（issue #131）：请求 query_options.show_total 为真且该表格确实分了组
+	// （有维度）时给出，否则缺省不出现在 JSON 里。形状与明细行同键（指标列 = 结果
+	// 别名），只含指标值——维度列由前端渲染 TableTotalLabel 标签，不在这里造假值。
+	// 值由数据库在**过滤后的完整数据集**上重算（见 BuildTableTotalQuery），不是当前页
+	// 明细行相加。
+	Total map[string]any `json:"total,omitempty"`
 }
 
 // TablePagination Table 分页信息

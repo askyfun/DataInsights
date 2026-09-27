@@ -216,16 +216,22 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 			orderedRows[i] = orderedRow
 		}
 
+		totalRow, err := e.executeTableTotal(ctx, dialect, ast, req)
+		if err != nil {
+			return ExecutorResult{}, err
+		}
+
 		return ExecutorResult{
 			Data: &TableResponse{
-				Columns: columns,
-				Data:    orderedRows,
+				Columns:    columns,
+				Data:       orderedRows,
 				Pagination: TablePagination{
 					Page:       page,
 					PageSize:   pageSize,
 					Total:      total,
 					TotalPages: totalPages,
 				},
+				Total: totalRow,
 			},
 			GeneratedSQL: GeneratedSQL{
 				Select: sql,
@@ -244,6 +250,20 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 	data, err := processor.Process(result.Rows, req.Dims, req.Metrics, ast)
 	if err != nil {
 		return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
+	}
+
+	// 表格合计行的第二条路径（issue #131）：不带 pagination 的 table —— 分享页与
+	// 仪表盘读持久化 config 时正是这一条（那条路径没有分页 UI，也不下发 pagination）。
+	// 合计值与是否分页无关，两条分支都必须给，否则同一个开关在 builder 里有合计、
+	// 在分享页/仪表盘里没有。
+	if req.ChartType == ChartTypeTable {
+		if table, ok := data.(*TableResponse); ok {
+			totalRow, terr := e.executeTableTotal(ctx, dialect, ast, req)
+			if terr != nil {
+				return ExecutorResult{}, terr
+			}
+			table.Total = totalRow
+		}
 	}
 
 	return ExecutorResult{
@@ -348,6 +368,52 @@ func (e *Executor) executeHistogram(ctx context.Context, dialect DialectType, as
 			Select: binSQL,
 		},
 	}, nil
+}
+
+// executeTableTotal 计算表格「合计行」（issue #131），table 的分页与不分页两条分支共用。
+//
+// 只在两个条件同时成立时发这条额外查询：请求显式开了 show_total，且这张表格确实
+// 分了组（有维度）。没有维度时主查询本身就是一行全集聚合，再查一次只会得到一个
+// 与明细行完全相同的"合计"——徒增一次往返，所以直接不产合计行（响应里 total 缺省）。
+//
+// 失败口径：合计查不到就**不给合计行**（返回 nil），而不是报错或给一个错的数——
+// 表格主体已经算对，明细可用；缺一个合计是可见的退化，错合计是不可见的误导。
+func (e *Executor) executeTableTotal(
+	ctx context.Context, dialect DialectType, ast *QueryAST, req *ChartQueryRequest,
+) (map[string]any, error) {
+	if !tableTotalOptions(req.QueryOptions) || len(req.Dims) == 0 {
+		return nil, nil
+	}
+
+	totalSQL, totalArgs := BuildTableTotalQuery(dialect, ast)
+	if totalSQL == "" {
+		return nil, nil // 无指标：没有可合计的量
+	}
+	slog.Debug("executing table total query", "sql", totalSQL, "args", totalArgs)
+
+	result, err := e.conn.Execute(ctx, totalSQL, totalArgs...)
+	if err != nil {
+		// 与 histogram/boxplot 分支同款：查询失败就是取数失败，显式报错，
+		// 不把「缺合计」和「合计查询挂了」混成同一种静默退化。
+		return nil, fmt.Errorf("table total query failed: %v", err)
+	}
+	if len(result.Rows) == 0 {
+		return nil, nil
+	}
+
+	// 只保留指标列：维度列本就不在这条 SQL 的 SELECT 里，标签由前端渲染。
+	// 键取 ast.Metrics 的 Alias——那是 renderMetricSelect 真正写进 SQL 的结果别名
+	// （req.Metrics 在无别名时还是列 ID，与驱动返回的行键对不上）。
+	total := make(map[string]any, len(ast.Metrics))
+	for _, metric := range ast.Metrics {
+		if value, ok := result.Rows[0][metric.Alias]; ok {
+			total[metric.Alias] = value
+		}
+	}
+	if len(total) == 0 {
+		return nil, nil
+	}
+	return total, nil
 }
 
 // getBaseQuery 获取基础查询 SQL

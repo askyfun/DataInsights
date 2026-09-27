@@ -1001,6 +1001,18 @@ func TestChartDataQueryFromConfig_QueryOptionsRoundTrip(t *testing.T) {
 			`{"version":2,"chartType":"histogram","query":{"dimensionGroups":[],"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-0","fieldId":"amount"}]}]},"fieldMeta":{},"queryOptions":{}}`,
 			nil,
 		},
+		{
+			// 表格合计行（issue #131）：分享页/仪表盘读持久化 config，开关必须同样归一为
+			// wire 的 show_total，否则「保存时开着、分享页没合计」。
+			"v2 table showTotal camelCase normalized",
+			`{"version":2,"chartType":"table","query":{"dimensionGroups":[{"id":"dimensions","bindings":[{"bindingId":"b-0","fieldId":"region"}]}],"metricGroups":[{"id":"metrics","bindings":[{"bindingId":"b-1","fieldId":"amount"}]}]},"fieldMeta":{},"queryOptions":{"showTotal":true}}`,
+			map[string]any{"show_total": true},
+		},
+		{
+			"v2 table show_total snake passthrough",
+			`{"version":2,"chartType":"table","query":{"dimensionGroups":[{"id":"dimensions","bindings":[{"bindingId":"b-0","fieldId":"region"}]}],"metricGroups":[{"id":"metrics","bindings":[{"bindingId":"b-1","fieldId":"amount"}]}]},"fieldMeta":{},"queryOptions":{"show_total":false}}`,
+			map[string]any{"show_total": false},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "histogram", Config: tc.config}

@@ -339,6 +339,12 @@ export interface ChartQueryOptions {
   pieMergeOtherBelowRatio?: number;
   /** 直方图分箱数量（R-57）；请求 wire 上以 snake_case bin_count 发送，缺省 20。 */
   binCount?: number;
+  /**
+   * 表格合计行（issue #131，仅 table）：请求 wire 上以 snake_case show_total 发送，
+   * 由后端在**过滤后的完整数据集**上重算（不是当前页明细相加），结果在响应的 total 里。
+   * undefined 等价于 false（不发该键、请求形状与改动前一致）。
+   */
+  showTotal?: boolean;
   /** 参考线（R-63）；纯前端渲染配置，不进查询 wire，随持久化文档 queryOptions 小节透传。 */
   referenceLines?: ReferenceLine[];
 }

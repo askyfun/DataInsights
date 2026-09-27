@@ -58,6 +58,7 @@ import {
   ChartQueryAggregation,
   ChartQueryRequest,
   isPivotV2Payload,
+  isTablePayload,
   type QueryRecord,
   queriesApi,
 } from '../api';
@@ -511,9 +512,16 @@ export const composeChartQueryRequest = (
 
   // histogram（R-57）专属 query_options：wire 用 snake_case bin_count，缺省 20（与后端
   // HistogramProcessor 默认一致）；持久化文档的 camelCase binCount → wire 的翻译只发生在
-  // 这里。其余图型不带 query_options 键，请求形状与本任务改动前完全一致。
-  const queryOptionsPayload =
-    chartType === 'histogram' ? { query_options: { bin_count: queryOptions.binCount ?? 20 } } : {};
+  // 这里。table（issue #131）的合计行开关同理：camelCase showTotal → wire show_total，
+  // 只在打开时携带（false/未设置都不发该键，请求形状与本任务改动前完全一致）。
+  // 其余图型不进这两条分支，请求形状不变。
+  const totalsPayload = chartType === 'table' && queryOptions.showTotal ? { show_total: true } : {};
+  const queryOptionsPayload = {
+    ...(chartType === 'histogram' ? { bin_count: queryOptions.binCount ?? 20 } : {}),
+    ...totalsPayload,
+  };
+  const queryOptionsSection =
+    Object.keys(queryOptionsPayload).length > 0 ? { query_options: queryOptionsPayload } : {};
 
   if (requiresSlotProtocol) {
     // v2 槽位协议：dimension_groups/metric_groups 携带真实槽位名与 binding_id
@@ -576,6 +584,10 @@ export const composeChartQueryRequest = (
       metric_groups: metricGroupsPayload,
       filters: filtersPayload,
       ...sortPayload,
+      // 图型专属查询选项：v2 分支同样透传。按图型判别的消费方（histogram 的
+      // bin_count、table 的 show_total）都可能走到这条协议，把扩展袋只挂在 v1
+      // return 上会让将来启用 v2 的图型静默丢配置。
+      ...queryOptionsSection,
       pagination: paginationPayload,
     };
   }
@@ -616,7 +628,7 @@ export const composeChartQueryRequest = (
     metrics,
     filters: filtersPayload,
     ...sortPayload,
-    ...queryOptionsPayload,
+    ...queryOptionsSection,
     pagination: paginationPayload,
   };
 };
@@ -1030,7 +1042,9 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
     showStyleControl('orientation') ||
     showStyleControl('donut') ||
     showStyleControl('tableRowSize') ||
-    config.chartType === 'histogram';
+    config.chartType === 'histogram' ||
+    // table 的合计行开关挂在这个卡片里（queryOptions，非 style），卡片必须出现。
+    config.chartType === 'table';
 
   // 参考线（R-63）：bar/line/area 的 markLine 是 buildChartOption 唯一消费的三种图型
   // （combo 双轴的值轴语义不在此期范围内）。
@@ -1251,6 +1265,17 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     { value: 'blank', label: '空白' },
                     { value: 'zero', label: '零（0）' },
                   ]}
+                />
+              </SettingRow>
+            )}
+
+            {/* 合计行（issue #131）不是纯样式：它要求后端在完整数据集上重算聚合，
+                所以住在 queryOptions（进 wire），而不是 chartStyle。 */}
+            {config.chartType === 'table' && (
+              <SettingRow label="合计行">
+                <Switch
+                  checked={queryOptions.showTotal ?? false}
+                  onChange={(checked) => onQueryOptionsChange({ showTotal: checked })}
                 />
               </SettingRow>
             )}
@@ -2657,15 +2682,18 @@ const ChartBuilder: React.FC = () => {
       const metricFields = getMetricFields();
       // table/pivot 的结构化响应是 {columns, data}，TableChart 消费行数组：
       // 按形状判别安全提取，空数组/形状不匹配时回退为 []。
-      const tableRows =
-        !Array.isArray(chartData) && 'columns' in chartData && Array.isArray(chartData.data)
-          ? chartData.data
-          : [];
+      // 收窄成一次（tablePayload）而不是两处重复判别：合计行与明细行同源，
+      // 两条判别若漂移会出现「明细来自负载 A、合计来自负载 B」。
+      const tablePayload = isTablePayload(chartData) ? chartData : null;
+      const tableRows = tablePayload ? tablePayload.data : [];
       return (
         <TableChart
           data={tableRows}
           loading={chartDataLoading}
-          columns={tableColumns}
+          columns={tableColumns.length > 0 ? tableColumns : tablePayload?.columns}
+          // 合计行只属于 table：后端在未开启开关/无维度时不给 total，这里再按图型
+          // 判一次，避免 pivot v1 的行透传负载里偶然出现的同名字段被当合计渲染。
+          totalRow={chartBuilderConfig.chartType === 'table' ? tablePayload?.total : undefined}
           columnLabels={Object.fromEntries([
             // columnLabels 仍按列名索引（TableChart 按列名取行值）；同一列名有多个
             // 维度 binding 时后写入的 label 覆盖先写入的（Task 0-6+0-8 前的已知歧义）。
