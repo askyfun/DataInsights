@@ -8,9 +8,11 @@ import {
   FunctionOutlined,
   LinkOutlined,
   PlayCircleOutlined,
+  RedoOutlined,
   ReloadOutlined,
   SaveOutlined,
   SwapOutlined,
+  UndoOutlined,
 } from '@ant-design/icons';
 import {
   DndContext,
@@ -1306,6 +1308,11 @@ const ChartBuilder: React.FC = () => {
     tableColumns,
     setTablePagination,
     chartQueryResponse,
+    undo,
+    redo,
+    resetHistory,
+    past,
+    future,
   } = useStore();
 
   /** 桌面端左栏顶部的数据集标识取对象而非 id，免得模板里重复 find。 */
@@ -1711,6 +1718,9 @@ const ChartBuilder: React.FC = () => {
       if (restoredQueryOptions && Object.keys(restoredQueryOptions).length > 0) {
         setChartQueryOptionsState(restoredQueryOptions);
       }
+      // 载入既有配置不构成「可撤销的一步」：清掉加载过程写入的历史，
+      // 否则用户第一次撤销会退回加载前的空白态。
+      resetHistory();
     },
     [
       setChartBuilderConfig,
@@ -1722,6 +1732,7 @@ const ChartBuilder: React.FC = () => {
       setMetricFormats,
       setChartStyleState,
       setChartQueryOptionsState,
+      resetHistory,
     ]
   );
 
@@ -2233,6 +2244,31 @@ const ChartBuilder: React.FC = () => {
     tablePagination.pageSize,
     chartQueryOptions,
   ]);
+
+  // 撤销/重做快捷键：⌘/Ctrl+Z 撤销，⌘/Ctrl+⇧+Z 或 ⌘/Ctrl+Y 重做。
+  // 焦点在输入框/文本域/可编辑区时放行——让浏览器做原生文本级撤销，不抢编辑框内的 ⌘Z。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [undo, redo]);
 
   useEffect(() => {
     const loadChartConfig = async () => {
@@ -2831,6 +2867,24 @@ const ChartBuilder: React.FC = () => {
                 >
                   {editingChartId ? '更新' : '保存'}
                 </Button>
+                <Tooltip title="撤销（⌘Z）">
+                  <Button
+                    size="small"
+                    icon={<UndoOutlined />}
+                    onClick={undo}
+                    disabled={past.length === 0}
+                    data-testid="undo-button"
+                  />
+                </Tooltip>
+                <Tooltip title="重做（⌘⇧Z）">
+                  <Button
+                    size="small"
+                    icon={<RedoOutlined />}
+                    onClick={redo}
+                    disabled={future.length === 0}
+                    data-testid="redo-button"
+                  />
+                </Tooltip>
                 <Button size="small" icon={<ReloadOutlined />} onClick={handleReset}>
                   重置
                 </Button>
