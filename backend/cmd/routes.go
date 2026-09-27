@@ -11,18 +11,14 @@ import (
 	"data-insights/internal/service/dataset"
 	"data-insights/internal/service/datasource"
 	"data-insights/internal/service/queryrecord"
-	"data-insights/internal/service/share"
 )
 
 // SetupRoutes configures all routes.
 //
-// serveWebUI 表示本进程同时托管前端构建产物（单镜像单容器的形态）。它会改变
-// /share/:token 的归属：见文末说明。
-//
 // extractDatasourceID 是抽取存储数据源 id（EXTRACT_DATASOURCE_ID，issue #118 预留，
 // 0=未启用）：数据源列表隐藏它、数据集创建/改指守卫拒绝它、图表查询对 extract
 // 模式数据集显式报错。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool, extractDatasourceID int) {
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourceID int) {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -33,7 +29,6 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool,
 	dsChartSvc := chart.NewService(db)
 	dsChartSvc.SetSecurityKey(securityKey)
 	dsChartSvc.SetExtractDatasourceID(extractDatasourceID)
-	dsShareSvc := share.NewService(db)
 	dsQuerySvc := queryrecord.NewService(db)
 	dsDashboardSvc := dashboard.NewService(db)
 	// 盘级批量取数（POST /api/dashboards/{id}/query）逐块复用图表取数管道：
@@ -47,7 +42,6 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool,
 	datasourceHandler := handler.NewDatasourceHandler(dsSvc)
 	datasetHandler := handler.NewDatasetHandler(dsDatasetSvc)
 	chartHandler := handler.NewChartHandler(dsChartSvc)
-	shareHandler := handler.NewShareHandler(dsShareSvc)
 	queryHandler := handler.NewQueryHandler(dsQuerySvc)
 	dashboardHandler := handler.NewDashboardHandler(dsDashboardSvc)
 	dashboardFolderHandler := handler.NewDashboardFolderHandler(dsFolderSvc)
@@ -94,13 +88,6 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool,
 	// bi_dashboard.layout_json, but the route belongs to the chart resource).
 	router.RegisterGetRoute(charts, "/:id/references", dashboardHandler.ListChartReferences)
 
-	// Share routes (generic router)
-	shares := api.Group("/shares")
-	router.RegisterGetRoute(shares, "", shareHandler.List)
-	router.RegisterPostRoute(shares, "", shareHandler.Create)
-	router.RegisterGetRoute(shares, "/:token", shareHandler.Get)
-	router.RegisterPostRoute(shares, "/:token/verify", shareHandler.Verify)
-
 	// Query record routes (generic router): 地址栏即分享的落库与寻址。
 	// {q} 是 idcodec 的 21 位 base58 短码，不是数据库里的 uuid 原文。
 	queries := api.Group("/queries")
@@ -128,16 +115,4 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool,
 	router.RegisterGetRoute(dashboardFolders, "/:id", dashboardFolderHandler.Get)
 	router.RegisterPutRoute(dashboardFolders, "/:id", dashboardFolderHandler.Update)
 	router.RegisterDeleteRoute(dashboardFolders, "/:id", dashboardFolderHandler.Delete)
-
-	// Share view route (no /api prefix). Not a generic route on purpose: its
-	// success response is a 302 redirect, which the JSON-envelope router
-	// cannot emit (see the ShareHandler.View doc comment).
-	//
-	// 只在纯 API 模式下注册。托管前端时 /share/<token> 必须留给前端路由：
-	// 分享页本身就是 SPA 的 /share/:token，后端再插一条同路径的 302 会抢先
-	// 命中，把页面重定向到一个渲染不出东西的地址上去（此前 nginx 把 /share
-	// 整段挡在后端之外，所以这条路由在生产环境其实一直是死的）。
-	if !serveWebUI {
-		r.GET("/share/:token", shareHandler.View)
-	}
 }

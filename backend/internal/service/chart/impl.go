@@ -136,8 +136,7 @@ func (s *chartService) Update(ctx context.Context, chart *entity.Chart) (*entity
 	return toChartEntity(updated), nil
 }
 
-// Delete soft-deletes a chart by ID and cascades the soft delete to all of its
-// shares, within a single transaction. The row is never physically removed
+// Delete soft-deletes a chart by ID. The row is never physically removed
 // (deleted_at is stamped instead).
 func (s *chartService) Delete(ctx context.Context, id int) error {
 	return database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
@@ -149,15 +148,6 @@ func (s *chartService) Delete(ctx context.Context, id int) error {
 			Where("deleted_at IS NULL").
 			Exec(ctx); err != nil {
 			return fmt.Errorf("failed to delete chart: %w", err)
-		}
-		// 级联软删其下分享。
-		if _, err := tx.NewUpdate().
-			Model((*model.Share)(nil)).
-			Set("deleted_at = now()").
-			Where("chart_id = ?", id).
-			Where("deleted_at IS NULL").
-			Exec(ctx); err != nil {
-			return fmt.Errorf("failed to cascade delete shares: %w", err)
 		}
 		return nil
 	})

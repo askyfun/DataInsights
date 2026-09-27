@@ -74,12 +74,6 @@ export interface ChartFormData {
   config: string;
 }
 
-// expires_at is null (never absent) on the wire; password is json:"-" and
-// has_password is the only protection signal (same as before).
-export type Share = G['Share'];
-
-export type ShareFormData = G['ShareCreateRequest'];
-
 export type TestConnectionRequest = Omit<G['DatasourceTestConnectionRequest'], 'type'> & {
   type: DatasourceType;
 };
@@ -561,29 +555,6 @@ export const dashboardFoldersApi = {
 
   remove: (id: string): Promise<AxiosResponse<ApiResponse<{ status: string }>>> => {
     return apiClient.delete<ApiResponse<{ status: string }>>(`/api/dashboard-folders/${id}`);
-  },
-};
-
-// Shares API
-export const sharesApi = {
-  // Get all shares
-  getAll: (): Promise<AxiosResponse<ApiResponse<Share[]>>> => {
-    return apiClient.get<ApiResponse<Share[]>>('/api/shares');
-  },
-
-  // Create share
-  create: (data: ShareFormData): Promise<AxiosResponse<ApiResponse<Share>>> => {
-    return apiClient.post<ApiResponse<Share>>('/api/shares', data);
-  },
-
-  // Get share by token
-  getByToken: (token: string): Promise<AxiosResponse<ApiResponse<Share>>> => {
-    return apiClient.get<ApiResponse<Share>>(`/api/shares/${token}`);
-  },
-
-  // Verify share password
-  verifyPassword: (token: string, password: string): Promise<AxiosResponse<ApiResponse<Share>>> => {
-    return apiClient.post<ApiResponse<Share>>(`/api/shares/${token}/verify`, { password });
   },
 };
 

@@ -567,7 +567,9 @@ type Dataset struct {
 	Description  *string `json:"description"`
 	Id           int     `json:"id"`
 
-	// Mode 数据集取数模式："direct"（直连，默认）| "extract"（抽取，issue #118 架构预留： 数据灌入统一 StarRocks 存储、查询直查该库）。本期 extract 仅落类型与守卫， 灌数与 extract 查询路径未实现（查询会显式报错）。
+	// Mode 数据集取数模式："direct"（直连，默认）| "extract"（抽取，issue #118 架构预留：
+	// 数据灌入统一 StarRocks 存储、查询直查该库）。本期 extract 仅落类型与守卫，
+	// 灌数与 extract 查询路径未实现（查询会显式报错）。
 	Mode        string  `json:"mode"`
 	Name        string  `json:"name"`
 	PreviewData *string `json:"preview_data"`
@@ -638,7 +640,7 @@ type DatasetCreateRequest struct {
 	DatasourceId int     `json:"datasource_id"`
 	Description  *string `json:"description,omitempty"`
 
-	// Mode 为空时后端缺省 "direct"。
+	// Mode 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue
 	Mode     *string `json:"mode,omitempty"`
 	Name     string  `json:"name"`
 	QuerySql *string `json:"query_sql,omitempty"`
@@ -718,7 +720,7 @@ type DatasetUpdateRequest struct {
 	DatasourceId int     `json:"datasource_id"`
 	Description  *string `json:"description,omitempty"`
 
-	// Mode 为空时后端缺省 "direct"。
+	// Mode 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue
 	Mode     *string `json:"mode,omitempty"`
 	Name     string  `json:"name"`
 	QuerySql *string `json:"query_sql,omitempty"`
@@ -1090,70 +1092,6 @@ type QueryRecordSpec struct {
 // ResponseCode 业务状态码，与 backend/internal/response/response.go 常量一一对应。
 type ResponseCode int
 
-// Share 分享响应实体（entity.Share，backend/internal/domain/entity/share.go）。 password 为 json:"-" 永不外泄（bcrypt 哈希也不回显），has_password 是 唯一的密码保护信号。
-type Share struct {
-	ChartId int `json:"chart_id"`
-
-	// CreatedAt RFC3339 时间；数据库时间戳无效时为空字符串。
-	CreatedAt string `json:"created_at"`
-
-	// ExpiresAt RFC3339 过期时间；指针字段，键恒在，无过期设置时为 null。
-	ExpiresAt *string `json:"expires_at"`
-
-	// HasPassword 是否设置了访问密码（替代外泄的 password 字段）。
-	HasPassword bool `json:"has_password"`
-	Id          int  `json:"id"`
-
-	// Token 后端随机生成，格式 hex(8 字节)-hex(8 字节)，如 "3a7f...c2-9d1e...f0"。
-	Token string `json:"token"`
-}
-
-// ShareCreateRequest POST /api/shares 请求体（handler 匿名 struct：chart_id/password/expires_at）。
-type ShareCreateRequest struct {
-	// ChartId 被分享的图表 ID；后端不校验其存在性。
-	ChartId int `json:"chart_id"`
-
-	// ExpiresAt RFC3339 过期时间；非 RFC3339 的字符串被后端解析失败后静默忽略 （等同不设置过期）。
-	ExpiresAt *string `json:"expires_at,omitempty"`
-
-	// Password 访问密码；空串/缺省表示不设密码；非空以 bcrypt 哈希落库。
-	Password *string `json:"password,omitempty"`
-}
-
-// ShareListResponse GET /api/shares 响应：data 为 Share 数组（id 倒序，无分页）。
-type ShareListResponse struct {
-	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
-	Code ResponseCode `json:"code"`
-	Data []Share      `json:"data"`
-
-	// Msg 提示消息；成功为 "success"，错误为可读错误描述
-	Msg string `json:"msg"`
-
-	// Trace 请求追踪 ID（X-Request-ID）
-	Trace string `json:"trace"`
-}
-
-// ShareResponse 分享 CRUD / verify 响应：data 为单个 Share。
-type ShareResponse struct {
-	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
-	Code ResponseCode `json:"code"`
-
-	// Data 分享响应实体（entity.Share，backend/internal/domain/entity/share.go）。 password 为 json:"-" 永不外泄（bcrypt 哈希也不回显），has_password 是 唯一的密码保护信号。
-	Data Share `json:"data"`
-
-	// Msg 提示消息；成功为 "success"，错误为可读错误描述
-	Msg string `json:"msg"`
-
-	// Trace 请求追踪 ID（X-Request-ID）
-	Trace string `json:"trace"`
-}
-
-// ShareVerifyRequest POST /api/shares/{token}/verify 请求体。
-type ShareVerifyRequest struct {
-	// Password 待校验密码；无密码的分享恒通过。
-	Password *string `json:"password,omitempty"`
-}
-
 // SortConfig defines model for SortConfig.
 type SortConfig struct {
 	Field string `json:"field"`
@@ -1229,9 +1167,6 @@ type DatasourceId = int
 
 // QueryShortId defines model for QueryShortId.
 type QueryShortId = string
-
-// ShareToken defines model for ShareToken.
-type ShareToken = string
 
 // TableName defines model for TableName.
 type TableName = string
@@ -1344,9 +1279,3 @@ type PreviewDatasourceJSONRequestBody = DatasourcePreviewRequest
 
 // SaveQueryRecordJSONRequestBody defines body for SaveQueryRecord for application/json ContentType.
 type SaveQueryRecordJSONRequestBody = QueryRecordSaveRequest
-
-// CreateShareJSONRequestBody defines body for CreateShare for application/json ContentType.
-type CreateShareJSONRequestBody = ShareCreateRequest
-
-// VerifySharePasswordJSONRequestBody defines body for VerifySharePassword for application/json ContentType.
-type VerifySharePasswordJSONRequestBody = ShareVerifyRequest

@@ -15,7 +15,6 @@ import { messages } from '../../i18n/useLocale';
 import ChartsPage from '../../pages/Charts';
 import DatasetDetailPage from '../../pages/DatasetDetail';
 import DatasourcePage from '../../pages/Datasource';
-import SharePage from '../../pages/Share';
 
 const { instance } = vi.hoisted(() => {
   const inst = {
@@ -90,12 +89,6 @@ describe('表面系统 · 页面骨架', () => {
     wrap(<DatasourcePage />);
     await waitFor(() => expect(document.querySelector('.dr-page')).not.toBeNull());
     assertSurface('数据源');
-  });
-
-  it('分享列表页：页头在画布上、不在卡里', async () => {
-    wrap(<SharePage />);
-    await waitFor(() => expect(document.querySelector('.dr-page')).not.toBeNull());
-    assertSurface('分享管理');
   });
 
   it('数据集详情页：面包屑与页头同处画布层', async () => {

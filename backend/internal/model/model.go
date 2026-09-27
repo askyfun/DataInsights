@@ -145,16 +145,3 @@ type Chart struct {
 	UpdatedAt sql.NullTime `bun:"updated_at" json:"updated_at"`
 	DeletedAt sql.NullTime `bun:"deleted_at,nullzero" json:"-"`
 }
-
-// Share represents a shared chart
-type Share struct {
-	bun.BaseModel `bun:"bi_share"`
-
-	ID        int            `bun:"id,pk,autoincrement" json:"id"`
-	Token     string         `bun:"token" json:"token"`
-	ChartID   int            `bun:"chart_id" json:"chart_id"`
-	Password  sql.NullString `bun:"password" json:"password"`
-	ExpiresAt sql.NullTime   `bun:"expires_at" json:"expires_at"`
-	CreatedAt sql.NullTime   `bun:"created_at" json:"created_at"`
-	DeletedAt sql.NullTime   `bun:"deleted_at,nullzero" json:"-"`
-}

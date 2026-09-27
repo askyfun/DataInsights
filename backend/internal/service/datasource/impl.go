@@ -157,8 +157,8 @@ func (s *datasourceService) Update(ctx context.Context, ds *entity.Datasource) (
 }
 
 // Delete soft-deletes a datasource by ID and cascades the soft delete to all of
-// its datasets, then to every chart under those datasets, then to every share
-// under those charts — all within a single transaction. The row stays in the
+// its datasets, then to every chart under those datasets — all within a single
+// transaction. The row stays in the
 // table (deleted_at is stamped, never physically removed), matching the
 // product requirement that nothing is ever hard-deleted.
 func (s *datasourceService) Delete(ctx context.Context, id int) error {
@@ -191,15 +191,6 @@ func (s *datasourceService) Delete(ctx context.Context, id int) error {
 			Where("deleted_at IS NULL").
 			Exec(ctx); err != nil {
 			return fmt.Errorf("failed to cascade delete charts: %w", err)
-		}
-		// 级联软删这些图表下分享（子查询同样刻意不带 IS NULL，同上）。
-		if _, err := tx.NewUpdate().
-			Model((*model.Share)(nil)).
-			Set("deleted_at = now()").
-			Where("chart_id IN (SELECT id FROM bi_chart WHERE dataset_id IN (SELECT id FROM bi_dataset WHERE datasource_id = ?))", id).
-			Where("deleted_at IS NULL").
-			Exec(ctx); err != nil {
-			return fmt.Errorf("failed to cascade delete shares: %w", err)
 		}
 		return nil
 	})

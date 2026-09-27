@@ -29,9 +29,9 @@ func containsStmtChart(executed []string, sub string) bool {
 	return false
 }
 
-// TestChartDeleteSoftDeletesAndCascades 验证 Delete 是软删：只发 UPDATE 打
-// deleted_at、绝不发 DELETE，并按 chart→share 顺序在同一事务内级联软删。
-func TestChartDeleteSoftDeletesAndCascades(t *testing.T) {
+// TestChartDeleteSoftDeletes 验证 Delete 是软删：只发 UPDATE 打 deleted_at、
+// 绝不发 DELETE，且不再级联触碰已下线的 bi_share。
+func TestChartDeleteSoftDeletes(t *testing.T) {
 	var executed []string
 	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(chartCaptureMatcher(&executed)))
 	if err != nil {
@@ -43,7 +43,6 @@ func TestChartDeleteSoftDeletesAndCascades(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "bi_chart"`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE "bi_share"`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	if err := s.Delete(context.Background(), 7); err != nil {
@@ -61,8 +60,8 @@ func TestChartDeleteSoftDeletesAndCascades(t *testing.T) {
 	if !containsStmtChart(executed, `SET deleted_at = now()`) {
 		t.Fatalf("chart soft delete must stamp deleted_at, got: %q", executed)
 	}
-	if !containsStmtChart(executed, `UPDATE "bi_share"`) || !containsStmtChart(executed, `"bi_chart"`) {
-		t.Fatalf("share cascade must scope to the chart, got: %q", executed)
+	if containsStmtChart(executed, `"bi_share"`) {
+		t.Fatalf("bi_share cascade must be removed, got: %q", executed)
 	}
 }
 
@@ -79,7 +78,6 @@ func TestChartDeleteIdempotent(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "bi_chart"`).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(`UPDATE "bi_share"`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	if err := s.Delete(context.Background(), 999); err != nil {

@@ -639,101 +639,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/shares": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 分享列表
-         * @description 返回全部分享（按 id 倒序），不支持分页参数（handler 不读取 limit/offset）。
-         *     无结果时 data 为空数组。
-         */
-        get: operations["listShares"];
-        put?: never;
-        /**
-         * 创建分享
-         * @description 后端生成随机 token（16 字节，格式 hex(8B)-hex(8B)）。password 非空时以
-         *     bcrypt（cost 10）哈希落库；expires_at 必须是 RFC3339，格式非法被后端静默
-         *     忽略（即不设置过期）。chart_id 不校验图表存在性。响应 data 为 Share，
-         *     password 永不回显（json:"-"），密码保护状态经 has_password 暴露。
-         */
-        post: operations["createShare"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/shares/{token}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 按 token 获取分享详情
-         * @description token 不存在时 Envelope.code = 20300（"share not found"）。不做密码校验、
-         *     不校验过期（过期只在 GET /share/{token} 公开视图判断）。
-         */
-        get: operations["getShare"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/shares/{token}/verify": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 校验分享密码
-         * @description 校验通过后返回 Share（含 chart_id，供前端跳转取数）。无密码的分享恒通过。
-         *     密码错误或分享不存在统一 Envelope.code = 20100（handler 走 BadRequest）。
-         *     存储侧 bcrypt 校验；遗留明文比对成功后透明升级为 bcrypt 哈希。
-         */
-        post: operations["verifySharePassword"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/share/{token}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 公开分享视图（浏览器入口，302 跳转）
-         * @description 非 Envelope JSON 端点：成功返回 HTTP 302，Location 指向前端 hash 路由
-         *     "/#/share/{token}"。密码保护不拦截本端点（密码校验走
-         *     /api/shares/{token}/verify），有/无密码均 302。失败才返回 HTTP 200
-         *     Envelope：分享不存在 code=20300；已过期 code=20400
-         *     （"share link has expired"，按 expires_at RFC3339 与当前时间比较）。
-         */
-        get: operations["viewShare"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/queries": {
         parameters: {
             query?: never;
@@ -960,7 +865,11 @@ export interface components {
             query_sql: string | null;
             /** @description "table" 或 "sql"。 */
             query_type: string;
-            /** @description 数据集取数模式："direct"（直连，默认）| "extract"（抽取，issue #118 架构预留： 数据灌入统一 StarRocks 存储、查询直查该库）。本期 extract 仅落类型与守卫， 灌数与 extract 查询路径未实现（查询会显式报错）。 */
+            /**
+             * @description 数据集取数模式："direct"（直连，默认）| "extract"（抽取，issue #118 架构预留：
+             *     数据灌入统一 StarRocks 存储、查询直查该库）。本期 extract 仅落类型与守卫，
+             *     灌数与 extract 查询路径未实现（查询会显式报错）。
+             */
             mode: string;
             accelerate_config: string | null;
             description: string | null;
@@ -988,7 +897,7 @@ export interface components {
             query_sql?: string;
             /** @description "table" 或 "sql"。 */
             query_type: string;
-            /** @description 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue #118，本期仅落类型）。 */
+            /** @description 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue */
             mode?: string;
             description?: string;
             /** @description JSON 数组字符串（非数组本体）。 */
@@ -1007,7 +916,7 @@ export interface components {
             query_sql?: string;
             /** @description "table" 或 "sql"。 */
             query_type: string;
-            /** @description 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue #118，本期仅落类型）。 */
+            /** @description 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue */
             mode?: string;
             description?: string;
             /** @description JSON 数组字符串（非数组本体）。 */
@@ -1369,33 +1278,6 @@ export interface components {
             unit?: string;
             format?: string;
         };
-        /** @description 分享响应实体（entity.Share，backend/internal/domain/entity/share.go）。 password 为 json:"-" 永不外泄（bcrypt 哈希也不回显），has_password 是 唯一的密码保护信号。 */
-        Share: {
-            id: number;
-            /** @description 后端随机生成，格式 hex(8 字节)-hex(8 字节)，如 "3a7f...c2-9d1e...f0"。 */
-            token: string;
-            chart_id: number;
-            /** @description RFC3339 过期时间；指针字段，键恒在，无过期设置时为 null。 */
-            expires_at: string | null;
-            /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
-            created_at: string;
-            /** @description 是否设置了访问密码（替代外泄的 password 字段）。 */
-            has_password: boolean;
-        };
-        /** @description POST /api/shares 请求体（handler 匿名 struct：chart_id/password/expires_at）。 */
-        ShareCreateRequest: {
-            /** @description 被分享的图表 ID；后端不校验其存在性。 */
-            chart_id: number;
-            /** @description 访问密码；空串/缺省表示不设密码；非空以 bcrypt 哈希落库。 */
-            password?: string;
-            /** @description RFC3339 过期时间；非 RFC3339 的字符串被后端解析失败后静默忽略 （等同不设置过期）。 */
-            expires_at?: string;
-        };
-        /** @description POST /api/shares/{token}/verify 请求体。 */
-        ShareVerifyRequest: {
-            /** @description 待校验密码；无密码的分享恒通过。 */
-            password: string;
-        };
         /** @description GET /api/charts 响应：data 为 Chart 数组。 */
         ChartListResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["Chart"][];
@@ -1412,14 +1294,6 @@ export interface components {
         /** @description POST /api/charts/query 响应：data 为 ChartDataResult。 */
         ChartQueryResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["ChartDataResult"];
-        };
-        /** @description GET /api/shares 响应：data 为 Share 数组（id 倒序，无分页）。 */
-        ShareListResponse: components["schemas"]["Envelope"] & {
-            data: components["schemas"]["Share"][];
-        };
-        /** @description 分享 CRUD / verify 响应：data 为单个 Share。 */
-        ShareResponse: components["schemas"]["Envelope"] & {
-            data: components["schemas"]["Share"];
         };
         /** @description 图表语义规格（query.ChartSpec:5）：表达图表实例绑定了什么字段和配置， 属于 Chart 语义层，不直接生成 SQL。 */
         ChartSpec: {
@@ -1808,8 +1682,6 @@ export interface components {
         DatasetId: number;
         /** @description 图表 ID（gin 通配符 :id；非法数字返回 20100）。 */
         ChartId: number;
-        /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
-        ShareToken: string;
         /** @description 查询记录短码（gin 通配符 :q）；idcodec 的 base58 定长 21 位，字符集为 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz（不含 0 O I l）。 长度或字符集不符 → 20100；解码成功但无此记录 → 20300。 */
         QueryShortId: string;
         /** @description 表名；spec 占位符 {table} 与 gin 通配符 `:table` 对应，须为合法标识符， 前端以 URL 编码传输。 */
@@ -2803,132 +2675,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OkResponse"];
                 };
-            };
-        };
-    };
-    listShares: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ShareListResponse"];
-                };
-            };
-        };
-    };
-    createShare: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ShareCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description HTTP 恒 200；成功 data 为新建 Share（含 token） */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ShareResponse"];
-                };
-            };
-        };
-    };
-    getShare: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
-                token: components["parameters"]["ShareToken"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ShareResponse"];
-                };
-            };
-        };
-    };
-    verifySharePassword: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
-                token: components["parameters"]["ShareToken"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ShareVerifyRequest"];
-            };
-        };
-        responses: {
-            /** @description HTTP 恒 200；校验通过 data 为 Share，失败 data = {} */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ShareResponse"];
-                };
-            };
-        };
-    };
-    viewShare: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description 分享 token（gin 通配符 :token）；后端生成格式 hex(8B)-hex(8B)， API 层按不透明字符串处理。 */
-                token: components["parameters"]["ShareToken"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description HTTP 200 仅出现在失败路径（20300 不存在 / 20400 已过期） */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"];
-                };
-            };
-            /** @description 重定向到前端分享页面（唯一成功形态，无响应体） */
-            302: {
-                headers: {
-                    /** @description 前端 hash 路由 /#/share/{token} */
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

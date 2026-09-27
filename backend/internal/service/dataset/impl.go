@@ -137,7 +137,7 @@ func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entit
 }
 
 // Delete soft-deletes a dataset by ID and cascades the soft delete to all of its
-// charts, then to every share under those charts — within a single transaction.
+// charts — within a single transaction.
 // The row is never physically removed (deleted_at is stamped instead).
 func (s *datasetService) Delete(ctx context.Context, id int) error {
 	return database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
@@ -158,17 +158,6 @@ func (s *datasetService) Delete(ctx context.Context, id int) error {
 			Where("deleted_at IS NULL").
 			Exec(ctx); err != nil {
 			return fmt.Errorf("failed to cascade delete charts: %w", err)
-		}
-		// 级联软删这些图表下分享。
-		// ⚠️ 子查询刻意不带 deleted_at IS NULL：父行刚在本事务软删，子查询加过滤会断链。
-		// 行筛选只靠外层的 IS NULL——勿"顺手"给子查询补过滤。
-		if _, err := tx.NewUpdate().
-			Model((*model.Share)(nil)).
-			Set("deleted_at = now()").
-			Where("chart_id IN (SELECT id FROM bi_chart WHERE dataset_id = ?)", id).
-			Where("deleted_at IS NULL").
-			Exec(ctx); err != nil {
-			return fmt.Errorf("failed to cascade delete shares: %w", err)
 		}
 		return nil
 	})

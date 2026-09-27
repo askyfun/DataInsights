@@ -136,7 +136,7 @@ func main() {
 	registerHealthRoute(r)
 
 	// Setup routes
-	SetupRoutes(r, db, securityKey, c.StaticDir != "", c.ExtractDatasourceID)
+	SetupRoutes(r, db, securityKey, c.ExtractDatasourceID)
 
 	// 前端静态产物与 API 同进程同端口。配了目录就托管页面，没配就是纯 API 服务
 	// （本地开发页面由 Vite dev server 提供，后端无须重复托管一份构建产物）。
