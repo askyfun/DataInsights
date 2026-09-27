@@ -160,6 +160,20 @@ executor 在 AST 上设置 `Sort`（目标指标的输出别名，与用户手�
 `Limit`，由 builder 渲染成 `ORDER BY … LIMIT N` —— 数据库完成排名截断。
 `metric` 缺省取首指标；解析不到（列 ID 与别名都不匹配）显式报错，不静默换排名依据。
 前端卡片仅在 bar/line/area/pie + 恰好一个维度时开放，恢复的文档失效时在源头清掉配置。
+## 六、同环比（issue #129）：窗口平移基线 + Go 端按键对齐
+
+`query/comparison.go`：请求 `query_options.comparison = {type: mom|yoy, field?: 列ID}`
+（扩展袋，与 histogram 的 bin_count 同一条链路，不进 QuerySpec/AST/planner）时，
+executor 在当期查询之后**再发一条基线查询**：同一 AST，仅把对比日期列上的边界条件
+整组替换为平移后的 `BETWEEN`（mom = 窗口天数 +1，yoy = 一个日历年；单侧缺失的窗口
+用本次结果的日期轴补齐），然后按「基线桶 + Δ → 当前桶」**按键**对齐，为
+bar/line/area 追加 `(上期)`/`(增长率%)` 两条系列、为 table 追加同名两列。
+
+- 为什么不用窗口函数/LAG：免方言差异（四库同一条 SQL 路径）、免改 SELECT 出口
+  `renderMetricSelect`；代价是多一次查询，换来的是**缺数桶得 null 而不是借用邻行**。
+- 增长率 =（当前 − 上期）/ |上期| × 100，上期缺失或为 0 → null（不猜）。
+- 门控：仅 bar/line/area/table、恰好一个维度；配了但不满足 → 显式报错，不静默降级
+  （前端卡片同口径门控，并在恢复的文档失效时于源头清掉配置）。
 
 ## 七、饼图"其他"合并：能力保留但未接线
 

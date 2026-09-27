@@ -389,6 +389,13 @@ const SLOT_PROTOCOL_DIMENSION_SLOTS = new Set(['indicators', 'rows', 'columns'])
 export const TOPN_CHART_TYPES = ['bar', 'line', 'area', 'pie'];
 
 /**
+ * 同环比（issue #129）消费的图型——与后端 query/comparison.go attachComparison 的
+ * 图型门镜像。恢复的文档带着别的图型时（如 bar 配好后切饼图），wire 侧据此丢弃
+ * comparison，避免后端「配了但图型不支持」的显式报错。
+ */
+export const COMPARISON_CHART_TYPES = ['bar', 'line', 'area', 'table'];
+
+/**
  * 图表查询请求的唯一构造出口（纯函数，所有输入经参数传入）。
  * 调用场景：手动执行查询（含排序/翻页覆盖）与两个自动查询 effect 共用。
  * 主要逻辑：按图表定义裁剪字段组、字段 id 映射回列名、组装 filters/pagination；
@@ -519,20 +526,23 @@ export const composeChartQueryRequest = (
 
   // histogram（R-57）专属 query_options：wire 用 snake_case bin_count，缺省 20（与后端
   // HistogramProcessor 默认一致）；持久化文档的 camelCase binCount → wire 的翻译只发生在
-  // 这里。Top N（#130）以 top_n 进同一扩展袋，仅门控图型下发。
+  // 这里。Top N（#130）以 top_n、同环比（#129）以 comparison 对象进同一扩展袋，仅门控
+  // 图型下发。其余情况不带 query_options 键，请求形状与本任务改动前完全一致。
   const topNPayload =
     queryOptions.topN && TOPN_CHART_TYPES.includes(chartType)
       ? { top_n: queryOptions.topN }
-      : undefined;
-  const queryOptionsPayload =
-    chartType === 'histogram' || topNPayload
-      ? {
-          query_options: {
-            ...(chartType === 'histogram' ? { bin_count: queryOptions.binCount ?? 20 } : {}),
-            ...(topNPayload ? topNPayload : {}),
-          },
-        }
       : {};
+  const comparisonPayload =
+    queryOptions.comparison && COMPARISON_CHART_TYPES.includes(chartType)
+      ? { comparison: queryOptions.comparison }
+      : {};
+  const queryOptionsPayload = {
+    ...(chartType === 'histogram' ? { bin_count: queryOptions.binCount ?? 20 } : {}),
+    ...topNPayload,
+    ...comparisonPayload,
+  };
+  const queryOptionsSection =
+    Object.keys(queryOptionsPayload).length > 0 ? { query_options: queryOptionsPayload } : {};
 
   if (requiresSlotProtocol) {
     // v2 槽位协议：dimension_groups/metric_groups 携带真实槽位名与 binding_id
@@ -635,7 +645,7 @@ export const composeChartQueryRequest = (
     metrics,
     filters: filtersPayload,
     ...sortPayload,
-    ...queryOptionsPayload,
+    ...queryOptionsSection,
     pagination: paginationPayload,
   };
 };
@@ -981,6 +991,11 @@ interface ConfigPanelProps {
    * 多系列拆分时前 N 无从对应，卡片仅在恰有一个维度时出现。
    */
   dimensionBindingCount: number;
+  /**
+   * 同环比（#129）可选的对比日期维度：当前活动维度绑定的「列 ID → 列名」。
+   * 后端窗口平移对齐要求恰好一个维度，卡片仅在恰有一个候选时出现。
+   */
+  comparisonDimensionOptions: Array<{ id: string; name: string }>;
 }
 
 const chartTypeOptions = Object.values(chartDefinitions).map((def) => ({
@@ -1039,6 +1054,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onQueryOptionsChange,
   referenceMetricOptions,
   dimensionBindingCount,
+  comparisonDimensionOptions,
 }) => {
   // styleKeys 决定当前图型显示哪些样式控件（Task 0-4 声明、本任务首次真正接线）。
   // 7 种图型现在都应显式声明 styleKeys（见 chartDefinitions.ts），undefined 理论上
@@ -1074,6 +1090,11 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const topN = queryOptions.topN;
   const updateTopN = (patch: Partial<TopNConfig>) =>
     onQueryOptionsChange({ topN: { ...(topN as TopNConfig), ...patch } });
+  // 同环比（#129）：与后端图型门同口径；对比目标恒为当前唯一的活动维度
+  // （窗口平移按日期桶对齐，多系列拆分会让「上期」无从对应）。
+  const supportsComparison = COMPARISON_CHART_TYPES.includes(config.chartType);
+  const comparisonTarget = comparisonDimensionOptions[0];
+  const comparison = queryOptions.comparison;
 
   return (
     <div>
@@ -1387,6 +1408,40 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
             >
               添加参考线
             </Button>
+          </div>
+        </Card>
+      )}
+
+      {supportsComparison && comparisonTarget && (
+        <Card
+          title="同环比"
+          size="small"
+          style={{ marginBottom: 6 }}
+          styles={{ body: { padding: '4px 6px' } }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <Select
+              size="small"
+              style={{ width: '100%' }}
+              aria-label="同环比类型"
+              data-testid="comparison-type"
+              value={comparison?.type ?? 'none'}
+              onChange={(value: 'none' | 'mom' | 'yoy') =>
+                onQueryOptionsChange({
+                  comparison: value === 'none' ? undefined : { type: value },
+                })
+              }
+              options={[
+                { value: 'none', label: '不对比' },
+                { value: 'mom', label: '环比（上一等长周期）' },
+                { value: 'yoy', label: '同比（前一年）' },
+              ]}
+            />
+            <span style={{ fontSize: 12, color: 'var(--dr-text-3)' }}>
+              按「{comparisonTarget.name}」对齐；基线 =
+              把当前日期筛选窗口整体前移（环比平移一个等长周期、同比前移一年），图表/表格追加
+              (上期)、(增长率%) 两列。需在该维度上配日期筛选。
+            </span>
           </div>
         </Card>
       )}
@@ -2266,6 +2321,42 @@ const ChartBuilder: React.FC = () => {
     chartBuilderConfig.chartType,
     dimensionBindingCount,
     referenceMetricOptions,
+    setChartQueryOptionsState,
+  ]);
+
+  // 同环比（#129）候选维度：活动维度绑定的「列 ID → 列名」；卡片仅在恰有一个
+  // 候选时出现（与后端单维度对齐门一致）。
+  const comparisonDimensionOptions = useMemo(
+    () =>
+      queryConfig.dimensionGroups
+        .flatMap((g) => g.bindings)
+        .flatMap((b) => {
+          const name = chartBuilderFields.find((f) => f.id === b.fieldId)?.name;
+          return name ? [{ id: b.fieldId, name }] : [];
+        }),
+    [queryConfig.dimensionGroups, chartBuilderFields]
+  );
+
+  // 恢复的文档可能带着已失效的同环比（切了图型 / 换/删了维度后目标不再成立），
+  // 此时后端会显式报错——在源头把它清掉，而不是让用户对着红条摸不着头脑。
+  useEffect(() => {
+    const comparison = chartQueryOptions.comparison;
+    if (!comparison) {
+      return;
+    }
+    const valid =
+      COMPARISON_CHART_TYPES.includes(chartBuilderConfig.chartType) &&
+      comparisonDimensionOptions.length === 1 &&
+      (comparison.field === undefined || comparison.field === comparisonDimensionOptions[0].id);
+    if (!valid) {
+      setChartQueryOptionsState({ ...chartQueryOptions, comparison: undefined });
+    }
+  }, [
+    chartQueryOptions,
+    chartBuilderConfig.chartType,
+    dimensionBindingCount,
+    referenceMetricOptions,
+    comparisonDimensionOptions,
     setChartQueryOptionsState,
   ]);
 
@@ -3311,6 +3402,7 @@ const ChartBuilder: React.FC = () => {
             queryOptions={chartQueryOptions}
             referenceMetricOptions={referenceMetricOptions}
             dimensionBindingCount={dimensionBindingCount}
+            comparisonDimensionOptions={comparisonDimensionOptions}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
             }
@@ -3376,6 +3468,7 @@ const ChartBuilder: React.FC = () => {
             queryOptions={chartQueryOptions}
             referenceMetricOptions={referenceMetricOptions}
             dimensionBindingCount={dimensionBindingCount}
+            comparisonDimensionOptions={comparisonDimensionOptions}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
             }
