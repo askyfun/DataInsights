@@ -24,6 +24,10 @@ const STRING_OPERATORS: FilterOperator[] = [
   'eq',
   'neq',
   'like',
+  'startsWith',
+  'endsWith',
+  'isEmptyString',
+  'isNotEmptyString',
   'isNull',
   'isNotNull',
 ];
@@ -36,6 +40,10 @@ const OPERATOR_LABELS: Partial<Record<FilterOperator, string>> = {
   lt: '小于',
   lte: '小于等于',
   like: '包含',
+  startsWith: '开头为',
+  endsWith: '结尾为',
+  isEmptyString: '为空字符串',
+  isNotEmptyString: '不为空字符串',
   between: '区间',
   in: '属于',
   notIn: '不属于',
@@ -43,7 +51,13 @@ const OPERATOR_LABELS: Partial<Record<FilterOperator, string>> = {
   isNotNull: '不为空',
 };
 
-const isNoValueOperator = (op: FilterOperator): boolean => op === 'isNull' || op === 'isNotNull';
+const NO_VALUE_OPERATORS: FilterOperator[] = [
+  'isNull',
+  'isNotNull',
+  'isEmptyString',
+  'isNotEmptyString',
+];
+const isNoValueOperator = (op: FilterOperator): boolean => NO_VALUE_OPERATORS.includes(op);
 
 export interface FilterValueControlProps {
   field: ChartField;

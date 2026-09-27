@@ -671,7 +671,11 @@ export interface WireFilterCondition {
     | 'notIn'
     | 'between'
     | 'isNull'
-    | 'isNotNull';
+    | 'isNotNull'
+    | 'startsWith'
+    | 'endsWith'
+    | 'isEmptyString'
+    | 'isNotEmptyString';
   value: unknown;
   value_end?: unknown;
   logic: 'and' | 'or';

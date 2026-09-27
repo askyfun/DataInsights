@@ -15,6 +15,14 @@ interface TableChartProps {
   metricNames?: string[];
   /** 指标列的「格式」配置（键为输出列名）：如 0,0.00 → 千分位 + 两位小数。 */
   metricFormats?: Record<string, string>;
+  /** 是否在最左侧插入序号列（跨分页连续编号）。 */
+  showIndex?: boolean;
+  /** 单元格自动换行：true 时取消 ellipsis 截断，长文本折行显示。 */
+  wordWrap?: boolean;
+  /** 空值显示：把 NULL/空字符串统一渲染为占位符；'raw'（缺省）保持原样。 */
+  nullDisplay?: 'raw' | 'dash' | 'blank' | 'zero';
+  /** 冻结维度列：横向滚动时把维度列（含序号列）固定在左侧。 */
+  freezeDimensions?: boolean;
   rowSize?: 'small' | 'middle' | 'large';
   pagination?: {
     page: number;
@@ -41,6 +49,10 @@ const TableChart: React.FC<TableChartProps> = ({
   dimensionNames,
   metricNames,
   metricFormats,
+  showIndex,
+  wordWrap,
+  nullDisplay,
+  freezeDimensions,
   rowSize = 'small',
   pagination,
   sortField,
@@ -85,8 +97,18 @@ const TableChart: React.FC<TableChartProps> = ({
       orderedKeys.push(...keys);
     }
 
-    return orderedKeys.map((key) => {
+    const nullText = nullPlaceholder(nullDisplay);
+    const isNullish = (value: unknown) => value === null || value === undefined || value === '';
+
+    const dimensionSet = new Set(dimensionNames || []);
+    const freeze = Boolean(freezeDimensions) && dimensionSet.size > 0;
+
+    const dataColumns = orderedKeys.map((key) => {
       const format = metricFormats?.[key];
+      // 只在「真的有事要做」时覆盖 render（配了空值占位、或指标列有格式）；
+      // 否则保持 antd 默认渲染——为普通列无条件挂 render 会干扰受控排序箭头的重渲染。
+      const nullAware = nullText !== null;
+      const needsRender = nullAware || Boolean(format);
       return {
         title: columnLabels?.[key] || key,
         dataIndex: key,
@@ -95,11 +117,43 @@ const TableChart: React.FC<TableChartProps> = ({
         sorter: Boolean(onSortChange),
         // 受控排序：只有当前生效的排序列显示箭头状态，其余列恒为 null。
         sortOrder: onSortChange && key === sortField ? toAntdSortOrder(sortOrder) : null,
-        ellipsis: true,
-        // 「格式」只作用于指标列的展示层：排序仍按原始行值比较。
-        ...(format ? { render: (value: unknown) => formatMetricValue(value, format) } : {}),
+        // 自动换行开启时取消 ellipsis；否则沿用截断。
+        ellipsis: !wordWrap,
+        // 冻结时把维度列固定在左侧（指标列不固定，避免全表锁死无法横向看指标）。
+        ...(freeze && dimensionSet.has(key) ? { fixed: 'left' as const } : {}),
+        // 展示层渲染：空值按 nullDisplay 占位，指标列套格式（'raw' 且无格式时不进入这里）。
+        ...(needsRender
+          ? {
+              render: (value: unknown) => {
+                if (nullAware && isNullish(value)) {
+                  return nullText;
+                }
+                if (format) {
+                  return formatMetricValue(value, format);
+                }
+                return value === null || value === undefined ? '' : String(value);
+              },
+            }
+          : {}),
       };
     });
+
+    if (!showIndex) {
+      return dataColumns;
+    }
+    // 序号列：跨服务端分页连续编号（当前页行下标 + 页偏移），冻结时随维度列固定在左。
+    const pageIndex = pagination ? (pagination.page - 1) * pagination.pageSize : 0;
+    const indexColumn = {
+      title: '#',
+      dataIndex: '__row_index__',
+      key: '__row_index__',
+      width: 56,
+      align: 'center' as const,
+      ellipsis: false,
+      ...(freeze ? { fixed: 'left' as const } : {}),
+      render: (_value: unknown, _record: unknown, index: number) => pageIndex + index + 1,
+    };
+    return [indexColumn, ...dataColumns];
   }, [
     columnLabels,
     data,
@@ -107,6 +161,11 @@ const TableChart: React.FC<TableChartProps> = ({
     dimensionNames,
     metricNames,
     metricFormats,
+    showIndex,
+    wordWrap,
+    nullDisplay,
+    freezeDimensions,
+    pagination,
     onSortChange,
     sortField,
     sortOrder,
@@ -194,6 +253,17 @@ const TableChart: React.FC<TableChartProps> = ({
       onChange={handleTableChange}
     />
   );
+};
+
+/**
+ * 空值占位符：把渲染层的 NULL/空字符串替换为可读标记。
+ * 'raw'（或缺省）返回 null，表示不拦截、沿用既有"原样输出空单元格"行为。
+ */
+const nullPlaceholder = (mode?: 'raw' | 'dash' | 'blank' | 'zero'): string | null => {
+  if (mode === 'dash') return '--';
+  if (mode === 'blank') return '';
+  if (mode === 'zero') return '0';
+  return null;
 };
 
 /** asc/desc（wire 口径）→ antd 的 ascend/descend；缺省 null 表示无排序。 */

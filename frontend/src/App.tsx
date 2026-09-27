@@ -2,6 +2,7 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   BuildOutlined,
+  BulbOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   GlobalOutlined,
@@ -12,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { useLocale } from './i18n/useLocale';
+import { type ThemeMode, useTheme } from './lib/theme';
 import ChartBuilder from './pages/ChartBuilder';
 import ChartsPage from './pages/Charts';
 import DashboardEditor from './pages/DashboardEditor';
@@ -30,6 +32,12 @@ const { Title } = Typography;
 const App: React.FC = () => {
   const intl = useIntl();
   const { locale, setLocale } = useLocale();
+  const { preference, setMode } = useTheme();
+  const themeOptions = [
+    { value: 'light' as ThemeMode, label: intl.formatMessage({ id: 'theme.light' }) },
+    { value: 'dark' as ThemeMode, label: intl.formatMessage({ id: 'theme.dark' }) },
+    { value: 'system' as ThemeMode, label: intl.formatMessage({ id: 'theme.system' }) },
+  ];
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const location = useLocation();
@@ -94,7 +102,7 @@ const App: React.FC = () => {
           position: 'sticky',
           top: 0,
           zIndex: 100,
-          background: '#fff',
+          background: 'var(--dr-surface)',
           borderBottom: '1px solid var(--dr-border)',
         }}
       >
@@ -141,6 +149,14 @@ const App: React.FC = () => {
                   { value: 'en-US', label: 'English' },
                 ]}
               />
+              <BulbOutlined />
+              <Select
+                aria-label={intl.formatMessage({ id: 'theme.label' })}
+                value={preference}
+                onChange={(value) => setMode(value)}
+                style={{ width: 96 }}
+                options={themeOptions}
+              />
             </Space>
           </>
         ) : null}
@@ -166,7 +182,7 @@ const App: React.FC = () => {
           items={menuItems}
           style={{ border: 'none' }}
         />
-        <div style={{ padding: '16px', borderTop: '1px solid #f0f0f0' }}>
+        <div style={{ padding: '16px', borderTop: '1px solid var(--dr-border)' }}>
           <Space>
             <GlobalOutlined />
             <Select
@@ -177,6 +193,16 @@ const App: React.FC = () => {
                 { value: 'zh-CN', label: '中文' },
                 { value: 'en-US', label: 'English' },
               ]}
+            />
+          </Space>
+          <Space style={{ marginTop: 12 }}>
+            <BulbOutlined />
+            <Select
+              aria-label={intl.formatMessage({ id: 'theme.label' })}
+              value={preference}
+              onChange={(value) => setMode(value)}
+              style={{ width: 96 }}
+              options={themeOptions}
             />
           </Space>
         </div>

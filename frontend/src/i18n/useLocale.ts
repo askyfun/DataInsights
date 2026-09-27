@@ -479,6 +479,11 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'dashboard.removeBlock': '移除该块',
     'dashboard.loadFailed': '仪表盘加载失败',
     'dashboard.notFound': '仪表盘不存在',
+    // 皮肤（主题）切换：偏好三选项 + 控件无障碍标签。
+    'theme.label': '主题',
+    'theme.light': '浅色',
+    'theme.dark': '深色',
+    'theme.system': '跟随系统',
   },
   'en-US': {
     'nav.dashboard': 'Dashboard',
@@ -959,6 +964,10 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'dashboard.removeBlock': 'Remove block',
     'dashboard.loadFailed': 'Failed to load dashboard',
     'dashboard.notFound': 'Dashboard not found',
+    'theme.label': 'Theme',
+    'theme.light': 'Light',
+    'theme.dark': 'Dark',
+    'theme.system': 'System',
   },
 };
 
