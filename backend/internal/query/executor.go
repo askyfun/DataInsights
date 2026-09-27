@@ -216,6 +216,31 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 			orderedRows[i] = orderedRow
 		}
 
+		// 同环比（issue #129）：分页表格路径同样并入「(上期)」「(增长率%)」两列
+		// （基线查询不带分页，全窗取数后按日期键对齐，页内行恒可查表）。
+		if comparison := parseComparison(req.QueryOptions); comparison != nil {
+			data, cerr := e.attachComparison(ctx, dialect, ast, req, comparison, &TableResponse{
+				Columns: columns,
+				Data:    orderedRows,
+				Pagination: TablePagination{
+					Page:       page,
+					PageSize:   pageSize,
+					Total:      total,
+					TotalPages: totalPages,
+				},
+			})
+			if cerr != nil {
+				return ExecutorResult{}, cerr
+			}
+			return ExecutorResult{
+				Data: data,
+				GeneratedSQL: GeneratedSQL{
+					Select: sql,
+					Count:  countSQL,
+				},
+			}, nil
+		}
+
 		return ExecutorResult{
 			Data: &TableResponse{
 				Columns: columns,
@@ -244,6 +269,16 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 	data, err := processor.Process(result.Rows, req.Dims, req.Metrics, ast)
 	if err != nil {
 		return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
+	}
+
+	// 同环比（issue #129）：query_options.comparison 在场时，紧接当期结果做一次
+	// 「窗口平移」基线查询并按日期桶对齐并入响应（详见 comparison.go 头部契约注释）。
+	// 未启用时零开销、路径与改动前完全一致。
+	if comparison := parseComparison(req.QueryOptions); comparison != nil {
+		data, err = e.attachComparison(ctx, dialect, ast, req, comparison, data)
+		if err != nil {
+			return ExecutorResult{}, err
+		}
 	}
 
 	return ExecutorResult{

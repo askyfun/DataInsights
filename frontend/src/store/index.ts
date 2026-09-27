@@ -335,12 +335,26 @@ export interface ReferenceLine {
   name?: string;
 }
 
+/**
+ * 同环比对比配置（issue #129，#116 epic 第二步）：随 query_options.comparison 进
+ * 查询 wire，执行器用「窗口平移基线查询」产 (上期)/(增长率%) 系列或列。
+ * - type=mom 环比：上一等长周期（当前筛选窗口的天数 +1 平移）；
+ * - type=yoy 同比：前一个日历年；
+ * - field 为对比日期维度的列 ID（DatasetColumn.id）；缺省时后端取首维度。
+ */
+export interface ComparisonConfig {
+  type: 'mom' | 'yoy';
+  field?: string;
+}
+
 export interface ChartQueryOptions {
   pieMergeOtherBelowRatio?: number;
   /** 直方图分箱数量（R-57）；请求 wire 上以 snake_case bin_count 发送，缺省 20。 */
   binCount?: number;
   /** 参考线（R-63）；纯前端渲染配置，不进查询 wire，随持久化文档 queryOptions 小节透传。 */
   referenceLines?: ReferenceLine[];
+  /** 同环比（#129）；wire 上以 query_options.comparison 发送，仅 bar/line/area/table 消费。 */
+  comparison?: ComparisonConfig;
 }
 
 // 查询配置 - 支持多维度组和多指标组
