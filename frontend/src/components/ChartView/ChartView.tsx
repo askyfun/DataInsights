@@ -3,7 +3,12 @@ import ReactECharts from 'echarts-for-react';
 import { type CSSProperties, useCallback, useMemo } from 'react';
 import { type Chart, type ChartDataResponse, isPivotV2Payload } from '../../api';
 import { type ChartType, migrateChartConfig } from '../../lib/chartConfigSchema';
-import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../../lib/chartOptions';
+import {
+  buildChartOption,
+  isEmptyPayload,
+  normalizeChartStyle,
+  normalizeReferenceLines,
+} from '../../lib/chartOptions';
 import { chartDefinitions } from '../ChartBuilder/chartDefinitions';
 import KpiCard from '../ChartBuilder/KpiCard';
 import PivotTable from '../ChartBuilder/PivotTable';
@@ -113,6 +118,11 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
       ),
       metrics: chartDoc.query.metricGroups.flatMap((g) => g.bindings.map((b) => nameOf(b.fieldId))),
       metricSlots,
+      // 参考线（R-63）：持久化文档 queryOptions 小节是 unknown，与 ChartBuilder 恢复路径
+      // 同款窄化后透传（binCount 等其余键 ChartView 不消费）。
+      referenceLines: normalizeReferenceLines(
+        (chartDoc.queryOptions as { referenceLines?: unknown }).referenceLines
+      ),
     });
   }, [chart, chartDoc, data, chartStyle, displayLabels, nameOf]);
 
