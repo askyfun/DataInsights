@@ -684,6 +684,45 @@ describe('normalizeChartStyle：持久化 style（unknown）安全窄化', () =>
   });
 });
 
+describe('normalizeChartStyle：表格展示开关安全窄化', () => {
+  it('合法值原样保留', () => {
+    expect(
+      normalizeChartStyle({
+        tableShowIndex: true,
+        tableWordWrap: true,
+        tableFreezeDimensions: true,
+        tableNullDisplay: 'dash',
+      })
+    ).toEqual({
+      colors: [],
+      smooth: false,
+      tableRowSize: 'small',
+      tableShowIndex: true,
+      tableWordWrap: true,
+      tableFreezeDimensions: true,
+      tableNullDisplay: 'dash',
+    });
+  });
+
+  it('tableNullDisplay 认 dash/blank/zero', () => {
+    for (const mode of ['dash', 'blank', 'zero'] as const) {
+      expect(normalizeChartStyle({ tableNullDisplay: mode }).tableNullDisplay).toBe(mode);
+    }
+  });
+
+  it('缺失/非法不带键（等价于 false / raw）', () => {
+    expect(normalizeChartStyle({})).not.toHaveProperty('tableShowIndex');
+    expect(normalizeChartStyle({})).not.toHaveProperty('tableNullDisplay');
+    // false / 非法字符串 / 未知枚举值一律丢弃
+    expect(normalizeChartStyle({ tableShowIndex: false })).not.toHaveProperty('tableShowIndex');
+    expect(normalizeChartStyle({ tableWordWrap: 'yes' })).not.toHaveProperty('tableWordWrap');
+    expect(normalizeChartStyle({ tableNullDisplay: 'raw' })).not.toHaveProperty('tableNullDisplay');
+    expect(normalizeChartStyle({ tableNullDisplay: 'nonsense' })).not.toHaveProperty(
+      'tableNullDisplay'
+    );
+  });
+});
+
 describe('buildChartOption：style.stack 堆叠渲染（bar/line/area）', () => {
   const stackedPayload = {
     x_axis: ['Apple', 'Banana'],

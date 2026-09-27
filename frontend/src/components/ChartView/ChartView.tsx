@@ -188,12 +188,21 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
   }
 
   if (isTableLike && !isEmptyPayload(data)) {
+    // 冻结维度列需要知道哪些列是维度：按 fieldId→列名 解析维度绑定的输出列名。
+    const tableDimensionNames = chartDoc.query.dimensionGroups.flatMap((g) =>
+      g.bindings.map((b) => nameOf(b.fieldId))
+    );
     return (
       <TableChart
         data={tablePayload ? tablePayload.data : (data as RawRow[])}
         columns={tablePayload ? tablePayload.columns : undefined}
         loading={false}
         columnLabels={displayLabels}
+        dimensionNames={tableDimensionNames}
+        showIndex={chartStyle.tableShowIndex}
+        wordWrap={chartStyle.tableWordWrap}
+        nullDisplay={chartStyle.tableNullDisplay}
+        freezeDimensions={chartStyle.tableFreezeDimensions}
       />
     );
   }
