@@ -2,7 +2,7 @@ import type { TableProps } from 'antd';
 import { Empty, Table } from 'antd';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
-import { formatMetricValue } from '@/lib/format';
+import { formatMetricValue, formatPercentOfTotal, splitPercentFormat } from '@/lib/format';
 import LoadingPlaceholder from '../LoadingPlaceholder';
 
 interface TableChartProps {
@@ -16,6 +16,16 @@ interface TableChartProps {
   metricNames?: string[];
   /** 指标列的「格式」配置（键为输出列名）：如 0,0.00 → 千分位 + 两位小数。 */
   metricFormats?: Record<string, string>;
+  /**
+   * 按占比展示的指标列（键为输出列名，issue #132）：格式串以 `%` 结尾即入选。
+   * 分母是 {@link grandTotal}，不是当前页明细相加。
+   */
+  metricPercentOfTotal?: string[];
+  /**
+   * 占比分母：过滤后**完整数据集**的指标合计（后端重算，来自 TableResponse.total）。
+   * 缺省时占比列留空——用本页合计当分母会给出一个看起来合理的错数。
+   */
+  grandTotal?: Record<string, unknown>;
   /** 是否在最左侧插入序号列（跨分页连续编号）。 */
   showIndex?: boolean;
   /** 单元格自动换行：true 时取消 ellipsis 截断，长文本折行显示。 */
@@ -60,6 +70,8 @@ const TableChart: React.FC<TableChartProps> = ({
   dimensionNames,
   metricNames,
   metricFormats,
+  metricPercentOfTotal,
+  grandTotal,
   showIndex,
   wordWrap,
   nullDisplay,
@@ -114,9 +126,13 @@ const TableChart: React.FC<TableChartProps> = ({
 
     const dimensionSet = new Set(dimensionNames || []);
     const freeze = Boolean(freezeDimensions) && dimensionSet.size > 0;
+    const percentSet = new Set(metricPercentOfTotal || []);
 
     const dataColumns = orderedKeys.map((key) => {
       const format = metricFormats?.[key];
+      // 占比列：值渲染成 value/全集合计，`%` 作为独立文本节点拼接（不进格式化器，
+      // 否则 `0,0.00%` 的后缀会被当成小数位数的一部分）。
+      const asPercent = percentSet.has(key) && Boolean(format);
       // 只在「真的有事要做」时覆盖 render（配了空值占位、或指标列有格式）；
       // 否则保持 antd 默认渲染——为普通列无条件挂 render 会干扰受控排序箭头的重渲染。
       const nullAware = nullText !== null;
@@ -140,8 +156,13 @@ const TableChart: React.FC<TableChartProps> = ({
                 if (nullAware && isNullish(value)) {
                   return nullText;
                 }
+                if (asPercent) {
+                  const percent = formatPercentOfTotal(value, grandTotal?.[key], format as string);
+                  return percent === '' ? '' : `${percent}%`;
+                }
                 if (format) {
-                  return formatMetricValue(value, format);
+                  // 非占比列也要剥掉 `%`：formatMetricValue 会把后缀算进小数位数。
+                  return formatMetricValue(value, splitPercentFormat(format).base);
                 }
                 return value === null || value === undefined ? '' : String(value);
               },
@@ -173,6 +194,8 @@ const TableChart: React.FC<TableChartProps> = ({
     dimensionNames,
     metricNames,
     metricFormats,
+    metricPercentOfTotal,
+    grandTotal,
     showIndex,
     wordWrap,
     nullDisplay,

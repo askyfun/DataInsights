@@ -70,6 +70,7 @@ const composeWith = (
     fields: FIELDS,
     metricAggregations: {},
     metricAliases: {},
+    metricFormats: {},
     tablePagination: { page: 1, pageSize: 20 },
     queryOptions,
     includeSort: false,

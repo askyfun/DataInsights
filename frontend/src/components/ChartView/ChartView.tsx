@@ -9,6 +9,7 @@ import {
   normalizeChartStyle,
   normalizeReferenceLines,
 } from '../../lib/chartOptions';
+import { isPercentOfTotalFormat } from '../../lib/format';
 import { useResolvedTheme } from '../../lib/theme';
 import { chartDefinitions } from '../ChartBuilder/chartDefinitions';
 import KpiCard from '../ChartBuilder/KpiCard';
@@ -210,11 +211,32 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
     const showTotal =
       (chartDoc.queryOptions as { showTotal?: unknown }).showTotal === true &&
       !!tablePayload?.total;
+    // 占比列（issue #132）：配在 fieldMeta 的「格式」上（`%` 后缀），分母同样来自
+    // 响应的 total —— 后端在占比列存在时一定会算 total（见 composeChartQueryRequest），
+    // 拿不到分母时该列留空，不用本页合计兜底。
+    const metricFormats: Record<string, string> = Object.create(null);
+    const percentColumns: string[] = [];
+    for (const group of chartDoc.query.metricGroups) {
+      for (const binding of group.bindings) {
+        const format = chartDoc.fieldMeta[binding.bindingId]?.format;
+        if (!format) {
+          continue;
+        }
+        const outputName = nameOf(binding.fieldId);
+        metricFormats[outputName] = format;
+        if (isPercentOfTotalFormat(format)) {
+          percentColumns.push(outputName);
+        }
+      }
+    }
     return (
       <TableChart
         data={tablePayload ? tablePayload.data : (data as RawRow[])}
         columns={tablePayload ? tablePayload.columns : undefined}
         totalRow={showTotal ? tablePayload?.total : undefined}
+        metricFormats={metricFormats}
+        metricPercentOfTotal={percentColumns}
+        grandTotal={tablePayload?.total}
         loading={false}
         columnLabels={displayLabels}
         dimensionNames={tableDimensionNames}

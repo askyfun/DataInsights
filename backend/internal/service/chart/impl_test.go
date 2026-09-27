@@ -1038,3 +1038,37 @@ func TestChartDataQueryFromConfig_QueryOptionsRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestChartDataQueryFromConfig_PercentFormatNeedsTotal 占比列（格式串带 %，issue #132）
+// 在分享页/仪表盘这条"读持久化 config"的路径上也必须拿到分母：用户可能只配了占比、
+// 没打开合计行开关，此时仍要补 show_total，否则占比列整列留空。
+func TestChartDataQueryFromConfig_PercentFormatNeedsTotal(t *testing.T) {
+	v2Percent := `{"version":2,"chartType":"table","query":{"dimensionGroups":[{"id":"dimensions","bindings":[{"bindingId":"b-0","fieldId":"region"}]}],"metricGroups":[{"id":"metrics","bindings":[{"bindingId":"b-1","fieldId":"amount"}]}]},"fieldMeta":{"b-1":{"aggregation":"sum","alias":"total","format":"0,0.00%"}},"queryOptions":{}}`
+	v2Plain := `{"version":2,"chartType":"table","query":{"dimensionGroups":[{"id":"dimensions","bindings":[{"bindingId":"b-0","fieldId":"region"}]}],"metricGroups":[{"id":"metrics","bindings":[{"bindingId":"b-1","fieldId":"amount"}]}]},"fieldMeta":{"b-1":{"aggregation":"sum","alias":"total","format":"0,0.00"}},"queryOptions":{}}`
+	v1Percent := `{"version":1,"chartType":"table","query":{"dimensionGroups":[{"id":"dimensions","fields":["region"]}],"metricGroups":[{"id":"metrics","fields":["amount"]}]},"fieldMeta":{"amount":{"aggregation":"sum","format":"0%"}}}`
+
+	for _, tc := range []struct {
+		name   string
+		config string
+		want   bool
+	}{
+		{"v2 占比列补 show_total", v2Percent, true},
+		{"v2 普通格式不补", v2Plain, false},
+		{"v1 占比列补 show_total", v1Percent, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chart := &model.Chart{ID: 8, DatasetID: 10, ChartType: "table", Config: tc.config}
+			req, ok := chartDataQueryFromConfig(chart)
+			if !ok {
+				t.Fatal("expected config to parse (ok=true)")
+			}
+			got := req.QueryOptions["show_total"]
+			if tc.want && got != true {
+				t.Fatalf("expected show_total=true, got %+v", req.QueryOptions)
+			}
+			if !tc.want && got != nil {
+				t.Fatalf("expected no show_total, got %+v", req.QueryOptions)
+			}
+		})
+	}
+}

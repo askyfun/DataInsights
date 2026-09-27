@@ -100,3 +100,57 @@ describe('FieldSettingsModal', () => {
     expect(screen.getByTestId('field-settings-alias')).toHaveValue('销售额');
   });
 });
+
+/**
+ * 占比开关（issue #132）。
+ *
+ * 占比不是第二份配置，而是「格式」串的一个 `%` 后缀：弹窗里拆成输入框 + 开关两个
+ * 视图，提交时折回一个字段。若两处各自可写，就会出现"输入框里没有 % 但开关是开的"
+ * 这种无法自洽的状态。
+ */
+describe('FieldSettingsModal 占比开关', () => {
+  // antd Switch 的可点击体是外层 button（testid 挂在内层 span 上）；确定按钮在
+  // Modal footer 里，getByRole 在 jsdom 下拿不到它的可及名，两处都走 DOM 查询。
+  const clickPercentSwitch = () => {
+    const inner = screen.getByTestId('field-settings-percent');
+    const button = inner.closest('button');
+    if (!button) {
+      throw new Error('占比开关的 button 容器未找到');
+    }
+    fireEvent.click(button);
+  };
+  const clickModalOk = () => {
+    const ok = document.querySelector<HTMLElement>('.ant-modal-footer .ant-btn-primary');
+    if (!ok) {
+      throw new Error('弹窗确定按钮未找到');
+    }
+    fireEvent.click(ok);
+  };
+
+  it('格式带 % 时：输入框只显示不含后缀的部分，开关为开', () => {
+    renderModal({ initial: { alias: '', unit: '', format: '0,0.00%' } });
+    expect(screen.getByTestId('field-settings-format')).toHaveValue('0,0.00');
+    expect(screen.getByTestId('field-settings-percent')).toBeChecked();
+  });
+
+  it('打开开关后确定：格式补上 % 后缀', () => {
+    const { onOk } = renderModal({ initial: { alias: '', unit: '', format: '0,0.00' } });
+    clickPercentSwitch();
+    clickModalOk();
+    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00%' });
+  });
+
+  it('关闭开关后确定：剥掉 % 后缀，其余格式保留', () => {
+    const { onOk } = renderModal({ initial: { alias: '', unit: '', format: '0,0.00%' } });
+    clickPercentSwitch();
+    clickModalOk();
+    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00' });
+  });
+
+  it('格式为空时打开开关：给一个两位小数的默认格式，而不是孤零零一个 %', () => {
+    const { onOk } = renderModal({ initial: { alias: '', unit: '', format: '' } });
+    clickPercentSwitch();
+    clickModalOk();
+    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00%' });
+  });
+});
