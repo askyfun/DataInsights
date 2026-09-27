@@ -321,10 +321,26 @@ export interface ChartStyleConfig {
   tableFreezeDimensions?: boolean;
 }
 
+/**
+ * 参考线（issue #116 分析配置，R-63）：叠加在 bar/line/area 值轴上的 ECharts markLine。
+ * - metric：目标指标的**输出列名**（wireAliasOf 口径 = 列名，别名永不进 SQL/响应），
+ *   与 buildChartOption 的 series.name 同一命名空间；
+ * - type=constant 时 value 必填；avg/median 由 ECharts 在实际渲染的 series 数据上计算；
+ * - name 为展示名（markLine 标签），缺省回落「常量线/均值线/中位数线」。
+ */
+export interface ReferenceLine {
+  metric: string;
+  type: 'constant' | 'avg' | 'median';
+  value?: number;
+  name?: string;
+}
+
 export interface ChartQueryOptions {
   pieMergeOtherBelowRatio?: number;
   /** 直方图分箱数量（R-57）；请求 wire 上以 snake_case bin_count 发送，缺省 20。 */
   binCount?: number;
+  /** 参考线（R-63）；纯前端渲染配置，不进查询 wire，随持久化文档 queryOptions 小节透传。 */
+  referenceLines?: ReferenceLine[];
 }
 
 // 查询配置 - 支持多维度组和多指标组

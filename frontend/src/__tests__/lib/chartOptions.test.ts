@@ -5,6 +5,7 @@ import {
   DARK_CHART_PALETTE,
   isEmptyPayload,
   normalizeChartStyle,
+  normalizeReferenceLines,
 } from '@/lib/chartOptions';
 
 /**
@@ -45,6 +46,11 @@ interface AxisOptionView {
     connectNulls?: boolean;
     areaStyle?: unknown;
     stack?: string;
+    markLine?: {
+      silent?: boolean;
+      symbol?: string;
+      data?: Record<string, unknown>[];
+    };
   }[];
   color?: string[];
 }
@@ -1558,6 +1564,195 @@ describe('buildChartOption：时间维度类目轴排序（D3 后续修复）', 
     expect(fmt('2026-01-01T00:00:00Z')).toBe('2026-01-01');
     expect(fmt('2026-01-01T08:30:00Z')).toBe('2026-01-01 08:30:00');
     expect(fmt('2026-01-01 12:00:00 +0000 UTC')).toBe('2026-01-01 12:00:00');
+  });
+});
+
+// 参考线（R-63，issue #116）：bar/line/area 的 markLine 与 queryOptions 净化
+describe('normalizeReferenceLines：持久化 referenceLines（unknown）净化', () => {
+  it('合法条目原样保留（constant 带 value；avg/median 不带）', () => {
+    expect(
+      normalizeReferenceLines([
+        { type: 'constant', metric: 'revenue', value: 1500, name: '目标' },
+        { type: 'avg', metric: 'revenue' },
+        { type: 'median', metric: 'cost', name: '中位' },
+      ])
+    ).toEqual([
+      { type: 'constant', metric: 'revenue', value: 1500, name: '目标' },
+      { type: 'avg', metric: 'revenue' },
+      { type: 'median', metric: 'cost', name: '中位' },
+    ]);
+  });
+
+  it('非法条目整条丢弃：未知 type / 空 metric / constant 缺非有限 value / 非对象', () => {
+    expect(normalizeReferenceLines(undefined)).toBeUndefined();
+    expect(normalizeReferenceLines('nope')).toBeUndefined();
+    expect(
+      normalizeReferenceLines([
+        null,
+        42,
+        { type: 'trend', metric: 'revenue' },
+        { type: 'avg', metric: '' },
+        { type: 'avg' },
+        { type: 'constant', metric: 'revenue' },
+        { type: 'constant', metric: 'revenue', value: Number.NaN },
+        { type: 'constant', metric: 'revenue', value: '1500' },
+        { type: 'median', metric: 'revenue', name: 7 },
+        { type: 'median', metric: 'revenue', name: '' },
+      ])
+    ).toEqual([
+      { type: 'median', metric: 'revenue' },
+      { type: 'median', metric: 'revenue' },
+    ]);
+  });
+
+  it('空 name 不带键；不改写输入数组', () => {
+    const input = [{ type: 'avg', metric: 'revenue', name: '' }];
+    const clone = structuredClone(input);
+    expect(normalizeReferenceLines(input)).toEqual([{ type: 'avg', metric: 'revenue' }]);
+    expect(input).toEqual(clone);
+  });
+});
+
+describe('buildChartOption：context.referenceLines 参考线（R-63）', () => {
+  const axisContext = (referenceLines?: ReturnType<typeof normalizeReferenceLines>) => ({
+    title: '',
+    dimensions: ['product'],
+    metrics: ['revenue'],
+    referenceLines,
+  });
+  const twoSeriesPayload = {
+    x_axis: ['Apple', 'Banana'],
+    series: [
+      { name: 'revenue', data: [1000, 2000] },
+      { name: 'cost', data: [3000, 2000] },
+    ],
+  };
+
+  it('无参考线 / 空数组：series 不携带 markLine 键（回归钉死改动前 option 形状）', () => {
+    const without = view<AxisOptionView>(
+      buildChartOption('bar', axisPayload, baseStyle, {}, axisContext())
+    );
+    expect(without.series[0]).not.toHaveProperty('markLine');
+    const empty = view<AxisOptionView>(
+      buildChartOption('bar', axisPayload, baseStyle, {}, axisContext([]))
+    );
+    expect(empty.series[0]).not.toHaveProperty('markLine');
+  });
+
+  it('avg/median 映射为 ECharts 内置统计项，constant 映射为值轴坐标', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        axisPayload,
+        baseStyle,
+        {},
+        axisContext(
+          normalizeReferenceLines([
+            { type: 'constant', metric: 'revenue', value: 1500, name: '目标' },
+            { type: 'avg', metric: 'revenue' },
+            { type: 'median', metric: 'revenue' },
+          ])
+        )
+      )
+    );
+    expect(option.series[0]?.markLine).toEqual({
+      silent: true,
+      symbol: 'none',
+      lineStyle: { type: 'dashed' },
+      data: [
+        { name: '目标', yAxis: 1500 },
+        { name: '均值线', type: 'average' },
+        { name: '中位数线', type: 'median' },
+      ],
+    });
+  });
+
+  it('按 series 展示名匹配：labels 映射后仍以显示名挂线；未匹配的 series 不带 markLine', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        twoSeriesPayload,
+        baseStyle,
+        { revenue: '收入' },
+        {
+          title: '',
+          dimensions: ['product'],
+          metrics: ['revenue', 'cost'],
+          referenceLines: normalizeReferenceLines([{ type: 'avg', metric: '收入' }]),
+        }
+      )
+    );
+    expect(option.series[0]?.markLine?.data).toEqual([{ name: '均值线', type: 'average' }]);
+    expect(option.series[1]).not.toHaveProperty('markLine');
+  });
+
+  it('横向条形（orientation=horizontal）：常量线端点键翻转到 xAxis', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        axisPayload,
+        { ...baseStyle, orientation: 'horizontal' },
+        {},
+        axisContext(normalizeReferenceLines([{ type: 'constant', metric: 'revenue', value: 500 }]))
+      )
+    );
+    expect(option.series[0]?.markLine?.data).toEqual([{ name: '常量线', xAxis: 500 }]);
+  });
+
+  it('与 stack 共存：markLine 挂在堆叠后的每条系列上', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        twoSeriesPayload,
+        { ...baseStyle, stack: 'normal' },
+        {},
+        {
+          title: '',
+          dimensions: ['product'],
+          metrics: ['revenue', 'cost'],
+          referenceLines: normalizeReferenceLines([
+            { type: 'avg', metric: 'revenue' },
+            { type: 'avg', metric: 'cost' },
+          ]),
+        }
+      )
+    );
+    expect(option.series[0]).toMatchObject({ stack: 'total' });
+    expect(option.series[0]?.markLine?.data).toEqual([{ name: '均值线', type: 'average' }]);
+    expect(option.series[1]?.markLine?.data).toEqual([{ name: '均值线', type: 'average' }]);
+  });
+
+  it('line/area 与 legacy 裸行路径同样支持', () => {
+    const lines = normalizeReferenceLines([{ type: 'median', metric: 'revenue' }]);
+    for (const chartType of ['line', 'area'] as const) {
+      const option = view<AxisOptionView>(
+        buildChartOption(chartType, axisPayload, baseStyle, {}, axisContext(lines))
+      );
+      expect(option.series[0]?.markLine?.data).toEqual([{ name: '中位数线', type: 'median' }]);
+    }
+    const rows = [{ product: 'Apple', revenue: 1000 }];
+    const legacy = view<AxisOptionView>(
+      buildChartOption('bar', rows, baseStyle, {}, axisContext(lines))
+    );
+    expect(legacy.series[0]?.markLine?.data).toEqual([{ name: '中位数线', type: 'median' }]);
+  });
+
+  it('非坐标轴图型（pie/combo）不受影响：pie series 无 markLine', () => {
+    const option = view<PieOptionView>(
+      buildChartOption(
+        'pie',
+        piePayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['product'],
+          metrics: ['revenue'],
+          referenceLines: normalizeReferenceLines([{ type: 'avg', metric: 'revenue' }]),
+        }
+      )
+    );
+    expect(option.series[0]).not.toHaveProperty('markLine');
   });
 });
 

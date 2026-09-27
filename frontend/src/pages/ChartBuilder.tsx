@@ -2,12 +2,14 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   CodeOutlined,
+  DeleteOutlined,
   DownOutlined,
   ExportOutlined,
   FieldBinaryOutlined,
   FunctionOutlined,
   LinkOutlined,
   PlayCircleOutlined,
+  PlusOutlined,
   RedoOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -89,7 +91,7 @@ import {
   type ChartType,
   migrateChartConfig,
 } from '../lib/chartConfigSchema';
-import { buildChartOption, isEmptyPayload } from '../lib/chartOptions';
+import { buildChartOption, isEmptyPayload, normalizeReferenceLines } from '../lib/chartOptions';
 import { classifyFieldKind, normalizeDataType } from '../lib/dataTypes';
 import {
   type DateFilterIntent,
@@ -114,6 +116,7 @@ import {
   FieldGroup,
   FilterCondition,
   QueryConfig,
+  type ReferenceLine,
   useStore,
 } from '../store';
 
@@ -648,6 +651,8 @@ interface ChartCanvasProps {
   metricAliases: Record<string, string>;
   metricUnits: Record<string, string>;
   chartStyle: ChartStyleConfig;
+  /** 查询选项（R-63：参考线在此透传给 buildChartOption）。 */
+  queryOptions: ChartQueryOptions;
 }
 
 /** 离屏主题探针样式：不影响布局，仅供 chartPalette 读取当前主题的 --dr-*。 */
@@ -692,6 +697,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   metricAliases,
   metricUnits,
   chartStyle,
+  queryOptions,
 }) => {
   // 主题宿主探针（与 ChartView 同一机制）：canvas 取不到 CSS 变量，须在构造 option 时
   // 把当前主题的颜色算成字面值。resolvedTheme 入依赖 → 切主题即重建 option 实时重绘。
@@ -770,6 +776,9 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         dimensions,
         metrics,
         metricSlots,
+        // 参考线（R-63）：store 里是 camelCase 持久化模型，进 option 前净化一次
+        // （防御恢复自旧文档/手改 config 的脏数据）。
+        referenceLines: normalizeReferenceLines(queryOptions.referenceLines),
       },
       resolvedTheme,
       hostEl
@@ -781,6 +790,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     dimensionLabels,
     metricAliases,
     metricUnits,
+    queryOptions,
     hostEl,
     resolvedTheme,
   ]);
@@ -938,9 +948,15 @@ interface ConfigPanelProps {
   onConfigChange: (config: Partial<ChartConfig>) => void;
   chartStyle: ChartStyleConfig;
   onChartStyleChange: (style: Partial<ChartStyleConfig>) => void;
-  /** 图表查询选项（histogram 的 binCount 在此读写）。 */
+  /** 图表查询选项（histogram 的 binCount、参考线全集在此读写）。 */
   queryOptions: ChartQueryOptions;
   onQueryOptionsChange: (options: Partial<ChartQueryOptions>) => void;
+  /**
+   * 参考线（R-63）可选目标指标：当前活动指标绑定的「输出列名 → 展示名」对。
+   * 输出列名与 buildChartOption 的 series.name 同一口径（wireAliasOf = 列名），
+   * 参考线按它匹配挂载；展示名只是下拉里给人看的标签。
+   */
+  referenceMetricOptions: Array<{ name: string; label: string }>;
 }
 
 const chartTypeOptions = Object.values(chartDefinitions).map((def) => ({
@@ -997,6 +1013,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onChartStyleChange,
   queryOptions,
   onQueryOptionsChange,
+  referenceMetricOptions,
 }) => {
   // styleKeys 决定当前图型显示哪些样式控件（Task 0-4 声明、本任务首次真正接线）。
   // 7 种图型现在都应显式声明 styleKeys（见 chartDefinitions.ts），undefined 理论上
@@ -1014,6 +1031,17 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
     showStyleControl('donut') ||
     showStyleControl('tableRowSize') ||
     config.chartType === 'histogram';
+
+  // 参考线（R-63）：bar/line/area 的 markLine 是 buildChartOption 唯一消费的三种图型
+  // （combo 双轴的值轴语义不在此期范围内）。
+  const supportsReferenceLines = ['bar', 'line', 'area'].includes(config.chartType);
+  const referenceLines = queryOptions.referenceLines ?? [];
+  const setReferenceLines = (lines: ReferenceLine[]) =>
+    onQueryOptionsChange({ referenceLines: lines.length > 0 ? lines : undefined });
+  const updateReferenceLine = (index: number, patch: Partial<ReferenceLine>) =>
+    setReferenceLines(
+      referenceLines.map((line, i) => (i === index ? { ...line, ...patch } : line))
+    );
 
   return (
     <div>
@@ -1226,6 +1254,107 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 />
               </SettingRow>
             )}
+          </div>
+        </Card>
+      )}
+
+      {supportsReferenceLines && (
+        <Card
+          title="参考线"
+          size="small"
+          style={{ marginBottom: 6 }}
+          styles={{ body: { padding: '4px 6px' } }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {referenceLines.length === 0 && (
+              <span style={{ fontSize: 12, color: 'var(--dr-text-3)' }}>
+                暂无参考线，点击下方按钮添加
+              </span>
+            )}
+            {referenceLines.map((line, index) => (
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: 参考线列表按序整体重写，无重排交互
+                key={index}
+                data-testid="reference-line-row"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '2px 4px',
+                  borderRadius: 6,
+                  background: 'var(--dr-sunken)',
+                }}
+              >
+                <Select
+                  size="small"
+                  style={{ width: 96, flexShrink: 0 }}
+                  value={line.metric}
+                  placeholder="指标"
+                  onChange={(value) => updateReferenceLine(index, { metric: value })}
+                  options={referenceMetricOptions.map((opt) => ({
+                    value: opt.name,
+                    label: opt.label,
+                  }))}
+                />
+                <Select
+                  size="small"
+                  style={{ width: 88, flexShrink: 0 }}
+                  value={line.type}
+                  onChange={(value) => updateReferenceLine(index, { type: value })}
+                  options={[
+                    { value: 'constant', label: '常量' },
+                    { value: 'avg', label: '均值' },
+                    { value: 'median', label: '中位数' },
+                  ]}
+                />
+                {line.type === 'constant' && (
+                  <InputNumber
+                    size="small"
+                    style={{ width: 88 }}
+                    value={line.value}
+                    placeholder="值"
+                    onChange={(value) => updateReferenceLine(index, { value: value ?? undefined })}
+                  />
+                )}
+                <Input
+                  size="small"
+                  style={{ minWidth: 0, flex: 1 }}
+                  value={line.name}
+                  placeholder={
+                    line.type === 'constant'
+                      ? '常量线'
+                      : line.type === 'avg'
+                        ? '均值线'
+                        : '中位数线'
+                  }
+                  onChange={(e) => updateReferenceLine(index, { name: e.target.value })}
+                />
+                <Button
+                  size="small"
+                  type="text"
+                  aria-label="删除参考线"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => setReferenceLines(referenceLines.filter((_, i) => i !== index))}
+                />
+              </div>
+            ))}
+            <Button
+              size="small"
+              type="dashed"
+              block
+              icon={<PlusOutlined />}
+              aria-label="添加参考线"
+              disabled={referenceMetricOptions.length === 0}
+              onClick={() => {
+                const first = referenceMetricOptions[0];
+                if (first) {
+                  setReferenceLines([...referenceLines, { metric: first.name, type: 'avg' }]);
+                }
+              }}
+            >
+              添加参考线
+            </Button>
           </div>
         </Card>
       )}
@@ -1977,6 +2106,27 @@ const ChartBuilder: React.FC = () => {
 
   // queryConfigOverride：调用方持有比组件闭包更新的 queryConfig 时显式传入
   // （handleSortChange 的 setQueryConfig 尚未触发重渲染），保证 compose 看到最新 sort。
+  // 参考线（R-63）下拉候选：当前活动指标绑定的「输出列名 → 展示名」。输出列名
+  // = 列名（wireAliasOf 口径，与后端 series.name 一致），展示名 = 别名兜底列名
+  // （与 ChartCanvas labels 口径一致）。
+  const referenceMetricOptions = useMemo(
+    () =>
+      queryConfig.metricGroups
+        .flatMap((g) => g.bindings)
+        .flatMap((b) => {
+          const columnName = chartBuilderFields.find((f) => f.id === b.fieldId)?.name;
+          return columnName
+            ? [
+                {
+                  name: columnName,
+                  label: metricAliases[b.bindingId] || columnName,
+                },
+              ]
+            : [];
+        }),
+    [queryConfig.metricGroups, chartBuilderFields, metricAliases]
+  );
+
   const buildChartQueryRequest = useCallback(
     (queryConfigOverride?: QueryConfig): ChartQueryRequest | null => {
       if (!selectedDatasetId) return null;
@@ -2603,6 +2753,7 @@ const ChartBuilder: React.FC = () => {
           metricAliases={metricAliases}
           metricUnits={metricUnits}
           chartStyle={chartStyle}
+          queryOptions={chartQueryOptions}
         />
       </ChartErrorBoundary>
     );
@@ -3016,6 +3167,7 @@ const ChartBuilder: React.FC = () => {
             chartStyle={chartStyle}
             onChartStyleChange={setChartStyle}
             queryOptions={chartQueryOptions}
+            referenceMetricOptions={referenceMetricOptions}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
             }
@@ -3079,6 +3231,7 @@ const ChartBuilder: React.FC = () => {
             chartStyle={chartStyle}
             onChartStyleChange={setChartStyle}
             queryOptions={chartQueryOptions}
+            referenceMetricOptions={referenceMetricOptions}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
             }

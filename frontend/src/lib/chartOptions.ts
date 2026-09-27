@@ -23,7 +23,7 @@ import type {
   RadarResponse,
   ScatterResponse,
 } from '../api';
-import type { ChartStyleConfig } from '../store';
+import type { ChartStyleConfig, ReferenceLine } from '../store';
 import type { ChartType } from './chartConfigSchema';
 
 /** ChartStyleConfig 默认值（持久化 style 缺失/形状非法时的兜底） */
@@ -114,6 +114,92 @@ export interface ChartOptionContext {
    * secondary_values→yAxisIndex 1）。其余图型留空 undefined，调用方无需改动（裁定）。
    */
   metricSlots?: Array<{ slot: string; metrics: string[] }>;
+  /**
+   * 参考线（R-63，issue #116）：仅 bar/line/area 消费，按 metric（输出列名）挂到对应
+   * series 的 markLine 上。调用方传入前须经 normalizeReferenceLines 净化
+   * （持久化文档的 queryOptions 是 unknown，不允许未校验数据流入 option 构造）。
+   */
+  referenceLines?: ReferenceLine[];
+}
+
+/** 参考线缺省展示名（用户未填 name 时） */
+const REFERENCE_LINE_LABELS: Record<ReferenceLine['type'], string> = {
+  constant: '常量线',
+  avg: '均值线',
+  median: '中位数线',
+};
+
+/**
+ * 把持久化 queryOptions.referenceLines（schema 上是 unknown）净化为合法条目。
+ * 调用场景：builder 与 ChartView 两条渲染路径在进 buildChartOption 前各自调用。
+ * 主要逻辑：逐条校验 type/metric（constant 额外要求有限数值 value），非法条目整条丢弃；
+ * 返回新数组，不改写输入。非数组输入返回 undefined（等价于无参考线）。
+ */
+export function normalizeReferenceLines(raw: unknown): ReferenceLine[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const out: ReferenceLine[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) {
+      continue;
+    }
+    const { type, metric, value, name } = item as Record<string, unknown>;
+    if (type !== 'constant' && type !== 'avg' && type !== 'median') {
+      continue;
+    }
+    if (typeof metric !== 'string' || metric === '') {
+      continue;
+    }
+    if (type === 'constant' && (typeof value !== 'number' || !Number.isFinite(value))) {
+      continue;
+    }
+    out.push({
+      type,
+      metric,
+      ...(type === 'constant' ? { value: value as number } : {}),
+      ...(typeof name === 'string' && name !== '' ? { name } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * 一条 series 的 markLine 片段（R-63）：无匹配参考线时返回 {}（不携带 markLine 键，
+ * 保持无参考线时 option 与本改动前字节等价）。avg/median 直接交给 ECharts 内置
+ * `type: 'average'/'median'`，在**实际渲染的数据**（含堆叠/百分比归一后的值）上计算。
+ *
+ * @param seriesName series 的展示名（labels[name] || name），参考线按此匹配
+ *   metric 映射到展示名后的值——匹配不到（指标被移除/改名）时该条静默不渲染。
+ * @param lines 已净化的参考线全集
+ * @param horizontal bar 图 orientation='horizontal'：值轴在 x，markLine 端点键随之翻转。
+ */
+function referenceLineMarkLine(
+  seriesName: string,
+  lines: ReferenceLine[] | undefined,
+  horizontal: boolean
+): Record<string, unknown> {
+  if (!lines || lines.length === 0) {
+    return {};
+  }
+  const matched = lines.filter((line) => line.metric === seriesName);
+  if (matched.length === 0) {
+    return {};
+  }
+  const coordKey = horizontal ? 'xAxis' : 'yAxis';
+  return {
+    markLine: {
+      silent: true,
+      symbol: 'none',
+      lineStyle: { type: 'dashed' as const },
+      data: matched.map((line) => ({
+        name: line.name || REFERENCE_LINE_LABELS[line.type],
+        ...(line.type === 'constant'
+          ? { [coordKey]: line.value as number }
+          : { type: line.type === 'avg' ? 'average' : 'median' }),
+      })),
+    },
+  };
 }
 
 /**
@@ -503,13 +589,17 @@ export function buildChartOption(
           xAxis: horizontalBar ? valueAxis : categoryAxis,
           yAxis: horizontalBar ? categoryAxis : valueAxis,
           series: applyStack(
-            axis.series.map((s) => ({
-              name: labelOf(s.name),
-              type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
-              ...(chartType === 'area' ? { areaStyle: {} } : {}),
-              ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
-              data: s.data.map(toOptionValue),
-            })),
+            axis.series.map((s) => {
+              const name = labelOf(s.name);
+              return {
+                name,
+                type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
+                ...(chartType === 'area' ? { areaStyle: {} } : {}),
+                ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
+                ...referenceLineMarkLine(name, context.referenceLines, horizontalBar),
+                data: s.data.map(toOptionValue),
+              };
+            }),
             style.stack
           ),
           ...colorOf(),
@@ -727,13 +817,17 @@ export function buildChartOption(
         xAxis: horizontalBar ? valueAxis : categoryAxis,
         yAxis: horizontalBar ? categoryAxis : valueAxis,
         series: applyStack(
-          context.metrics.map((yField) => ({
-            name: labelOf(yField),
-            type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
-            ...(chartType === 'area' ? { areaStyle: {} } : {}),
-            ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
-            data: rows.map((item) => toOptionValue(item[yField])),
-          })),
+          context.metrics.map((yField) => {
+            const name = labelOf(yField);
+            return {
+              name,
+              type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
+              ...(chartType === 'area' ? { areaStyle: {} } : {}),
+              ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
+              ...referenceLineMarkLine(name, context.referenceLines, horizontalBar),
+              data: rows.map((item) => toOptionValue(item[yField])),
+            };
+          }),
           style.stack
         ),
         ...colorOf(),
