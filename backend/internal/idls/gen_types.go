@@ -349,13 +349,16 @@ type ColumnListResponse struct {
 	Trace string `json:"trace"`
 }
 
-// Dashboard 仪表盘响应实体（entity.Dashboard）。layout_json 是布局文档（DashboardLayout） 的字符串形态：列是 JSONB，API 面是 string，与 Chart.config 同款约定。 owner_id / tenant_id 是对内列，不在读出口。已软删的行不会出现在任何读出口。
+// Dashboard 仪表盘响应实体（entity.Dashboard）。layout_json 是布局文档（DashboardLayout） 的字符串形态：列是 JSONB，API 面是 string，与 Chart.config 同款约定。 owner_id / tenant_id 是对内列，不在读出口。已软删的行不会出现在任何读出口。 folder_id 是归档文件夹（第一期仅仪表盘），未归档为 null。
 type Dashboard struct {
 	// CreatedAt RFC3339。
 	CreatedAt string `json:"created_at"`
 
 	// Description 无描述时为 null（空串与 null 落库后不可区分，都记为 NULL）。
 	Description *string `json:"description"`
+
+	// FolderId 所属文件夹 id；未归档（根级）为 null。指向**已软删**文件夹时后端仍原样回显 该 id（不做级联清洗），前端把这种行归到「未归档」桶里展示。
+	FolderId *string `json:"folder_id"`
 
 	// Id UUIDv7 字符串（非自增；PRD §6.5 一次性不可逆决策），由后端生成。
 	//
@@ -379,12 +382,78 @@ type DashboardCreateRequest struct {
 	// Description 缺省或空串落库为 NULL。
 	Description *string `json:"description,omitempty"`
 
+	// FolderId 新建时直接归档到该文件夹；缺省/null/空串都是「未归档」。指向不存在或已软删 的文件夹 → 20300。
+	FolderId *string `json:"folder_id,omitempty"`
+
 	// LayoutJson 布局文档的 JSON 字符串；缺省/空串后端填 {"version":1,"widgets":[]}。 非空但不是合法 JSON → 20100。
 	LayoutJson *string `json:"layout_json,omitempty"`
 	Name       string  `json:"name"`
 
 	// Status 缺省 draft。
 	Status *string `json:"status,omitempty"`
+}
+
+// DashboardFolder 仪表盘文件夹响应实体（entity.DashboardFolder）。树由前端按 parent_id 组装， 后端不落派生路径。已软删的行不会出现在任何读出口。
+type DashboardFolder struct {
+	// CreatedAt RFC3339。
+	CreatedAt string `json:"created_at"`
+
+	// Id UUIDv7 字符串（与仪表盘同款不可枚举主键），由后端生成。
+	//
+	// Example: 0198f2c3-4d5e-7a6b-8c9d-0e1f2a3b4c5d
+	Id   string `json:"id"`
+	Name string `json:"name"`
+
+	// ParentId 父文件夹 id；根级为 null。
+	ParentId *string `json:"parent_id"`
+
+	// UpdatedAt RFC3339；由后端在每次更新时显式前进（表无触发器）。
+	UpdatedAt string `json:"updated_at"`
+}
+
+// DashboardFolderCreateRequest POST /api/dashboard-folders 请求体（entity.DashboardFolderCreateRequest）。 不含 id：主键由后端生成 UUIDv7。
+type DashboardFolderCreateRequest struct {
+	Name string `json:"name"`
+
+	// ParentId 父文件夹 id；缺省/null/空串都是根级（空串在此与 null 等价——根级本来就是 「无父级」，不需要哨兵）。目标不存在或已软删 → 20300。
+	ParentId *string `json:"parent_id,omitempty"`
+}
+
+// DashboardFolderListResponse GET /api/dashboard-folders 响应：data 为 DashboardFolder 数组（扁平）。
+type DashboardFolderListResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode      `json:"code"`
+	Data []DashboardFolder `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// DashboardFolderResponse 仪表盘文件夹 CRUD 响应：data 为单个 DashboardFolder。
+type DashboardFolderResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data 仪表盘文件夹响应实体（entity.DashboardFolder）。树由前端按 parent_id 组装， 后端不落派生路径。已软删的行不会出现在任何读出口。
+	Data DashboardFolder `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// DashboardFolderUpdateRequest PUT /api/dashboard-folders/{id} 请求体（entity.DashboardFolderUpdateRequest）。 两个字段全部可选，遵循「未提供则保留」。
+type DashboardFolderUpdateRequest struct {
+	// Name 缺省/null 保留存量；空串 → 20100（夹名不可为空）。
+	Name *string `json:"name,omitempty"`
+
+	// ParentId **三态**：缺省或 null = 保留现有父级（只改名）；`""`（空串）= **移到根级** （清空父级的显式哨兵）；UUID = 移到该文件夹下。目标不存在/已软删 → 20300； 移动到自己或任意后代（成环）→ 20400。
+	ParentId *string `json:"parent_id,omitempty"`
 }
 
 // DashboardListResponse GET /api/dashboards 响应：data 为 Dashboard 数组。
@@ -456,7 +525,7 @@ type DashboardResponse struct {
 	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
 	Code ResponseCode `json:"code"`
 
-	// Data 仪表盘响应实体（entity.Dashboard）。layout_json 是布局文档（DashboardLayout） 的字符串形态：列是 JSONB，API 面是 string，与 Chart.config 同款约定。 owner_id / tenant_id 是对内列，不在读出口。已软删的行不会出现在任何读出口。
+	// Data 仪表盘响应实体（entity.Dashboard）。layout_json 是布局文档（DashboardLayout） 的字符串形态：列是 JSONB，API 面是 string，与 Chart.config 同款约定。 owner_id / tenant_id 是对内列，不在读出口。已软删的行不会出现在任何读出口。 folder_id 是归档文件夹（第一期仅仪表盘），未归档为 null。
 	Data Dashboard `json:"data"`
 
 	// Msg 提示消息；成功为 "success"，错误为可读错误描述
@@ -466,10 +535,13 @@ type DashboardResponse struct {
 	Trace string `json:"trace"`
 }
 
-// DashboardUpdateRequest PUT /api/dashboards/{id} 请求体（entity.DashboardUpdateRequest）。四个字段 **全部可选且都是「未提供则保留」**：缺省或 null 保持存量值（不是全量覆盖）， 与本仓库 datasource 密码、dataset 可选元数据同例。description 传空串表示 清空为 NULL。
+// DashboardUpdateRequest PUT /api/dashboards/{id} 请求体（entity.DashboardUpdateRequest）。五个字段 **全部可选且都是「未提供则保留」**：缺省或 null 保持存量值（不是全量覆盖）， 与本仓库 datasource 密码、dataset 可选元数据同例。description 传空串表示 清空为 NULL。
 type DashboardUpdateRequest struct {
 	// Description 缺省/null 保留存量；空串清空为 NULL；非空写入。
 	Description *string `json:"description,omitempty"`
+
+	// FolderId **三态**（归档移动）：缺省或 null = 保留现有归档位置；`""`（空串）= **移出文件夹到未归档**（与文件夹 PUT 的 parent_id 同一哨兵口径）； UUID = 归档到该文件夹。目标不存在或已软删 → 20300。
+	FolderId *string `json:"folder_id,omitempty"`
 
 	// LayoutJson 缺省/null 保留存量；非空但不是合法 JSON → 20100。
 	LayoutJson *string `json:"layout_json,omitempty"`
@@ -1143,6 +1215,9 @@ type TypeConfig struct {
 // ChartId defines model for ChartId.
 type ChartId = int
 
+// DashboardFolderId defines model for DashboardFolderId.
+type DashboardFolderId = string
+
 // DashboardId defines model for DashboardId.
 type DashboardId = string
 
@@ -1224,6 +1299,12 @@ type QueryChartJSONRequestBody = ChartSpecQueryRequest
 
 // UpdateChartJSONRequestBody defines body for UpdateChart for application/json ContentType.
 type UpdateChartJSONRequestBody = ChartUpdateRequest
+
+// CreateDashboardFolderJSONRequestBody defines body for CreateDashboardFolder for application/json ContentType.
+type CreateDashboardFolderJSONRequestBody = DashboardFolderCreateRequest
+
+// UpdateDashboardFolderJSONRequestBody defines body for UpdateDashboardFolder for application/json ContentType.
+type UpdateDashboardFolderJSONRequestBody = DashboardFolderUpdateRequest
 
 // CreateDashboardJSONRequestBody defines body for CreateDashboard for application/json ContentType.
 type CreateDashboardJSONRequestBody = DashboardCreateRequest

@@ -101,11 +101,15 @@ const (
 	// 的转义形态（内嵌双引号必须转义）。
 	dashLayout       = `{"version":1,"widgets":[]}`
 	dashLayoutJSON   = `{\"version\":1,\"widgets\":[]}`
-	dashFoundJSON    = `{"id":"` + dashID + `","name":"月度经营总览","description":null,"layout_json":"` + dashLayoutJSON + `","status":"draft","created_at":"","updated_at":""}`
+	dashFoundJSON    = `{"id":"` + dashID + `","name":"月度经营总览","description":null,"layout_json":"` + dashLayoutJSON + `","status":"draft","folder_id":null,"created_at":"","updated_at":""}`
 	dashNotFound     = `{"code":20300,"msg":"dashboard not found","trace":"","data":{}}`
 	dashBadLayout    = `{"code":20100,"msg":"layout_json 必须是合法 JSON","trace":"","data":{}}`
 	refEmptyEnvelope = `{"code":20000,"msg":"success","trace":"","data":{"count":0,"dashboards":[]}}`
 )
+
+// strPtr 只服务下面的 folder_id 三态表：cases 里要放 *string 的字面量，
+// Go 没有 `&""` 这种写法。
+func strPtr(s string) *string { return &s }
 
 // ---------------------------------------------------------------- List
 
@@ -318,7 +322,7 @@ func TestDashboardUpdate_UnprovidedFieldsStayNil(t *testing.T) {
 		},
 	})
 	w := serve(newDashboardTestRouter(h), http.MethodPut, "/api/dashboards/"+dashID, `{"name":"改名后的盘"}`)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":"`+dashID+`","name":"改名后的盘","description":null,"layout_json":"`+dashLayoutJSON+`","status":"draft","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":"`+dashID+`","name":"改名后的盘","description":null,"layout_json":"`+dashLayoutJSON+`","status":"draft","folder_id":null,"created_at":"","updated_at":""}}`)
 
 	if gotID != dashID {
 		t.Errorf("path id 未透传: %q", gotID)
@@ -326,8 +330,54 @@ func TestDashboardUpdate_UnprovidedFieldsStayNil(t *testing.T) {
 	if got.Name == nil || *got.Name != "改名后的盘" {
 		t.Fatalf("name 未透传: %+v", got.Name)
 	}
-	if got.Description != nil || got.LayoutJSON != nil || got.Status != nil {
+	if got.Description != nil || got.LayoutJSON != nil || got.Status != nil || got.FolderID != nil {
 		t.Errorf("未提供的字段必须是 nil（保留存量），实际 %+v", got)
+	}
+}
+
+// TestDashboardUpdate_FolderIDSentinels 钉住归档移动的三态在 wire 上的形态：
+// `""` 与 UUID 都必须原样透传给 service（前者是「移出文件夹」的唯一表达，
+// handler 绝不能把它当成「未提供」而丢掉，否则拖到根级会静默失效）。
+func TestDashboardUpdate_FolderIDSentinels(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want *string
+	}{{
+		name: "空串 = 移出文件夹",
+		body: `{"folder_id":""}`,
+		want: strPtr(""),
+	}, {
+		name: "UUID = 归档到该文件夹",
+		body: `{"folder_id":"` + dashID + `"}`,
+		want: strPtr(dashID),
+	}, {
+		name: "null = 保留存量（与缺省同义）",
+		body: `{"folder_id":null}`,
+		want: nil,
+	}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got entity.DashboardUpdateRequest
+			h := NewDashboardHandler(&mockDashboardService{
+				updateFunc: func(_ context.Context, id string, in entity.DashboardUpdateRequest) (*entity.Dashboard, error) {
+					got = in
+					return &entity.Dashboard{ID: id}, nil
+				},
+			})
+			w := serve(newDashboardTestRouter(h), http.MethodPut, "/api/dashboards/"+dashID, tc.body)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected HTTP 200, got %d (body: %s)", w.Code, w.Body.String())
+			}
+			switch {
+			case tc.want == nil && got.FolderID != nil:
+				t.Errorf("null 必须解成 nil, 实际 %q", *got.FolderID)
+			case tc.want != nil && got.FolderID == nil:
+				t.Errorf("folder_id 被丢成了 nil（会被 service 当成保留存量）")
+			case tc.want != nil && *got.FolderID != *tc.want:
+				t.Errorf("folder_id 未原样透传: got %q want %q", *got.FolderID, *tc.want)
+			}
+		})
 	}
 }
 

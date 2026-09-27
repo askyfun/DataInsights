@@ -3,6 +3,7 @@
 //
 // 职责边界：bi_dashboard 这一张表的 CRUD、 「谁引用了某张图表」的反查，以及
 // POST /api/dashboards/{id}/query 的批量取数（query.go；筛选合并算法见那里）。
+// 归档夹 bi_dashboard_folder 的 CRUD 与树守卫在同包的 folder.go。
 // layout_json 的权威解析仍归前端 migrateDashboardLayout，后端只做防御性投影读取。
 //
 // 两条与 PRD 一致的生命周期语义：
@@ -132,12 +133,17 @@ func (s *dashboardService) Create(ctx context.Context, in entity.DashboardCreate
 		return nil, fmt.Errorf("failed to generate dashboard id: %w", err)
 	}
 	now := s.now()
+	folderID, err := nullableFolderID(in.FolderID)
+	if err != nil {
+		return nil, err
+	}
 	m := &model.Dashboard{
 		ID:          id.String(),
 		Name:        in.Name,
 		Description: nullableDescription(in.Description),
 		LayoutJSON:  defaultLayoutJSON(in.LayoutJSON),
 		Status:      defaultStatus(in.Status),
+		FolderID:    folderID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -172,6 +178,15 @@ func (s *dashboardService) Update(ctx context.Context, id string, in entity.Dash
 	}
 	if in.Status != nil {
 		m.Status = *in.Status
+	}
+	if in.FolderID != nil {
+		// 三态里的另外两态在这里落地：nil 已在上面跳过（保留存量），非 nil 时
+		// 空串 = 移出文件夹，UUID = 归档到该文件夹。
+		folderID, err := nullableFolderID(*in.FolderID)
+		if err != nil {
+			return nil, err
+		}
+		m.FolderID = folderID
 	}
 	m.UpdatedAt = s.now()
 
@@ -283,6 +298,25 @@ func nullableDescription(value *string) sql.NullString {
 	return sql.NullString{String: *value, Valid: true}
 }
 
+// nullableFolderID is the shared ""→NULL sentinel for the folder assignment:
+// both the create path and the update path's "move out of any folder" arrive as
+// an empty string, and only a well-formed UUID is stored.
+//
+// ⚠️ 刻意**不校验文件夹是否存在**：bi_dashboard.folder_id 无外键（与 00005 不建
+// bi_chart FK 同理，软删语义下外键会拒绝合法历史态），而存在性检查会让每一次
+// dashboard Create/Update 都多出一条 SQL。悬空 id 的实际后果是「前端把该行归到
+// 未归档桶」，不报错、不崩页，第一期接受这个退化（与 folder 侧的 parent_id 同口径）。
+// 形态非法（非 UUID）仍然当场 20100，因为那会直接变成 PostgreSQL 的 uuid 转换 500。
+func nullableFolderID(raw string) (sql.NullString, error) {
+	if raw == "" {
+		return sql.NullString{}, nil
+	}
+	if _, err := uuid.Parse(raw); err != nil {
+		return sql.NullString{}, router.NewBusinessError(response.CodeBadRequest, "folder_id 必须是合法的 UUID")
+	}
+	return sql.NullString{String: raw, Valid: true}, nil
+}
+
 // Conversion functions
 
 func toDashboardEntity(m *model.Dashboard) *entity.Dashboard {
@@ -296,6 +330,9 @@ func toDashboardEntity(m *model.Dashboard) *entity.Dashboard {
 	}
 	if m.Description.Valid {
 		e.Description = &m.Description.String
+	}
+	if m.FolderID.Valid {
+		e.FolderID = &m.FolderID.String
 	}
 	return e
 }

@@ -564,6 +564,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/dashboard-folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 仪表盘文件夹列表（扁平，前端按 parent_id 组树）
+         * @description 返回全部未软删文件夹（`deleted_at IS NULL`），按 `created_at ASC, id ASC` 排序
+         *     （建树先序稳定）。**不做服务端组树**：树由前端用 parent_id 折叠，后端只回扁平数组。
+         *
+         *     根级以 `parent_id = null` 表达。无结果时 data 为空数组。
+         *     第一期不分页（归档量级小），也不支持按 parent_id 过滤。
+         */
+        get: operations["listDashboardFolders"];
+        put?: never;
+        /**
+         * 新建仪表盘文件夹
+         * @description id 由后端生成 UUIDv7。parent_id 缺省 / null 表示根级；传 `""`（空串）同样表示
+         *     **根级**——这是 PUT 侧「移动回根」哨兵（见 updateDashboardFolder）在本端点的镜像，
+         *     创建时两者等价，都是「无父级」。
+         *
+         *     parent_id 指向的文件夹必须存在且未软删，否则 20300。name 为空 → 20100。
+         */
+        post: operations["createDashboardFolder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dashboard-folders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取仪表盘文件夹详情
+         * @description id 非法（非 UUID）→ 20100；不存在或已软删 → 20300。
+         */
+        get: operations["getDashboardFolder"];
+        /**
+         * 更新文件夹（改名 / 移动；未提供的字段保留存量）
+         * @description 两个字段**全部可选且遵循「未提供则保留」**（与本仓库 dashboard / datasource 同例）：
+         *     - `name`：缺省或 null 保留存量；空串 → 20100。
+         *     - `parent_id`：**三态**。
+         *       - 缺省或 `null` = 保留现有父级（只改名时前端就发这一形态）。
+         *       - `""`（空串）= **移到根级**（清空父级）。这是 JSON 无法区分「缺省」与「null」
+         *         时的显式哨兵，是本仓库唯一的字符串哨兵，前后端都按此口径实现。
+         *       - UUID = 移到该文件夹下。
+         *
+         *     守卫（都返回业务错误，不落库）：
+         *     - 目标父级不存在或已软删 → 20300。
+         *     - 把文件夹移动到自己或自己的**任意后代**下（环）→ 20400。
+         */
+        put: operations["updateDashboardFolder"];
+        post?: never;
+        /**
+         * 删除仪表盘文件夹（软删，仅空夹可删）
+         * @description 软删：只打 `deleted_at = now()`，幂等（重复删除影响 0 行不报错）。
+         *
+         *     **第一期采用「仅空夹可删」策略**：文件夹下仍有未软删的**子文件夹**或**仪表盘**
+         *     时返回 20400 业务错误（消息指出还有几项），绝不级联删子夹、也绝不把子项孤儿化。
+         *     理由：删除是不可逆的用户动作，级联删仪表盘会连带销毁整份 layout_json 文档；
+         *     而「移动子项」第一期没有批量端点。前端据此在删除前先提示用户清空。
+         */
+        delete: operations["deleteDashboardFolder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/shares": {
         parameters: {
             query?: never;
@@ -1224,10 +1299,10 @@ export interface components {
                 [key: string]: number;
             };
         };
-        /** @description 直方图响应（query.HistogramResponse，Task 3-1a 实现，R-57；2026-09-26 增加分组）。chart_type=histogram 时 ChartDataResult.data 的形状：两阶段分箱查询（阶段1 MIN/MAX/COUNT → 阶段2 FLOOR((field-min)/bin_width) 分组计数）产出。bins 为补全后的完整 连续分箱序列（无行的 bin 以 count=0 占位），sum(bins[].count) == 参与分箱的 数值行数；空数据集返回 bins=[]。被分箱字段为 metrics[0].field（对该列的 原始数值分箱计数，不做 SUM/AVG 聚合）；bin_count（默认 20）/bin_width 经请求的 query_options 传入。请求携带维度（v1 dims）时额外返回 groups：每个维度值组合一个系列，各系列 bins 与顶层 bins 同长度同边界，顶层 bins 为跨系列总计数。 */
+        /** @description 直方图响应（query.HistogramResponse，Task 3-1a 实现，R-57；2026-09-26 增加分组）。 chart_type=histogram 时 ChartDataResult.data 的形状：两阶段分箱查询（阶段1 MIN/MAX/COUNT → 阶段2 FLOOR((field-min)/bin_width) 分组计数）产出。bins 为 补全后的完整连续分箱序列（无行的 bin 以 count=0 占位），sum(bins[].count) == 参与分箱的数值行数；空数据集返回 bins=[]。被分箱字段为 metrics[0].field （对该列的原始数值分箱计数，不做 SUM/AVG 聚合）；bin_count（默认 20）/ bin_width 经请求的 query_options 传入。请求携带维度（v1 dims）时额外返回 groups：每个维度值组合一个系列，各系列 bins 与顶层 bins 同长度同边界， 顶层 bins 为跨系列总计数（sum(groups[].bins[].count) == bins[].count）。 */
         ChartHistogramResponse: {
             bins: components["schemas"]["ChartHistogramBin"][];
-            /** @description 分组直方图系列（query.HistogramGroup）。仅在请求携带维度时出现；name 为维度值组合（多维度用 " - " 连接，NULL 渲染为空串），按首次出现排序。 */
+            /** @description 分组直方图系列（query.HistogramGroup）。仅在请求携带维度时出现； name 为维度值组合（多维度用 " - " 连接，NULL 渲染为空串），按首次出现排序。 */
             groups?: components["schemas"]["ChartHistogramGroup"][];
         };
         /** @description 分组直方图的单个系列（query.HistogramGroup）：Name 为维度值组合， Bins 与顶层 bins 同长度同边界、只含该系列的计数。 */
@@ -1506,7 +1581,7 @@ export interface components {
         QueryRecordResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["QueryRecord"];
         };
-        /** @description 仪表盘响应实体（entity.Dashboard）。layout_json 是布局文档（DashboardLayout） 的字符串形态：列是 JSONB，API 面是 string，与 Chart.config 同款约定。 owner_id / tenant_id 是对内列，不在读出口。已软删的行不会出现在任何读出口。 */
+        /** @description 仪表盘响应实体（entity.Dashboard）。layout_json 是布局文档（DashboardLayout） 的字符串形态：列是 JSONB，API 面是 string，与 Chart.config 同款约定。 owner_id / tenant_id 是对内列，不在读出口。已软删的行不会出现在任何读出口。 folder_id 是归档文件夹（第一期仅仪表盘），未归档为 null。 */
         Dashboard: {
             /**
              * @description UUIDv7 字符串（非自增；PRD §6.5 一次性不可逆决策），由后端生成。
@@ -1516,6 +1591,8 @@ export interface components {
             name: string;
             /** @description 无描述时为 null（空串与 null 落库后不可区分，都记为 NULL）。 */
             description: string | null;
+            /** @description 所属文件夹 id；未归档（根级）为 null。指向**已软删**文件夹时后端仍原样回显 该 id（不做级联清洗），前端把这种行归到「未归档」桶里展示。 */
+            folder_id: string | null;
             /**
              * @description 布局文档的 JSON 字符串（结构见 DashboardLayout）。缺省 {"version":1,"widgets":[]}，后端不解释其内容。
              *     ⚠️ 列是 jsonb，PostgreSQL 会规范化键序与空白：写接口（POST/PUT）把请求 里的原文回显给你，读接口（GET/list）返回的是库里的规范形态。两者 JSON 语义等价（前端按 DashboardLayout 解析即可），但**不要按字节比对**。
@@ -1537,8 +1614,10 @@ export interface components {
             layout_json?: string;
             /** @description 缺省 draft。 */
             status?: string;
+            /** @description 新建时直接归档到该文件夹；缺省/null/空串都是「未归档」。指向不存在或已软删 的文件夹 → 20300。 */
+            folder_id?: string | null;
         };
-        /** @description PUT /api/dashboards/{id} 请求体（entity.DashboardUpdateRequest）。四个字段 **全部可选且都是「未提供则保留」**：缺省或 null 保持存量值（不是全量覆盖）， 与本仓库 datasource 密码、dataset 可选元数据同例。description 传空串表示 清空为 NULL。 */
+        /** @description PUT /api/dashboards/{id} 请求体（entity.DashboardUpdateRequest）。五个字段 **全部可选且都是「未提供则保留」**：缺省或 null 保持存量值（不是全量覆盖）， 与本仓库 datasource 密码、dataset 可选元数据同例。description 传空串表示 清空为 NULL。 */
         DashboardUpdateRequest: {
             name?: string;
             /** @description 缺省/null 保留存量；空串清空为 NULL；非空写入。 */
@@ -1547,6 +1626,8 @@ export interface components {
             layout_json?: string;
             /** @description 缺省/null 保留存量。 */
             status?: string;
+            /** @description **三态**（归档移动）：缺省或 null = 保留现有归档位置；`""`（空串）= **移出文件夹到未归档**（与文件夹 PUT 的 parent_id 同一哨兵口径）； UUID = 归档到该文件夹。目标不存在或已软删 → 20300。 */
+            folder_id?: string | null;
         };
         /** @description layout_json 的解析后形态（PRD §6.2）。前端用 migrateDashboardLayout 做迁移： 任何输入（空串 / 损坏 JSON / 非对象）都返回合法 v1 文档，绝不抛异常；version 未知时按 v1 尽力解析。后端不做解析。 */
         DashboardLayout: {
@@ -1668,6 +1749,42 @@ export interface components {
             /** @description 引用方身份（id + name）；无引用时为空数组。 */
             dashboards: components["schemas"]["ChartReferenceItem"][];
         };
+        /** @description 仪表盘文件夹响应实体（entity.DashboardFolder）。树由前端按 parent_id 组装， 后端不落派生路径。已软删的行不会出现在任何读出口。 */
+        DashboardFolder: {
+            /**
+             * @description UUIDv7 字符串（与仪表盘同款不可枚举主键），由后端生成。
+             * @example 0198f2c3-4d5e-7a6b-8c9d-0e1f2a3b4c5d
+             */
+            id: string;
+            name: string;
+            /** @description 父文件夹 id；根级为 null。 */
+            parent_id: string | null;
+            /** @description RFC3339。 */
+            created_at: string;
+            /** @description RFC3339；由后端在每次更新时显式前进（表无触发器）。 */
+            updated_at: string;
+        };
+        /** @description POST /api/dashboard-folders 请求体（entity.DashboardFolderCreateRequest）。 不含 id：主键由后端生成 UUIDv7。 */
+        DashboardFolderCreateRequest: {
+            name: string;
+            /** @description 父文件夹 id；缺省/null/空串都是根级（空串在此与 null 等价——根级本来就是 「无父级」，不需要哨兵）。目标不存在或已软删 → 20300。 */
+            parent_id?: string | null;
+        };
+        /** @description PUT /api/dashboard-folders/{id} 请求体（entity.DashboardFolderUpdateRequest）。 两个字段全部可选，遵循「未提供则保留」。 */
+        DashboardFolderUpdateRequest: {
+            /** @description 缺省/null 保留存量；空串 → 20100（夹名不可为空）。 */
+            name?: string;
+            /** @description **三态**：缺省或 null = 保留现有父级（只改名）；`""`（空串）= **移到根级** （清空父级的显式哨兵）；UUID = 移到该文件夹下。目标不存在/已软删 → 20300； 移动到自己或任意后代（成环）→ 20400。 */
+            parent_id?: string | null;
+        };
+        /** @description GET /api/dashboard-folders 响应：data 为 DashboardFolder 数组（扁平）。 */
+        DashboardFolderListResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["DashboardFolder"][];
+        };
+        /** @description 仪表盘文件夹 CRUD 响应：data 为单个 DashboardFolder。 */
+        DashboardFolderResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["DashboardFolder"];
+        };
         /** @description 引用方仪表盘的最小身份（删除提示只需要这两项）。 */
         ChartReferenceItem: {
             /** @description 仪表盘 UUID。 */
@@ -1683,6 +1800,8 @@ export interface components {
     parameters: {
         /** @description 仪表盘 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
         DashboardId: string;
+        /** @description 仪表盘文件夹 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+        DashboardFolderId: string;
         /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
         DatasourceId: number;
         /** @description 数据集 ID（gin 通配符 :id；非法数字返回 20100）。 */
@@ -2566,6 +2685,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardQueryResponse"];
+                };
+            };
+        };
+    };
+    listDashboardFolders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardFolderListResponse"];
+                };
+            };
+        };
+    };
+    createDashboardFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardFolderCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardFolderResponse"];
+                };
+            };
+        };
+    };
+    getDashboardFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 仪表盘文件夹 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+                id: components["parameters"]["DashboardFolderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardFolderResponse"];
+                };
+            };
+        };
+    };
+    updateDashboardFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 仪表盘文件夹 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+                id: components["parameters"]["DashboardFolderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardFolderUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardFolderResponse"];
+                };
+            };
+        };
+    };
+    deleteDashboardFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 仪表盘文件夹 id（gin 通配符 :id）：UUID 字符串形态（后端生成 UUIDv7，非自增）。 非 UUID → 20100；格式合法但不存在/已软删 → 20300。 */
+                id: components["parameters"]["DashboardFolderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；成功 data 为 {status: "ok"} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
         };

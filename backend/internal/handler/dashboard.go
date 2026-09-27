@@ -108,6 +108,7 @@ type dashboardCreateIn struct {
 	Description *string `json:"description" form:"-"`
 	LayoutJSON  string  `json:"layout_json" form:"-"`
 	Status      string  `json:"status" form:"-"`
+	FolderID    string  `json:"folder_id" form:"-"`
 }
 
 // Create handles POST /api/dashboards. The id is server-generated and the
@@ -120,6 +121,7 @@ func (h *DashboardHandler) Create(req router.Request[dashboardCreateIn], res *ro
 		Description: in.Description,
 		LayoutJSON:  in.LayoutJSON,
 		Status:      in.Status,
+		FolderID:    in.FolderID,
 	})
 	if err != nil {
 		return err
@@ -137,6 +139,7 @@ type dashboardUpdateIn struct {
 	Description *string `json:"description" form:"-"`
 	LayoutJSON  *string `json:"layout_json" form:"-"`
 	Status      *string `json:"status" form:"-"`
+	FolderID    *string `json:"folder_id" form:"-"`
 }
 
 // Update handles PUT /api/dashboards/:id
@@ -153,6 +156,7 @@ func (h *DashboardHandler) Update(req router.Request[dashboardUpdateIn], res *ro
 		Description: in.Description,
 		LayoutJSON:  in.LayoutJSON,
 		Status:      in.Status,
+		FolderID:    in.FolderID,
 	})
 	if err != nil {
 		return err
