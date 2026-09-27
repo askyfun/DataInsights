@@ -1,6 +1,6 @@
 # 图表构建器设计与现状
 
-> 最后更新：2026-09-26
+> 最后更新：2026-09-27
 
 > 本文原为 2026-05 的《Chart Builder 增强实现计划》，其中绝大多数内容已落地。
 > 现改写为"设计 + 现状"文档：以下描述以仓库当前代码为准（以 `backend/internal/query/`、
@@ -153,7 +153,22 @@ interface FilterConfig {
 | histogram | 两阶段分箱 + HistogramProcessor | bins 补全（空 bin 以 0 占位） |
 | boxplot / radar | 对应 processor | 受数据源方言能力门控 |
 
-## 六、饼图"其他"合并：能力保留但未接线
+## 六、同环比（issue #129）：窗口平移基线 + Go 端按键对齐
+
+`query/comparison.go`：请求 `query_options.comparison = {type: mom|yoy, field?: 列ID}`
+（扩展袋，与 histogram 的 bin_count 同一条链路，不进 QuerySpec/AST/planner）时，
+executor 在当期查询之后**再发一条基线查询**：同一 AST，仅把对比日期列上的边界条件
+整组替换为平移后的 `BETWEEN`（mom = 窗口天数 +1，yoy = 一个日历年；单侧缺失的窗口
+用本次结果的日期轴补齐），然后按「基线桶 + Δ → 当前桶」**按键**对齐，为
+bar/line/area 追加 `(上期)`/`(增长率%)` 两条系列、为 table 追加同名两列。
+
+- 为什么不用窗口函数/LAG：免方言差异（四库同一条 SQL 路径）、免改 SELECT 出口
+  `renderMetricSelect`；代价是多一次查询，换来的是**缺数桶得 null 而不是借用邻行**。
+- 增长率 =（当前 − 上期）/ |上期| × 100，上期缺失或为 0 → null（不猜）。
+- 门控：仅 bar/line/area/table、恰好一个维度；配了但不满足 → 显式报错，不静默降级
+  （前端卡片同口径门控，并在恢复的文档失效时于源头清掉配置）。
+
+## 七、饼图"其他"合并：能力保留但未接线
 
 `query.PieProcessor` 具备按比例阈值把小占比类目并入"其他"的能力（`MergeOtherBelowRatio`，`Process` 内消费，单测
 `TestPieProcessor_WithMergeOtherBelowRatio` 覆盖）。但图表查询的**线协议已不再携带**该阈值——
@@ -161,7 +176,7 @@ interface FilterConfig {
 `NewPieProcessor()` 在查询路径上以默认 `MergeOtherBelowRatio: 0`（即不合并）构造。该能力保留但未接线，
 重新接线需要恢复请求侧的阈值字段。
 
-## 七、各图表类型落地要点
+## 八、各图表类型落地要点
 
 - **table**：`COUNT(*)` 取总数，`LIMIT/OFFSET` 经参数化下推；前端 Ant Design Table + 分页器。
 - **pie**：聚合后按首维度分组算百分比；长尾合并见第六节（未接线）。
@@ -170,7 +185,7 @@ interface FilterConfig {
 - **pivot**：GROUPING SETS 行列转换（缺失回退 UNION ALL）。
 - **histogram**：两阶段分箱（MIN/MAX/COUNT → 分箱计数），`query_options.bin_count` / `bin_width` 经 v1 请求传入并生效。
 
-## 八、配置项
+## 九、配置项
 
 ### 8.1 Pie 图表配置
 
