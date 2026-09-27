@@ -322,7 +322,8 @@ func FuzzZZFilterOpToString(f *testing.F) {
 func zzKnownOp(op FilterOperator) bool {
 	switch op {
 	case FilterEq, FilterNeq, FilterGt, FilterGte, FilterLt, FilterLte,
-		FilterLike, FilterIn, FilterNotIn, FilterBetween, FilterIsNull, FilterIsNotNull:
+		FilterLike, FilterIn, FilterNotIn, FilterBetween, FilterIsNull, FilterIsNotNull,
+		FilterStartsWith, FilterEndsWith, FilterIsEmptyString, FilterIsNotEmptyString:
 		return true
 	}
 	return false

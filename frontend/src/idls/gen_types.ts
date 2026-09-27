@@ -1436,7 +1436,7 @@ export interface components {
         /** @description 查询层过滤条件（query.FilterConfig）：JSON 键是 op，与旧协议 entity.Filter 的 operator 不同；Batch 3 chart_spec 协议统一采用本形状。 */
         FilterConfig: {
             field: string;
-            /** @description eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull； 未知值后端按 "=" 回退（FilterOperator.ToString default）。 */
+            /** @description eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull / startsWith / endsWith / isEmptyString / isNotEmptyString； 未知算子后端 fail-closed 渲染恒假谓词（1 = 0），不静默退化为等值。 */
             op: string;
             value: unknown;
             value_end?: unknown;

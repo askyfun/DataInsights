@@ -7,6 +7,7 @@ package query
 // 与 IN/NotIn 值缺失时的 fail-closed 同构；同时保留 builder 层的畸形 IN 兜底与 between 对照。
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -117,6 +118,45 @@ func TestZZMalformedInFilterFailsClosed(t *testing.T) {
 		}
 		if len(args) != 1 {
 			t.Errorf("[共存] op=%s args=%d，期望仅 1（恒假片段不消费值参数）", op, len(args))
+		}
+	}
+}
+
+// TestZZStringConditionOperators 字符串条件算子（开头为/结尾为/空串判定）的
+// SQL 形态与参数：前缀/后缀用 substr 比较（不经 LIKE，值里的 %/_ 不会被当通配符），
+// endsWith 的起点以负数参数表达；空串判定恒携带一个空串参数。
+func TestZZStringConditionOperators(t *testing.T) {
+	cases := []struct {
+		op      FilterOperator
+		value   any
+		contain string
+		wantArg []any
+	}{
+		{FilterStartsWith, "ab", "substr(c, 1, ?) = ?", []any{2, "ab"}},
+		{FilterEndsWith, "ab", "substr(c, ?) = ?", []any{-2, "ab"}},
+		{FilterIsEmptyString, nil, "c = ?", []any{""}},
+		{FilterIsNotEmptyString, nil, "c IS NOT NULL AND c <> ?", []any{""}},
+	}
+	for _, c := range cases {
+		ast := &QueryAST{
+			Source:     "t",
+			SourceType: SourceTypeTable,
+			Filters: []FilterExpr{
+				{Field: "c", FieldExpr: "c", Op: c.op, Value: c.value, Logic: "AND"},
+			},
+		}
+		sql, _, args := BuildQueryStringWithBun(DialectPostgreSQL, ast)
+		if !strings.Contains(sql, c.contain) {
+			t.Errorf("op=%s 未渲染 %q：%s", c.op, c.contain, sql)
+		}
+		if len(args) != len(c.wantArg) {
+			t.Errorf("op=%s args=%v，期望 %v", c.op, args, c.wantArg)
+			continue
+		}
+		for i := range args {
+			if fmt.Sprint(args[i]) != fmt.Sprint(c.wantArg[i]) {
+				t.Errorf("op=%s args[%d]=%v，期望 %v", c.op, i, args[i], c.wantArg[i])
+			}
 		}
 	}
 }

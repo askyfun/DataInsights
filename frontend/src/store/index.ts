@@ -244,7 +244,11 @@ export type FilterOperator =
   | 'notIn'
   | 'between'
   | 'isNull'
-  | 'isNotNull';
+  | 'isNotNull'
+  | 'startsWith'
+  | 'endsWith'
+  | 'isEmptyString'
+  | 'isNotEmptyString';
 
 // 过滤条件
 export interface FilterCondition {
