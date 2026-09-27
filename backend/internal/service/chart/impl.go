@@ -582,6 +582,8 @@ func normalizePersistedQueryOptions(opts map[string]any) map[string]any {
 			k = "bin_count"
 		case "binWidth":
 			k = "bin_width"
+		case "topN":
+			k = "top_n"
 		case "showTotal":
 			k = "show_total"
 		}
