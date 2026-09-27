@@ -379,6 +379,8 @@ type chartConfigV1 struct {
 	FieldMeta map[string]struct {
 		Aggregation string `json:"aggregation"`
 		Alias       string `json:"alias"`
+		// Format 指标「格式」串：以 `%` 结尾即占比列，需要全集合计做分母（issue #132）。
+		Format string `json:"format"`
 	} `json:"fieldMeta"`
 	// QueryOptions 顶层透传小节（frontend chartConfigSchema.ts 的 queryOptions）：
 	// histogram 持久化的 bin_count/bin_width 存这里（R-57 持久化 round-trip）。
@@ -415,6 +417,8 @@ type chartConfigV2 struct {
 	FieldMeta map[string]struct {
 		Aggregation string `json:"aggregation"`
 		Alias       string `json:"alias"`
+		// Format 指标「格式」串：以 `%` 结尾即占比列，需要全集合计做分母（issue #132）。
+		Format string `json:"format"`
 	} `json:"fieldMeta"`
 	// QueryOptions 顶层透传小节（与 v1 同款，v2 文档"queryOptions 小节形状不变"，
 	// 见 frontend chartConfigSchema.ts）：histogram 的 bin_count/bin_width 持久化处。
@@ -470,6 +474,7 @@ func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bo
 		dims = append(dims, group.Fields...)
 	}
 	var metrics []entity.MetricConfig
+	var metricFormats []string
 	for _, group := range doc.Query.MetricGroups {
 		for _, name := range group.Fields {
 			meta := doc.FieldMeta[name]
@@ -482,6 +487,7 @@ func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bo
 				alias = name
 			}
 			metrics = append(metrics, entity.MetricConfig{Field: name, Agg: agg, Alias: alias})
+			metricFormats = append(metricFormats, meta.Format)
 		}
 	}
 	if len(dims) == 0 && len(metrics) == 0 {
@@ -490,6 +496,7 @@ func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bo
 
 	req := buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, doc.Query.Sort, doc.Query.Limit)
 	req.QueryOptions = normalizePersistedQueryOptions(doc.QueryOptions)
+	ensureTotalForPercentFormats(req, metricFormats)
 	return req, true
 }
 
@@ -512,6 +519,7 @@ func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, 
 		}
 	}
 	var metrics []entity.MetricConfig
+	var metricFormats []string
 	for _, group := range doc.Query.MetricGroups {
 		for _, b := range group.Bindings {
 			meta := doc.FieldMeta[b.BindingID]
@@ -524,6 +532,7 @@ func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, 
 				alias = b.Field
 			}
 			metrics = append(metrics, entity.MetricConfig{Field: b.Field, Agg: agg, Alias: alias})
+			metricFormats = append(metricFormats, meta.Format)
 		}
 	}
 	if len(dims) == 0 && len(metrics) == 0 {
@@ -532,7 +541,27 @@ func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, 
 
 	req := buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, resolveV2DocSort(doc.Query.Sort, &doc), doc.Query.Limit)
 	req.QueryOptions = normalizePersistedQueryOptions(doc.QueryOptions)
+	ensureTotalForPercentFormats(req, metricFormats)
 	return req, true
+}
+
+// ensureTotalForPercentFormats 让「占比列」在分享页/仪表盘也能拿到分母（issue #132）。
+//
+// 占比不是后端协议：它复用 #131 的 show_total —— 分母就是同一份过滤后全集合计。
+// builder 侧在构造请求时已经这么做了（composeChartQueryRequest），但读持久化 config
+// 的这条路径没有那个判断：用户只配了 `%` 格式、没打开合计行开关时，响应里没有 total，
+// 占比列只能留空。这里按 fieldMeta 里的格式串补上开关，两条路径口径才一致。
+func ensureTotalForPercentFormats(req *entity.ChartQueryRequest, formats []string) {
+	for _, format := range formats {
+		if !strings.HasSuffix(strings.TrimSpace(format), "%") {
+			continue
+		}
+		if req.QueryOptions == nil {
+			req.QueryOptions = map[string]any{}
+		}
+		req.QueryOptions["show_total"] = true
+		return
+	}
 }
 
 // normalizePersistedQueryOptions 把持久化 config 文档 queryOptions 小节的键归一为

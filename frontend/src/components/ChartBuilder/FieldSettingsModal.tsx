@@ -1,5 +1,6 @@
-import { Input, Modal, Space } from 'antd';
+import { Input, Modal, Space, Switch } from 'antd';
 import React, { useEffect, useState } from 'react';
+import { applyPercentFormat, splitPercentFormat } from '@/lib/format';
 import type { ChartField } from '@/store';
 
 export interface FieldSettingsValue {
@@ -7,7 +8,7 @@ export interface FieldSettingsValue {
   alias: string;
   /** 单位（仅指标）：如 元 / %，展示为「列名 (单位)」。 */
   unit: string;
-  /** 格式（仅指标）：如 0,0.00 → 千分位 + 两位小数。 */
+  /** 格式（仅指标）：如 0,0.00 → 千分位 + 两位小数；以 `%` 结尾表示按占比显示。 */
   format: string;
 }
 
@@ -36,6 +37,8 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
 }) => {
   const [alias, setAlias] = useState('');
   const [unit, setUnit] = useState('');
+  const [percentOfTotal, setPercentOfTotal] = useState(false);
+  // 「格式」输入框承载不含 `%` 的部分；占比开关只负责最后补/剥那个后缀。
   const [format, setFormat] = useState('');
 
   // 依赖必须拆成原始值：调用方每次都传内联对象字面量，直接依赖 initial
@@ -44,9 +47,11 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
   const { alias: initialAlias, unit: initialUnit, format: initialFormat } = initial;
   useEffect(() => {
     if (!open) return;
+    const parsed = splitPercentFormat(initialFormat ?? '');
     setAlias(initialAlias ?? '');
     setUnit(initialUnit ?? '');
-    setFormat(initialFormat ?? '');
+    setFormat(parsed.base);
+    setPercentOfTotal(parsed.percent);
   }, [open, initialAlias, initialUnit, initialFormat]);
 
   const isMetric = kind === 'metric';
@@ -57,7 +62,13 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
       title={field ? `字段属性 · ${field.name}` : '字段属性'}
       okText="确定"
       cancelText="取消"
-      onOk={() => onOk({ alias: alias.trim(), unit: unit.trim(), format: format.trim() })}
+      onOk={() =>
+        onOk({
+          alias: alias.trim(),
+          unit: unit.trim(),
+          format: applyPercentFormat(format, percentOfTotal),
+        })
+      }
       onCancel={onCancel}
       width={420}
       destroyOnHidden
@@ -97,6 +108,21 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
                 onChange={(e) => setFormat(e.target.value)}
                 data-testid="field-settings-format"
               />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--dr-text-2)', marginBottom: 4 }}>
+                显示占比
+              </div>
+              <Switch
+                checked={percentOfTotal}
+                onChange={(checked) => setPercentOfTotal(checked)}
+                data-testid="field-settings-percent"
+              />
+              {/* 占比不是格式串能自解释的东西：分母来自后端的完整数据集合计，
+                  拿不到分母（图型不支持、或该表无维度）时这一列会留空。 */}
+              <div style={{ fontSize: 12, color: 'var(--dr-text-3)', marginTop: 4 }}>
+                按占全集比例显示（分母 = 过滤后全部数据的合计，不是当前页相加）；目前仅表格支持。
+              </div>
             </div>
           </>
         )}

@@ -41,6 +41,7 @@ const compose = (filters: FilterCondition[]) =>
     fields: FIELDS,
     metricAggregations: {},
     metricAliases: {},
+    metricFormats: {},
     tablePagination: { page: 1, pageSize: 20 },
     queryOptions: {},
     includeSort: true,

@@ -272,3 +272,66 @@ describe('TableChart 合计行', () => {
     expect(summaryCells(container)).toEqual(['合计', '58']);
   });
 });
+
+/**
+ * 指标占比列（issue #132）：格式串带 `%` 后缀的列按 value/全集合计 显示。
+ *
+ * 红线是分母必须来自后端重算的完整数据集合计（grandTotal）。服务端分页下拿当前页
+ * 明细相加当分母，同一行在第 1 页和第 2 页会显示不同占比 —— 所以拿不到分母时
+ * 宁可留空，也不能"看起来算出来了"。
+ */
+describe('TableChart 占比列', () => {
+  const percentRows = [
+    { region: 'East', share: 30 },
+    { region: 'West', share: 10 },
+  ];
+
+  const renderPercent = (props: Partial<React.ComponentProps<typeof TableChart>> = {}) =>
+    render(
+      <TableChart
+        data={percentRows}
+        columns={['region', 'share']}
+        loading={false}
+        dimensionNames={['region']}
+        metricNames={['share']}
+        metricFormats={{ share: '0,0.00%' }}
+        metricPercentOfTotal={['share']}
+        grandTotal={{ share: 120 }}
+        {...props}
+      />
+    );
+
+  const columnValues = (container: HTMLElement, columnIndex: number) =>
+    Array.from(container.querySelectorAll(`.ant-table-row td:nth-child(${columnIndex})`)).map(
+      (td) => td.textContent ?? ''
+    );
+
+  it('占比列显示 value/全集合计，`%` 作为后缀拼在格式化结果之后', () => {
+    const { container } = renderPercent();
+    expect(columnValues(container, 2)).toEqual(['25.00%', '8.33%']);
+  });
+
+  it('未配占比的指标列仍按原格式显示（不受分母影响）', () => {
+    const { container } = renderPercent({ metricPercentOfTotal: [] });
+    expect(columnValues(container, 2)).toEqual(['30.00', '10.00']);
+  });
+
+  it('拿不到全集合计时占比列留空，不回落到本页合计', () => {
+    const { container } = renderPercent({ grandTotal: undefined });
+    // 本页相加会得到 100% / 33.33% —— 那正是必须避免的错数
+    expect(columnValues(container, 2)).toEqual(['', '']);
+  });
+
+  it('合计为 0（除零）时留空而不是 Infinity%', () => {
+    const { container } = renderPercent({ grandTotal: { share: 0 } });
+    expect(columnValues(container, 2)).toEqual(['', '']);
+  });
+
+  it('合计行里的占比列按同一分母算出 100%', () => {
+    const { container } = renderPercent({ totalRow: { share: 120 } });
+    const cells = Array.from(container.querySelectorAll('.ant-table-summary td')).map(
+      (td) => td.textContent ?? ''
+    );
+    expect(cells).toEqual(['合计', '100.00%']);
+  });
+});

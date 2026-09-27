@@ -101,6 +101,7 @@ import {
   expandDateFilterIntent,
   isDateFilterValue,
 } from '../lib/dateFilter';
+import { isPercentOfTotalFormat } from '../lib/format';
 import {
   buildChartConfigDocument,
   buildQuerySpecDocument,
@@ -356,6 +357,8 @@ export interface ChartQueryRequestInput {
   fields: ChartField[];
   metricAggregations: Record<string, string>;
   metricAliases: Record<string, string>;
+  /** 指标列的「格式」（键为 bindingId）：带 `%` 后缀的占比列需要后端给出全集合计做分母。 */
+  metricFormats: Record<string, string>;
   tablePagination: { page: number; pageSize: number };
   /** 图表查询选项（持久化 camelCase 模型）；histogram 从中取 binCount 发 wire bin_count。 */
   queryOptions: ChartQueryOptions;
@@ -407,6 +410,7 @@ export const composeChartQueryRequest = (
     fields,
     metricAggregations,
     metricAliases,
+    metricFormats,
     tablePagination,
     queryOptions,
     includeSort,
@@ -515,7 +519,16 @@ export const composeChartQueryRequest = (
   // 这里。table（issue #131）的合计行开关同理：camelCase showTotal → wire show_total，
   // 只在打开时携带（false/未设置都不发该键，请求形状与本任务改动前完全一致）。
   // 其余图型不进这两条分支，请求形状不变。
-  const totalsPayload = chartType === 'table' && queryOptions.showTotal ? { show_total: true } : {};
+  // 占比列（issue #132）没有独立的 wire 开关：它的分母就是同一份全集合计，所以只要本表
+  // 有任一指标配了 `%` 格式，就必须让后端把 total 算出来（否则占比列拿不到分母、只能
+  // 留空）。合计行开关 showTotal 仍单独控制「要不要在表尾显示那一行」。
+  const usesPercentFormat = Object.values(metricFormats).some((format) =>
+    isPercentOfTotalFormat(format)
+  );
+  const totalsPayload =
+    chartType === 'table' && (queryOptions.showTotal || usesPercentFormat)
+      ? { show_total: true }
+      : {};
   const queryOptionsPayload = {
     ...(chartType === 'histogram' ? { bin_count: queryOptions.binCount ?? 20 } : {}),
     ...totalsPayload,
@@ -2163,6 +2176,7 @@ const ChartBuilder: React.FC = () => {
         fields: chartBuilderFields,
         metricAggregations,
         metricAliases,
+        metricFormats,
         tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
         queryOptions: chartQueryOptions,
         includeSort: true,
@@ -2172,6 +2186,7 @@ const ChartBuilder: React.FC = () => {
       selectedDatasetId,
       metricAggregations,
       metricAliases,
+      metricFormats,
       queryConfig,
       chartBuilderConfig.chartType,
       tablePagination.page,
@@ -2457,6 +2472,7 @@ const ChartBuilder: React.FC = () => {
       fields: state.chartBuilderFields,
       metricAggregations: state.metricAggregations,
       metricAliases: state.metricAliases,
+      metricFormats: state.metricFormats,
       tablePagination: state.tablePagination,
       queryOptions: state.chartQueryOptions,
       includeSort: true,
@@ -2480,6 +2496,7 @@ const ChartBuilder: React.FC = () => {
       fields: chartBuilderFields,
       metricAggregations,
       metricAliases,
+      metricFormats,
       tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
       queryOptions: chartQueryOptions,
       includeSort: true,
@@ -2495,6 +2512,7 @@ const ChartBuilder: React.FC = () => {
     queryConfig,
     metricAggregations,
     metricAliases,
+    metricFormats,
     chartBuilderFields,
     tablePagination.page,
     tablePagination.pageSize,
@@ -2686,6 +2704,18 @@ const ChartBuilder: React.FC = () => {
       // 两条判别若漂移会出现「明细来自负载 A、合计来自负载 B」。
       const tablePayload = isTablePayload(chartData) ? chartData : null;
       const tableRows = tablePayload ? tablePayload.data : [];
+      // 占比列（issue #132）：输出列名 = 别名 || 列名，与下面 metricFormats 的键同口径；
+      // 分母是后端给的全集合计（tablePayload.total），不是本页相加。
+      const percentColumns = metricFields
+        .map(
+          (bound) =>
+            [
+              wireAliasOf(metricAliases[bound.binding.bindingId], bound.field.name),
+              metricFormats[bound.binding.bindingId],
+            ] as const
+        )
+        .filter(([, format]) => isPercentOfTotalFormat(format))
+        .map(([name]) => name);
       return (
         <TableChart
           data={tableRows}
@@ -2726,6 +2756,8 @@ const ChartBuilder: React.FC = () => {
               })
               .filter(([, format]) => Boolean(format))
           )}
+          metricPercentOfTotal={percentColumns}
+          grandTotal={tablePayload?.total}
           rowSize={chartStyle.tableRowSize}
           showIndex={chartStyle.tableShowIndex}
           wordWrap={chartStyle.tableWordWrap}

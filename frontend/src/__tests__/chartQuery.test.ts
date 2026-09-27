@@ -230,6 +230,7 @@ describe('composeChartQueryRequest：histogram 的 query_options.bin_count 发�
     fields: histogramFields,
     metricAggregations: {},
     metricAliases: {},
+    metricFormats: {},
     tablePagination: { page: 1, pageSize: 10 },
     includeSort: true,
   };
@@ -292,6 +293,7 @@ describe('composeChartQueryRequest：funnel 强制 value 降序（R-59，验收�
     fields: funnelFields,
     metricAggregations: {},
     metricAliases: {},
+    metricFormats: {},
     tablePagination: { page: 1, pageSize: 10 },
     queryOptions: {},
     includeSort: true,
@@ -399,6 +401,7 @@ describe('composeChartQueryRequest：radar 强制走 v2 槽位协议（R-62）',
     fields: radarFields,
     metricAggregations: {},
     metricAliases: {},
+    metricFormats: {},
     tablePagination: { page: 1, pageSize: 10 },
     queryOptions: {},
     includeSort: true,
@@ -480,6 +483,7 @@ describe('composeChartQueryRequest：pivot 强制走 v2 槽位协议', () => {
     fields: pivotFields,
     metricAggregations: {},
     metricAliases: {},
+    metricFormats: {},
     tablePagination: { page: 1, pageSize: 10 },
     queryOptions: {},
     includeSort: true,
@@ -546,6 +550,7 @@ describe('composeChartQueryRequest：table 的 query_options.show_total（issue 
     fields,
     metricAggregations: {},
     metricAliases: {},
+    metricFormats: {},
     tablePagination: { page: 1, pageSize: 100 },
     includeSort: true,
   };
@@ -576,6 +581,68 @@ describe('composeChartQueryRequest：table 的 query_options.show_total（issue 
       queryOptions: { showTotal: true },
     });
     expect(request).not.toBeNull();
+    expect(request).not.toHaveProperty('query_options');
+  });
+});
+
+/**
+ * 占比列的请求契约（issue #132）：占比没有独立的 wire 开关，它复用 #131 的
+ * `show_total` —— 分母就是同一份全集合计，所以只要表里有 `%` 格式的指标，
+ * 就必须让后端把 total 算出来，否则占比列只能留空。
+ */
+describe('composeChartQueryRequest：占比列强制携带全集合计（issue #132）', () => {
+  const fields = [
+    { id: 'f-1', name: 'region', type: 'dimension' as const, dataType: 'string' },
+    { id: 'f-2', name: 'amount', type: 'metric' as const, dataType: 'number' },
+  ];
+  const queryConfig = {
+    dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] }],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'f-2' }] }],
+    filters: [],
+  };
+  const baseInput = {
+    datasetId: 1,
+    chartType: 'table' as const,
+    queryConfig,
+    fields,
+    metricAggregations: {},
+    metricAliases: {},
+    tablePagination: { page: 1, pageSize: 100 },
+    queryOptions: {},
+    includeSort: true,
+  };
+
+  it('table + 某指标格式带 %：即使没开合计行，也发 show_total 拿分母', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      metricFormats: { 'b-1': '0,0.00%' },
+    });
+    expect(request?.query_options).toEqual({ show_total: true });
+  });
+
+  it('table + 合计行开关：同样发 show_total（此时表尾还会多渲染一行合计）', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      metricFormats: { 'b-1': '0,0.00' },
+      queryOptions: { showTotal: true },
+    });
+    expect(request?.query_options).toEqual({ show_total: true });
+  });
+
+  it('table + 普通格式且未开合计：不发 query_options', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      metricFormats: { 'b-1': '0,0.00' },
+    });
+    expect(request).not.toHaveProperty('query_options');
+  });
+
+  it('非 table 图型不受影响：bar 带 % 格式也不发 show_total', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      chartType: 'bar' as const,
+      metricFormats: { 'b-1': '0,0.00%' },
+    });
     expect(request).not.toHaveProperty('query_options');
   });
 });
