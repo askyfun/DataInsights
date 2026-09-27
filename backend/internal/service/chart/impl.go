@@ -536,11 +536,12 @@ func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, 
 }
 
 // normalizePersistedQueryOptions 把持久化 config 文档 queryOptions 小节的键归一为
-// wire snake_case（bin_count/bin_width），供 executor 的 histogramBinOptions 统一
-// 读取：前端 store/文档惯例是 camelCase（binCount/binWidth，见 chartConfigSchema.ts
-// 的 camelCase 文档键），3-1b 无论按哪种风格保存都能 round-trip；已是 snake_case
-// 的键原样透传，未知键保留（扩展袋语义）。空/缺失小节返回 nil（请求不带
-// query_options，executor 回落 bin_count=20 默认）。
+// wire snake_case（bin_count/bin_width/show_total），供 executor 的 histogramBinOptions
+// 与 tableTotalOptions 统一读取：前端 store/文档惯例是 camelCase（binCount/binWidth/
+// showTotal，见 chartConfigSchema.ts 的 camelCase 文档键），3-1b 无论按哪种风格保存
+// 都能 round-trip；已是 snake_case 的键原样透传，未知键保留（扩展袋语义）。
+// 空/缺失小节返回 nil（请求不带 query_options，executor 回落 bin_count=20 默认、
+// 合计行关闭）。
 func normalizePersistedQueryOptions(opts map[string]any) map[string]any {
 	if len(opts) == 0 {
 		return nil
@@ -554,6 +555,8 @@ func normalizePersistedQueryOptions(opts map[string]any) map[string]any {
 			k = "bin_width"
 		case "topN":
 			k = "top_n"
+		case "showTotal":
+			k = "show_total"
 		}
 		out[k] = v
 	}

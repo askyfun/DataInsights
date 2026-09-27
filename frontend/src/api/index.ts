@@ -163,7 +163,13 @@ export type ChartDimensionField = G['ChartDimensionField'];
 export type ChartMetricGroup = G['ChartMetricGroup'];
 export type ChartMetricField = G['ChartMetricField'];
 
-export type TableResponse = G['ChartTableResponse'];
+// 表格响应。`total`（合计行，issue #131）走手写薄层补齐：生成物早于 openapi 的
+// ChartTableResponse.total 改动（与上面 query_options 同一裁定 A：不重新生成
+// gen_types.ts），形状与后端 query.TableResponse.Total（Go map[string]any omitempty）
+// 一致——键是指标列的输出别名，缺省表示该查询没有合计行。
+export type TableResponse = G['ChartTableResponse'] & {
+  total?: Record<string, unknown>;
+};
 
 export type PieResponse = G['ChartPieResponse'];
 
@@ -190,7 +196,7 @@ export type RadarSeries = G['ChartRadarSeries'];
 export type BoxplotResponse = G['ChartBoxplotResponse'];
 
 export type ChartDataResponse =
-  | G['ChartTableResponse']
+  | TableResponse
   | G['ChartPieResponse']
   | G['ChartAxisResponse']
   | G['ChartScatterResponse']
@@ -201,6 +207,17 @@ export type ChartDataResponse =
   | G['ChartRadarResponse']
   | G['ChartBoxplotResponse']
   | unknown[];
+
+// table 响应负载判别（{columns, data[]}）。必须显式收窄成 TableResponse：
+// 联合里的 ChartPivotResponse 与它结构同形（都是 {columns, data}），`'columns' in x`
+// 只会按声明顺序落到先出现的成员上，把手写薄层里的 `total`（合计行）判丢。
+export function isTablePayload(x: unknown): x is TableResponse {
+  if (typeof x !== 'object' || x === null || Array.isArray(x)) {
+    return false;
+  }
+  const record = x as Record<string, unknown>;
+  return Array.isArray(record.columns) && Array.isArray(record.data);
+}
 
 // pivot v2 交叉表负载判别：按响应形状（cells + col_headers + row_headers 均为数组）
 // 判别，而非 chartType——v1 平铺 pivot（{columns,data}，ChartPivotResponse）与 v2

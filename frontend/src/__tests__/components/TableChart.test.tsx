@@ -185,3 +185,90 @@ describe('TableChart 展示增强', () => {
     expect(tdWithText('East')?.className).not.toContain('ant-table-cell-fix-start');
   });
 });
+
+/**
+ * 合计行（issue #131）。
+ *
+ * 契约：合计值只来自后端负载的 `total`（在过滤后的完整数据集上重算），前端只做展示。
+ * 关键红线是**不得**在前端拿当前页明细相加——服务端分页下那只是某一页的和，
+ * AVG / COUNT(DISTINCT) 还会算成「平均数的平均数」。
+ */
+describe('TableChart 合计行', () => {
+  const summaryRows = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('.ant-table-summary tr'));
+  const summaryCells = (container: HTMLElement) =>
+    Array.from(summaryRows(container)[0]?.querySelectorAll('td') ?? []).map(
+      (td) => td.textContent ?? ''
+    );
+
+  it('传入 totalRow 时在表尾渲染一行：首列为「合计」标签，指标列取后端值', () => {
+    const { container } = renderTable({
+      totalRow: { revenue: 58 },
+      dimensionNames: ['region'],
+      metricNames: ['revenue'],
+    });
+    expect(summaryRows(container)).toHaveLength(1);
+    expect(summaryCells(container)).toEqual(['合计', '58']);
+    // 明细行不受影响：合计不是往 dataSource 里塞一行
+    expect(container.querySelectorAll('.ant-table-row')).toHaveLength(2);
+  });
+
+  it('不传 totalRow 时不渲染合计行（默认关闭，行为与本任务前一致）', () => {
+    const { container } = renderTable();
+    expect(summaryRows(container)).toHaveLength(0);
+  });
+
+  it('合计值套用该列的「格式」，与明细行同口径', () => {
+    const { container } = renderTable({
+      totalRow: { revenue: 58 },
+      dimensionNames: ['region'],
+      metricNames: ['revenue'],
+      metricFormats: { revenue: '0,0.00' },
+    });
+    expect(summaryCells(container)).toEqual(['合计', '58.00']);
+  });
+
+  it('序号列 + 维度列：序号列留空，「合计」标签落在维度列', () => {
+    const { container } = render(
+      <TableChart
+        data={[{ region: 'East', revenue: 42 }]}
+        columns={['region', 'revenue']}
+        loading={false}
+        showIndex
+        dimensionNames={['region']}
+        metricNames={['revenue']}
+        totalRow={{ revenue: 42 }}
+      />
+    );
+    expect(summaryCells(container)).toEqual(['', '合计', '42']);
+  });
+
+  it('只有指标列时，「合计」标签落到序号列', () => {
+    const { container } = render(
+      <TableChart
+        data={[{ revenue: 42 }]}
+        columns={['revenue']}
+        loading={false}
+        showIndex
+        metricNames={['revenue']}
+        totalRow={{ revenue: 42 }}
+      />
+    );
+    expect(summaryCells(container)).toEqual(['合计', '42']);
+  });
+
+  it('明细为空但有合计：不显示空态，合计行仍在（过滤后 0 行、全集仍有数值）', () => {
+    const { container } = render(
+      <TableChart
+        data={[]}
+        columns={['region', 'revenue']}
+        loading={false}
+        dimensionNames={['region']}
+        metricNames={['revenue']}
+        totalRow={{ revenue: 58 }}
+      />
+    );
+    expect(screen.queryByText('暂无数据')).toBeNull();
+    expect(summaryCells(container)).toEqual(['合计', '58']);
+  });
+});

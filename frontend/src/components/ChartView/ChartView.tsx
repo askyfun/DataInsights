@@ -1,7 +1,7 @@
 import { Result } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type Chart, type ChartDataResponse, isPivotV2Payload } from '../../api';
+import { type Chart, type ChartDataResponse, isPivotV2Payload, isTablePayload } from '../../api';
 import { type ChartType, migrateChartConfig } from '../../lib/chartConfigSchema';
 import {
   buildChartOption,
@@ -164,7 +164,9 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
   // 聚合负载的 table/pivot 臂：TableResponse 带 pagination、PivotResponse 不带，
   // 两者都有 columns + data（行由后端按维度在前/指标别名在后组装，
   // pagination 仅回显服务端窗口，本组件是静态视图不接翻页）。
-  const tablePayload = isTableLike && !Array.isArray(data) && 'columns' in data ? data : null;
+  // 走显式的 table 判别而不是 `'columns' in data`：后者会把负载收窄成与之同形的
+  // ChartPivotResponse，读不到 table 特有的 total（合计行）。
+  const tablePayload = isTableLike ? (isTablePayload(data) ? data : null) : null;
 
   // pivot v2 臂（R-53）：交叉表负载（cells+col_headers+row_headers）按响应形状判别——
   // v1 平铺 pivot（{columns,data}）时 pivotPayload 为 null，仍走下方 TableChart 分支。
@@ -202,10 +204,17 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
     const tableDimensionNames = chartDoc.query.dimensionGroups.flatMap((g) =>
       g.bindings.map((b) => nameOf(b.fieldId))
     );
+    // 合计行（issue #131）：开关在持久化文档的 queryOptions 小节（schema 上是 unknown，
+    // 与参考线同款窄化后使用），值在响应的 total 里——后端只在开关为真且确实分组时给出。
+    // 两个条件都要成立才渲染，避免历史文档/手工构造的响应里偶然出现的 total 被当合计。
+    const showTotal =
+      (chartDoc.queryOptions as { showTotal?: unknown }).showTotal === true &&
+      !!tablePayload?.total;
     return (
       <TableChart
         data={tablePayload ? tablePayload.data : (data as RawRow[])}
         columns={tablePayload ? tablePayload.columns : undefined}
+        totalRow={showTotal ? tablePayload?.total : undefined}
         loading={false}
         columnLabels={displayLabels}
         dimensionNames={tableDimensionNames}

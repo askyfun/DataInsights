@@ -197,6 +197,9 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
   保留进查询 AST）。
 - `filters` / `pagination` / `sort` 两协议共用。`filters` 元素键为 `operator`（**不是 op**）：
   `{id, field, operator, value, value_end?, logic}`。
+- `query_options`：histogram 消费 `bin_count`（默认 20）/ `bin_width`；table 消费
+  `show_total`（true 时响应 `data.total` 给出合计行，见 `ChartTableResponse.total`）。
+  executor 直接从请求读取，不进 QuerySpec。
 - `query_options`：扩展袋。histogram 消费 `bin_count`（默认 20）/ `bin_width`；
   Top N（#130，bar/line/area/pie）消费 `top_n: {limit, metric?, order?}` ——
   executor 翻译进查询计划（AST 的 Sort + Limit，数据库完成排序截断）。

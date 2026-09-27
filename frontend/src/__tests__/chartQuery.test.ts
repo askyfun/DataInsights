@@ -521,3 +521,61 @@ describe('composeChartQueryRequest：pivot 强制走 v2 槽位协议', () => {
     expect(colGroup?.fields).toEqual([{ field: 'f-1', binding_id: 'b-0' }]);
   });
 });
+
+/**
+ * 表格合计行的请求契约（issue #131）。
+ *
+ * 合计值必须由后端在过滤后的完整数据集上重算，所以开关要进 wire（query_options），
+ * 而不是留在前端做展示层求和。这里钉三条：开→发 show_total、关/未设→不发该键、
+ * 非表格图型→不受影响。
+ */
+describe('composeChartQueryRequest：table 的 query_options.show_total（issue #131）', () => {
+  const fields = [
+    { id: 'f-1', name: 'region', type: 'dimension' as const, dataType: 'string' },
+    { id: 'f-2', name: 'amount', type: 'metric' as const, dataType: 'number' },
+  ];
+  const tableQueryConfig = {
+    dimensionGroups: [{ id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'f-1' }] }],
+    metricGroups: [{ id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'f-2' }] }],
+    filters: [],
+  };
+  const baseInput = {
+    datasetId: 1,
+    chartType: 'table' as const,
+    queryConfig: tableQueryConfig,
+    fields,
+    metricAggregations: {},
+    metricAliases: {},
+    tablePagination: { page: 1, pageSize: 100 },
+    includeSort: true,
+  };
+
+  it('showTotal=true：camelCase 文档模型翻成 snake_case show_total，仍走 v1 平铺协议', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      queryOptions: { showTotal: true },
+    });
+
+    expect(request?.query_options).toEqual({ show_total: true });
+    expect(request?.spec_version).toBeUndefined();
+    expect(request?.pagination).toEqual({ page: 1, page_size: 100 });
+  });
+
+  it('showTotal=false 或未设置：不携带 query_options（请求形状与本任务前一致）', () => {
+    for (const queryOptions of [{ showTotal: false }, {}]) {
+      const request = composeChartQueryRequest({ ...baseInput, queryOptions });
+      expect(request).not.toBeNull();
+      expect(request).not.toHaveProperty('query_options');
+    }
+  });
+
+  it('其它图型不受影响：bar 带 showTotal 也不发 show_total', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      chartType: 'bar',
+      queryOptions: { showTotal: true },
+    });
+    expect(request).not.toBeNull();
+    expect(request).not.toHaveProperty('query_options');
+  });
+});

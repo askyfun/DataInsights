@@ -1,5 +1,6 @@
 import type { TableProps } from 'antd';
 import { Empty, Table } from 'antd';
+import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { formatMetricValue } from '@/lib/format';
 import LoadingPlaceholder from '../LoadingPlaceholder';
@@ -23,6 +24,13 @@ interface TableChartProps {
   nullDisplay?: 'raw' | 'dash' | 'blank' | 'zero';
   /** 冻结维度列：横向滚动时把维度列（含序号列）固定在左侧。 */
   freezeDimensions?: boolean;
+  /**
+   * 合计行（issue #131）：键为指标列的输出列名，值由后端在过滤后的**完整数据集**上
+   * 重算。传入即在表尾渲染一行合计；缺省不渲染。
+   * ⚠️ 不在前端拿当前页明细行相加——服务端分页下那只是某一页的和，
+   * AVG / COUNT(DISTINCT) 更是会算成「平均数的平均数」。
+   */
+  totalRow?: Record<string, unknown>;
   rowSize?: 'small' | 'middle' | 'large';
   pagination?: {
     page: number;
@@ -41,6 +49,9 @@ interface TableChartProps {
   onSortChange?: (sort: { field: string; order: 'asc' | 'desc' } | null) => void;
 }
 
+/** 序号列的常量 dataIndex（不参与取数，仅占位）；合计行据此把它与真实数据列区分开。 */
+const INDEX_COLUMN_DATA_INDEX = '__row_index__';
+
 const TableChart: React.FC<TableChartProps> = ({
   data,
   loading,
@@ -53,6 +64,7 @@ const TableChart: React.FC<TableChartProps> = ({
   wordWrap,
   nullDisplay,
   freezeDimensions,
+  totalRow,
   rowSize = 'small',
   pagination,
   sortField,
@@ -145,7 +157,7 @@ const TableChart: React.FC<TableChartProps> = ({
     const pageIndex = pagination ? (pagination.page - 1) * pagination.pageSize : 0;
     const indexColumn = {
       title: '#',
-      dataIndex: '__row_index__',
+      dataIndex: INDEX_COLUMN_DATA_INDEX,
       key: '__row_index__',
       width: 56,
       align: 'center' as const,
@@ -170,6 +182,61 @@ const TableChart: React.FC<TableChartProps> = ({
     sortField,
     sortOrder,
   ]);
+
+  // 合计行（issue #131）：指标列显示后端在完整数据集上重算的值，「合计」标签落在
+  // 第一个非指标列（维度列；没有维度列时落到序号列）。直接复用 columns 的渲染器，
+  // 于是「格式」「空值显示」与明细行同口径，序号列/冻结列的位置也不会数错。
+  const summary = useMemo<(() => ReactNode) | null>(() => {
+    if (!totalRow || !columns) {
+      return null;
+    }
+    const metricSet = new Set(metricNames || []);
+    // 标签候选 = 第一个「真实数据列且不是指标列」。序号列（常量 dataIndex）被排除：
+    // 它没有 dataIndex，任何情况下都不该拿 totalRow 的值或当标签位。
+    const isIndexColumn = (col: object) =>
+      'dataIndex' in col && col.dataIndex === INDEX_COLUMN_DATA_INDEX;
+    let labelCell = columns.findIndex(
+      (col) => 'dataIndex' in col && !isIndexColumn(col) && !metricSet.has(col.dataIndex as string)
+    );
+    // 没有维度列时把标签退到序号列；只有一列时不放——那一列要留给合计数值本身，
+    // 放标签会把值挤掉。
+    if (labelCell === -1 && columns.length > 1) {
+      labelCell = 0;
+    }
+    return () => (
+      <Table.Summary fixed>
+        <Table.Summary.Row>
+          {columns.map((col, i) => {
+            const key = 'key' in col && typeof col.key === 'string' ? col.key : String(i);
+            if (i === labelCell) {
+              return (
+                <Table.Summary.Cell key={key} index={i}>
+                  合计
+                </Table.Summary.Cell>
+              );
+            }
+            if (isIndexColumn(col)) {
+              return (
+                <Table.Summary.Cell key={key} index={i}>
+                  {''}
+                </Table.Summary.Cell>
+              );
+            }
+            // 复用列自己的 render：合计值与明细值走同一条展示层（「格式」「空值显示」
+            // 口径一致），不会出现同一列两种小数位数。
+            const dataIndex = 'dataIndex' in col ? String(col.dataIndex) : '';
+            const render = (col as { render?: (value: unknown) => ReactNode }).render;
+            const value = totalRow[dataIndex];
+            return (
+              <Table.Summary.Cell key={key} index={i}>
+                {render ? render(value) : value == null ? '' : String(value)}
+              </Table.Summary.Cell>
+            );
+          })}
+        </Table.Summary.Row>
+      </Table.Summary>
+    );
+  }, [totalRow, columns, metricNames]);
 
   const handleTableChange: TableProps<any>['onChange'] = (
     tablePagination,
@@ -214,7 +281,8 @@ const TableChart: React.FC<TableChartProps> = ({
     return <LoadingPlaceholder text="加载数据中..." />;
   }
 
-  if (!data || data.length === 0) {
+  // 明细为空但有合计时不显示空态：过滤后确实没有明细行，全集聚合仍可能给出数值。
+  if ((!data || data.length === 0) && !totalRow) {
     return (
       <Empty
         description="暂无数据"
@@ -228,6 +296,7 @@ const TableChart: React.FC<TableChartProps> = ({
     <Table
       dataSource={data.map((item, index) => ({ ...item, key: index }))}
       columns={columns}
+      summary={summary ?? (() => null)}
       pagination={
         pagination
           ? {
