@@ -48,6 +48,9 @@ type Config struct {
 	// StaticDir 是前端构建产物的目录。留空表示本进程只提供 API，
 	// 页面由别的进程提供（本地开发时的 Vite dev server）。
 	StaticDir string
+	// ExtractDatasourceID 指定作为「抽取数据集统一存储」的数据源 id（issue #118 预留）。
+	// 0 = 未启用：抽取存储数据源不存在，所有抽取守卫退化为放行。
+	ExtractDatasourceID int
 }
 
 type DatabaseConfig struct {
@@ -128,6 +131,14 @@ func (c *Config) Load() error {
 
 	if v := os.Getenv("STATIC_DIR"); v != "" {
 		c.StaticDir = v
+	}
+
+	if v := os.Getenv("EXTRACT_DATASOURCE_ID"); v != "" {
+		id, err := strconv.Atoi(v)
+		if err != nil || id < 0 {
+			return fmt.Errorf("invalid EXTRACT_DATASOURCE_ID %q: must be a non-negative integer", v)
+		}
+		c.ExtractDatasourceID = id
 	}
 
 	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {

@@ -495,7 +495,7 @@ type Dataset struct {
 	Description  *string `json:"description"`
 	Id           int     `json:"id"`
 
-	// Mode 当前后端语义为 "direct"（前端类型含 "accelerated"，后端不产出）。
+	// Mode 数据集取数模式："direct"（直连，默认）| "extract"（抽取，issue #118 架构预留： 数据灌入统一 StarRocks 存储、查询直查该库）。本期 extract 仅落类型与守卫， 灌数与 extract 查询路径未实现（查询会显式报错）。
 	Mode        string  `json:"mode"`
 	Name        string  `json:"name"`
 	PreviewData *string `json:"preview_data"`

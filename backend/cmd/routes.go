@@ -18,14 +18,21 @@ import (
 //
 // serveWebUI 表示本进程同时托管前端构建产物（单镜像单容器的形态）。它会改变
 // /share/:token 的归属：见文末说明。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool) {
+//
+// extractDatasourceID 是抽取存储数据源 id（EXTRACT_DATASOURCE_ID，issue #118 预留，
+// 0=未启用）：数据源列表隐藏它、数据集创建/改指守卫拒绝它、图表查询对 extract
+// 模式数据集显式报错。
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, serveWebUI bool, extractDatasourceID int) {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
+	dsSvc.SetExtractDatasourceID(extractDatasourceID)
 	dsDatasetSvc := dataset.NewService(db)
 	dsDatasetSvc.SetSecurityKey(securityKey)
+	dsDatasetSvc.SetExtractDatasourceID(extractDatasourceID)
 	dsChartSvc := chart.NewService(db)
 	dsChartSvc.SetSecurityKey(securityKey)
+	dsChartSvc.SetExtractDatasourceID(extractDatasourceID)
 	dsShareSvc := share.NewService(db)
 	dsQuerySvc := queryrecord.NewService(db)
 	dsDashboardSvc := dashboard.NewService(db)
