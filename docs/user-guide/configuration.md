@@ -35,6 +35,7 @@ cp .env.example .env    # 然后按需修改
 | `SENTRY_DSN` | 否 | 空 | 后端 Sentry DSN，留空 = 关闭上报。 |
 | `CORS_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔白名单；**留空 = 放开所有来源**（平台 API 无登录态，CORS 不构成安全边界）。填非空白名单则只回显名单内来源，供将来引入认证后收紧。 |
 | `STATIC_DIR` | 否 | 空 | 前端构建产物目录。设置后本进程一并托管页面（未命中回落 `index.html`）；**留空 = 只提供 API**（本地开发默认形态，页面走 Vite dev server）。目录配错即启动失败。 |
+| `EXTRACT_DATASOURCE_ID` | 否 | `0` | 抽取数据集的统一存储数据源 id（issue #118 架构预留）。指定后该数据源不再是普通数据源：列表隐藏、不能被常规数据集引用；抽取表以 `di_extract_<datasetId>` 命名。`0`/留空 = 未启用。灌数与 extract 查询在后续期实现。 |
 | `VITE_API_BASE_URL` | 否 | 空 | 前端 API 基础地址。未配置时：生产构建自动同源、开发回退 `http://<当前访问主机名>:23352`。**仅前后端分开部署时**才需配成非空绝对地址。 |
 | `VITE_SENTRY_DSN` | 否 | 空 | 前端 Sentry DSN。留空 = 完全跳过 `Sentry.init`，不打点也不上报。 |
 

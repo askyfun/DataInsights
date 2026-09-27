@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -14,6 +15,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"PORT", "DATABASE_URL", "SECURITY_KEY", "SENTRY_DSN", "STATIC_DIR", "CORS_ALLOWED_ORIGINS",
+		"EXTRACT_DATASOURCE_ID",
 	} {
 		t.Setenv(name, "")
 	}
@@ -131,6 +133,58 @@ func TestLoadInvalidPort(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLoadExtractDatasourceID 钉死抽取存储配置位（issue #118 预留）：
+// 未设置/空 = 0（未启用），正整数生效，非法值 fail-fast。
+func TestLoadExtractDatasourceID(t *testing.T) {
+	t.Run("unset and empty keep 0", func(t *testing.T) {
+		clearEnv(t)
+		cfg := &Config{}
+		if err := cfg.Load(); err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.ExtractDatasourceID != 0 {
+			t.Fatalf("unset must keep 0, got %d", cfg.ExtractDatasourceID)
+		}
+		t.Setenv("EXTRACT_DATASOURCE_ID", "")
+		cfg = &Config{}
+		if err := cfg.Load(); err != nil {
+			t.Fatalf("Load with empty: %v", err)
+		}
+		if cfg.ExtractDatasourceID != 0 {
+			t.Fatalf("empty must keep 0, got %d", cfg.ExtractDatasourceID)
+		}
+	})
+
+	t.Run("valid ids honored", func(t *testing.T) {
+		for _, v := range []string{"0", "7"} {
+			clearEnv(t)
+			t.Setenv("EXTRACT_DATASOURCE_ID", v)
+			cfg := &Config{}
+			if err := cfg.Load(); err != nil {
+				t.Fatalf("Load(%q): %v", v, err)
+			}
+			var want int
+			if _, err := fmt.Sscanf(v, "%d", &want); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ExtractDatasourceID != want {
+				t.Fatalf("EXTRACT_DATASOURCE_ID=%q not honored, got %d", v, cfg.ExtractDatasourceID)
+			}
+		}
+	})
+
+	t.Run("invalid values fail fast", func(t *testing.T) {
+		for _, v := range []string{"abc", "-1", "1.5"} {
+			clearEnv(t)
+			t.Setenv("EXTRACT_DATASOURCE_ID", v)
+			cfg := &Config{}
+			if err := cfg.Load(); err == nil {
+				t.Errorf("expected error for EXTRACT_DATASOURCE_ID=%q", v)
+			}
+		}
+	})
 }
 
 // TestLoadDotEnv 验证 .env 文件加载：格式解析、真实环境变量优先、文件缺失与
@@ -264,6 +318,7 @@ func TestEnvVarNamesAreStable(t *testing.T) {
 	t.Setenv("SENTRY_DSN", "https://literal@sentry.io/1")
 	t.Setenv("STATIC_DIR", "/tmp/literal-web")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://literal.example")
+	t.Setenv("EXTRACT_DATASOURCE_ID", "9")
 
 	cfg := &Config{}
 	if err := cfg.Load(); err != nil {
@@ -287,6 +342,9 @@ func TestEnvVarNamesAreStable(t *testing.T) {
 	}
 	if len(cfg.CORS.AllowedOrigins) != 1 || cfg.CORS.AllowedOrigins[0] != "https://literal.example" {
 		t.Errorf("CORS_ALLOWED_ORIGINS not honored, got %v", cfg.CORS.AllowedOrigins)
+	}
+	if cfg.ExtractDatasourceID != 9 {
+		t.Errorf("EXTRACT_DATASOURCE_ID not honored, got %d", cfg.ExtractDatasourceID)
 	}
 }
 

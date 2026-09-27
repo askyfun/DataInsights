@@ -29,8 +29,9 @@ export interface DatasourceFormData {
   password: string;
 }
 
-// 数据集模式
-export type DatasetMode = 'direct' | 'accelerated';
+// 数据集模式：direct=直连（默认）；extract=抽取（issue #118 架构预留，本期后端仅落
+// 类型与守卫，不产出该值）；accelerated=历史前端词，后端从不产出。
+export type DatasetMode = 'direct' | 'extract' | 'accelerated';
 
 // 数据类型（统一规范词表，单一事实源在 lib/dataTypes）
 export type { DataType } from '../lib/dataTypes';
