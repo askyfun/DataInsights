@@ -492,6 +492,11 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'dashboard.folderDropOutside': '不能放到仪表盘上',
     'dashboard.folderMoved': '已移动',
     'dashboard.folderEmptyName': '名称不能为空',
+    // 皮肤（主题）切换：偏好三选项 + 控件无障碍标签。
+    'theme.label': '主题',
+    'theme.light': '浅色',
+    'theme.dark': '深色',
+    'theme.system': '跟随系统',
   },
   'en-US': {
     'nav.dashboard': 'Dashboard',
@@ -985,6 +990,10 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'dashboard.folderDropOutside': 'Dashboards cannot be dropped on another dashboard',
     'dashboard.folderMoved': 'Moved',
     'dashboard.folderEmptyName': 'Name cannot be empty',
+    'theme.label': 'Theme',
+    'theme.light': 'Light',
+    'theme.dark': 'Dark',
+    'theme.system': 'System',
   },
 };
 

@@ -250,3 +250,19 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 - **背景**：字段组从「列名位置索引」升级为「binding 实例（`bindingId`）」，旧图表必须仍可打开。
 - **取舍**：不做破坏性 schema 变更 → 靠迁移函数兼容旧结构；代价是迁移层需长期维护，且迁移必须无损。
 - **现状**：已实现（当前 `version: 2`）。证据：`frontend/src/lib/chartConfigSchema.ts`；字段组演变详见 `chart-query-design.md`。
+
+### D11 抽取数据集：统一 StarRocks 存储 + 架构预留（issue #118）
+
+- **决策**：抽取数据集（extract）与直连数据集（direct）双模式，对齐火山引擎心智。指定**一个**
+  StarRocks 数据源为统一抽取存储（`EXTRACT_DATASOURCE_ID`）；该数据源被指定后不再是普通数据源
+  ——列表隐藏、不能被常规数据集引用；抽取表在其内以 `di_extract_<datasetId>` 命名，与用户表隔离。
+  本地文件即席查询不做独立链路，而是抽取数据集的特例（上传 → 灌入 → 自动生成数据集）。
+- **背景**：当前纯直连、无缓存；外部数据源（如客户生产库）不宜承载高频分析查询，而 StarRocks
+  本身就是分析型存储，直接当抽取库用，省掉自研缓存层。
+- **取舍**：本期**只预留不实现**灌数——模型/契约（`mode: direct|extract`）、守卫（dataset
+  Create/Update 拒绝抽取数据源、datasource List 隐藏）、查询分派位（chart service
+  `dispatchExtractDataset` 对 extract 显式报错）与命名约定全部落位，直连路径零回归；
+  代价是 extract 模式短期是"看得见跑不了"的预留态。
+- **现状**：预留已实现，灌数与 extract 查询在后续期。证据：`backend/internal/extract/`、
+  `internal/config`（`EXTRACT_DATASOURCE_ID`）、`service/chart/impl.go`（分派位）、
+  `api/openapi.yaml`（mode 语义）。

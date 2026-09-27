@@ -12,6 +12,7 @@ import (
 	"data-insights/internal/database"
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/extract"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
 	"data-insights/internal/response"
@@ -48,12 +49,17 @@ type Service interface {
 	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
 	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
 	SetSecurityKey(key []byte)
+
+	// SetExtractDatasourceID injects the designated extract storage datasource
+	// (issue #118 reservation, EXTRACT_DATASOURCE_ID). 0 = disabled.
+	SetExtractDatasourceID(id int)
 }
 
 // chartService implements the Service interface
 type chartService struct {
 	db                   *bun.DB
 	key                  []byte // 32-byte AES key; nil => plaintext passthrough
+	extract              extract.Guard
 	connectFn            func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error)
 	dialFn               func(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error)
 	executorFactory      func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor
@@ -283,6 +289,9 @@ func dedupeFilterFields(filters []entity.Filter) []string {
 func (s *chartService) Query(ctx context.Context, req *entity.ChartQueryRequest) (entity.ChartDataResult, error) {
 	dataset, err := s.getDatasetModelFn(ctx, req.DatasetID)
 	if err != nil {
+		return entity.ChartDataResult{}, err
+	}
+	if err := s.dispatchExtractDataset(dataset); err != nil {
 		return entity.ChartDataResult{}, err
 	}
 
@@ -783,6 +792,25 @@ func (s *chartService) connect(ctx context.Context, ds *model.Datasource) (datas
 // SetSecurityKey injects the AES key; nil/empty disables decryption.
 func (s *chartService) SetSecurityKey(key []byte) {
 	s.key = key
+}
+
+// SetExtractDatasourceID 注入抽取存储数据源（issue #118 预留，0=未启用）。
+func (s *chartService) SetExtractDatasourceID(id int) {
+	s.extract = extract.Guard{DatasourceID: id}
+}
+
+// dispatchExtractDataset 是抽取数据集的查询分派位（issue #118 预留，灌数在后续期实现）：
+// mode=extract 的数据集将来在此改连抽取存储数据源（s.extract.DatasourceID）并按
+// extract.TableName(dataset.ID) 取数；本期该路径未实现，显式报错而非静默按直连执行
+// （直连路径零回归是本期验收线）。
+func (s *chartService) dispatchExtractDataset(dataset *model.Dataset) error {
+	if dataset.Mode != "extract" {
+		return nil
+	}
+	return router.NewBusinessError(
+		response.CodeBadRequest,
+		fmt.Sprintf("extract-mode dataset %d is reserved (issue #118): ingestion is not implemented yet", dataset.ID),
+	)
 }
 
 func (s *chartService) dial(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {

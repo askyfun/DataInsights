@@ -11,6 +11,7 @@ import (
 	"data-insights/internal/database"
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/extract"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
 
@@ -43,12 +44,19 @@ type Service interface {
 	// SetSecurityKey injects the 32-byte AES key used to encrypt datasource
 	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
 	SetSecurityKey(key []byte)
+
+	// SetExtractDatasourceID injects the designated extract storage datasource
+	// (issue #118 reservation, EXTRACT_DATASOURCE_ID). 0 = disabled. While set,
+	// List hides that datasource from the regular list (it is infrastructure,
+	// not a user-facing connection); GetByID still resolves it.
+	SetExtractDatasourceID(id int)
 }
 
 // datasourceService implements the Service interface
 type datasourceService struct {
-	db  *bun.DB
-	key []byte // 32-byte AES key; nil => plaintext passthrough
+	db      *bun.DB
+	key     []byte // 32-byte AES key; nil => plaintext passthrough
+	extract extract.Guard
 
 	connectFn            func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error)
 	getDatasourceModelFn func(ctx context.Context, id int) (*model.Datasource, error)
@@ -67,10 +75,21 @@ func (s *datasourceService) SetSecurityKey(key []byte) {
 	s.key = key
 }
 
+// SetExtractDatasourceID 注入抽取存储数据源（issue #118 预留，0=未启用）。
+func (s *datasourceService) SetExtractDatasourceID(id int) {
+	s.extract = extract.Guard{DatasourceID: id}
+}
+
 // List returns all datasources with pagination
 func (s *datasourceService) List(ctx context.Context, limit, offset int) ([]entity.Datasource, error) {
 	var datasources []model.Datasource
 	q := s.db.NewSelect().Model(&datasources).Where("deleted_at IS NULL")
+	// 抽取存储数据源不进常规列表（issue #118 预留）：它是统一存储基础设施，
+	// 用户在数据集/数据源管理里不应看到、也不该选中它。SQL 级排除保证
+	// limit/offset 语义仍对「可见集合」成立。
+	if s.extract.Enabled() {
+		q = q.Where("id <> ?", s.extract.DatasourceID)
+	}
 	if limit > 0 {
 		q = q.Limit(limit)
 	}

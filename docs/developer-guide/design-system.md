@@ -5,7 +5,7 @@
 > **受众**：维护 Data Insights 前端的工程师，以及在此基础上做二次开发的协作者。
 > **主任务**：拖拽式 BI 可视化分析 —— 选数据源 → 建数据集 → 拖字段配图 → 保存/分享。
 > **范围**：全站 11 个页面（图表构建 / 图表列表 / 数据集列表·详情·编辑 / 数据源列表·详情 / 分享列表 / 分享只读页 / 仪表盘列表 / 仪表盘编辑器）与首页的**表面层级、色彩、字体、页面骨架、组件样式**。
-> **不覆盖**：图表本身的视觉（`lib/chartOptions.ts` 的 ECharts option 构造）、国际化文案、后端。
+> **不覆盖**：图表本身的视觉（`lib/chartOptions.ts` 的 ECharts option 构造；其**主题取色**见 §10）、国际化文案、后端。
 > **依据来源**：全部结论来自源码取证（读 `styles/index.css`、`pages/*.tsx`、antd 6.6.4 发行产物），不含用户调研或可用性测试数据。
 > **关键假设**：产品定位为**内部密集型数据工具**，不面向 C 端；因此优先"一屏塞更多"而非"留白显高级"。
 
@@ -35,7 +35,9 @@
 
 **克制的工具感（restrained instrument）** —— 信息密度优先，颜色只用作语义信号。
 
-刻意**不**采用：深色模式、玻璃拟态、装饰性渐变、为"高级感"增加留白。理由：本产品的用户是每天看同一批数据的分析人员，装饰不产生价值，留白直接减少一屏可见的数据行。
+刻意**不**采用：玻璃拟态、装饰性渐变、为"高级感"增加留白。理由：本产品的用户是每天看同一批数据的分析人员，装饰不产生价值，留白直接减少一屏可见的数据行。
+
+> 深色模式早期也在"不采用"之列，现已作为可切换皮肤落地（浅色 / 深色 / 跟随系统），机制见 §10。它**不改变**上述性格：深色只是把同一套明度阶梯倒置，颜色仍只作语义信号、不加装饰。
 
 ### 1.3 参考观察（与提议规则分开记录）
 
@@ -109,6 +111,8 @@
 ```
 
 **为什么挂在 `:root` 而不是页面作用域**：三类消费者跨页面边界 —— ① 各页的页面骨架；② portal 到 `body` 的 `Drawer`/`Modal`/`Dropdown`；③ 在 `ShareView` 下复用的 `PivotTable`/`TableChart`/`KpiCard`。挂在页面作用域上，后两者取不到值。
+
+> 上表为**浅色**值。深色下同名 token 由 `[data-theme="dark"]` 整组覆盖（机制与约束见 §10）。
 
 > **对比度状态：未测量。** 本表数值取自 antd 6 的色阶与中性灰推导，未用工具计算 WCAG 对比度，也未做色盲模拟。`--dr-text-3`（`#8c95a1`）在 `--dr-surface` 上的对比度属于"辅助文字"档，是否满足 AA 需实测确认。**不要在本节被引用为已通过无障碍审计。**
 
@@ -429,6 +433,44 @@ npx vitest run 全通过（其中 surfaces.test.tsx 必须仍能断言页头不�
 ⚠️ 本文件的验证状态以第 8 节为准。自动化检查已通过；真机目视、对比度测量
 与无障碍审计尚未执行，不要把它们当作已完成项。
 ```
+
+---
+
+---
+
+## 10. 主题 / 皮肤（浅色 · 深色 · 跟随系统）
+
+### 10.1 机制
+
+- **单一事实源**：`frontend/src/lib/theme.ts` 是模块级 store（非每组件各持 `useState`，因为 ConfigProvider、顶栏控件、图表取色要共享同一份）。偏好三值 `light | dark | system`，持久化在 `localStorage['theme']`，默认 `system`。
+- **解析值镜像到 `<html data-theme>`**：`initTheme()` 在 `main.tsx` render 前调用，首帧即正确（避免闪白/闪黑）。`data-theme` 同时驱动 CSS 变量覆盖与 antd 算法。
+- **跟随系统**：监听 `matchMedia('(prefers-color-scheme: dark)')` 的 `change` 事件，系统深浅色切换时**实时**重算并通知订阅者。
+
+### 10.2 三层联动
+
+| 层 | 落点 | 深色如何生效 |
+|----|------|--------------|
+| CSS 变量 | `styles/index.css`：`:root`（浅色）+ `[data-theme="dark"]`（整组覆盖） | 同名 token 倒置明度，消费者一律走 `var()` |
+| antd 组件 | `main.tsx` 的 `ConfigProvider.theme` | `algorithm` 按解析主题切 `darkAlgorithm`/`defaultAlgorithm`；Table 的 `headerBg/borderColor/rowHoverBg` 用 `var(--dr-*)`（antd 原样落到 CSS 变量，浏览器解析，无需 JS 判断深浅） |
+| ECharts canvas | `lib/chartOptions.ts` 的 `chartPalette()` | 见 10.3 |
+
+### 10.3 ECharts 取色（最易回归的一处）
+
+ECharts 渲染在 canvas 上，**拿不到 CSS 变量**（`var()` 不会被解析），因此主题色必须在构造 option 时算成**字面色值**。
+
+- 宿主元素挂 `.dr-chart-host` 类；`[data-theme="dark"] .dr-chart-host` 就地重定义相关 `--dr-*`。
+- `chartPalette(host, theme)` 用 `getComputedStyle(host)` 读出解析后的真实颜色喂进 option；非 DOM（纯逻辑单测）时按 `theme` 回落对应调色板。
+- `ChartView` 与 `ChartCanvas` 把 `useResolvedTheme()` 纳入 option 的 `useMemo` 依赖 → 切主题即重建 option、实时重绘。
+- ⚠️ `chartOptions.ts` 的 `DARK_CHART_PALETTE` 与 `[data-theme="dark"] .dr-chart-host` 的字面量**必须同源**，改一处要改两处（有单测钉死）。
+
+### 10.4 深色灰阶约束
+
+- 沿用「中性偏冷」纪律，只倒置明度，**保持 L0 画布 < L1 面板 < L2 下沉** 的前后关系不翻转。
+- `--dr-canvas` 与 `--dr-surface` 在深色下**不能相等**：表头用 canvas、斑马纹奇行用 surface，一旦相等表头会与奇数行连成一片。故 canvas 取比 surface 更深的值。
+
+### 10.5 控件
+
+顶栏语言切换右侧的主题下拉（浅色 / 深色 / 跟随系统），移动端 Drawer 内同款。控件按「用户选的那一项」高亮（选 system 时即便渲染成 dark 也显示 system）。
 
 ---
 

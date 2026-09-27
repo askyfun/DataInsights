@@ -8,9 +8,11 @@ import {
   FunctionOutlined,
   LinkOutlined,
   PlayCircleOutlined,
+  RedoOutlined,
   ReloadOutlined,
   SaveOutlined,
   SwapOutlined,
+  UndoOutlined,
 } from '@ant-design/icons';
 import {
   DndContext,
@@ -101,6 +103,7 @@ import {
   buildQuerySpecDocument,
   parseQuerySpecDocument,
 } from '../lib/querySpec';
+import { useResolvedTheme } from '../lib/theme';
 import {
   BindingInstance,
   BoundField,
@@ -647,6 +650,15 @@ interface ChartCanvasProps {
   chartStyle: ChartStyleConfig;
 }
 
+/** 离屏主题探针样式：不影响布局，仅供 chartPalette 读取当前主题的 --dr-*。 */
+const CHART_PROBE_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  width: 0,
+  height: 0,
+  overflow: 'hidden',
+  pointerEvents: 'none',
+};
+
 /** 图表渲染错误兜底：阻止 ECharts 抛错清空整棵 React 树（白屏丢工作）。 */
 class ChartErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -681,6 +693,14 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   metricUnits,
   chartStyle,
 }) => {
+  // 主题宿主探针（与 ChartView 同一机制）：canvas 取不到 CSS 变量，须在构造 option 时
+  // 把当前主题的颜色算成字面值。resolvedTheme 入依赖 → 切主题即重建 option 实时重绘。
+  const resolvedTheme = useResolvedTheme();
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [hostEl, setHostEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setHostEl(hostRef.current);
+  }, []);
   // option 构造走共享纯函数 buildChartOption（与 ShareView 同一出口）；
   // 「字段名 → 显示名」映射依赖 store 状态（queryConfig/chartBuilderFields），
   // 在组件体内计算为纯数据 labels 后传入。
@@ -740,13 +760,30 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
             }))
         : undefined;
 
-    return buildChartOption(config.chartType, data, chartStyle, labels, {
-      title: config.title,
-      dimensions,
-      metrics,
-      metricSlots,
-    });
-  }, [chartStyle, config, data, dimensionLabels, metricAliases, metricUnits]);
+    return buildChartOption(
+      config.chartType,
+      data,
+      chartStyle,
+      labels,
+      {
+        title: config.title,
+        dimensions,
+        metrics,
+        metricSlots,
+      },
+      resolvedTheme,
+      hostEl
+    );
+  }, [
+    chartStyle,
+    config,
+    data,
+    dimensionLabels,
+    metricAliases,
+    metricUnits,
+    hostEl,
+    resolvedTheme,
+  ]);
 
   if (loading) {
     return (
@@ -811,11 +848,14 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   }
 
   return (
-    <ReactECharts
-      option={chartOption}
-      style={{ height: '100%', width: '100%' }}
-      opts={{ renderer: 'canvas' }}
-    />
+    <>
+      <div ref={hostRef} className="dr-chart-host" aria-hidden style={CHART_PROBE_STYLE} />
+      <ReactECharts
+        option={chartOption}
+        style={{ height: '100%', width: '100%' }}
+        opts={{ renderer: 'canvas' }}
+      />
+    </>
   );
 };
 
@@ -1143,6 +1183,49 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 />
               </SettingRow>
             )}
+
+            {showStyleControl('tableShowIndex') && (
+              <SettingRow label="序号列">
+                <Switch
+                  checked={chartStyle.tableShowIndex ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableShowIndex: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('tableWordWrap') && (
+              <SettingRow label="自动换行">
+                <Switch
+                  checked={chartStyle.tableWordWrap ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableWordWrap: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('tableFreezeDimensions') && (
+              <SettingRow label="冻结维度列">
+                <Switch
+                  checked={chartStyle.tableFreezeDimensions ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableFreezeDimensions: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('tableNullDisplay') && (
+              <SettingRow label="空值显示">
+                <Select
+                  style={{ width: 160 }}
+                  value={chartStyle.tableNullDisplay ?? 'raw'}
+                  onChange={(value) => onChartStyleChange({ tableNullDisplay: value })}
+                  options={[
+                    { value: 'raw', label: '原样' },
+                    { value: 'dash', label: '横杠（--）' },
+                    { value: 'blank', label: '空白' },
+                    { value: 'zero', label: '零（0）' },
+                  ]}
+                />
+              </SettingRow>
+            )}
           </div>
         </Card>
       )}
@@ -1306,6 +1389,11 @@ const ChartBuilder: React.FC = () => {
     tableColumns,
     setTablePagination,
     chartQueryResponse,
+    undo,
+    redo,
+    resetHistory,
+    past,
+    future,
   } = useStore();
 
   /** 桌面端左栏顶部的数据集标识取对象而非 id，免得模板里重复 find。 */
@@ -1711,6 +1799,9 @@ const ChartBuilder: React.FC = () => {
       if (restoredQueryOptions && Object.keys(restoredQueryOptions).length > 0) {
         setChartQueryOptionsState(restoredQueryOptions);
       }
+      // 载入既有配置不构成「可撤销的一步」：清掉加载过程写入的历史，
+      // 否则用户第一次撤销会退回加载前的空白态。
+      resetHistory();
     },
     [
       setChartBuilderConfig,
@@ -1722,6 +1813,7 @@ const ChartBuilder: React.FC = () => {
       setMetricFormats,
       setChartStyleState,
       setChartQueryOptionsState,
+      resetHistory,
     ]
   );
 
@@ -2234,6 +2326,31 @@ const ChartBuilder: React.FC = () => {
     chartQueryOptions,
   ]);
 
+  // 撤销/重做快捷键：⌘/Ctrl+Z 撤销，⌘/Ctrl+⇧+Z 或 ⌘/Ctrl+Y 重做。
+  // 焦点在输入框/文本域/可编辑区时放行——让浏览器做原生文本级撤销，不抢编辑框内的 ⌘Z。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [undo, redo]);
+
   useEffect(() => {
     const loadChartConfig = async () => {
       if (editingChartId && selectedDatasetId) {
@@ -2432,6 +2549,10 @@ const ChartBuilder: React.FC = () => {
               .filter(([, format]) => Boolean(format))
           )}
           rowSize={chartStyle.tableRowSize}
+          showIndex={chartStyle.tableShowIndex}
+          wordWrap={chartStyle.tableWordWrap}
+          nullDisplay={chartStyle.tableNullDisplay}
+          freezeDimensions={chartStyle.tableFreezeDimensions}
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
           // 排序状态受控：单一事实源是 queryConfig.sort（bindingId 引用），
           // 表头箭头只反映它，避免"看起来排了、数据没排"的不一致。
@@ -2831,6 +2952,24 @@ const ChartBuilder: React.FC = () => {
                 >
                   {editingChartId ? '更新' : '保存'}
                 </Button>
+                <Tooltip title="撤销（⌘Z）">
+                  <Button
+                    size="small"
+                    icon={<UndoOutlined />}
+                    onClick={undo}
+                    disabled={past.length === 0}
+                    data-testid="undo-button"
+                  />
+                </Tooltip>
+                <Tooltip title="重做（⌘⇧Z）">
+                  <Button
+                    size="small"
+                    icon={<RedoOutlined />}
+                    onClick={redo}
+                    disabled={future.length === 0}
+                    data-testid="redo-button"
+                  />
+                </Tooltip>
                 <Button size="small" icon={<ReloadOutlined />} onClick={handleReset}>
                   重置
                 </Button>

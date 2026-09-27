@@ -960,7 +960,7 @@ export interface components {
             query_sql: string | null;
             /** @description "table" 或 "sql"。 */
             query_type: string;
-            /** @description 当前后端语义为 "direct"（前端类型含 "accelerated"，后端不产出）。 */
+            /** @description 数据集取数模式："direct"（直连，默认）| "extract"（抽取，issue #118 架构预留： 数据灌入统一 StarRocks 存储、查询直查该库）。本期 extract 仅落类型与守卫， 灌数与 extract 查询路径未实现（查询会显式报错）。 */
             mode: string;
             accelerate_config: string | null;
             description: string | null;
@@ -988,7 +988,7 @@ export interface components {
             query_sql?: string;
             /** @description "table" 或 "sql"。 */
             query_type: string;
-            /** @description 为空时后端缺省 "direct"。 */
+            /** @description 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue #118，本期仅落类型）。 */
             mode?: string;
             description?: string;
             /** @description JSON 数组字符串（非数组本体）。 */
@@ -1007,7 +1007,7 @@ export interface components {
             query_sql?: string;
             /** @description "table" 或 "sql"。 */
             query_type: string;
-            /** @description 为空时后端缺省 "direct"。 */
+            /** @description 为空时后端缺省 "direct"；"extract" 为抽取数据集预留值（issue #118，本期仅落类型）。 */
             mode?: string;
             description?: string;
             /** @description JSON 数组字符串（非数组本体）。 */
@@ -1511,7 +1511,7 @@ export interface components {
         /** @description 查询层过滤条件（query.FilterConfig）：JSON 键是 op，与旧协议 entity.Filter 的 operator 不同；Batch 3 chart_spec 协议统一采用本形状。 */
         FilterConfig: {
             field: string;
-            /** @description eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull； 未知值后端按 "=" 回退（FilterOperator.ToString default）。 */
+            /** @description eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull / startsWith / endsWith / isEmptyString / isNotEmptyString； 未知算子后端 fail-closed 渲染恒假谓词（1 = 0），不静默退化为等值。 */
             op: string;
             value: unknown;
             value_end?: unknown;

@@ -57,6 +57,13 @@ const (
 	FilterBetween   FilterOperator = "between"
 	FilterIsNull    FilterOperator = "isNull"
 	FilterIsNotNull FilterOperator = "isNotNull"
+	// 字符串条件算子（对齐火山「条件筛选」词表）：前缀/后缀匹配与空串判定。
+	FilterStartsWith    FilterOperator = "startsWith"
+	FilterEndsWith      FilterOperator = "endsWith"
+	FilterIsEmptyString FilterOperator = "isEmptyString"
+	// isNotEmptyString 语义是「非空串」= IS NOT NULL AND <> ''，渲染两条谓词，
+	// 因此没有单一 SQL token 可映射，ToString 不为其提供映射（builder 内直接渲染）。
+	FilterIsNotEmptyString FilterOperator = "isNotEmptyString"
 )
 
 // MetricConfig 指标配置
@@ -324,6 +331,10 @@ func (op FilterOperator) ToString() string {
 		return "IS NULL"
 	case FilterIsNotNull:
 		return "IS NOT NULL"
+	case FilterStartsWith, FilterEndsWith:
+		return "LIKE"
+	case FilterIsEmptyString:
+		return "="
 	default:
 		return "="
 	}

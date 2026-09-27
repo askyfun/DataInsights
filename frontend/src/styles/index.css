@@ -53,6 +53,43 @@
   --dr-radius-sm: 6px; /* 控件圆角（与 antd 默认一致，故不再单独定义容器圆角） */
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   深色主题（皮肤）
+
+   切换由 lib/theme.ts 驱动：<html data-theme='dark'> 时整组覆盖同名 token，
+   消费者（页面骨架 / portal 浮层 / 图表组件）全部走 var()，无需各自判断主题。
+   灰阶沿用同一「中性偏冷」纪律，只把明度倒置：画布最深、面板次之、下沉最亮，
+   保持 L0<L1<L2 的前后关系不翻转。描边 / 文本 / accent 取深色下的等效对比度值。
+
+   ⚠️ --dr-canvas 与 --dr-surface 在深色下**不能相等**：表格斑马纹靠
+   nth-child(odd)=surface / nth-child(even)=sunken 分行，表头用 canvas；一旦
+   canvas==surface，表头与奇数行会连成一片。故 canvas 取比 surface 更深的 #141414。
+   ───────────────────────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --dr-canvas: #141414; /* L0 画布：比面板更深，勾出卡片边界 */
+  --dr-surface: #1f1f1f; /* L1 面板：卡片、浮层 */
+  --dr-sunken: #2a2a2a; /* L2 下沉：拖放区、占位、斑马纹偶行 */
+
+  --dr-border: #303030; /* 常规发丝线 */
+  --dr-border-strong: #434343; /* 需要被看见的线 */
+
+  --dr-text-1: #e6e8eb; /* 标题、数值 */
+  --dr-text-2: #b0b7c3; /* 正文 */
+  --dr-text-3: #8c95a1; /* 计数、辅助、图标 */
+  --dr-text-4: #5a6270; /* 占位图形、最次要提示 */
+
+  --dr-accent: #1677ff; /* 品牌蓝深色下仍可用，保持与浅色同一强调色 */
+  --dr-accent-soft: #111d2c; /* accent 的深底：悬停、选中行 */
+
+  --dr-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45); /* 深色下投影更实 */
+
+  /* 语义色三件套：深色下提亮一档，避免在深底上对比不足 */
+  --dr-dim: #4096ff;
+  --dr-metric: #73d13d;
+  --dr-filter: #ffa940;
+  --dr-date: #9254de;
+}
+
 body {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
@@ -458,4 +495,23 @@ h5.ant-typography {
 .chart-builder-page .ant-table-wrapper .ant-table-thead > tr > th {
   background: var(--dr-sunken) !important;
   border-bottom: 1px solid var(--dr-border-strong) !important;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   图表宿主 · ECharts canvas 取色
+
+   ECharts 渲染在 canvas 上，拿不到 CSS 变量（var() 不会被解析），所以只能把
+   颜色**算成实际值**喂进 option。宿主 div 挂这个类，深色下就地把文本/轴线/网格/
+   tooltip 底色重定义为字面色值；chartPalette() 用 getComputedStyle 读宿主即可
+   拿到已解析的真实颜色，浅色保持继承 :root（不改任何浅色表现，零回归）。
+
+   这些字面量必须与上面 [data-theme='dark'] 灰阶同源，改一处要改两处。
+   ───────────────────────────────────────────────────────────────────────────── */
+[data-theme="dark"] .dr-chart-host {
+  --dr-text-1: #e6e8eb;
+  --dr-text-2: #b0b7c3;
+  --dr-text-3: #8c95a1;
+  --dr-border: #303030;
+  --dr-border-strong: #434343;
+  --dr-surface: #1f1f1f;
 }

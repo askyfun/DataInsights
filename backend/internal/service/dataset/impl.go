@@ -11,9 +11,12 @@ import (
 	"data-insights/internal/database"
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/extract"
 	"data-insights/internal/idgen"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
+	"data-insights/internal/response"
+	"data-insights/internal/router"
 	dsservice "data-insights/internal/service/datasource"
 
 	"github.com/uptrace/bun"
@@ -39,12 +42,17 @@ type Service interface {
 	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
 	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
 	SetSecurityKey(key []byte)
+
+	// SetExtractDatasourceID injects the designated extract storage datasource
+	// (issue #118 reservation, EXTRACT_DATASOURCE_ID). 0 = disabled.
+	SetExtractDatasourceID(id int)
 }
 
 // datasetService implements the Service interface
 type datasetService struct {
 	db                   *bun.DB
 	key                  []byte // 32-byte AES key; nil => plaintext passthrough
+	extract              extract.Guard
 	connectFn            func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error)
 	dialFn               func(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error)
 	getDatasetModelFn    func(ctx context.Context, id int) (*model.Dataset, error)
@@ -91,6 +99,11 @@ func (s *datasetService) GetByID(ctx context.Context, id int) (*entity.Dataset, 
 
 // Create creates a new dataset
 func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
+	// 抽取存储数据源不再承担普通数据集（issue #118 预留守卫）：它只放抽取表，
+	// 在其上建数据集会让「统一存储」与用户数据混在一处。
+	if err := s.extract.CheckDatasource(ds.DatasourceID); err != nil {
+		return nil, router.NewBusinessError(response.CodeBadRequest, err.Error())
+	}
 	m := toDatasetModel(ds)
 	m.CreatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	// bun 对零值 sql.NullTime 发显式 NULL（绕过列 DEFAULT CURRENT_TIMESTAMP），
@@ -104,6 +117,10 @@ func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entit
 
 // Update updates an existing dataset
 func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error) {
+	// 同 Create：禁止把数据集改指到抽取存储数据源上（issue #118 预留守卫）。
+	if err := s.extract.CheckDatasource(ds.DatasourceID); err != nil {
+		return nil, router.NewBusinessError(response.CodeBadRequest, err.Error())
+	}
 	m := toDatasetModel(ds)
 	// 整行 WherePK 更新会把合并基带入的旧 updated_at 原样写回，导致更新后时间戳
 	// 不前进（DB 无触发器兜底）。显式打当前时间，让 bun 的整行更新写入新值；
@@ -452,6 +469,11 @@ func (s *datasetService) connect(ctx context.Context, ds *model.Datasource) (dat
 // SetSecurityKey injects the AES key; nil/empty disables decryption.
 func (s *datasetService) SetSecurityKey(key []byte) {
 	s.key = key
+}
+
+// SetExtractDatasourceID 注入抽取存储数据源守卫（issue #118 预留，0=未启用）。
+func (s *datasetService) SetExtractDatasourceID(id int) {
+	s.extract = extract.Guard{DatasourceID: id}
 }
 
 func (s *datasetService) dial(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {
