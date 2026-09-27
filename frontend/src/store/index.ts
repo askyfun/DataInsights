@@ -17,8 +17,6 @@ import {
   DatasourceFormData,
   datasetsApi,
   datasourcesApi,
-  ShareFormData,
-  sharesApi,
 } from '../api';
 import type { UndoableSnapshot } from './history';
 import { withHistory } from './history';
@@ -510,9 +508,6 @@ export interface AppState {
   executeChartQuery: (request: ChartQueryRequest) => Promise<boolean>;
   setTablePagination: (pagination: { page: number; pageSize: number; total: number }) => void;
 
-  // Actions - Shares
-  createShare: (data: ShareFormData) => Promise<string>;
-
   // Actions - Undo/Redo（图表构建页配置时间线，见 store/history.ts）
   undo: () => void;
   redo: () => void;
@@ -712,12 +707,6 @@ export const useStore = create<AppState>()(
       set((state) => ({
         charts: state.charts.filter((c) => c.id !== id),
       }));
-    },
-
-    // Shares actions
-    createShare: async (data: ShareFormData) => {
-      const response = await sharesApi.create(data);
-      return response.data.data.token;
     },
 
     // Chart Builder actions

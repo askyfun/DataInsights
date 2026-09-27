@@ -23,8 +23,6 @@ import DatasetDetail from './pages/DatasetDetail';
 import DatasetEdit from './pages/DatasetEdit';
 import DatasourcePage from './pages/Datasource';
 import DatasourceDetailPage from './pages/DatasourceDetail';
-import SharePage from './pages/Share';
-import ShareView from './pages/ShareView';
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
@@ -226,8 +224,6 @@ const App: React.FC = () => {
               <Route path="/datasets/:id/edit" element={<DatasetEdit />} />
               <Route path="/chart-builder" element={<ChartBuilder />} />
               <Route path="/charts" element={<ChartsPage />} />
-              <Route path="/shares" element={<SharePage />} />
-              <Route path="/share/:token" element={<ShareView />} />
             </Routes>
           </Content>
         </Layout>
