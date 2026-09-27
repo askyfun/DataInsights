@@ -8,7 +8,11 @@ import { createIntl, IntlProvider } from 'react-intl';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { cache, messages, useLocale } from './i18n/useLocale';
+import { initTheme, useTheme } from './lib/theme';
 import './styles/index.css';
+
+// 主题在 render 前接线：装载偏好、把初值写到 <html data-theme>，让首帧即正确（避免闪白/闪黑）。
+initTheme();
 
 // Sentry DSN 走构建期环境变量（VITE_SENTRY_DSN），与后端 SENTRY_DSN 同一套口径：
 // DSN 不该硬编码在源码里，谁拿到仓库谁就能往你的配额里灌事件。
@@ -30,6 +34,7 @@ if (sentryDsn) {
 
 const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { locale } = useLocale();
+  const { resolved } = useTheme();
   const intl = createIntl(
     {
       locale,
@@ -45,7 +50,7 @@ const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
       <ConfigProvider
         locale={antdLocale}
         theme={{
-          algorithm: theme.defaultAlgorithm,
+          algorithm: resolved === 'dark' ? theme.darkAlgorithm : theme.defaultAlgorithm,
           token: {
             colorPrimary: '#1677ff',
           },
@@ -55,10 +60,13 @@ const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
               cellPaddingInlineSM: 8,
               cellPaddingBlockMD: 6,
               cellPaddingInlineMD: 10,
-              headerBg: '#fafafa',
-              headerColor: '#333',
-              borderColor: '#e8e8e8',
-              rowHoverBg: '#f0f7ff',
+              // 底色/描边随主题走 CSS 变量（[data-theme='dark'] 时自动切深）。
+              // hoverBg 用 var()：antd 原样落到 --ant-table-row-hover-bg，浏览器在
+              // :hover 规则里解析，无需 JS 判断深浅色。表头字色交给 antd 算法
+              // （深色下自动给亮字），不再钉死 #333。
+              headerBg: 'var(--dr-canvas)',
+              borderColor: 'var(--dr-border)',
+              rowHoverBg: 'var(--dr-accent-soft)',
             },
             // 全局卡片内边距收紧（默认 bodyPaddingSM/headerPaddingSM 均为 12，非 small 卡片
             // bodyPadding/headerPadding 为 24）。屏幕利用率优先：8/16 仍留有节奏，但一张卡片

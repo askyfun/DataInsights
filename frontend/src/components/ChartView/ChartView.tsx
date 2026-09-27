@@ -1,9 +1,10 @@
 import { Result } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { type CSSProperties, useCallback, useMemo } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Chart, type ChartDataResponse, isPivotV2Payload } from '../../api';
 import { type ChartType, migrateChartConfig } from '../../lib/chartConfigSchema';
 import { buildChartOption, isEmptyPayload, normalizeChartStyle } from '../../lib/chartOptions';
+import { useResolvedTheme } from '../../lib/theme';
 import { chartDefinitions } from '../ChartBuilder/chartDefinitions';
 import KpiCard from '../ChartBuilder/KpiCard';
 import PivotTable from '../ChartBuilder/PivotTable';
@@ -35,6 +36,15 @@ interface ChartViewProps {
 
 /** 分享页的 ECharts 容器尺寸（改造前的原值，勿改：ShareView 行为按此冻结）。 */
 const SHARE_ECHARTS_STYLE: CSSProperties = { height: 'calc(100vh - 250px)', minHeight: 400 };
+
+/** 离屏主题探针样式：不影响布局，仅供 getComputedStyle 读取当前主题的 --dr-*。 */
+const PROBE_STYLE: CSSProperties = {
+  position: 'absolute',
+  width: 0,
+  height: 0,
+  overflow: 'hidden',
+  pointerEvents: 'none',
+};
 
 /**
  * 「图表 + 数据 → 渲染」的唯一出口。
@@ -89,6 +99,20 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
 
   // option 构造与 builder 预览共用 buildChartOption 唯一出口（结构化聚合
   // 负载与 legacy 裸行回退两臂都在函数内部处理）。
+  //
+  // 主题宿主探针：ECharts 在 canvas 上渲染取不到 CSS 变量，须在构造 option 时把颜色
+  // 算成字面值（见 chartPalette）。用一个离屏探针元素承载当前主题的 --dr-* 值：
+  //  - 挂载前探针不存在 → 取浅色兜底；
+  //  - 主题变化会连带重算 resolvedTheme → useMemo 重跑，此时 <html data-theme> 已由
+  //    store 先行更新，探针（若已挂载）即反映新主题 → 实时重绘。
+  // resolvedTheme 入依赖是重算的扳机（其值本身不参与 option 构造，只驱动重算时机）。
+  const resolvedTheme = useResolvedTheme();
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [hostEl, setHostEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setHostEl(hostRef.current);
+  }, []);
+
   const chartOption = useMemo(() => {
     // combo 双轴：按图型定义的 metric 槽位（primary_values/secondary_values）与持久化文档的
     // metricGroups 按 index 对齐派生 metricSlots。槽位名取自定义的 fieldGroup id（非组的位置 id）。
@@ -106,15 +130,25 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
               ),
             }))
         : undefined;
-    return buildChartOption(chartDoc.chartType, data, chartStyle, displayLabels, {
-      title: chartDoc.title || chart.name,
-      dimensions: chartDoc.query.dimensionGroups.flatMap((g) =>
-        g.bindings.map((b) => nameOf(b.fieldId))
-      ),
-      metrics: chartDoc.query.metricGroups.flatMap((g) => g.bindings.map((b) => nameOf(b.fieldId))),
-      metricSlots,
-    });
-  }, [chart, chartDoc, data, chartStyle, displayLabels, nameOf]);
+    return buildChartOption(
+      chartDoc.chartType,
+      data,
+      chartStyle,
+      displayLabels,
+      {
+        title: chartDoc.title || chart.name,
+        dimensions: chartDoc.query.dimensionGroups.flatMap((g) =>
+          g.bindings.map((b) => nameOf(b.fieldId))
+        ),
+        metrics: chartDoc.query.metricGroups.flatMap((g) =>
+          g.bindings.map((b) => nameOf(b.fieldId))
+        ),
+        metricSlots,
+      },
+      resolvedTheme,
+      hostEl
+    );
+  }, [chart, chartDoc, data, chartStyle, displayLabels, nameOf, hostEl, resolvedTheme]);
 
   const isTableLike = chartDoc.chartType === 'table' || chartDoc.chartType === 'pivot';
   // 聚合负载的 table/pivot 臂：TableResponse 带 pagination、PivotResponse 不带，
@@ -166,13 +200,18 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
 
   if (chartOption) {
     return (
-      <div style={echartsStyle ?? SHARE_ECHARTS_STYLE}>
-        <ReactECharts
-          option={chartOption}
-          style={{ height: '100%', width: '100%' }}
-          opts={{ renderer: 'canvas' }}
-        />
-      </div>
+      <>
+        {/* 离屏主题探针：承载当前主题的 --dr-* 供 chartPalette 取字面色值（见上方说明）。
+            aria-hidden + 离屏定位，不参与布局。 */}
+        <div ref={hostRef} className="dr-chart-host" aria-hidden style={PROBE_STYLE} />
+        <div style={echartsStyle ?? SHARE_ECHARTS_STYLE}>
+          <ReactECharts
+            option={chartOption}
+            style={{ height: '100%', width: '100%' }}
+            opts={{ renderer: 'canvas' }}
+          />
+        </div>
+      </>
     );
   }
 

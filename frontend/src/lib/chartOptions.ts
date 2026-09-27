@@ -108,6 +108,60 @@ export interface ChartOptionContext {
   metricSlots?: Array<{ slot: string; metrics: string[] }>;
 }
 
+/**
+ * 图表取色（ECharts 在 canvas 上渲染，拿不到 CSS 变量，必须算成字面色值喂进 option）。
+ * 由 chartPalette() 从「图表宿主元素」的已解析样式读出，浅色继承 :root、深色由
+ * [data-theme='dark'] .dr-chart-host 就地重定义（见 styles/index.css）。
+ */
+export interface ChartPalette {
+  text: string;
+  axisText: string;
+  axisLine: string;
+  splitLine: string;
+  tooltipBg: string;
+}
+
+const LIGHT_CHART_PALETTE: ChartPalette = {
+  text: '#1f2328',
+  axisText: '#57606a',
+  axisLine: '#d9dde3',
+  splitLine: '#e6e8eb',
+  tooltipBg: '#ffffff',
+};
+
+/** 与 [data-theme='dark'] .dr-chart-host 灰阶同源，改一处要改两处。 */
+export const DARK_CHART_PALETTE: ChartPalette = {
+  text: '#e6e8eb',
+  axisText: '#b0b7c3',
+  axisLine: '#434343',
+  splitLine: '#303030',
+  tooltipBg: '#1f1f1f',
+};
+
+/**
+ * 读取宿主元素解析后的取色。theme 由调用方（useResolvedTheme()）传入并纳入 option 的
+ * useMemo 依赖 → 切主题即重算，且 host 的 --dr-* 届时已随 <html data-theme> 更新；
+ * 非 DOM 环境（纯逻辑单测）host 为空时按 theme 回落对应调色板，行为可预期。
+ */
+export function chartPalette(host: Element | null, theme: 'light' | 'dark'): ChartPalette {
+  const fallback = theme === 'dark' ? DARK_CHART_PALETTE : LIGHT_CHART_PALETTE;
+  if (!host || typeof window === 'undefined') {
+    return fallback;
+  }
+  const styles = window.getComputedStyle(host);
+  const read = (name: string, color: string): string => {
+    const value = styles.getPropertyValue(name).trim();
+    return value === '' ? color : value;
+  };
+  return {
+    text: read('--dr-text-1', fallback.text),
+    axisText: read('--dr-text-2', fallback.axisText),
+    axisLine: read('--dr-border-strong', fallback.axisLine),
+    splitLine: read('--dr-border', fallback.splitLine),
+    tooltipBg: read('--dr-surface', fallback.tooltipBg),
+  };
+}
+
 /** legacy 裸行按列名索引 */
 type RawRow = Record<string, unknown>;
 
@@ -258,13 +312,18 @@ function applyStack<T extends StackableSeries>(
  * @param labels 列名 → 显示名（builder 由 dimensionLabels/metricAliases/metricUnits
  *               组合计算；share 直接用 displayLabels），缺失时回落列名
  * @param context 标题与维度/指标列名（顺序即配置顺序）
+ * @param theme 解析后的主题（light/dark）：决定取色兜底，并与 host 一起驱动实时重绘。
+ * @param host 图表宿主 DOM 元素（可选）：提供时按当前主题解析取色（标题/轴/网格/
+ *             tooltip 底色）；缺省时按 theme 回落对应调色板。
  */
 export function buildChartOption(
   chartType: ChartType,
   data: ChartDataResponse,
   style: ChartStyleConfig,
   labels: Record<string, string>,
-  context: ChartOptionContext
+  context: ChartOptionContext,
+  theme?: 'light' | 'dark',
+  host?: Element | null
 ): EChartsOption | null {
   // 表格类走 TableChart 渲染，不产出 ECharts option
   if (chartType === 'table' || chartType === 'pivot') {
@@ -282,15 +341,20 @@ export function buildChartOption(
   // 由 colorOf() 按 palette 有无返回片段对象（不能用 `color: undefined`）。
   const palette = style.colors.length > 0 ? style.colors : undefined;
   const colorOf = (): { color?: string[] } => (palette ? { color: palette } : {});
+  // 主题取色（标题/轴/网格/tooltip 底色）：canvas 拿不到 CSS 变量，须在构造时算成字面值。
+  const chartColors = chartPalette(host ?? null, theme ?? 'light');
 
   const commonOptions = {
+    textStyle: { color: chartColors.text },
     title: {
       text: context.title,
       left: 'center' as const,
     },
     tooltip: {
       trigger: 'axis' as const,
+      backgroundColor: chartColors.tooltipBg,
     },
+    legend: { textStyle: { color: chartColors.axisText } },
     grid: {
       left: '3%',
       right: '4%',
@@ -318,6 +382,19 @@ export function buildChartOption(
     formatter: truncateUtcSuffix,
   });
 
+  // 主题化轴：值轴承载网格线（splitLine）、类目轴承载基线（axisLine），两者的默认色
+  // 都是近黑，深色画布上不可见 —— 从取色器取字面值覆盖。仅补颜色，不动结构。
+  const themedValueAxis = () => ({
+    type: 'value' as const,
+    axisLine: { lineStyle: { color: chartColors.axisLine } },
+    axisLabel: { color: chartColors.axisText },
+    splitLine: { lineStyle: { color: chartColors.splitLine } },
+  });
+  const themedCategoryExtras = () => ({
+    axisLine: { lineStyle: { color: chartColors.axisLine } },
+    axisLabel: { color: chartColors.axisText },
+  });
+
   // 环形图（R-52）：donut=true 时用内外双半径，否则保持实心饼图
   const pieRadius: string | string[] = style.donut === true ? ['40%', '70%'] : '50%';
 
@@ -336,8 +413,8 @@ export function buildChartOption(
         const scatter = data as ScatterResponse;
         return {
           ...commonOptions,
-          xAxis: { type: 'value', name: labelOf(xField) },
-          yAxis: { type: 'value', name: labelOf(yField) },
+          xAxis: { ...themedValueAxis(), name: labelOf(xField) },
+          yAxis: { ...themedValueAxis(), name: labelOf(yField) },
           series: [{ type: 'scatter' as const, data: scatter.data }],
         };
       }
@@ -409,9 +486,10 @@ export function buildChartOption(
           type: 'category' as const,
           data: axis.x_axis,
           name: labelOf(context.dimensions[0]),
+          ...themedCategoryExtras(),
           axisLabel: categoryAxisLabel(axis.x_axis.length),
         };
-        const valueAxis = { type: 'value' as const };
+        const valueAxis = themedValueAxis();
         return {
           ...commonOptions,
           xAxis: horizontalBar ? valueAxis : categoryAxis,
@@ -459,11 +537,12 @@ export function buildChartOption(
             ];
         return {
           ...commonOptions,
-          xAxis: { type: 'value' as const },
+          xAxis: themedValueAxis(),
           yAxis: {
             type: 'category' as const,
             data: histogram.bins.map((bin) => `${bin.bin_start} ~ ${bin.bin_end}`),
             inverse: true,
+            ...themedCategoryExtras(),
           },
           series: histogramSeries,
           ...colorOf(),
@@ -492,6 +571,10 @@ export function buildChartOption(
           // 不再二次 labelOf——context.dimensions/metrics 是列名，语义与轴/系列名不同。
           radar: {
             indicator: radar.indicators.map((i) => ({ name: i.name, max: i.max })),
+            axisLine: { lineStyle: { color: chartColors.splitLine } },
+            splitLine: { lineStyle: { color: chartColors.splitLine } },
+            splitArea: { show: false },
+            axisName: { color: chartColors.axisText },
           },
           series: [
             {
@@ -514,8 +597,8 @@ export function buildChartOption(
           ...commonOptions,
           tooltip: { trigger: 'item' as const },
           // 单箱：水平 value 轴承载统计值，类目轴只一条（箱名）。
-          xAxis: { type: 'value' as const, scale: true },
-          yAxis: { type: 'category' as const, data: [boxName] },
+          xAxis: { ...themedValueAxis(), scale: true },
+          yAxis: { type: 'category' as const, data: [boxName], ...themedCategoryExtras() },
           series: [
             {
               // ECharts boxplot 数据项即五数概括 [min, Q1, median, Q3, max]。
@@ -562,6 +645,7 @@ export function buildChartOption(
           type: 'category' as const,
           data: axis.x_axis,
           name: labelOf(context.dimensions[0]),
+          ...themedCategoryExtras(),
           axisLabel: categoryAxisLabel(axis.x_axis.length),
         };
         return {
@@ -569,10 +653,7 @@ export function buildChartOption(
           xAxis: categoryAxis,
           // 双 Y 轴：index 0 主轴（左）、index 1 次轴（右）——这是 combo 与单轴
           // bar/line/area 在 option 结构上的关键差异（yAxis 是数组而非单个对象）。
-          yAxis: [
-            { type: 'value' as const },
-            { type: 'value' as const, position: 'right' as const },
-          ],
+          yAxis: [themedValueAxis(), { ...themedValueAxis(), position: 'right' as const }],
           series: axis.series.map((s) => {
             const yAxisIndex = slotAxisIndex.get(s.name) ?? 0;
             return {
@@ -604,8 +685,8 @@ export function buildChartOption(
     }
     return {
       ...commonOptions,
-      xAxis: { type: 'value', name: labelOf(xField) },
-      yAxis: { type: 'value', name: labelOf(yField) },
+      xAxis: { ...themedValueAxis(), name: labelOf(xField) },
+      yAxis: { ...themedValueAxis(), name: labelOf(yField) },
       series: [
         {
           type: 'scatter' as const,
@@ -624,9 +705,10 @@ export function buildChartOption(
     type: 'category' as const,
     data: xAxisData,
     name: labelOf(xAxisField),
+    ...themedCategoryExtras(),
     axisLabel: categoryAxisLabel(xAxisData.length),
   };
-  const valueAxis = { type: 'value' as const };
+  const valueAxis = themedValueAxis();
 
   switch (chartType) {
     case 'line':
