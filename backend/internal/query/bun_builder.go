@@ -376,6 +376,23 @@ func (qb *BunQueryBuilder) buildFilterPart(f *FilterExpr, args *[]interface{}) s
 		return fmt.Sprintf("%s IS NULL", field)
 	case FilterIsNotNull:
 		return fmt.Sprintf("%s IS NOT NULL", field)
+	case FilterIsEmptyString:
+		*args = append(*args, "")
+		return fmt.Sprintf("%s = ?", field)
+	case FilterIsNotEmptyString:
+		// 「非空串」两条谓词：NULL 与空串都要排除（'' 在多数方言非 NULL）。
+		*args = append(*args, "")
+		return fmt.Sprintf("%s IS NOT NULL AND %s <> ?", field, field)
+	case FilterStartsWith:
+		// 不用 LIKE：值里的 % / _ 会被当通配符放大匹配面，而显式 ESCAPE 子句的
+		// 写法各方言不一；substr 前缀比较四库通吃且参数化值无转义负担。
+		n := len([]rune(fmt.Sprintf("%v", f.Value)))
+		*args = append(*args, n, f.Value)
+		return fmt.Sprintf("substr(%s, 1, ?) = ?", field)
+	case FilterEndsWith:
+		n := len([]rune(fmt.Sprintf("%v", f.Value)))
+		*args = append(*args, -n, f.Value)
+		return fmt.Sprintf("substr(%s, ?) = ?", field)
 	case FilterIn, FilterNotIn:
 		connector := "IN"
 		if f.Op == FilterNotIn {

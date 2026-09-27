@@ -2726,8 +2726,9 @@ components:
         op:
           type: string
           description: >-
-            eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull；
-            未知值后端按 "=" 回退（FilterOperator.ToString default）。
+            eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull /
+            startsWith / endsWith / isEmptyString / isNotEmptyString；
+            未知算子后端 fail-closed 渲染恒假谓词（1 = 0），不静默退化为等值。
         value: {}
         value_end: {}
           # query.FilterConfig.ValueEnd interface{} omitempty：between 上界，任意 JSON 值
