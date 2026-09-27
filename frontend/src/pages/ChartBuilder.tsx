@@ -117,6 +117,7 @@ import {
   FilterCondition,
   QueryConfig,
   type ReferenceLine,
+  type TopNConfig,
   useStore,
 } from '../store';
 
@@ -381,6 +382,13 @@ const DUAL_AXIS_METRIC_SLOTS = new Set(['primary_values', 'secondary_values']);
 const SLOT_PROTOCOL_DIMENSION_SLOTS = new Set(['indicators', 'rows', 'columns']);
 
 /**
+ * Top N（issue #130）消费的图型——轴类与饼图（单维度排名最直观；表格的分页语义
+ * 与 LIMIT 截断冲突）。后端 applyTopN 本身图型无关，这里只是前端的产品门控，
+ * 恢复的文档带着其他图型时据此不下发，避免「配了没效果」。
+ */
+export const TOPN_CHART_TYPES = ['bar', 'line', 'area', 'pie'];
+
+/**
  * 同环比（issue #129）消费的图型——与后端 query/comparison.go attachComparison 的
  * 图型门镜像。恢复的文档带着别的图型时（如 bar 配好后切饼图），wire 侧据此丢弃
  * comparison，避免后端「配了但图型不支持」的显式报错。
@@ -518,21 +526,23 @@ export const composeChartQueryRequest = (
 
   // histogram（R-57）专属 query_options：wire 用 snake_case bin_count，缺省 20（与后端
   // HistogramProcessor 默认一致）；持久化文档的 camelCase binCount → wire 的翻译只发生在
-  // 这里。同环比（#129）以 comparison 对象进同一扩展袋，仅门控图型下发。
-  // 其余情况不带 query_options 键，请求形状与本任务改动前完全一致。
+  // 这里。Top N（#130）以 top_n、同环比（#129）以 comparison 对象进同一扩展袋，仅门控
+  // 图型下发。其余情况不带 query_options 键，请求形状与本任务改动前完全一致。
+  const topNPayload =
+    queryOptions.topN && TOPN_CHART_TYPES.includes(chartType)
+      ? { top_n: queryOptions.topN }
+      : {};
   const comparisonPayload =
     queryOptions.comparison && COMPARISON_CHART_TYPES.includes(chartType)
       ? { comparison: queryOptions.comparison }
-      : undefined;
-  const queryOptionsPayload =
-    chartType === 'histogram' || comparisonPayload
-      ? {
-          query_options: {
-            ...(chartType === 'histogram' ? { bin_count: queryOptions.binCount ?? 20 } : {}),
-            ...(comparisonPayload ? comparisonPayload : {}),
-          },
-        }
       : {};
+  const queryOptionsPayload = {
+    ...(chartType === 'histogram' ? { bin_count: queryOptions.binCount ?? 20 } : {}),
+    ...topNPayload,
+    ...comparisonPayload,
+  };
+  const queryOptionsSection =
+    Object.keys(queryOptionsPayload).length > 0 ? { query_options: queryOptionsPayload } : {};
 
   if (requiresSlotProtocol) {
     // v2 槽位协议：dimension_groups/metric_groups 携带真实槽位名与 binding_id
@@ -635,7 +645,7 @@ export const composeChartQueryRequest = (
     metrics,
     filters: filtersPayload,
     ...sortPayload,
-    ...queryOptionsPayload,
+    ...queryOptionsSection,
     pagination: paginationPayload,
   };
 };
@@ -975,7 +985,12 @@ interface ConfigPanelProps {
    * 输出列名与 buildChartOption 的 series.name 同一口径（wireAliasOf = 列名），
    * 参考线按它匹配挂载；展示名只是下拉里给人看的标签。
    */
-  referenceMetricOptions: Array<{ name: string; label: string }>;
+  referenceMetricOptions: Array<{ id: string; name: string; label: string }>;
+  /**
+   * Top N（#130）门控：当前活动维度绑定的总数。排名是对「维度值」取前 N，
+   * 多系列拆分时前 N 无从对应，卡片仅在恰有一个维度时出现。
+   */
+  dimensionBindingCount: number;
   /**
    * 同环比（#129）可选的对比日期维度：当前活动维度绑定的「列 ID → 列名」。
    * 后端窗口平移对齐要求恰好一个维度，卡片仅在恰有一个候选时出现。
@@ -1038,6 +1053,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   queryOptions,
   onQueryOptionsChange,
   referenceMetricOptions,
+  dimensionBindingCount,
   comparisonDimensionOptions,
 }) => {
   // styleKeys 决定当前图型显示哪些样式控件（Task 0-4 声明、本任务首次真正接线）。
@@ -1068,6 +1084,12 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
       referenceLines.map((line, i) => (i === index ? { ...line, ...patch } : line))
     );
 
+  // Top N（#130）：对唯一维度的取值按指标排名取前 N，由后端翻译进查询计划
+  // （数据库 ORDER BY 指标 + LIMIT 截断），排名目标存列 ID、默认首指标。
+  const supportsTopN = TOPN_CHART_TYPES.includes(config.chartType) && dimensionBindingCount === 1;
+  const topN = queryOptions.topN;
+  const updateTopN = (patch: Partial<TopNConfig>) =>
+    onQueryOptionsChange({ topN: { ...(topN as TopNConfig), ...patch } });
   // 同环比（#129）：与后端图型门同口径；对比目标恒为当前唯一的活动维度
   // （窗口平移按日期桶对齐，多系列拆分会让「上期」无从对应）。
   const supportsComparison = COMPARISON_CHART_TYPES.includes(config.chartType);
@@ -1420,6 +1442,83 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               把当前日期筛选窗口整体前移（环比平移一个等长周期、同比前移一年），图表/表格追加
               (上期)、(增长率%) 两列。需在该维度上配日期筛选。
             </span>
+          </div>
+        </Card>
+      )}
+
+      {supportsTopN && (
+        <Card
+          title="Top N"
+          size="small"
+          style={{ marginBottom: 6 }}
+          styles={{ body: { padding: '4px 6px' } }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <SettingRow label="启用">
+              <Switch
+                size="small"
+                checked={!!topN}
+                aria-label="Top N 开关"
+                onChange={(checked) =>
+                  onQueryOptionsChange({
+                    topN: checked
+                      ? { limit: 10, metric: referenceMetricOptions[0]?.id }
+                      : undefined,
+                  })
+                }
+              />
+            </SettingRow>
+            {topN && (
+              <>
+                <SettingRow label="取前">
+                  <InputNumber
+                    size="small"
+                    min={1}
+                    max={10000}
+                    precision={0}
+                    style={{ width: 88 }}
+                    value={topN.limit}
+                    aria-label="Top N 数量"
+                    onChange={(value) => {
+                      const n = typeof value === 'number' && value >= 1 ? value : undefined;
+                      if (n === undefined) {
+                        return;
+                      }
+                      updateTopN({ limit: n });
+                    }}
+                  />
+                </SettingRow>
+                <SettingRow label="排名指标">
+                  <Select
+                    size="small"
+                    style={{ width: 150 }}
+                    aria-label="Top N 排名指标"
+                    value={topN.metric ?? referenceMetricOptions[0]?.id}
+                    onChange={(value: string) => updateTopN({ metric: value })}
+                    options={referenceMetricOptions.map((opt) => ({
+                      value: opt.id,
+                      label: opt.label,
+                    }))}
+                  />
+                </SettingRow>
+                <SettingRow label="排序">
+                  <Select
+                    size="small"
+                    style={{ width: 110 }}
+                    aria-label="Top N 排序方向"
+                    value={topN.order ?? 'desc'}
+                    onChange={(value: 'asc' | 'desc') => updateTopN({ order: value })}
+                    options={[
+                      { value: 'desc', label: '从大到小' },
+                      { value: 'asc', label: '从小到大' },
+                    ]}
+                  />
+                </SettingRow>
+                <span style={{ fontSize: 12, color: 'var(--dr-text-3)' }}>
+                  按所选指标对维度值取前 N（数据库排序截断），其余取值不出现。
+                </span>
+              </>
+            )}
           </div>
         </Card>
       )}
@@ -2183,6 +2282,9 @@ const ChartBuilder: React.FC = () => {
           return columnName
             ? [
                 {
+                  // id = 列 ID（Top N 的排名目标按列 ID 存，后端解析到指标绑定）；
+                  // name = 输出列名（参考线按它匹配 series.name）。
+                  id: b.fieldId,
                   name: columnName,
                   label: metricAliases[b.bindingId] || columnName,
                 },
@@ -2191,6 +2293,36 @@ const ChartBuilder: React.FC = () => {
         }),
     [queryConfig.metricGroups, chartBuilderFields, metricAliases]
   );
+
+  // Top N（#130）门控：活动维度绑定总数（恰为 1 才对「维度值取前 N」有意义）。
+  const dimensionBindingCount = useMemo(
+    () => queryConfig.dimensionGroups.reduce((sum, g) => sum + g.bindings.length, 0),
+    [queryConfig.dimensionGroups]
+  );
+
+  // 恢复的文档可能带着已失效的 Top N（切了图型 / 维度数变了 / 排名指标被移除），
+  // 此时在源头清掉，而不是让请求悄悄带着一个不生效或报错的配置。
+  useEffect(() => {
+    if (!chartQueryOptions.topN) {
+      return;
+    }
+    const metricValid =
+      !chartQueryOptions.topN.metric ||
+      referenceMetricOptions.some((opt) => opt.id === chartQueryOptions.topN?.metric);
+    const valid =
+      TOPN_CHART_TYPES.includes(chartBuilderConfig.chartType) &&
+      dimensionBindingCount === 1 &&
+      metricValid;
+    if (!valid) {
+      setChartQueryOptionsState({ ...chartQueryOptions, topN: undefined });
+    }
+  }, [
+    chartQueryOptions,
+    chartBuilderConfig.chartType,
+    dimensionBindingCount,
+    referenceMetricOptions,
+    setChartQueryOptionsState,
+  ]);
 
   // 同环比（#129）候选维度：活动维度绑定的「列 ID → 列名」；卡片仅在恰有一个
   // 候选时出现（与后端单维度对齐门一致）。
@@ -2222,6 +2354,8 @@ const ChartBuilder: React.FC = () => {
   }, [
     chartQueryOptions,
     chartBuilderConfig.chartType,
+    dimensionBindingCount,
+    referenceMetricOptions,
     comparisonDimensionOptions,
     setChartQueryOptionsState,
   ]);
@@ -3267,6 +3401,7 @@ const ChartBuilder: React.FC = () => {
             onChartStyleChange={setChartStyle}
             queryOptions={chartQueryOptions}
             referenceMetricOptions={referenceMetricOptions}
+            dimensionBindingCount={dimensionBindingCount}
             comparisonDimensionOptions={comparisonDimensionOptions}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
@@ -3332,6 +3467,7 @@ const ChartBuilder: React.FC = () => {
             onChartStyleChange={setChartStyle}
             queryOptions={chartQueryOptions}
             referenceMetricOptions={referenceMetricOptions}
+            dimensionBindingCount={dimensionBindingCount}
             comparisonDimensionOptions={comparisonDimensionOptions}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })

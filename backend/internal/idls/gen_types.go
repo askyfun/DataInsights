@@ -311,6 +311,7 @@ type ChartSpecQueryRequest struct {
 	// Pagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
 	Pagination *ChartPagination `json:"pagination,omitempty"`
 
+	// QueryOptions 查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go map[string]any omitempty，Task 3-1a 接线）：histogram 读取 bin_count （数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的 宽度）。Top N（issue #130）读取 top_n 对象 {limit: 正整数, metric?: 列ID, order?: asc|desc}：executor 把「按指标取前 N 个维度值」 翻译进查询计划（AST 的 Sort + Limit，由数据库完成排序截断）， order 缺省 desc；指标解析不到时显式报错。executor 从请求结构体直接 消费，不进入 QuerySpec/AST；其他 chart_type 忽略本节。
 	// QueryOptions 查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go map[string]any omitempty，Task 3-1a 接线）：histogram 读取 bin_count （数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的 宽度）。同环比（issue #129）读取 comparison 对象 {type: mom|yoy, field?: 列ID}：executor 用窗口平移的基线查询为 bar/line/area/table 追加「(上期)」「(增长率%)」系列/列（mom 平移整个筛选窗口的天数+1， yoy 平移一个日历年；field 缺省取首维度）。executor 从请求结构体直接 消费，不进入 QuerySpec/AST；其他 chart_type 忽略本节。
 	QueryOptions *map[string]interface{} `json:"query_options,omitempty"`
 	Sort         *SortConfig             `json:"sort,omitempty"`

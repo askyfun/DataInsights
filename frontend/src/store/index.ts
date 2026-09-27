@@ -336,6 +336,19 @@ export interface ReferenceLine {
 }
 
 /**
+ * Top N（issue #130，#116 epic 第三步）：按某指标取前 N 个维度值，翻译进查询计划
+ * （AST Sort+Limit，数据库完成排序截断）。
+ * - limit：正整数（后端钳位 ≤10000，非法即整节不生效）；
+ * - metric：排名指标的列 ID（DatasetColumn.id），缺省取首指标；
+ * - order：asc|desc，缺省 desc（「取最大的 N 个」是默认心智）。
+ */
+export interface TopNConfig {
+  limit: number;
+  metric?: string;
+  order?: 'asc' | 'desc';
+}
+
+/**
  * 同环比对比配置（issue #129，#116 epic 第二步）：随 query_options.comparison 进
  * 查询 wire，执行器用「窗口平移基线查询」产 (上期)/(增长率%) 系列或列。
  * - type=mom 环比：上一等长周期（当前筛选窗口的天数 +1 平移）；
@@ -353,6 +366,8 @@ export interface ChartQueryOptions {
   binCount?: number;
   /** 参考线（R-63）；纯前端渲染配置，不进查询 wire，随持久化文档 queryOptions 小节透传。 */
   referenceLines?: ReferenceLine[];
+  /** Top N（#130）；wire 上以 query_options.top_n 发送，仅 bar/line/area/pie 消费。 */
+  topN?: TopNConfig;
   /** 同环比（#129）；wire 上以 query_options.comparison 发送，仅 bar/line/area/table 消费。 */
   comparison?: ComparisonConfig;
 }

@@ -153,6 +153,13 @@ interface FilterConfig {
 | histogram | 两阶段分箱 + HistogramProcessor | bins 补全（空 bin 以 0 占位） |
 | boxplot / radar | 对应 processor | 受数据源方言能力门控 |
 
+## 六、Top N（issue #130）：翻译进查询计划而非事后裁剪
+
+`query/topn.go`：请求 `query_options.top_n = {limit, metric?: 列ID, order?}` 时，
+executor 在 AST 上设置 `Sort`（目标指标的输出别名，与用户手选排序共用渲染链路）与
+`Limit`，由 builder 渲染成 `ORDER BY … LIMIT N` —— 数据库完成排名截断。
+`metric` 缺省取首指标；解析不到（列 ID 与别名都不匹配）显式报错，不静默换排名依据。
+前端卡片仅在 bar/line/area/pie + 恰好一个维度时开放，恢复的文档失效时在源头清掉配置。
 ## 六、同环比（issue #129）：窗口平移基线 + Go 端按键对齐
 
 `query/comparison.go`：请求 `query_options.comparison = {type: mom|yoy, field?: 列ID}`

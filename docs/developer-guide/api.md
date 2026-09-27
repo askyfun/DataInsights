@@ -198,6 +198,8 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 - `filters` / `pagination` / `sort` 两协议共用。`filters` 元素键为 `operator`（**不是 op**）：
   `{id, field, operator, value, value_end?, logic}`。
 - `query_options`：扩展袋。histogram 消费 `bin_count`（默认 20）/ `bin_width`；
+  Top N（#130，bar/line/area/pie）消费 `top_n: {limit, metric?, order?}` ——
+  executor 翻译进查询计划（AST 的 Sort + Limit，数据库完成排序截断）。
   同环比（#129，bar/line/area/table）消费 `comparison: {type: mom|yoy, field?: 列ID}` ——
   executor 追加一条「窗口平移基线查询」并并入 `(上期)`/`(增长率%)` 系列/列。
   均从请求直接读取，不进 QuerySpec。
