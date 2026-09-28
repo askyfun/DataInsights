@@ -3055,16 +3055,41 @@ components:
           type: array
           description: 当前选中值；空数组等同于未激活。
           items: {}
+    DashboardQueryLinkage:
+      type: object
+      description: >-
+        POST /api/dashboards/{id}/query 的单个图表联动取值（issue #143）。点击某图表的
+        数据项后，前端只下发「哪块图被点了 + 点了什么值」；要打到哪些图表、落在哪一列上，
+        由后端从 layout_json 里各 chart 块的 `linkage.targets` 读出 —— 列标识只来自已落库
+        文档，与盘级筛选器同一条信任边界。
+      required:
+        - sourceWidgetId
+      properties:
+        sourceWidgetId:
+          type: string
+          description: 被点击的图表块 widgetId（联动来源，对应布局里 type=chart 的块）。
+        value:
+          type: array
+          description: >-
+            被点击数据项的维度取值；空数组等同于未激活。单值 → eq，多值 → in
+            （与盘级筛选器同一条「按值个数收形」的规则）。
+          items: {}
     DashboardQueryRequest:
       type: object
       description: >-
-        POST /api/dashboards/{id}/query 请求体（PRD §6.3）。前端只下筛选器的当前值，
+        POST /api/dashboards/{id}/query 请求体（PRD §6.3）。前端只下筛选器与联动的当前值，
         **不解析 chart config、不下发合并结果**：筛选合并是后端单点逻辑（可测）。
       properties:
         filters:
           type: array
           items:
             $ref: '#/components/schemas/DashboardQueryFilter'
+        linkages:
+          type: array
+          description: >-
+            已激活的图表联动（issue #143）。同一来源只应出现一次；未点击的来源不要下发。
+          items:
+            $ref: '#/components/schemas/DashboardQueryLinkage'
     DashboardQueryResult:
       type: object
       description: 单块取数结果（PRD §6.3）。单块失败不整盘失败。

@@ -38,6 +38,16 @@ interface ChartViewProps {
    * 翻译。缺省/未命中时回落 field 本身——历史文档里 field 本就是列名，行为不变。
    */
   fieldNames?: Record<string, string>;
+  /**
+   * 可点击维度列（列的稳定 id，仪表盘图表联动 issue #143）：非空时数据项点击会上报
+   * `(该列 id, 取值)`。空/缺省 = 不挂点击。
+   *
+   * 由调用方（仪表盘）决定「这块图能不能作联动来源」：只有恰好一个维度绑定时才给值，
+   * 因为 ECharts 的点击只带一个分类值，多维度时分不清点的是哪个维度。
+   */
+  linkageFieldId?: string | null;
+  /** 数据项点击回调（与 {@link linkageFieldId} 成对出现）。 */
+  onDataPointClick?: (fieldId: string, value: unknown) => void;
 }
 
 /** 分享页的 ECharts 容器尺寸（改造前的原值，勿改：ShareView 行为按此冻结）。 */
@@ -67,7 +77,14 @@ const PROBE_STYLE: CSSProperties = {
  * 字段标识来自持久化文档（列 id），而负载键与 SQL 输出别名是列名，翻译由调用方
  * 通过 `fieldNames` 注入（见该 prop 的说明）。
  */
-const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldNames }) => {
+const ChartView: React.FC<ChartViewProps> = ({
+  chart,
+  data,
+  echartsStyle,
+  fieldNames,
+  linkageFieldId,
+  onDataPointClick,
+}) => {
   const chartDoc = useMemo(
     () => migrateChartConfig(chart.config, chart.chart_type as ChartType),
     [chart]
@@ -162,7 +179,35 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
   }, [chart, chartDoc, data, chartStyle, displayLabels, nameOf, hostEl, resolvedTheme]);
 
   const isTableLike = chartDoc.chartType === 'table' || chartDoc.chartType === 'pivot';
-  // 聚合负载的 table/pivot 臂：TableResponse 带 pagination、PivotResponse 不带，
+
+  /**
+   * 数据项点击 → 联动上报（issue #143）。
+   *
+   * 取 `params.name`：ECharts 的分类轴数据就是维度原值（轴上的展示格式只走 axisLabel），
+   * 饼图/漏斗的 slice name 也是维度值。只认 series 上的点击——坐标轴、图例等元素的
+   * name 不是数据项取值。
+   */
+  const clickable = Boolean(linkageFieldId && onDataPointClick);
+  const handleChartClick = useCallback(
+    (params: unknown) => {
+      if (!clickable || !linkageFieldId || !onDataPointClick) {
+        return;
+      }
+      const item = params as { componentType?: string; name?: unknown };
+      if (item?.componentType !== 'series') {
+        return;
+      }
+      const value = item.name;
+      if (typeof value !== 'string' && typeof value !== 'number') {
+        return;
+      }
+      if (value === '') {
+        return;
+      }
+      onDataPointClick(linkageFieldId, value);
+    },
+    [clickable, linkageFieldId, onDataPointClick]
+  ); // 聚合负载的 table/pivot 臂：TableResponse 带 pagination、PivotResponse 不带，
   // 两者都有 columns + data（行由后端按维度在前/指标别名在后组装，
   // pagination 仅回显服务端窗口，本组件是静态视图不接翻页）。
   // 走显式的 table 判别而不是 `'columns' in data`：后者会把负载收窄成与之同形的
@@ -244,6 +289,20 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
         wordWrap={chartStyle.tableWordWrap}
         nullDisplay={chartStyle.tableNullDisplay}
         freezeDimensions={chartStyle.tableFreezeDimensions}
+        // 联动（issue #143）：行点击上报该行在唯一维度列上的取值。没有可点击维度列时
+        // 不挂 onRow——否则表行会出现「能点但点了没反应」的手型光标。
+        onRowClick={
+          clickable && linkageFieldId
+            ? (record) => {
+                const name = nameOf(linkageFieldId);
+                const value = record?.[name];
+                if (value === undefined || value === null || value === '') {
+                  return;
+                }
+                onDataPointClick?.(linkageFieldId, value);
+              }
+            : undefined
+        }
       />
     );
   }
@@ -259,6 +318,8 @@ const ChartView: React.FC<ChartViewProps> = ({ chart, data, echartsStyle, fieldN
             option={chartOption}
             style={{ height: '100%', width: '100%' }}
             opts={{ renderer: 'canvas' }}
+            // 联动（issue #143）：只有声明了可点击维度列时才挂 click，避免无谓的事件开销。
+            onEvents={clickable ? { click: handleChartClick } : undefined}
           />
         </div>
       </>

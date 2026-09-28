@@ -1,7 +1,9 @@
 import {
   ArrowLeftOutlined,
+  ClearOutlined,
   DashboardOutlined,
   DeleteOutlined,
+  MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -11,12 +13,14 @@ import {
   App,
   Button,
   Card,
+  Dropdown,
   Empty,
   Input,
   Result,
   Select,
   Space,
   Spin,
+  Tag,
   Typography,
 } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -36,9 +40,11 @@ import {
   chartsApi,
   type Dashboard,
   type DashboardQueryResult,
+  type DatasetColumn,
   dashboardsApi,
   datasetsApi,
 } from '../api';
+import ChartLinkageSettings from '../components/ChartLinkage/ChartLinkageSettings';
 import ChartView from '../components/ChartView/ChartView';
 import AddFilterWidgetModal, {
   type NewFilterWidgetConfig,
@@ -64,12 +70,20 @@ import {
   type DashboardChartWidget,
   type DashboardFilterWidget,
   type DashboardLayoutDocument,
+  type DashboardLinkageTarget,
   type DashboardWidget,
   findFreePlacement,
   migrateDashboardLayout,
   normalizePlacement,
   serializeDashboardLayout,
 } from '../lib/dashboardLayoutSchema';
+import {
+  type ActiveLinkageMap,
+  incomingLinkages,
+  linkageCandidates,
+  linkageKeyColumn,
+  linkageQueryPayload,
+} from '../lib/dashboardLinkage';
 import type { DateGranularity, WeekStart } from '../lib/dateFilter';
 import { isDateFilterValue } from '../lib/dateFilter';
 import { useStore } from '../store';
@@ -170,6 +184,16 @@ const DashboardEditor: React.FC = () => {
    */
   // 取值按原始类型存：日期族是 DateFilterValue，字符串/数值族是 unknown[]。
   const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
+  /**
+   * 已激活的图表联动（来源 widgetId → 被点击的维度取值，issue #143）。
+   * 与筛选器取值一样是**会话内状态**、不写进 layout：布局里只有「联动配置」（打到哪块图），
+   * 点击产生的是取值。
+   */
+  const [activeLinkages, setActiveLinkages] = useState<ActiveLinkageMap>({});
+  /** 正在配置联动设置的图表块；null 时弹窗不渲染内容。 */
+  const [linkageSettingsFor, setLinkageSettingsFor] = useState<string | null>(null);
+  /** 数据集 id → 列（跨数据集联动要在目标数据集上选关联字段）。 */
+  const [columnsByDataset, setColumnsByDataset] = useState<Record<number, DatasetColumn[]>>({});
   const [addFilterOpen, setAddFilterOpen] = useState(false);
   const [configuringFilterId, setConfiguringFilterId] = useState<string | null>(null);
   /** 未持久化块的本地取数在途集合：防止 effect 重跑时对同一块重复发请求。 */
@@ -187,14 +211,19 @@ const DashboardEditor: React.FC = () => {
   /**
    * 盘级取数。
    *
-   * `filters` 是筛选器的**当前取值**（不是合并结果）：合并由后端单点完成（PRD §6.3），
-   * 前端只负责把「哪个筛选器现在选了什么」如实下发，形状规则见 `lib/dashboardFilterValue`。
+   * `filters` / `linkages` 都是**当前取值**（不是合并结果）：合并由后端单点完成（PRD §6.3），
+   * 前端只负责把「哪个筛选器现在选了什么」「哪块图被点了什么值」如实下发，形状规则见
+   * `lib/dashboardFilterValue` 与 `lib/dashboardLinkage`。
    */
   const runQuery = useCallback(
-    async (dashboardId: string, filters: DashboardQueryFilterValue[]) => {
+    async (
+      dashboardId: string,
+      filters: DashboardQueryFilterValue[],
+      linkages: ReturnType<typeof linkageQueryPayload>
+    ) => {
       setQuerying(true);
       try {
-        const response = await dashboardsApi.query(dashboardId, { filters });
+        const response = await dashboardsApi.query(dashboardId, { filters, linkages });
         const map: Record<string, DashboardQueryResult> = {};
         for (const result of response.data.data.results ?? []) {
           map[result.widgetId] = result;
@@ -211,19 +240,30 @@ const DashboardEditor: React.FC = () => {
   );
 
   /**
-   * 按给定的筛选器状态重取一整盘。
+   * 按给定的筛选器 / 联动状态重取一整盘。
    *
    * 只把**已落库**的筛选器下发出去：后端是按已落库的 layout 逐块取数、并按同一份 layout
-   * 建筛选器索引的，未保存的筛选器它根本认不出来 —— 发了也只是白跑一趟。
-   * 调用方传显式的 widgets/values 而不是读组件状态：改筛选取值、改粒度这些场景下
+   * 建筛选器与联动去向索引的，未保存的块它根本认不出来 —— 发了也只是白跑一趟。
+   * 调用方传显式的 widgets/values/linkages 而不是读组件状态：改筛选取值、改粒度这些场景下
    * 新状态还没落进 state，读旧值会算出上一轮的载荷。
    */
-  const queryWithFilters = useCallback(
-    (dashboardId: string, widgets: readonly DashboardWidget[], values: Record<string, unknown>) => {
+  const queryWithState = useCallback(
+    (
+      dashboardId: string,
+      widgets: readonly DashboardWidget[],
+      values: Record<string, unknown>,
+      linkages: ActiveLinkageMap
+    ) => {
       const active = filterWidgetsOf(widgets).filter((widget) =>
         persistedIdsRef.current.has(widget.widgetId)
       );
-      return runQuery(dashboardId, dashboardFiltersPayload(active, values));
+      // 来源也必须已落库：后端从 layout 读「这块图打到哪些目标」，未保存的配置读不到。
+      const persistedLinkages = linkageQueryPayload(
+        Object.fromEntries(
+          Object.entries(linkages).filter(([widgetId]) => persistedIdsRef.current.has(widgetId))
+        )
+      );
+      return runQuery(dashboardId, dashboardFiltersPayload(active, values), persistedLinkages);
     },
     [runQuery]
   );
@@ -247,39 +287,11 @@ const DashboardEditor: React.FC = () => {
         setChartsById(byId);
         setResults({});
         setPendingData({});
+        // 联动是会话内状态：重新装载（含丢弃草稿）一律回到「没有联动」。
+        setActiveLinkages({});
+        setLinkageSettingsFor(null);
 
-        // 列 ID→列名映射：ChartView 的 labelOf 靠它把配置里的列 ID 换成展示名。
-        // 缺了它，combo 分支的 xAxis.name 会把裸列 ID 画进坐标轴（浏览器验收缺陷 1）。
-        // 按块引用的图表去重的数据集拉取，单个数据集失败不阻断盘装载（回落空映射，
-        // ChartView 对未命中字段原样输出，行为与修复前一致）。
         const serverDoc = migrateDashboardLayout(dashboard.layout_json);
-        const datasetIds = [
-          ...new Set(
-            serverDoc.widgets.flatMap((w) =>
-              w.type === 'chart' ? [byId[w.chartId]?.dataset_id] : []
-            )
-          ),
-        ].filter((id): id is number => typeof id === 'number');
-        if (datasetIds.length > 0) {
-          void Promise.all(
-            datasetIds.map((id) =>
-              datasetsApi
-                .getColumns(id)
-                .then((r) => r.data.data ?? [])
-                .catch(() => [])
-            )
-          ).then((columnGroups) => {
-            const names: Record<string, string> = {};
-            for (const columns of columnGroups) {
-              for (const column of columns) {
-                names[column.id] = column.name;
-              }
-            }
-            setFieldNames(names);
-          });
-        } else {
-          setFieldNames({});
-        }
 
         const serverLayout = serializeDashboardLayout(serverDoc);
         persistedIdsRef.current = new Set(serverDoc.widgets.map((widget) => widget.widgetId));
@@ -319,14 +331,14 @@ const DashboardEditor: React.FC = () => {
         // 否则会出现"控件显示最近 7 天、实际查的是全量"这种不一致。
         const seeded = initialFilterWidgetValues(filterWidgetsOf(nextDoc.widgets));
         setFilterValues(seeded);
-        await queryWithFilters(dashboardId, nextDoc.widgets, seeded);
+        await queryWithState(dashboardId, nextDoc.widgets, seeded, {});
       } catch (error: any) {
         setLoadError(error.message || intl.formatMessage({ id: 'dashboard.loadFailed' }));
       } finally {
         setLoading(false);
       }
     },
-    [intl, queryWithFilters]
+    [intl, queryWithState]
   );
 
   useEffect(() => {
@@ -404,6 +416,68 @@ const DashboardEditor: React.FC = () => {
     }
   }, [id, doc.widgets, results, pendingData]);
 
+  /**
+   * 盘内图表块引用的数据集（去重、升序）。
+   *
+   * 这些数据集的列清单有两个消费方：ChartView 的列 ID→展示名翻译（缺了它 combo 分支会把
+   * 裸列 ID 画进坐标轴），以及跨数据集联动的「关联字段」选择器。
+   */
+  const referencedDatasetIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const widget of doc.widgets) {
+      if (widget.type !== 'chart') {
+        continue;
+      }
+      const datasetId = chartsById[widget.chartId]?.dataset_id;
+      if (typeof datasetId === 'number') {
+        ids.add(datasetId);
+      }
+    }
+    return [...ids].sort((a, b) => a - b);
+  }, [doc.widgets, chartsById]);
+
+  /**
+   * 按当前引用的数据集**补齐缺失的列清单**（已拉过的不再重复请求）。
+   *
+   * 放在 effect 而不是装载流程里：会话中新加进来的图表块也要能立刻配置跨数据集联动，
+   * 否则用户只能刷新页面才看得到目标字段。单个数据集失败只落空清单、不阻断装载。
+   */
+  const loadedDatasetIdsRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const missing = referencedDatasetIds.filter((id) => !loadedDatasetIdsRef.current.has(id));
+    if (missing.length === 0) {
+      return;
+    }
+    for (const id of missing) {
+      loadedDatasetIdsRef.current.add(id);
+    }
+    void Promise.all(
+      missing.map((id) =>
+        datasetsApi
+          .getColumns(id)
+          .then((response) => ({ id, columns: response.data.data ?? [] }))
+          .catch(() => ({ id, columns: [] as DatasetColumn[] }))
+      )
+    ).then((columnGroups) => {
+      setColumnsByDataset((prev) => {
+        const next = { ...prev };
+        for (const group of columnGroups) {
+          next[group.id] = group.columns;
+        }
+        return next;
+      });
+      setFieldNames((prev) => {
+        const next = { ...prev };
+        for (const group of columnGroups) {
+          for (const column of group.columns) {
+            next[column.id] = column.name;
+          }
+        }
+        return next;
+      });
+    });
+  }, [referencedDatasetIds]);
+
   const layout = useMemo<Layout>(
     () =>
       doc.widgets.map((widget) => ({
@@ -476,7 +550,137 @@ const DashboardEditor: React.FC = () => {
       ...prev,
       widgets: prev.widgets.filter((widget) => widget.widgetId !== widgetId),
     }));
+    // 会话内的联动取值随块一起消失（布局里残留的「去向」由后端忽略、弹窗确定时自愈）。
+    setActiveLinkages((prev) => {
+      if (!(widgetId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[widgetId];
+      return next;
+    });
+    setLinkageSettingsFor((prev) => (prev === widgetId ? null : prev));
   }, []);
+
+  /** 已落库的图表块（只有它们的联动配置后端读得到）。 */
+  const isPersisted = useCallback((widgetId: string) => persistedIdsRef.current.has(widgetId), []);
+
+  /**
+   * 块上「联动来源的键列」：只有恰好一个维度、且图型支持点击的块才可作来源。
+   * 盘内逐块算一次（图表配置在编辑期不变）。
+   */
+  const linkageKeyColumns = useMemo(() => {
+    const map: Record<string, string | null> = {};
+    for (const widget of doc.widgets) {
+      if (widget.type !== 'chart') {
+        continue;
+      }
+      const chart = chartsById[widget.chartId];
+      map[widget.widgetId] = chart ? linkageKeyColumn(chart.config, chart.chart_type) : null;
+    }
+    return map;
+  }, [doc.widgets, chartsById]);
+
+  /**
+   * 块可点击的联动键列。**只有已落库的块**才给：联动去向存在布局里，未保存的配置后端
+   * 读不到，让用户点一个不生效的图比不让点更糟（弹窗里有同样的提示）。
+   */
+  const linkageFieldIdOf = (widget: DashboardChartWidget): string | null =>
+    isPersisted(widget.widgetId) ? (linkageKeyColumns[widget.widgetId] ?? null) : null;
+
+  /** 已落库的基线布局文档（判断「这块图的联动配置是否还没保存」）。 */
+  const baselineDoc = useMemo(
+    () => (baseline ? migrateDashboardLayout(baseline.layout) : null),
+    [baseline]
+  );
+
+  /**
+   * 该块的联动配置是否「还没生效」：块本身未落库，或它的 linkage 与基线不同。
+   * 只看配置不看整盘 dirty —— 改个名字就弹「保存后生效」会变成噪声。
+   */
+  const linkageConfigPending = (widget: DashboardChartWidget): boolean => {
+    if (!isPersisted(widget.widgetId)) {
+      return true;
+    }
+    const baseWidget = baselineDoc?.widgets.find((item) => item.widgetId === widget.widgetId);
+    const baseLinkage = baseWidget?.type === 'chart' ? baseWidget.linkage : undefined;
+    return JSON.stringify(widget.linkage ?? null) !== JSON.stringify(baseLinkage ?? null);
+  };
+
+  /**
+   * 数据项被点击：记下取值并按新状态重取。
+   *
+   * 联动取值是**会话内**状态（不进 layout）：布局里只存「打到哪块图」，点击产生的是值。
+   * 同一来源再点一次直接覆盖（符合「点柱子即筛选」的心智模型）。
+   */
+  const handleDataPointClick = useCallback(
+    (widgetId: string, column: string, value: unknown) => {
+      if (!id) {
+        return;
+      }
+      const next: ActiveLinkageMap = { ...activeLinkages, [widgetId]: { column, value } };
+      setActiveLinkages(next);
+      void queryWithState(id, doc.widgets, filterValues, next);
+    },
+    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
+  );
+
+  /** 撤掉某个来源的联动（块上的「×」与 ⋮ 菜单里的「清除联动」共用这一个出口）。 */
+  const clearLinkage = useCallback(
+    (sourceWidgetId: string) => {
+      if (!id || !(sourceWidgetId in activeLinkages)) {
+        return;
+      }
+      const next = { ...activeLinkages };
+      delete next[sourceWidgetId];
+      setActiveLinkages(next);
+      void queryWithState(id, doc.widgets, filterValues, next);
+    },
+    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
+  );
+
+  /** 一键清除所有联动（PRD 要求「清除所有联动」）。 */
+  const clearAllLinkages = useCallback(() => {
+    if (!id || Object.keys(activeLinkages).length === 0) {
+      return;
+    }
+    setActiveLinkages({});
+    void queryWithState(id, doc.widgets, filterValues, {});
+  }, [activeLinkages, doc.widgets, filterValues, id, queryWithState]);
+
+  /**
+   * 联动设置确定：把「打到哪些块、哪一列」写回来源块的布局配置，然后立刻重取一次。
+   *
+   * 配置在保存前不生效（后端按已落库 layout 读取去向），此时点击来源块仍会亮出联动提示，
+   * 但数据要保存后才跟着变——弹窗里对此有「保存后生效」的提示。
+   */
+  const handleLinkageSettingsOk = useCallback(
+    (targets: DashboardLinkageTarget[]) => {
+      const sourceWidgetId = linkageSettingsFor;
+      setLinkageSettingsFor(null);
+      if (!sourceWidgetId) {
+        return;
+      }
+      const widgets = doc.widgets.map((widget) => {
+        if (widget.widgetId !== sourceWidgetId || widget.type !== 'chart') {
+          return widget;
+        }
+        if (targets.length === 0) {
+          // 全部取消勾选 = 没有联动配置：不留 `linkage: {targets: []}` 这种空壳。
+          const cleared: DashboardChartWidget = { ...widget };
+          delete cleared.linkage;
+          return cleared;
+        }
+        return { ...widget, linkage: { targets } };
+      });
+      setDoc((prev) => ({ ...prev, widgets }));
+      if (!id) {
+        return;
+      }
+      void queryWithState(id, widgets, filterValues, activeLinkages);
+    },
+    [activeLinkages, doc.widgets, filterValues, id, linkageSettingsFor, queryWithState]
+  );
 
   /** 新建筛选器块：与图表块走同一套落位规则（放进首个空位，而不是一律落在最左边）。 */
   const handleAddFilterWidget = useCallback((config: NewFilterWidgetConfig) => {
@@ -533,9 +737,9 @@ const DashboardEditor: React.FC = () => {
       if (!id) {
         return;
       }
-      void queryWithFilters(id, widgets, values);
+      void queryWithState(id, widgets, values, activeLinkages);
     },
-    [doc.widgets, filterValues, id, queryWithFilters]
+    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
   );
 
   /**
@@ -551,9 +755,9 @@ const DashboardEditor: React.FC = () => {
       if (!id) {
         return;
       }
-      void queryWithFilters(id, widgets, filterValues);
+      void queryWithState(id, widgets, filterValues, activeLinkages);
     },
-    [doc.widgets, filterValues, id, queryWithFilters]
+    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
   );
 
   /** 完整日期筛选弹窗确定：取值与粒度/周计算逻辑一起落库并重取。 */
@@ -593,8 +797,8 @@ const DashboardEditor: React.FC = () => {
       setDraftRestored(false);
       message.success(intl.formatMessage({ id: 'common.success' }));
       // 落库后由后端按新布局重新逐块取数，顺手覆盖掉未持久化块的本地结果。
-      // persistedIdsRef 刚在上面刷过，所以这次会把（刚保存的）筛选器一并下发。
-      await queryWithFilters(id, doc.widgets, filterValues);
+      // persistedIdsRef 刚在上面刷过，所以这次会把（刚保存的）筛选器与联动一并下发。
+      await queryWithState(id, doc.widgets, filterValues, activeLinkages);
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
@@ -616,6 +820,62 @@ const DashboardEditor: React.FC = () => {
     ? (filterWidgetsOf(doc.widgets).find((widget) => widget.widgetId === configuringFilterId) ??
       null)
     : null;
+
+  const blockTitle = (widget: DashboardChartWidget) =>
+    widget.titleOverride || chartsById[widget.chartId]?.name || `#${widget.chartId}`;
+
+  /** 正在配置联动的来源块；null 时弹窗不渲染内容。 */
+  const linkageSource =
+    linkageSettingsFor !== null
+      ? ((doc.widgets.find(
+          (widget): widget is DashboardChartWidget =>
+            widget.type === 'chart' && widget.widgetId === linkageSettingsFor
+        ) ?? null) as DashboardChartWidget | null)
+      : null;
+
+  // `initialTargets` 必须引用稳定（弹窗打开时按它重置勾选），故按来源块派生。
+  const linkageInitialTargets = useMemo(
+    () => linkageSource?.linkage?.targets ?? [],
+    [linkageSource]
+  );
+
+  /**
+   * 块顶部的联动状态标签：
+   *   - 来源侧：这块图正在驱动联动（自己的点击取值）；
+   *   - 目标侧：被哪些来源筛着，逐条可 ×（清除该来源的联动）。
+   */
+  const linkageTags = (widget: DashboardChartWidget) => {
+    const tags: React.ReactNode[] = [];
+    const own = activeLinkages[widget.widgetId];
+    if (own) {
+      tags.push(
+        <Tag key="own" color="processing" data-testid={`linkage-source-${widget.widgetId}`}>
+          {intl.formatMessage({ id: 'dashboard.linkageActive' })}: {String(own.value)}
+        </Tag>
+      );
+    }
+    for (const incoming of incomingLinkages(doc.widgets, activeLinkages, widget.widgetId)) {
+      const source = doc.widgets.find(
+        (item): item is DashboardChartWidget =>
+          item.type === 'chart' && item.widgetId === incoming.sourceWidgetId
+      );
+      tags.push(
+        <Tag
+          key={incoming.sourceWidgetId}
+          color="blue"
+          closable
+          data-testid={`linkage-in-${widget.widgetId}`}
+          onClose={(event) => {
+            event.preventDefault();
+            clearLinkage(incoming.sourceWidgetId);
+          }}
+        >
+          {source ? blockTitle(source) : ''}: {String(incoming.value)}
+        </Tag>
+      );
+    }
+    return tags;
+  };
 
   const renderChartBlock = (widget: DashboardChartWidget) => {
     const result = results[widget.widgetId];
@@ -665,6 +925,12 @@ const DashboardEditor: React.FC = () => {
           data={data}
           fieldNames={fieldNames}
           echartsStyle={{ height: '100%', minHeight: 0 }}
+          linkageFieldId={linkageFieldIdOf(widget)}
+          onDataPointClick={
+            linkageFieldIdOf(widget)
+              ? (column, value) => handleDataPointClick(widget.widgetId, column, value)
+              : undefined
+          }
         />
       );
     }
@@ -710,6 +976,12 @@ const DashboardEditor: React.FC = () => {
         data={pending}
         fieldNames={fieldNames}
         echartsStyle={{ height: '100%', minHeight: 0 }}
+        linkageFieldId={linkageFieldIdOf(widget)}
+        onDataPointClick={
+          linkageFieldIdOf(widget)
+            ? (column, value) => handleDataPointClick(widget.widgetId, column, value)
+            : undefined
+        }
       />
     );
   };
@@ -737,12 +1009,21 @@ const DashboardEditor: React.FC = () => {
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
               {intl.formatMessage({ id: 'dashboard.back' })}
             </Button>
+            {Object.keys(activeLinkages).length > 0 && (
+              <Button
+                icon={<ClearOutlined />}
+                data-testid="linkage-clear-all"
+                onClick={clearAllLinkages}
+              >
+                {intl.formatMessage({ id: 'dashboard.linkageClearAll' })}
+              </Button>
+            )}
             <Button
               icon={<ReloadOutlined />}
               loading={querying}
               onClick={() => {
-                // 刷新沿用当前筛选器取值（不是空载荷），否则点一下刷新就"筛了个寂寞"。
-                if (id) void queryWithFilters(id, doc.widgets, filterValues);
+                // 刷新沿用当前筛选器与联动取值（不是空载荷），否则点一下刷新就"筛了个寂寞"。
+                if (id) void queryWithState(id, doc.widgets, filterValues, activeLinkages);
               }}
             >
               {intl.formatMessage({ id: 'common.refresh' })}
@@ -752,6 +1033,7 @@ const DashboardEditor: React.FC = () => {
               icon={<SaveOutlined />}
               loading={saving}
               disabled={!dirty}
+              data-testid="dashboard-save"
               onClick={handleSave}
             >
               {intl.formatMessage({ id: 'common.save' })}
@@ -857,19 +1139,60 @@ const DashboardEditor: React.FC = () => {
                       <Card
                         size="small"
                         title={
-                          widget.titleOverride ||
-                          chartsById[widget.chartId]?.name ||
-                          `#${widget.chartId}`
+                          <Space size={4}>
+                            <span>{blockTitle(widget)}</span>
+                            {linkageTags(widget)}
+                          </Space>
                         }
                         extra={
-                          <Button
-                            type="text"
-                            size="small"
-                            danger
-                            icon={<DeleteOutlined />}
-                            aria-label={intl.formatMessage({ id: 'dashboard.removeBlock' })}
-                            onClick={() => handleRemoveWidget(widget.widgetId)}
-                          />
+                          <Space size={0}>
+                            <Dropdown
+                              trigger={['click']}
+                              menu={{
+                                items: [
+                                  {
+                                    key: 'linkage-settings',
+                                    label: intl.formatMessage({
+                                      id: 'dashboard.linkageSettings',
+                                    }),
+                                  },
+                                  ...(activeLinkages[widget.widgetId]
+                                    ? [
+                                        {
+                                          key: 'linkage-clear',
+                                          label: intl.formatMessage({
+                                            id: 'dashboard.linkageClearOne',
+                                          }),
+                                        },
+                                      ]
+                                    : []),
+                                ],
+                                onClick: ({ key }) => {
+                                  if (key === 'linkage-settings') {
+                                    setLinkageSettingsFor(widget.widgetId);
+                                    return;
+                                  }
+                                  clearLinkage(widget.widgetId);
+                                },
+                              }}
+                            >
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<MoreOutlined />}
+                                aria-label={intl.formatMessage({ id: 'dashboard.blockMenu' })}
+                                data-testid={`block-menu-${widget.widgetId}`}
+                              />
+                            </Dropdown>
+                            <Button
+                              type="text"
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                              aria-label={intl.formatMessage({ id: 'dashboard.removeBlock' })}
+                              onClick={() => handleRemoveWidget(widget.widgetId)}
+                            />
+                          </Space>
                         }
                         style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
                         styles={{
@@ -911,6 +1234,28 @@ const DashboardEditor: React.FC = () => {
         datasets={datasets}
         onOk={handleAddFilterWidget}
         onCancel={() => setAddFilterOpen(false)}
+      />
+
+      <ChartLinkageSettings
+        open={linkageSource !== null}
+        source={
+          linkageSource
+            ? {
+                datasetId: chartsById[linkageSource.chartId]?.dataset_id,
+                keyColumn: linkageKeyColumns[linkageSource.widgetId] ?? null,
+                unsaved: linkageConfigPending(linkageSource),
+              }
+            : null
+        }
+        candidates={linkageCandidates(doc.widgets, linkageSettingsFor ?? '').map((widget) => ({
+          widgetId: widget.widgetId,
+          label: blockTitle(widget),
+          datasetId: chartsById[widget.chartId]?.dataset_id,
+        }))}
+        columnsByDataset={columnsByDataset}
+        initialTargets={linkageInitialTargets}
+        onOk={handleLinkageSettingsOk}
+        onCancel={() => setLinkageSettingsFor(null)}
       />
 
       <DateFilterModal

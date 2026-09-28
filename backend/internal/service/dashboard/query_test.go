@@ -813,3 +813,276 @@ func TestQueryEmptyDashboardReturnsEmptySlice(t *testing.T) {
 		t.Fatalf("期望空切片，实际 %#v", got.Results)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 图表联动（issue #143）
+// ---------------------------------------------------------------------------
+
+// layoutChartLinked 是一块带 linkage.targets 的 type=chart widget 字面量。
+func layoutChartLinked(widgetID string, chartID int, targets ...string) string {
+	return fmt.Sprintf(
+		`{"widgetId":%q,"type":"chart","x":0,"y":0,"w":6,"h":4,"chartId":%d,"linkage":{"targets":[%s]}}`,
+		widgetID, chartID, strings.Join(targets, ","))
+}
+
+// linkageTarget 是一条联动去向的字面量（column 为目标数据集的列 ID）。
+func linkageTarget(widgetID, column string) string {
+	return fmt.Sprintf(`{"widgetId":%q,"column":%q}`, widgetID, column)
+}
+
+// blockByWidget 按 widgetId 取结果块（结果顺序跟随 layout，断言不该依赖下标）。
+func blockByWidget(blocks []entity.DashboardQueryBlock, widgetID string) entity.DashboardQueryBlock {
+	for _, b := range blocks {
+		if b.WidgetID == widgetID {
+			return b
+		}
+	}
+	return entity.DashboardQueryBlock{}
+}
+
+// linkageMeta 让每块图表都返回同一份元信息（数据集相同，便于把断言收敛在条件形状上）。
+func linkageMeta(datasetID int) func(context.Context, int) (*entity.ChartQueryContext, error) {
+	return func(_ context.Context, _ int) (*entity.ChartQueryContext, error) {
+		return &entity.ChartQueryContext{Exists: true, DatasetID: datasetID}, nil
+	}
+}
+
+// TestQueryAppliesLinkageToTargetBlock 联动只落在 layout 声明的目标块上：来源自己
+// 不带任何条件（点击它不该反过来筛它自己）。
+func TestQueryAppliesLinkageToTargetBlock(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	expectDashboardRead(t, mock, layoutDoc(
+		layoutChartLinked("w-1", 42, linkageTarget("w-2", "region")),
+		layoutChart("w-2", 43),
+	))
+	fake := &fakeChartProvider{}
+	svc.chartProvider = fake
+
+	got, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+		Linkages: []entity.DashboardQueryLinkage{{SourceWidgetID: "w-1", Value: []any{"华东"}}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	target, ok := fake.overridesFor(43)
+	if !ok {
+		t.Fatal("未观察到对目标块的取数")
+	}
+	want := []entity.Filter{{
+		ID:       "link-w-1",
+		Field:    "region",
+		Operator: "eq",
+		Value:    "华东",
+		Logic:    "and",
+	}}
+	if !reflect.DeepEqual(target, want) {
+		t.Errorf("目标块 overrides = %#v, want %#v", target, want)
+	}
+
+	source, ok := fake.overridesFor(42)
+	if !ok {
+		t.Fatal("未观察到对来源块的取数")
+	}
+	if source != nil {
+		t.Errorf("来源块不该被自己的联动筛到，实际 overrides = %#v", source)
+	}
+	if !reflect.DeepEqual(blockByWidget(got.Results, "w-2").AppliedFields, []string{"region"}) {
+		t.Errorf("目标块 appliedFields = %#v, want [region]", blockByWidget(got.Results, "w-2").AppliedFields)
+	}
+}
+
+// TestQueryLinkageMultiValueUsesIn 联动取值形状按个数分流：多值 → in。
+func TestQueryLinkageMultiValueUsesIn(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	expectDashboardRead(t, mock, layoutDoc(
+		layoutChartLinked("w-1", 42, linkageTarget("w-2", "region")),
+		layoutChart("w-2", 43),
+	))
+	fake := &fakeChartProvider{}
+	svc.chartProvider = fake
+
+	if _, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+		Linkages: []entity.DashboardQueryLinkage{{SourceWidgetID: "w-1", Value: []any{"华东", "华南"}}},
+	}); err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	target, _ := fake.overridesFor(43)
+	if len(target) != 1 || target[0].Operator != "in" {
+		t.Fatalf("多值联动应为 in 单条，实际 %#v", target)
+	}
+	if !reflect.DeepEqual(target[0].Value, []any{"华东", "华南"}) {
+		t.Errorf("value = %#v, want 数组两元素", target[0].Value)
+	}
+}
+
+// TestQueryInactiveLinkageProducesNoOverrides 空值 / 未声明的来源都视为未激活：
+// 一次取数都不该被注入条件（nil 短路路径）。
+func TestQueryInactiveLinkageProducesNoOverrides(t *testing.T) {
+	cases := []struct {
+		name    string
+		request []entity.DashboardQueryLinkage
+	}{
+		{"空值", []entity.DashboardQueryLinkage{{SourceWidgetID: "w-1", Value: []any{}}}},
+		{"nil 值", []entity.DashboardQueryLinkage{{SourceWidgetID: "w-1"}}},
+		{"来源不在布局里", []entity.DashboardQueryLinkage{{SourceWidgetID: "w-nope", Value: []any{"华东"}}}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, mock, _ := newTestService(t)
+			expectDashboardRead(t, mock, layoutDoc(
+				layoutChartLinked("w-1", 42, linkageTarget("w-2", "region")),
+				layoutChart("w-2", 43),
+			))
+			fake := &fakeChartProvider{}
+			svc.chartProvider = fake
+
+			got, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+				Linkages: tc.request,
+			})
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			target, _ := fake.overridesFor(43)
+			if target != nil {
+				t.Errorf("未激活的联动不该产生条件，实际 %#v", target)
+			}
+			if len(blockByWidget(got.Results, "w-2").AppliedFields) != 0 {
+				t.Errorf("appliedFields 应为空，实际 %#v", blockByWidget(got.Results, "w-2").AppliedFields)
+			}
+		})
+	}
+}
+
+// TestQueryLinkageWinsOverFilterOnSameField 同字段冲突时联动优先，且只留一条条件：
+// 两条同字段条件 AND 在一起会互相排斥成空集。
+func TestQueryLinkageWinsOverFilterOnSameField(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	expectDashboardRead(t, mock, layoutDoc(
+		layoutChartLinked("w-1", 42, linkageTarget("w-2", "region")),
+		layoutChart("w-2", 43),
+		layoutFilter("f-1", 7, "region", "in"),
+	))
+	fake := &fakeChartProvider{metaFn: linkageMeta(7)}
+	svc.chartProvider = fake
+
+	got, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+		Filters:  []entity.DashboardQueryFilter{{WidgetID: "f-1", Value: []any{"华东", "华南"}}},
+		Linkages: []entity.DashboardQueryLinkage{{SourceWidgetID: "w-1", Value: []any{"华南"}}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	target, _ := fake.overridesFor(43)
+	want := []entity.Filter{{
+		ID:       "link-w-1",
+		Field:    "region",
+		Operator: "eq",
+		Value:    "华南",
+		Logic:    "and",
+	}}
+	if !reflect.DeepEqual(target, want) {
+		t.Fatalf("同字段冲突应只留联动那条，实际 %#v", target)
+	}
+
+	// 来源块（42）没有联动去向，仍吃盘级筛选器。
+	source, _ := fake.overridesFor(42)
+	if len(source) != 1 || source[0].ID != "dash-f-1" {
+		t.Errorf("来源块应保留盘级筛选条件，实际 %#v", source)
+	}
+
+	applied := blockByWidget(got.Results, "w-2").AppliedFields
+	if !reflect.DeepEqual(applied, []string{"region"}) {
+		t.Errorf("appliedFields 不该出现重复字段，实际 %#v", applied)
+	}
+}
+
+// TestQueryLinkageAcrossDatasets 联动不受「目标数据集必须等于来源数据集」约束：
+// 目标列来自目标自己的数据集（跨数据集靠用户在联动设置里选列，而不是靠列名撞名）。
+func TestQueryLinkageAcrossDatasets(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	expectDashboardRead(t, mock, layoutDoc(
+		layoutChartLinked("w-1", 42, linkageTarget("w-2", "city")),
+		layoutChart("w-2", 43),
+	))
+	fake := &fakeChartProvider{metaFn: func(_ context.Context, id int) (*entity.ChartQueryContext, error) {
+		datasetID := 7
+		if id == 43 {
+			datasetID = 9
+		}
+		return &entity.ChartQueryContext{Exists: true, DatasetID: datasetID}, nil
+	}}
+	svc.chartProvider = fake
+
+	if _, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+		Linkages: []entity.DashboardQueryLinkage{{SourceWidgetID: "w-1", Value: []any{"杭州"}}},
+	}); err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	target, _ := fake.overridesFor(43)
+	if len(target) != 1 || target[0].Field != "city" || target[0].Value != "杭州" {
+		t.Fatalf("跨数据集联动应落在目标列上，实际 %#v", target)
+	}
+	source, _ := fake.overridesFor(42)
+	if source != nil {
+		t.Errorf("来源块不该被联动筛到，实际 %#v", source)
+	}
+}
+
+// TestProjectLinkageTargetsDropsUnusableAndDedupes 投影层丢弃「声明不了条件」的去向
+// （缺 widgetId / 缺列 ID），并让同一目标的重复声明只留首条。
+func TestProjectLinkageTargetsDropsUnusableAndDedupes(t *testing.T) {
+	layout := layoutDoc(layoutChartLinked("w-1", 42,
+		linkageTarget("", "region"),
+		linkageTarget("w-2", ""),
+		linkageTarget("w-2", "region"),
+		linkageTarget("w-2", "city"),
+	))
+	got := projectLayout(layout)
+
+	if len(got.Charts) != 1 {
+		t.Fatalf("期望 1 块图表，实际 %d", len(got.Charts))
+	}
+	want := []layoutLinkageTarget{{WidgetID: "w-2", Column: "region"}}
+	if !reflect.DeepEqual(got.Charts[0].LinkageTargets, want) {
+		t.Errorf("linkageTargets = %#v, want %#v", got.Charts[0].LinkageTargets, want)
+	}
+}
+
+// TestMergeOverridesKeepsFilterPosition filter 与联动打在不同字段时两条都留，
+// 且盘级筛选器那条保持原位置（前端「盘级条件在前」的阅读顺序不变）。
+func TestMergeOverridesKeepsFilterPosition(t *testing.T) {
+	filters := []entity.Filter{{ID: "dash-f-1", Field: "region", Operator: "eq", Value: "华东", Logic: "and"}}
+	linkages := []entity.Filter{{ID: "link-w-1", Field: "city", Operator: "eq", Value: "杭州", Logic: "and"}}
+
+	merged, applied := mergeOverrides(filters, linkages)
+	want := append(append([]entity.Filter{}, filters...), linkages...)
+	if !reflect.DeepEqual(merged, want) {
+		t.Errorf("merged = %#v, want %#v", merged, want)
+	}
+	if !reflect.DeepEqual(applied, []string{"region", "city"}) {
+		t.Errorf("applied = %#v, want [region city]", applied)
+	}
+}
+
+// TestMergeOverridesEmptyLinkagesReturnsFiltersAsIs 没有联动时原样返回盘级条件
+// （含 nil 短路：无条件的块仍走 provider 的 nil 语义）。
+func TestMergeOverridesEmptyLinkagesReturnsFiltersAsIs(t *testing.T) {
+	merged, applied := mergeOverrides(nil, nil)
+	if merged != nil || applied != nil {
+		t.Fatalf("空输入应原样返回 nil，实际 %#v / %#v", merged, applied)
+	}
+
+	filters := []entity.Filter{{ID: "dash-f-1", Field: "region", Operator: "eq", Value: "华东", Logic: "and"}}
+	merged, applied = mergeOverrides(filters, nil)
+	if !reflect.DeepEqual(merged, filters) {
+		t.Errorf("merged = %#v, want 入参本身", merged)
+	}
+	if !reflect.DeepEqual(applied, []string{"region"}) {
+		t.Errorf("applied = %#v, want [region]", applied)
+	}
+}

@@ -168,8 +168,8 @@ describe('仪表盘画布页', () => {
 
     await waitFor(() => expect(screen.getByTestId('echarts')).toBeInTheDocument());
     expect(screen.getByText('图表已删除')).toBeInTheDocument();
-    // 盘级取数只发一次，且下发的是空筛选（v1 无筛选器入口）。
-    expect(mockQuery).toHaveBeenCalledWith('d-1', { filters: [] });
+    // 盘级取数只发一次，且下发的是空筛选 / 空联动（本盘既无筛选器入口，也没点击过数据项）。
+    expect(mockQuery).toHaveBeenCalledWith('d-1', { filters: [], linkages: [] });
     // 已被 /query 覆盖的块不应再走图表自身的取数端点。
     expect(mockGetChartData).not.toHaveBeenCalled();
   });

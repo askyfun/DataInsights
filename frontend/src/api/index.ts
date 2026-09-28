@@ -269,7 +269,18 @@ export type DashboardUpdateRequest = G['DashboardUpdateRequest'];
 export type DashboardFolder = G['DashboardFolder'];
 export type DashboardFolderCreateRequest = G['DashboardFolderCreateRequest'];
 export type DashboardFolderUpdateRequest = G['DashboardFolderUpdateRequest'];
-export type DashboardQueryRequest = G['DashboardQueryRequest'];
+// 联动取值（issue #143）与 `total` / `query_options` 同一裁定 A：生成物早于 openapi 的
+// DashboardQueryRequest.linkages 改动，故在手写薄层补齐；形状与 openapi 的
+// DashboardQueryLinkage 一致——只带「哪块图被点了 + 点了什么值」，列标识由后端读 layout。
+export type DashboardQueryLinkage = {
+  sourceWidgetId: string;
+  /** 空数组 = 未激活；单值 → eq，多值 → in。 */
+  value: unknown[];
+};
+
+export type DashboardQueryRequest = G['DashboardQueryRequest'] & {
+  linkages?: DashboardQueryLinkage[];
+};
 // 注意命名陷阱：这里取的是**单块结果**（DashboardQueryResult 是 block schema），
 // 接口的 Envelope 同名类型是 G['DashboardQueryResponse']（见文件头迁移规则）。
 export type DashboardQueryResult = G['DashboardQueryResult'];
