@@ -117,6 +117,11 @@
 > ⚠️ **取值形状按算子分流，三族共用同一条规则**：`in` / `notIn` 数组、`between` 两元素、
 > **其余标量算子恰好一个元素**（后端 `buildOverrides` 取 `value[0]` 当绑定参数；给多了会被降级成 `in`）。
 > `between` 缺一端时前端**整条不下发**（退回未激活），不补空值造恒假区间。
+> ⚠️ **按页收窄也是一对前后端镜像**：前端 `dashboardLayoutSchema.applicableFilterWidgets`
+> （本页的 + `scope: 'all'` 的）必须与后端 `projectLayout` 的 `chartInPage` / `filterInPage` 同口径 ——
+> 改一边不改另一边，会得到「前端不发、后端白认」或「后端认、前端永不发」的死筛选器。
+> ⚠️ **缺 `pageId` 的块（v1 旧文档）不受按页收窄影响**：迁移只在前端跑，后端读的是库里原样的文档；
+> 把缺 `pageId` 的块按页排除，会让打开一个旧盘直接空白。
 
 - ⚠️ **`buildOverrides` 的取值形状必须按算子分流**：请求里的值恒为数组，但 `in` / `notIn` 要数组、`between` 要**两个标量**、**标量算子（eq/neq/gt/gte/lt/lte/like）要单个标量**——`buildFilterPart` 对它们是 `append(f.Value)` 单参数绑定，塞数组进去会渲染成 `col = ARRAY[...]`（PG 42883）。`between` 的拆分还必须排在「多值降级为 in」之前，否则区间被吃成 `IN (下界, 上界)`。
 - ⚠️ **`DashboardFilterBinding.column` 必须是列 ID，不是列名**：盘级条件最终以 `entity.Filter.Field` 传给取数，而「哪些字段被盘级条件覆盖」（`overriddenFields`）是拿图表自身过滤条件里的**列 ID**（`OwnFilterFields` ← config 的 `filters[].fieldId`）求交集 —— 存列名这个可见标识永远匹配不上。⚠️ openapi 里 `binding.column` 的描述仍写着「列名」，是改造前的口径，**待同步**（改 description 要重跑 `make api-gen`）。
