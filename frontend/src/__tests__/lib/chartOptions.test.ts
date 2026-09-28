@@ -46,6 +46,12 @@ interface AxisOptionView {
     connectNulls?: boolean;
     areaStyle?: unknown;
     stack?: string;
+    label?: {
+      show?: boolean;
+      position?: string;
+      formatter?: (params: { value: unknown }) => string;
+    };
+    labelLayout?: { hideOverlap?: boolean };
     markLine?: {
       silent?: boolean;
       symbol?: string;
@@ -143,7 +149,10 @@ describe('buildChartOption：结构化聚合响应（正常路径）', () => {
     expect(option.title.text).toBe('Sales');
     expect(option.xAxis.type).toBe('category');
     expect(option.xAxis.data).toEqual(['Apple', 'Banana']);
-    expect(option.series).toEqual([{ name: 'revenue', type: 'bar', data: [1000, 2000] }]);
+    // label: {show:false} 是数据标注的显式关闭态（未配置 dataLabel 时的默认形状）
+    expect(option.series).toEqual([
+      { name: 'revenue', type: 'bar', label: { show: false }, data: [1000, 2000] },
+    ]);
   });
 
   it('line：带 smooth/connectNulls（ChartCanvas 版本细节统一到共享函数）', () => {
@@ -1753,6 +1762,163 @@ describe('buildChartOption：context.referenceLines 参考线（R-63）', () => 
       )
     );
     expect(option.series[0]).not.toHaveProperty('markLine');
+  });
+});
+
+describe('buildChartOption：style.dataLabel 数据标注（issue #153 第 1 批）', () => {
+  const axisContext = { title: '', dimensions: ['product'], metrics: ['revenue'] };
+  const twoSeriesPayload = {
+    x_axis: ['Apple', 'Banana'],
+    series: [
+      { name: 'revenue', data: [1000, 2000] },
+      { name: 'cost', data: [3000, 2000] },
+    ],
+  };
+
+  it('未开启 / 显式 false：series 写成显式关闭态（ECharts 按下标合并不撤销旧值），且不带 labelLayout', () => {
+    for (const style of [baseStyle, { ...baseStyle, dataLabel: false }]) {
+      const option = view<AxisOptionView>(
+        buildChartOption('bar', axisPayload, style, {}, axisContext)
+      );
+      expect(option.series[0]?.label).toEqual({ show: false });
+      expect(option.series[0]).not.toHaveProperty('labelLayout');
+    }
+  });
+
+  it('bar/line/area 开启后 series 带 label.show 与防重叠 labelLayout，位置缺省 top', () => {
+    const style = { ...baseStyle, dataLabel: true };
+    for (const chartType of ['bar', 'line', 'area'] as const) {
+      const option = view<AxisOptionView>(
+        buildChartOption(chartType, axisPayload, style, {}, axisContext)
+      );
+      expect(option.series[0]?.label).toEqual({ show: true, position: 'top' });
+      expect(option.series[0]?.labelLayout).toEqual({ hideOverlap: true });
+    }
+  });
+
+  it('标注位置按 dataLabelPosition 覆盖（inside / center）', () => {
+    for (const position of ['inside', 'center'] as const) {
+      const option = view<AxisOptionView>(
+        buildChartOption(
+          'bar',
+          axisPayload,
+          { ...baseStyle, dataLabel: true, dataLabelPosition: position },
+          {},
+          axisContext
+        )
+      );
+      expect(option.series[0]?.label).toEqual({ show: true, position });
+    }
+  });
+
+  it('未配指标格式时不挂 formatter（与 TableChart 无格式列的原样输出一致）', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption('bar', axisPayload, { ...baseStyle, dataLabel: true }, {}, axisContext)
+    );
+    expect(option.series[0]?.label).not.toHaveProperty('formatter');
+  });
+
+  it('配了 metricFormats 时标签按该格式渲染（复用 lib/format 的口径）', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        axisPayload,
+        { ...baseStyle, dataLabel: true },
+        {},
+        { ...axisContext, metricFormats: { revenue: '0,0.00' } }
+      )
+    );
+    const formatter = option.series[0]?.label?.formatter;
+    expect(typeof formatter).toBe('function');
+    expect(formatter?.({ value: 1000 })).toBe('1,000.00');
+  });
+
+  it('格式按 series 输出名匹配：未配格式的 series 不受其他 series 的格式影响', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        twoSeriesPayload,
+        { ...baseStyle, dataLabel: true },
+        {},
+        {
+          title: '',
+          dimensions: ['product'],
+          metrics: ['revenue', 'cost'],
+          metricFormats: { revenue: '0.0' },
+        }
+      )
+    );
+    expect(option.series[0]?.label?.formatter?.({ value: 1000 })).toBe('1000.0');
+    expect(option.series[1]?.label).not.toHaveProperty('formatter');
+  });
+
+  it('多条 series 各自带标注；legacy 裸行路径同样生效', () => {
+    const style = { ...baseStyle, dataLabel: true };
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        twoSeriesPayload,
+        style,
+        {},
+        { title: '', dimensions: ['product'], metrics: ['revenue', 'cost'] }
+      )
+    );
+    expect(option.series[0]?.label).toEqual({ show: true, position: 'top' });
+    expect(option.series[1]?.label).toEqual({ show: true, position: 'top' });
+
+    const rows = [{ product: 'Apple', revenue: 1000 }];
+    const legacy = view<AxisOptionView>(buildChartOption('line', rows, style, {}, axisContext));
+    expect(legacy.series[0]?.label).toEqual({ show: true, position: 'top' });
+    expect(legacy.series[0]?.labelLayout).toEqual({ hideOverlap: true });
+  });
+
+  it('横向条形（orientation=horizontal）同样带标注：位置不做图型特化', () => {
+    const option = view<AxisOptionView>(
+      buildChartOption(
+        'bar',
+        axisPayload,
+        { ...baseStyle, orientation: 'horizontal', dataLabel: true },
+        {},
+        axisContext
+      )
+    );
+    expect(option.series[0]?.label).toEqual({ show: true, position: 'top' });
+  });
+
+  it('pie 自带标签不落 dataLabel 分支（本期不接管饼/漏斗标注）', () => {
+    const option = view<PieOptionView>(
+      buildChartOption(
+        'pie',
+        piePayload,
+        { ...baseStyle, dataLabel: true },
+        {},
+        { title: '', dimensions: ['product'], metrics: ['revenue'] }
+      )
+    );
+    expect(option.series[0]?.label).toEqual({ formatter: '{b}: {d}%' });
+    expect(option.series[0]).not.toHaveProperty('labelLayout');
+  });
+});
+
+describe('normalizeChartStyle：dataLabel 安全窄化', () => {
+  it('只认 true；false / 非布尔一律不带键（与默认值形状一致）', () => {
+    expect(normalizeChartStyle({ dataLabel: true, dataLabelPosition: 'inside' })).toMatchObject({
+      dataLabel: true,
+      dataLabelPosition: 'inside',
+    });
+    expect(normalizeChartStyle({})).not.toHaveProperty('dataLabel');
+    expect(normalizeChartStyle({ dataLabel: false })).not.toHaveProperty('dataLabel');
+    expect(normalizeChartStyle({ dataLabel: 'yes' })).not.toHaveProperty('dataLabel');
+  });
+
+  it('位置按词表白名单校验，词表外丢弃', () => {
+    for (const position of ['top', 'inside', 'center'] as const) {
+      expect(normalizeChartStyle({ dataLabelPosition: position }).dataLabelPosition).toBe(position);
+    }
+    expect(normalizeChartStyle({})).not.toHaveProperty('dataLabelPosition');
+    expect(normalizeChartStyle({ dataLabelPosition: 'bottom' })).not.toHaveProperty(
+      'dataLabelPosition'
+    );
   });
 });
 

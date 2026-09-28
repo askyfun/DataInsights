@@ -197,7 +197,10 @@ describe('store.chartData 可被共享 buildChartOption 直接消费（builder/s
       series: { name: string; type: string; data: unknown[] }[];
     };
     expect(shaped.xAxis.data).toEqual(['Apple', 'Banana']);
-    expect(shaped.series).toEqual([{ name: 'revenue', type: 'bar', data: [1000, 2000] }]);
+    // label: {show:false} 是数据标注的显式关闭态（未配置 dataLabel 时的默认形状）
+    expect(shaped.series).toEqual([
+      { name: 'revenue', type: 'bar', label: { show: false }, data: [1000, 2000] },
+    ]);
   });
 });
 

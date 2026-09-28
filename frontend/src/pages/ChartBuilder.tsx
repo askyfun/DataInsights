@@ -701,6 +701,8 @@ interface ChartCanvasProps {
   dimensionLabels: Record<string, string>;
   metricAliases: Record<string, string>;
   metricUnits: Record<string, string>;
+  /** 指标显示格式（键为 bindingId）；仅数据标注消费，按输出列名翻译后进 option。 */
+  metricFormats: Record<string, string>;
   chartStyle: ChartStyleConfig;
   /** 查询选项（R-63：参考线在此透传给 buildChartOption）。 */
   queryOptions: ChartQueryOptions;
@@ -747,6 +749,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   dimensionLabels,
   metricAliases,
   metricUnits,
+  metricFormats,
   chartStyle,
   queryOptions,
 }) => {
@@ -779,6 +782,9 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     // labels 的键保持列名（buildChartOption 按列名/系列名查显示名），但 label/alias/unit
     // 的值按 bindingId 取（五个 Record 已改为 bindingId 键）。
     const labels: Record<string, string> = {};
+    // 指标显示格式（数据标注用）：与 labels 同一键空间（输出列名），随 labels 一起在
+    // 同一个 metricBindings 循环里填，避免两处各写一遍「bindingId → 输出列名」的翻译。
+    const formats: Record<string, string> = {};
     for (const binding of dimensionBindings) {
       const name = fieldMap.get(binding.fieldId)?.name;
       const label = dimensionLabels[binding.bindingId];
@@ -794,6 +800,10 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
       // 已知限制（Task 0-6+0-8 解决）：同一列名有多个 binding（多个不同 alias）时，
       // 共享的列名键上后写入者覆盖先写入者，图表暂时无法区分显示名。
       labels[baseName] = unit ? `${displayName} (${unit})` : displayName;
+      const format = metricFormats[binding.bindingId];
+      if (format) {
+        formats[baseName] = format;
+      }
     }
 
     // combo 双轴：按图型定义的 metric 槽位（primary_values/secondary_values）派生 metricSlots。
@@ -830,6 +840,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         // 参考线（R-63）：store 里是 camelCase 持久化模型，进 option 前净化一次
         // （防御恢复自旧文档/手改 config 的脏数据）。
         referenceLines: normalizeReferenceLines(queryOptions.referenceLines),
+        metricFormats: formats,
       },
       resolvedTheme,
       hostEl
@@ -841,6 +852,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     dimensionLabels,
     metricAliases,
     metricUnits,
+    metricFormats,
     queryOptions,
     hostEl,
     resolvedTheme,
@@ -1092,6 +1104,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
     showStyleControl('stack') ||
     showStyleControl('orientation') ||
     showStyleControl('donut') ||
+    showStyleControl('dataLabel') ||
     showStyleControl('tableRowSize') ||
     config.chartType === 'histogram' ||
     // table 的合计行开关挂在这个卡片里（queryOptions，非 style），卡片必须出现。
@@ -1270,6 +1283,30 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 <Switch
                   checked={chartStyle.donut ?? false}
                   onChange={(checked) => onChartStyleChange({ donut: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('dataLabel') && (
+              <SettingRow label="数据标注">
+                <Switch
+                  checked={chartStyle.dataLabel ?? false}
+                  onChange={(checked) => onChartStyleChange({ dataLabel: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('dataLabel') && chartStyle.dataLabel === true && (
+              <SettingRow label="标注位置">
+                <Select
+                  style={{ width: 160 }}
+                  value={chartStyle.dataLabelPosition ?? 'top'}
+                  onChange={(value) => onChartStyleChange({ dataLabelPosition: value })}
+                  options={[
+                    { value: 'top', label: '柱顶/折点上方' },
+                    { value: 'inside', label: '图形内部' },
+                    { value: 'center', label: '居中' },
+                  ]}
                 />
               </SettingRow>
             )}
@@ -3042,6 +3079,7 @@ const ChartBuilder: React.FC = () => {
           dimensionLabels={dimensionLabels}
           metricAliases={metricAliases}
           metricUnits={metricUnits}
+          metricFormats={metricFormats}
           chartStyle={chartStyle}
           queryOptions={chartQueryOptions}
         />
