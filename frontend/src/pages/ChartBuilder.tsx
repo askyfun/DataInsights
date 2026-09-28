@@ -3451,16 +3451,15 @@ const ChartBuilder: React.FC = () => {
                     查看 SQL
                   </Button>
                 )}
-                <Tooltip title="本次会话内最近 20 次成功查询的配置快照，点击回填">
+                <Tooltip title="查询历史：本次会话内最近 20 次成功查询的配置快照，点击回填">
                   <Button
                     size="small"
                     icon={<HistoryOutlined />}
                     onClick={() => setHistoryOpen(true)}
                     disabled={queryHistory.length === 0}
+                    aria-label="查询历史"
                     data-testid="query-history-button"
-                  >
-                    查询历史
-                  </Button>
+                  />
                 </Tooltip>
                 {shareShortId && (
                   <Tooltip title="复制地址栏链接：对方打开看到的就是这一屏">
