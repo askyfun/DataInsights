@@ -189,6 +189,8 @@ describe('仪表盘多页面：按页取数与页面切换', () => {
     expect(mockQuery).toHaveBeenCalledWith('d-1', {
       page_id: 'p-1',
       filters: [{ widgetId: 'f-global', value: ['华东'] }],
+      // #143 起 /query 契约恒带 linkages（无联动为空数组）
+      linkages: [],
     });
     // 只渲染首页的块。
     expect(screen.getByText('首屏图')).toBeInTheDocument();
@@ -209,6 +211,7 @@ describe('仪表盘多页面：按页取数与页面切换', () => {
       expect(mockQuery).toHaveBeenCalledWith('d-1', {
         page_id: 'p-2',
         filters: [{ widgetId: 'f-global', value: ['华东'] }],
+        linkages: [],
       })
     );
     await waitFor(() => expect(screen.getByText('明细图')).toBeInTheDocument());
@@ -236,7 +239,11 @@ describe('仪表盘多页面：按页取数与页面切换', () => {
     fireEvent.click(within(firstTab as HTMLElement).getByTestId('dashboard-page-label'));
 
     await waitFor(() =>
-      expect(mockQuery).toHaveBeenLastCalledWith('d-1', { page_id: 'p-1', filters: [] })
+      expect(mockQuery).toHaveBeenLastCalledWith('d-1', {
+        page_id: 'p-1',
+        filters: [],
+        linkages: [],
+      })
     );
   });
 });
@@ -332,6 +339,7 @@ describe('仪表盘多页面：页面增删改复制', () => {
       expect(mockQuery).toHaveBeenLastCalledWith('d-1', {
         page_id: 'p-2',
         filters: [{ widgetId: 'f-global', value: ['华东'] }],
+        linkages: [],
       })
     );
     expect(tabLabels()).toEqual(['p-2']);
