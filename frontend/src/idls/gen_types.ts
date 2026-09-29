@@ -1504,11 +1504,11 @@ export interface components {
             /** @description **三态**（归档移动）：缺省或 null = 保留现有归档位置；`""`（空串）= **移出文件夹到未归档**（与文件夹 PUT 的 parent_id 同一哨兵口径）； UUID = 归档到该文件夹。目标不存在或已软删 → 20300。 */
             folder_id?: string | null;
         };
-        /** @description layout_json 的解析后形态（PRD §6.2）。前端用 migrateDashboardLayout 做迁移： 任何输入（空串 / 损坏 JSON / 非对象）都返回合法 v1 文档，绝不抛异常；version 未知时按 v1 尽力解析。后端不做解析。 */
+        /** @description layout_json 的解析后形态（PRD §6.2）。前端用 migrateDashboardLayout 做迁移： 任何输入（空串 / 损坏 JSON / 非对象）都返回合法文档，绝不抛异常。当前版本为 v2（多页面）；v1（单页、无 pages/pageId）在加载时无损迁移到 v2——v1 的 widgets 全部落到迁移合成的那一页上。后端不做解析。 */
         DashboardLayout: {
             /**
-             * @description 文档版本；当前为 1。
-             * @example 1
+             * @description 文档版本；当前为 2（1 = 单页，加载时迁移）。
+             * @example 2
              */
             version: number;
             /** @description 仅持久化列数，供将来扩容判别。 */
@@ -1519,12 +1519,27 @@ export interface components {
                  */
                 cols?: number;
             };
+            /** @description 页面（独立画布）列表，**至少一页**；数组顺序即标签顺序。 */
+            pages: components["schemas"]["DashboardPage"][];
             widgets: components["schemas"]["DashboardWidget"][];
         };
+        /** @description 一个页面。归属用扁平 `widgets[].pageId` 表达（而不是把 widgets 嵌进 page）， 因为后端投影与图表引用计数的 jsonpath 都建立在扁平 widgets 数组上。 */
+        DashboardPage: {
+            /**
+             * @description 页面 id，盘内唯一；前端用 crypto.randomUUID() 生成（前缀 p-）。
+             * @example p-3f9c
+             */
+            id: string;
+            /**
+             * @description 标签显示名；可重命名，不要求唯一。
+             * @example 页面 1
+             */
+            name: string;
+        };
         /**
-         * @description 盘内一块 widget，按 type 判别（chart | text | filter）：本 schema 是三者的 扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用 markdown，filter 用 binding/label/dataType/operator/multi/defaultValue。
+         * @description 盘内一块 widget，按 type 判别（chart | text | filter）：本 schema 是三者的 扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用 markdown，filter 用 binding/label/dataType/operator/multi/defaultValue/scope。
          *     契约上这是 oneOf-with-discriminator 语义，但生成物刻意不落成 union 类型： Go 侧为不引入 oapi-codegen/runtime 依赖（与 ChartDataResult.data 同款取舍）， TS 侧消费方按 type 手动收窄。
-         *     硬约束：widgetId 盘内唯一且**绝不等于 chartId**（PRD D1，同一 chartId 可以在 同一盘里出现多次，各自独立 x/y/w/h）；chart 块只存引用不存快照。
+         *     硬约束：widgetId **整盘**唯一（唯一域是整盘而非单页）且**绝不等于 chartId** （PRD D1，同一 chartId 可以在同一盘里出现多次，各自独立 x/y/w/h）；chart 块 只存引用不存快照。
          */
         DashboardWidget: {
             /**
@@ -1532,6 +1547,11 @@ export interface components {
              * @example w-3f9c
              */
             widgetId: string;
+            /**
+             * @description 所属页面的 id（对应 DashboardLayout.pages 里的一项）。解析后形态里恒存在； 指向不存在页面的块由前端迁移归到首页。
+             * @example p-3f9c
+             */
+            pageId: string;
             /** @enum {string} */
             type: "chart" | "text" | "filter";
             /** @description react-grid-layout 左上角列坐标（0 起）。 */
@@ -1557,6 +1577,11 @@ export interface components {
             operator?: string;
             /** @description type=filter 是否允许多选。 */
             multi?: boolean;
+            /**
+             * @description type=filter 的作用范围：`page`（缺省）= 只作用于所在页；`all` = 作用于 所有页（取数时任意页都下发它）。缺省值不写进文档（键不存在即 page）。
+             * @enum {string}
+             */
+            scope?: "page" | "all";
             /** @description type=filter 且绑定字段是日期类时的粒度与周计算逻辑（口径见前端 lib/dateFilter.ts）。 **后端只做投影解析、不读这个键**：盘级筛选的取值由前端按它现算成具体区间后随请求下发。 */
             date?: {
                 /**
@@ -1585,6 +1610,8 @@ export interface components {
         };
         /** @description POST /api/dashboards/{id}/query 请求体（PRD §6.3）。前端只下筛选器的当前值， **不解析 chart config、不下发合并结果**：筛选合并是后端单点逻辑（可测）。 */
         DashboardQueryRequest: {
+            /** @description 多页面文档（layout v2）的「当前激活页」页面 id。非空时只取该页的图表块， 并额外带上任意页里 `scope: all` 的筛选器；缺 pageId 的块（v1 旧文档） 不受按页收窄影响。省略或空串 = 不按页收窄（单页语义）。 */
+            page_id?: string;
             filters?: components["schemas"]["DashboardQueryFilter"][];
         };
         /** @description 单块取数结果（PRD §6.3）。单块失败不整盘失败。 */

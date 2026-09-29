@@ -174,8 +174,9 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 拖拽式仪表盘（`backend/internal/service/dashboard` + `frontend/src/components/Dashboard*`）：
 
 - **布局**：12 列栅格（`frontend/src/lib/dashboardLayoutSchema.ts` 的 `DASHBOARD_GRID_COLS = 12`，渲染基于 react-grid-layout），落库为 `bi_dashboard.layout_json`，块含图表 widget 与筛选器 widget。
-- **盘级筛选器三族**（`frontend/src/lib/dashboardFilterValue.ts` 的 `filterWidgetFamily`）：`date`（复用 `components/DateFilter` 语义）、`string`（枚举多/单选，候选值实查）、`number`（算子下拉 + 数值输入）；三族只有控件形态与算子词表分族，取值下发是同一条链路。筛选器绑定 `(datasetId, column)` 二元组，`column` 是列的稳定 id。
-- **盘级批量取数**：`POST /api/dashboards/{id}/query` 只收各筛选器当前取值 `{widgetId, value[]}`，与图表自身条件的合并由后端单点完成（`service/dashboard/query.go` 的 `buildOverrides`），逐块复用图表取数管道。日期族取值的意图解析仍走 `query/datefilter.go` 的 Go 侧镜像。
+- **多页面（v2 文档）**：一个盘含至少一页（`pages: [{id, name}]`），每个 widget 用 `pageId` 归属一页 —— 归属刻意用**扁平** `widgets[] + pageId`（而非把 widgets 嵌进 page），因为后端投影与图表引用计数的 jsonpath 都建立在扁平 widgets 数组上。v1 文档（单页）在加载时无损迁移到 v2。激活页是**会话态**（不落库），页面标签条在 `components/DashboardPageTabs/`。
+- **盘级筛选器三族**（`frontend/src/lib/dashboardFilterValue.ts` 的 `filterWidgetFamily`）：`date`（复用 `components/DateFilter` 语义）、`string`（枚举多/单选，候选值实查）、`number`（算子下拉 + 数值输入）；三族只有控件形态与算子词表分族，取值下发是同一条链路。筛选器绑定 `(datasetId, column)` 二元组，`column` 是列的稳定 id；`scope` 决定作用范围（缺省只作用所在页，`all` 作用所有页）。
+- **盘级批量取数**：`POST /api/dashboards/{id}/query` 收各筛选器当前取值 `{widgetId, value[]}` 与可选 `page_id`，与图表自身条件的合并由后端单点完成（`service/dashboard/query.go` 的 `buildOverrides`），逐块复用图表取数管道。`page_id` 非空时后端 `chartInPage`/`filterInPage` 按页收窄（**与前端 `applicableFilterWidgets` 是一对镜像**）。日期族取值的意图解析仍走 `query/datefilter.go` 的 Go 侧镜像。
 
 ## 关键设计决策（Key Design Decisions）
 

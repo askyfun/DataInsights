@@ -1,6 +1,7 @@
 import { DeleteOutlined, SettingOutlined } from '@ant-design/icons';
 import { Button, Card, InputNumber, Select, Space, Typography } from 'antd';
 import React, { useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { datasetsApi } from '@/api';
 // 算子中文名复用图表侧的导出（`FilterConfigModal` 里还有一份重复的表，属既有重复，未一并合并）。
 import { OPERATOR_LABELS } from '@/components/ChartBuilder/FilterDropZone';
@@ -10,7 +11,7 @@ import {
   FAMILY_OPERATORS,
   filterWidgetFamily,
 } from '@/lib/dashboardFilterValue';
-import type { DashboardFilterWidget } from '@/lib/dashboardLayoutSchema';
+import type { DashboardFilterScope, DashboardFilterWidget } from '@/lib/dashboardLayoutSchema';
 import { type DateFilterValue, isDateFilterValue } from '@/lib/dateFilter';
 import type { FilterOperator } from '@/store';
 
@@ -46,6 +47,8 @@ export interface DashboardFilterBlockProps {
   onChange: (next: unknown) => void;
   /** 换算子（数值族在块上直接改）。 */
   onOperatorChange: (operator: FilterOperator) => void;
+  /** 改作用范围：`'page'` 只作用本页，`'all'` 作用所有页。 */
+  onScopeChange: (scope: DashboardFilterScope) => void;
   /** 打开完整日期筛选弹窗（粒度 / 快捷选项 / 高级起止 / 特殊值）——仅日期族。 */
   onConfigure: () => void;
   onRemove: () => void;
@@ -65,9 +68,11 @@ const DashboardFilterBlock: React.FC<DashboardFilterBlockProps> = ({
   unsaved,
   onChange,
   onOperatorChange,
+  onScopeChange,
   onConfigure,
   onRemove,
 }) => {
+  const intl = useIntl();
   const family = filterWidgetFamily(widget);
   const { datasetId, column } = widget.binding;
   const [candidates, setCandidates] = useState<string[]>([]);
@@ -201,6 +206,19 @@ const DashboardFilterBlock: React.FC<DashboardFilterBlockProps> = ({
       title={widget.label}
       extra={
         <>
+          <Select
+            size="small"
+            value={widget.scope ?? 'page'}
+            aria-label={intl.formatMessage({ id: 'dashboard.filterScope' })}
+            data-testid="dashboard-filter-scope"
+            style={{ width: 96 }}
+            options={[
+              { value: 'page', label: intl.formatMessage({ id: 'dashboard.filterScopePage' }) },
+              { value: 'all', label: intl.formatMessage({ id: 'dashboard.filterScopeAll' }) },
+            ]}
+            // 词表在这里是普通字符串（与 FAMILY_OPERATORS 同款），到边界收成字面量联合。
+            onChange={(next) => onScopeChange(next as DashboardFilterScope)}
+          />
           {family === 'date' && (
             <Button
               type="text"

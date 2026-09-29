@@ -196,7 +196,10 @@ describe('结构化 AxisResponse：顺序原样保留（executeChartQuery 不再
       ['revenue']
     );
     expect(option.xAxis.data).toEqual(['A', 'B']);
-    expect(option.series).toEqual([{ name: 'revenue', type: 'bar', data: [100, 200] }]);
+    // label: {show:false} 是数据标注的显式关闭态（未配置 dataLabel 时的默认形状）
+    expect(option.series).toEqual([
+      { name: 'revenue', type: 'bar', label: { show: false }, data: [100, 200] },
+    ]);
   });
 
   it('多维度：系列名是第二个维度的值，顺序原样保留', () => {

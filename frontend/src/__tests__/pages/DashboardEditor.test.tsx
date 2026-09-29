@@ -112,6 +112,9 @@ const layoutDoc = JSON.stringify({
   ],
 });
 
+/** v1 文档迁移后块落到的那一页（migrateDashboardLayout 合成的首页）。 */
+const migrationPageId = 'p-recovered-0';
+
 const dashboard: Dashboard = {
   id: 'd-1',
   name: '销售总览',
@@ -168,8 +171,13 @@ describe('仪表盘画布页', () => {
 
     await waitFor(() => expect(screen.getByTestId('echarts')).toBeInTheDocument());
     expect(screen.getByText('图表已删除')).toBeInTheDocument();
-    // 盘级取数只发一次，且下发的是空筛选（v1 无筛选器入口）。
-    expect(mockQuery).toHaveBeenCalledWith('d-1', { filters: [] });
+    // 盘级取数只发一次，按当前页取（v1 文档迁移出单页，块都在这一页上）；
+    // 下发的是空筛选 / 空联动（本盘既无筛选器入口，也没点击过数据项）。
+    expect(mockQuery).toHaveBeenCalledWith('d-1', {
+      page_id: migrationPageId,
+      filters: [],
+      linkages: [],
+    });
     // 已被 /query 覆盖的块不应再走图表自身的取数端点。
     expect(mockGetChartData).not.toHaveBeenCalled();
   });
@@ -244,9 +252,20 @@ describe('仪表盘画布页', () => {
 
     fireEvent.click(saveButton());
 
-    await waitFor(() =>
-      expect(mockUpdate).toHaveBeenCalledWith('d-1', { name: '新名字', layout_json: layoutDoc })
-    );
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+    const payload = mockUpdate.mock.calls[0][1] as { name: string; layout_json: string };
+    expect(payload.name).toBe('新名字');
+    // 落库时把 v1 文档**升级**成 v2：块带上 pageId、页面列表带上合成的那一页。
+    // 旧盘因此不会掉块；这也是「迁移产物会写回后端」的锚点。
+    expect(JSON.parse(payload.layout_json)).toMatchObject({
+      version: 2,
+      grid: { cols: 12 },
+      pages: [{ id: migrationPageId, name: '页面 1' }],
+      widgets: [
+        { widgetId: 'w-a', pageId: migrationPageId },
+        { widgetId: 'w-b', pageId: migrationPageId },
+      ],
+    });
     expect(localStorage.getItem('dashboard-draft:d-1')).toBeNull();
   });
 

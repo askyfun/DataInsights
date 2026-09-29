@@ -478,9 +478,24 @@ type DashboardQueryFilter struct {
 	WidgetId string `json:"widgetId"`
 }
 
-// DashboardQueryRequest POST /api/dashboards/{id}/query 请求体（PRD §6.3）。前端只下筛选器的当前值， **不解析 chart config、不下发合并结果**：筛选合并是后端单点逻辑（可测）。
+// DashboardQueryLinkage POST /api/dashboards/{id}/query 的单个图表联动取值（issue #143）。点击某图表的 数据项后，前端只下发「哪块图被点了 + 点了什么值」；要打到哪些图表、落在哪一列上， 由后端从 layout_json 里各 chart 块的 `linkage.targets` 读出 —— 列标识只来自已落库 文档，与盘级筛选器同一条信任边界。
+type DashboardQueryLinkage struct {
+	// SourceWidgetId 被点击的图表块 widgetId（联动来源，对应布局里 type=chart 的块）。
+	SourceWidgetId string `json:"sourceWidgetId"`
+
+	// Value 被点击数据项的维度取值；空数组等同于未激活。单值 → eq，多值 → in （与盘级筛选器同一条「按值个数收形」的规则）。
+	Value *[]interface{} `json:"value,omitempty"`
+}
+
+// DashboardQueryRequest POST /api/dashboards/{id}/query 请求体（PRD §6.3）。前端只下筛选器与联动的当前值， **不解析 chart config、不下发合并结果**：筛选合并是后端单点逻辑（可测）。
 type DashboardQueryRequest struct {
 	Filters *[]DashboardQueryFilter `json:"filters,omitempty"`
+
+	// PageId 多页面文档（layout v2）的「当前激活页」页面 id。非空时只取该页的图表块， 并额外带上任意页里 `scope: all` 的筛选器；缺 pageId 的块（v1 旧文档） 不受按页收窄影响。省略或空串 = 不按页收窄（单页语义）。
+	PageId *string `json:"page_id,omitempty"`
+
+	// Linkages 已激活的图表联动（issue #143）。同一来源只应出现一次；未点击的来源不要下发。
+	Linkages *[]DashboardQueryLinkage `json:"linkages,omitempty"`
 }
 
 // DashboardQueryResponse POST /api/dashboards/{id}/query 响应：data.results 为逐块结果数组，顺序与 layout 里 type=chart 的块一致（前端据 widgetId 归位）。单块失败不整盘失败： 该块 status=error 并带 message，其余块照常返回；无图表块（或无图表块的合法 布局）返回空数组。

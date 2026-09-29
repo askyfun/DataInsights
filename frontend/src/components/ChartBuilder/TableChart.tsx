@@ -57,6 +57,11 @@ interface TableChartProps {
   onPageChange?: (page: number, pageSize: number) => void;
   /** 传 null 表示用户取消了排序（第三次点击表头）。未传 onSortChange 时不渲染排序箭头。 */
   onSortChange?: (sort: { field: string; order: 'asc' | 'desc' } | null) => void;
+  /**
+   * 行点击（仪表盘图表联动 issue #143）：回调整行记录，由调用方决定取哪一列的什么值。
+   * 缺省不挂——点了没反应的区域不该出现手型光标。
+   */
+  onRowClick?: (record: Record<string, unknown>) => void;
 }
 
 /** 序号列的常量 dataIndex（不参与取数，仅占位）；合计行据此把它与真实数据列区分开。 */
@@ -83,6 +88,7 @@ const TableChart: React.FC<TableChartProps> = ({
   sortOrder,
   onPageChange,
   onSortChange,
+  onRowClick,
 }) => {
   const columns: TableProps<any>['columns'] = useMemo(() => {
     const keys =
@@ -343,6 +349,14 @@ const TableChart: React.FC<TableChartProps> = ({
       size={rowSize}
       scroll={{ x: 'max-content' }}
       onChange={handleTableChange}
+      onRow={
+        onRowClick
+          ? (record) => ({
+              onClick: () => onRowClick(record as Record<string, unknown>),
+              style: { cursor: 'pointer' },
+            })
+          : undefined
+      }
     />
   );
 };
