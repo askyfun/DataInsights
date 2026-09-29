@@ -2519,8 +2519,6 @@ const ChartBuilder: React.FC = () => {
   }, [
     chartQueryOptions,
     chartBuilderConfig.chartType,
-    dimensionBindingCount,
-    referenceMetricOptions,
     comparisonDimensionOptions,
     setChartQueryOptionsState,
   ]);
@@ -3639,7 +3637,14 @@ const ChartBuilder: React.FC = () => {
             // 内层 flex:1 只能停在 min-height 上（预览画布塌缩的根因之一）。
             style={{ flex: 1, minHeight: 400, display: 'flex', flexDirection: 'column' }}
             styles={{
-              body: { padding: 4, display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minHeight: 0 },
+              body: {
+                padding: 4,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+                flex: 1,
+                minHeight: 0,
+              },
             }}
             extra={
               <QueryStatusBadge
