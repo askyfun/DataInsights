@@ -79,9 +79,17 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 
 	// Top N（issue #130）：query_options.top_n 翻译进查询计划本身（AST 的
 	// Sort + Limit，由数据库完成排序截断）。未启用时零开销、路径与改动前一致。
-	if topN := parseTopN(req.QueryOptions); topN != nil {
+	// merge_other 的守卫也在这里（拿到 req + ast 的唯一位置）：它要沿主查询之后
+	// 再发一条全量汇总，只在图型走得通、维度切得干净的形状上才有意义。
+	var topN *topNConfig
+	if topN = parseTopN(req.QueryOptions); topN != nil {
 		if err := applyTopN(ast, topN); err != nil {
 			return ExecutorResult{}, err
+		}
+		if topN.MergeOther {
+			if err := guardTopNMergeOther(req.ChartType, ast); err != nil {
+				return ExecutorResult{}, err
+			}
 		}
 	}
 
@@ -281,7 +289,16 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		return ExecutorResult{}, fmt.Errorf("query failed: %v", err)
 	}
 
-	data, err := processor.Process(result.Rows, req.Dims, req.Metrics, ast)
+	// 其余合并为「其他」（issue #116 验收行）：追加行并进主查询结果，让下游处理器
+	// （饼图占比、轴类系列）按普通一行看待，而不是各自再认一个特例。
+	rows := result.Rows
+	if topN != nil && topN.MergeOther {
+		if rows, err = e.appendTopNOther(ctx, dialect, ast, rows); err != nil {
+			return ExecutorResult{}, err
+		}
+	}
+
+	data, err := processor.Process(rows, req.Dims, req.Metrics, ast)
 	if err != nil {
 		return ExecutorResult{}, fmt.Errorf("process failed: %v", err)
 	}

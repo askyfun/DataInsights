@@ -393,6 +393,16 @@ const SLOT_PROTOCOL_DIMENSION_SLOTS = new Set(['indicators', 'rows', 'columns'])
 export const TOPN_CHART_TYPES = ['bar', 'line', 'area', 'pie'];
 
 /**
+ * Top N「其余合并为其他」（issue #116 验收行）允许的可加聚合——与后端
+ * query.topNAdditiveMetrics 同一份白名单：只有 SUM/COUNT 满足
+ * 「其他 = 全量 − Σ(前 N)」这条恒等式。AVG 会变成平均数的平均数、
+ * COUNT(DISTINCT) 会变成跨组去重后求和，MIN/MAX 的剩余段值与全量值之间没有
+ * 可反推的关系。后端是权威（还会拒掉表达式列），这里只是提前置灰，
+ * 不让用户点完吃一个 500。
+ */
+export const TOPN_MERGE_OTHER_ADDITIVE_AGGS = ['sum', 'count'];
+
+/**
  * 同环比（issue #129）消费的图型——与后端 query/comparison.go attachComparison 的
  * 图型门镜像。恢复的文档带着别的图型时（如 bar 配好后切饼图），wire 侧据此丢弃
  * comparison，避免后端「配了但图型不支持」的显式报错。
@@ -538,10 +548,17 @@ export const composeChartQueryRequest = (
   // 占比列（issue #132）没有独立的 wire 开关：它的分母就是同一份全集合计，所以只要本表
   // 有任一指标配了 `%` 格式，就必须让后端把 total 算出来（否则占比列拿不到分母、只能
   // 留空）。合计行开关 showTotal 仍单独控制「要不要在表尾显示那一行」。
-  const topNPayload =
-    queryOptions.topN && TOPN_CHART_TYPES.includes(chartType)
-      ? { top_n: queryOptions.topN }
-      : {};
+  const topNPayload = (() => {
+    if (!queryOptions.topN || !TOPN_CHART_TYPES.includes(chartType)) {
+      return {};
+    }
+    // mergeOther → merge_other 只在这里翻译（wire 一律 snake_case，持久化小节是
+    // camelCase；与 binCount→bin_count / showTotal→show_total 同一条口径），
+    // 且只在打开时携带该键。持久化文档不经此处的那两条链路（分享页 / 仪表盘）由
+    // 后端 parseTopNMergeOther 直接认 camelCase，两处都能把开关打开。
+    const { mergeOther, ...topNRest } = queryOptions.topN;
+    return { top_n: mergeOther ? { ...topNRest, merge_other: true } : topNRest };
+  })();
   const comparisonPayload =
     queryOptions.comparison && COMPARISON_CHART_TYPES.includes(chartType)
       ? { comparison: queryOptions.comparison }
@@ -1018,6 +1035,11 @@ interface ConfigPanelProps {
    * 后端窗口平移对齐要求恰好一个维度，卡片仅在恰有一个候选时出现。
    */
   comparisonDimensionOptions: Array<{ id: string; name: string }>;
+  /**
+   * Top N「其余合并为其他」（issue #116 验收行）的置灰理由，undefined = 可用。
+   * 由父层按活动指标的聚合函数算出（只有 sum/count 可加），卡片据此置灰并写明原因。
+   */
+  topNMergeOtherBlocked?: string;
 }
 
 const chartTypeOptions = Object.values(chartDefinitions).map((def) => ({
@@ -1077,6 +1099,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   referenceMetricOptions,
   dimensionBindingCount,
   comparisonDimensionOptions,
+  topNMergeOtherBlocked,
 }) => {
   // styleKeys 决定当前图型显示哪些样式控件（Task 0-4 声明、本任务首次真正接线）。
   // 7 种图型现在都应显式声明 styleKeys（见 chartDefinitions.ts），undefined 理论上
@@ -1549,8 +1572,30 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     ]}
                   />
                 </SettingRow>
+                <SettingRow label="其余合并为其他">
+                  {/* 禁用态的 Switch 不派发 hover 事件，Tooltip 得挂在包一层的 span 上，
+                      否则用户看不到「为什么点不动」。 */}
+                  <Tooltip
+                    title={
+                      topNMergeOtherBlocked ??
+                      '把被截断的那些取值合成一行「其他」，值为全量减去前 N（仅 sum/count 指标可用）'
+                    }
+                  >
+                    <span>
+                      <Switch
+                        size="small"
+                        checked={!!topN.mergeOther}
+                        disabled={!!topNMergeOtherBlocked}
+                        aria-label="Top N 其余合并为其他"
+                        onChange={(checked) => updateTopN({ mergeOther: checked || undefined })}
+                      />
+                    </span>
+                  </Tooltip>
+                </SettingRow>
                 <span style={{ fontSize: 12, color: 'var(--dr-text-3)' }}>
-                  按所选指标对维度值取前 N（数据库排序截断），其余取值不出现。
+                  {topN.mergeOther
+                    ? '按所选指标对维度值取前 N，其余取值合并为末尾一行「其他」。'
+                    : '按所选指标对维度值取前 N（数据库排序截断），其余取值不出现。'}
                 </span>
               </>
             )}
@@ -2335,6 +2380,21 @@ const ChartBuilder: React.FC = () => {
     [queryConfig.dimensionGroups]
   );
 
+  // 「其余合并为其他」的置灰理由（undefined = 可用）。看的是**全部**活动指标：
+  // 追加行要为每一列都给出数值，只要有一列不可加，那一列就是编的数——所以整节拒掉，
+  // 而不是合并可加的那些。聚合缺省与 wire 同一口径（未设置即 sum）。
+  const topNMergeOtherBlocked = useMemo(() => {
+    const aggs = queryConfig.metricGroups
+      .flatMap((group) => group.bindings)
+      .map((binding) => metricAggregations[binding.bindingId] || 'sum');
+    const blocked = Array.from(
+      new Set(aggs.filter((agg) => !TOPN_MERGE_OTHER_ADDITIVE_AGGS.includes(agg)))
+    );
+    return blocked.length > 0
+      ? `仅 sum/count 指标可合并（当前：${blocked.join(' / ')}）`
+      : undefined;
+  }, [queryConfig.metricGroups, metricAggregations]);
+
   // 恢复的文档可能带着已失效的 Top N（切了图型 / 维度数变了 / 排名指标被移除），
   // 此时在源头清掉，而不是让请求悄悄带着一个不生效或报错的配置。
   useEffect(() => {
@@ -2350,12 +2410,23 @@ const ChartBuilder: React.FC = () => {
       metricValid;
     if (!valid) {
       setChartQueryOptionsState({ ...chartQueryOptions, topN: undefined });
+      return;
+    }
+    // 整节仍有效、只有「合并其他」失效（把 sum 改成 avg、或多加一个 avg 指标）：
+    // 单清那一个子键。后端此时会**显式报错**而不是忽略，所以不清就等于把图表打成
+    // 一次失败查询——截断本身仍然可用，不该被连带废掉。
+    if (chartQueryOptions.topN.mergeOther && topNMergeOtherBlocked) {
+      setChartQueryOptionsState({
+        ...chartQueryOptions,
+        topN: { ...chartQueryOptions.topN, mergeOther: undefined },
+      });
     }
   }, [
     chartQueryOptions,
     chartBuilderConfig.chartType,
     dimensionBindingCount,
     referenceMetricOptions,
+    topNMergeOtherBlocked,
     setChartQueryOptionsState,
   ]);
 
@@ -3460,6 +3531,7 @@ const ChartBuilder: React.FC = () => {
             referenceMetricOptions={referenceMetricOptions}
             dimensionBindingCount={dimensionBindingCount}
             comparisonDimensionOptions={comparisonDimensionOptions}
+            topNMergeOtherBlocked={topNMergeOtherBlocked}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
             }
@@ -3526,6 +3598,7 @@ const ChartBuilder: React.FC = () => {
             referenceMetricOptions={referenceMetricOptions}
             dimensionBindingCount={dimensionBindingCount}
             comparisonDimensionOptions={comparisonDimensionOptions}
+            topNMergeOtherBlocked={topNMergeOtherBlocked}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
             }
