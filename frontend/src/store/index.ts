@@ -317,6 +317,13 @@ export interface ChartStyleConfig {
   tableNullDisplay?: 'raw' | 'dash' | 'blank' | 'zero';
   /** 表格冻结维度列（仅 table）：横向滚动时把维度列固定在左侧；undefined 等价于 false。 */
   tableFreezeDimensions?: boolean;
+  /** 数据标注（仅 bar/line/area）：在柱子/折点上显示数值标签；undefined 等价于 false。 */
+  dataLabel?: boolean;
+  /**
+   * 数据标注位置（仅 dataLabel 为 true 时消费）；undefined 等价于 'top'。
+   * 词表取轴图通用位置，不逐图型再分叉（饼图/漏斗自带标签，不走本项）。
+   */
+  dataLabelPosition?: 'top' | 'inside' | 'center';
 }
 
 /**

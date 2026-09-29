@@ -25,6 +25,7 @@ import type {
 } from '../api';
 import type { ChartStyleConfig, ReferenceLine } from '../store';
 import type { ChartType } from './chartConfigSchema';
+import { formatMetricValue } from './format';
 
 /** ChartStyleConfig 默认值（持久化 style 缺失/形状非法时的兜底） */
 const DEFAULT_CHART_STYLE: ChartStyleConfig = {
@@ -79,6 +80,7 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
   const stack = raw.stack;
   const orientation = raw.orientation;
   const nullDisplay = raw.tableNullDisplay;
+  const dataLabelPosition = raw.dataLabelPosition;
   return {
     colors: Array.isArray(raw.colors)
       ? raw.colors.filter((color): color is string => typeof color === 'string')
@@ -96,6 +98,13 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
     ...(raw.tableFreezeDimensions === true ? { tableFreezeDimensions: true } : {}),
     ...(nullDisplay === 'dash' || nullDisplay === 'blank' || nullDisplay === 'zero'
       ? { tableNullDisplay: nullDisplay }
+      : {}),
+    // 数据标注（仅 bar/line/area 消费）：只认 true，缺失/非法不带键，等价于不显示。
+    ...(raw.dataLabel === true ? { dataLabel: true } : {}),
+    ...(dataLabelPosition === 'top' ||
+    dataLabelPosition === 'inside' ||
+    dataLabelPosition === 'center'
+      ? { dataLabelPosition }
       : {}),
   };
 }
@@ -120,6 +129,12 @@ export interface ChartOptionContext {
    * （持久化文档的 queryOptions 是 unknown，不允许未校验数据流入 option 构造）。
    */
   referenceLines?: ReferenceLine[];
+  /**
+   * 指标的显示格式（issue #153 数据标注）：键为**输出列名**，与 `labels` 同一口径；
+   * 值为 fieldMeta.format（形如 '0,0.00'）。仅数据标注消费——把标签值按该格式渲染。
+   * 缺省/未配的指标原样输出数值，与 TableChart 对无格式列的行为一致。
+   */
+  metricFormats?: Record<string, string>;
 }
 
 /** 参考线缺省展示名（用户未填 name 时） */
@@ -199,6 +214,37 @@ function referenceLineMarkLine(
           : { type: line.type === 'avg' ? 'average' : 'median' }),
       })),
     },
+  };
+}
+
+/**
+ * 一条 series 的数据标注片段（issue #153 第 1 批）。
+ *
+ * ⚠️ 关闭态必须写成显式的 `label.show: false`，不能返回 `{}`（只把 label 键去掉）：
+ * ECharts 的 setOption 是**按 series 下标合并**，上一次开启时合并进去的 `show: true`
+ * 不会因为新 option 里没有 label 键而被撤销——实测切开关后标签仍留在图上（浏览器验收）。
+ * 显式 false 与 ECharts 的默认值一致，故首次渲染与改动前的观感不变。
+ *
+ * 开启时带上 `labelLayout.hideOverlap`：密集类目下标签必然互相压盖，ECharts 的
+ * 原生防重叠（隐藏被盖住的那个）即可满足本期诉求，不做精细位移控制。
+ * 位置取 `dataLabelPosition`，缺省 'top'（柱顶/折点上方，轴图最不易遮挡图形的落点）。
+ *
+ * @param format 该指标配置的显示格式（fieldMeta.format）。配了才挂 formatter——
+ *   未配时保留 ECharts 的原始数值输出，与 TableChart 对无格式列的行为一致。
+ */
+function dataLabelFragment(style: ChartStyleConfig, format?: string): Record<string, unknown> {
+  if (style.dataLabel !== true) {
+    return { label: { show: false } };
+  }
+  return {
+    label: {
+      show: true,
+      position: style.dataLabelPosition ?? 'top',
+      ...(format
+        ? { formatter: (params: { value: unknown }) => formatMetricValue(params.value, format) }
+        : {}),
+    },
+    labelLayout: { hideOverlap: true },
   };
 }
 
@@ -597,6 +643,7 @@ export function buildChartOption(
                 ...(chartType === 'area' ? { areaStyle: {} } : {}),
                 ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
                 ...referenceLineMarkLine(name, context.referenceLines, horizontalBar),
+                ...dataLabelFragment(style, context.metricFormats?.[name]),
                 data: s.data.map(toOptionValue),
               };
             }),
@@ -825,6 +872,7 @@ export function buildChartOption(
               ...(chartType === 'area' ? { areaStyle: {} } : {}),
               ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
               ...referenceLineMarkLine(name, context.referenceLines, horizontalBar),
+              ...dataLabelFragment(style, context.metricFormats?.[name]),
               data: rows.map((item) => toOptionValue(item[yField])),
             };
           }),
