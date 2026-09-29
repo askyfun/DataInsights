@@ -953,9 +953,11 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   return (
     <>
       <div ref={hostRef} className="dr-chart-host" aria-hidden style={CHART_PROBE_STYLE} />
+      {/* 绝对定位铺满最近的 relative 祖先（两处预览容器）。不能用 height:100%——
+          容器高度来自 flex 拉伸/min-height，不是可解析的百分比基准，会塌成 echarts 兜底 100px。 */}
       <ReactECharts
         option={chartOption}
-        style={{ height: '100%', width: '100%' }}
+        style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }}
         opts={{ renderer: 'canvas' }}
       />
     </>
@@ -3379,6 +3381,7 @@ const ChartBuilder: React.FC = () => {
               style={{
                 height: 'calc(100vh - 400px)',
                 minHeight: 250,
+                position: 'relative',
                 opacity: queryStale ? 0.45 : 1,
                 transition: 'opacity 0.2s',
               }}
@@ -3632,8 +3635,12 @@ const ChartBuilder: React.FC = () => {
           <Card
             title="预览"
             size="small"
-            style={{ flex: 1, minHeight: 400 }}
-            styles={{ body: { padding: 4, display: 'flex', flexDirection: 'column', gap: 4 } }}
+            // 根节点转 flex 列让 body 撑满剩余高度：Card 默认 block，body 高度 auto，
+            // 内层 flex:1 只能停在 min-height 上（预览画布塌缩的根因之一）。
+            style={{ flex: 1, minHeight: 400, display: 'flex', flexDirection: 'column' }}
+            styles={{
+              body: { padding: 4, display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minHeight: 0 },
+            }}
             extra={
               <QueryStatusBadge
                 loading={chartDataLoading}
@@ -3654,6 +3661,7 @@ const ChartBuilder: React.FC = () => {
               style={{
                 flex: 1,
                 minHeight: 300,
+                position: 'relative',
                 // 自动查询关闭且配置已变更：置灰提示「所见非最新」，不隐藏数据本身
                 opacity: queryStale ? 0.45 : 1,
                 transition: 'opacity 0.2s',
