@@ -124,7 +124,9 @@ func topNAdditiveMetrics(metrics []MetricExpr) bool {
 func toPositiveInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case float64:
-		if n >= 1 && n == math.Trunc(n) {
+		// 上界钳在 maxTopNLimits 内再转 int：+Inf/超大值在 amd64 上 int() 会
+		// 溢出成负数（arm64 饱和为 max），平台行为不一致且都不可信，先钳掉。
+		if n >= 1 && n <= maxTopNLimits && n == math.Trunc(n) {
 			return int(n), true
 		}
 	case int:
