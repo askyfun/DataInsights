@@ -24,6 +24,7 @@ const chartWidget = (
   widgetId,
   type: 'chart',
   chartId,
+  pageId: 'p-1',
   x: 0,
   y: 0,
   w: 6,
@@ -132,11 +133,12 @@ describe('linkageCandidates：可作为目标的其他图表块', () => {
     const widgets: DashboardWidget[] = [
       chartWidget('w-1', 42),
       chartWidget('w-2', 43),
-      { widgetId: 'w-t', type: 'text', markdown: 'x', x: 0, y: 0, w: 6, h: 4 },
+      { widgetId: 'w-t', type: 'text', markdown: 'x', pageId: 'p-1', x: 0, y: 0, w: 6, h: 4 },
       {
         widgetId: 'w-f',
         type: 'filter',
         binding: { datasetId: 7, column: 'region' },
+        pageId: 'p-1',
         label: '区域',
         dataType: 'string',
         operator: 'in',
