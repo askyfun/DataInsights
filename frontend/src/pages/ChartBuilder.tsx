@@ -7,6 +7,7 @@ import {
   ExportOutlined,
   FieldBinaryOutlined,
   FunctionOutlined,
+  HistoryOutlined,
   LinkOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -209,6 +210,18 @@ interface DragPreview {
   label: string;
   color: string;
 }
+
+/** 查询历史面板的条目：一次成功查询的配置快照（会话内，不入库）。 */
+interface ChartQueryHistoryEntry {
+  key: string;
+  time: number;
+  title: string;
+  chartType: ChartConfig['chartType'];
+  doc: ChartConfigDocument;
+}
+
+/** 查询历史最多保留的快照条数（会话内、纯前端，不进后端）。 */
+const QUERY_HISTORY_LIMIT = 20;
 
 /**
  * 按当前图表定义裁剪字段组，只保留当前类型实际会渲染的那部分配置。
@@ -539,9 +552,7 @@ export const composeChartQueryRequest = (
   // 有任一指标配了 `%` 格式，就必须让后端把 total 算出来（否则占比列拿不到分母、只能
   // 留空）。合计行开关 showTotal 仍单独控制「要不要在表尾显示那一行」。
   const topNPayload =
-    queryOptions.topN && TOPN_CHART_TYPES.includes(chartType)
-      ? { top_n: queryOptions.topN }
-      : {};
+    queryOptions.topN && TOPN_CHART_TYPES.includes(chartType) ? { top_n: queryOptions.topN } : {};
   const comparisonPayload =
     queryOptions.comparison && COMPARISON_CHART_TYPES.includes(chartType)
       ? { comparison: queryOptions.comparison }
@@ -1620,6 +1631,11 @@ const ChartBuilder: React.FC = () => {
   // 左侧字段栏宽度（可拖拽调节）
   const [leftSiderWidth, setLeftSiderWidth] = useState(150);
   const [resizeHandleHover, setResizeHandleHover] = useState(false);
+  // 自动查询关闭后配置变更 → 预览置灰提示，直到下一次成功查询
+  const [queryStale, setQueryStale] = useState(false);
+  // 查询历史（会话内）：最近 N 次成功查询的配置快照，可点击回填。独立于 undo/redo 时间线。
+  const [queryHistory, setQueryHistory] = useState<ChartQueryHistoryEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   // 编辑态图表详情缓存（id + 请求 Promise），供配置加载 effect 重跑时复用
   const editChartCache = useRef<{ id: number; promise: Promise<Chart> } | null>(null);
   // 当前地址栏短码（= 复制按钮复制的那条链接的 id）
@@ -1645,6 +1661,8 @@ const ChartBuilder: React.FC = () => {
   );
   /** 上次成功落库的 spec 快照（JSON 串）：同配置不重复提交，翻页/重查不抖动地址栏。 */
   const lastPersistedSpecRef = useRef<string | null>(null);
+  // 最近一次成功执行的查询请求指纹：判定「自动查询关闭时配置是否已变更」的基准
+  const lastExecutedRequestKeyRef = useRef<string | null>(null);
 
   /** 左侧栏右缘拖拽调节宽度：按住手柄水平拖动，宽度限制在 [120, 320]。 */
   const startLeftSiderResize = (e: React.MouseEvent) => {
@@ -2459,6 +2477,27 @@ const ChartBuilder: React.FC = () => {
         chartQueryOptions,
       });
 
+      // 本次成功查询记账：预览不再置灰；spec.document 就是 v2 配置文档，历史快照直接复用，
+      // 与查询记录落库 / 保存图表保证同一份序列化出口（lib/querySpec）。
+      lastExecutedRequestKeyRef.current = JSON.stringify(request);
+      setQueryStale(false);
+      const historyDocKey = JSON.stringify(spec.document);
+      setQueryHistory((prev) => {
+        if (prev[0] && JSON.stringify(prev[0].doc) === historyDocKey) {
+          return prev;
+        }
+        return [
+          {
+            key: `${Date.now()}-${prev.length}`,
+            time: Date.now(),
+            title: chartBuilderConfig.title,
+            chartType: chartBuilderConfig.chartType,
+            doc: spec.document,
+          },
+          ...prev,
+        ].slice(0, QUERY_HISTORY_LIMIT);
+      });
+
       const specKey = JSON.stringify(spec);
       if (specKey === lastPersistedSpecRef.current) {
         return;
@@ -2523,6 +2562,16 @@ const ChartBuilder: React.FC = () => {
       void runChartQuery(request);
     }
   }, [buildChartQueryRequest, runChartQuery]);
+
+  /** 查询历史：回填某次查询的配置快照（与图表库编辑 / ?q= 直链共用同一还原出口）。 */
+  const handleRestoreHistoryEntry = useCallback(
+    (entry: ChartQueryHistoryEntry) => {
+      applyConfigDocument(entry.doc, entry.title);
+      setHistoryOpen(false);
+      message.success('已回填该次查询的配置');
+    },
+    [applyConfigDocument]
+  );
 
   const handlePageChange = useCallback(
     (page: number, pageSize: number) => {
@@ -2748,6 +2797,22 @@ const ChartBuilder: React.FC = () => {
     tablePagination.pageSize,
     chartQueryOptions,
   ]);
+
+  // #141：自动查询关闭时，配置一旦相对上一次成功执行的请求发生变更，就把预览标记为
+  // 「待执行」——置灰 + 提示，点「执行查询」才发请求。buildChartQueryRequest 的依赖列表
+  // 与上面的自动查询 effect 完全一致，保证两者对「什么算变更」的判定是同一份；弹窗关闭
+  // 等未实际改变请求的重跑（指纹相同）不会误标。
+  useEffect(() => {
+    if (autoQuery) {
+      setQueryStale(false);
+      return;
+    }
+    if (!selectedDatasetId || filterEditing) return;
+    const request = buildChartQueryRequest();
+    if (request && JSON.stringify(request) !== lastExecutedRequestKeyRef.current) {
+      setQueryStale(true);
+    }
+  }, [autoQuery, selectedDatasetId, filterEditing, buildChartQueryRequest]);
 
   // 撤销/重做快捷键：⌘/Ctrl+Z 撤销，⌘/Ctrl+⇧+Z 或 ⌘/Ctrl+Y 重做。
   // 焦点在输入框/文本域/可编辑区时放行——让浏览器做原生文本级撤销，不抢编辑框内的 ⌘Z。
@@ -3199,7 +3264,16 @@ const ChartBuilder: React.FC = () => {
               />
             }
           >
-            <div style={{ height: 'calc(100vh - 400px)', minHeight: 250 }}>{renderPreview()}</div>
+            <div
+              style={{
+                height: 'calc(100vh - 400px)',
+                minHeight: 250,
+                opacity: queryStale ? 0.45 : 1,
+                transition: 'opacity 0.2s',
+              }}
+            >
+              {renderPreview()}
+            </div>
           </Card>
         </Content>
       );
@@ -3377,6 +3451,16 @@ const ChartBuilder: React.FC = () => {
                     查看 SQL
                   </Button>
                 )}
+                <Tooltip title="查询历史：本次会话内最近 20 次成功查询的配置快照，点击回填">
+                  <Button
+                    size="small"
+                    icon={<HistoryOutlined />}
+                    onClick={() => setHistoryOpen(true)}
+                    disabled={queryHistory.length === 0}
+                    aria-label="查询历史"
+                    data-testid="query-history-button"
+                  />
+                </Tooltip>
                 {shareShortId && (
                   <Tooltip title="复制地址栏链接：对方打开看到的就是这一屏">
                     <Button size="small" icon={<LinkOutlined />} onClick={handleCopyShareLink}>
@@ -3438,7 +3522,7 @@ const ChartBuilder: React.FC = () => {
             title="预览"
             size="small"
             style={{ flex: 1, minHeight: 400 }}
-            styles={{ body: { padding: 4 } }}
+            styles={{ body: { padding: 4, display: 'flex', flexDirection: 'column', gap: 4 } }}
             extra={
               <QueryStatusBadge
                 loading={chartDataLoading}
@@ -3447,7 +3531,25 @@ const ChartBuilder: React.FC = () => {
               />
             }
           >
-            <div style={{ height: 'calc(100vh - 380px)', minHeight: 300 }}>{renderPreview()}</div>
+            {queryStale && (
+              <Alert
+                type="warning"
+                showIcon
+                banner
+                message="配置已变更，图表展示的是上次查询的结果——点击「执行查询」查看最新数据"
+              />
+            )}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 300,
+                // 自动查询关闭且配置已变更：置灰提示「所见非最新」，不隐藏数据本身
+                opacity: queryStale ? 0.45 : 1,
+                transition: 'opacity 0.2s',
+              }}
+            >
+              {renderPreview()}
+            </div>
           </Card>
         </Content>
 
@@ -3664,6 +3766,32 @@ const ChartBuilder: React.FC = () => {
         }}
         onCancel={() => setFieldSettings(null)}
       />
+
+      <Drawer title="查询历史" open={historyOpen} onClose={() => setHistoryOpen(false)} size={320}>
+        {queryHistory.length === 0 ? (
+          <Empty description="暂无查询记录" />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {queryHistory.map((entry) => (
+              <Button
+                key={entry.key}
+                size="small"
+                style={{ textAlign: 'left', height: 'auto', padding: '6px 10px' }}
+                onClick={() => handleRestoreHistoryEntry(entry)}
+                data-testid={`query-history-entry-${entry.key}`}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Text strong>{entry.title || chartDefinitions[entry.chartType].label}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {chartDefinitions[entry.chartType].label} ·{' '}
+                    {new Date(entry.time).toLocaleTimeString()}
+                  </Text>
+                </div>
+              </Button>
+            ))}
+          </div>
+        )}
+      </Drawer>
     </DndContext>
   );
 };

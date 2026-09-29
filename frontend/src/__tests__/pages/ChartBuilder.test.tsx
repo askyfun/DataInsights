@@ -1762,6 +1762,77 @@ describe('ChartBuilder', () => {
       });
     });
   });
+
+  describe('#141 自动查询与查询历史', () => {
+    it('自动查询关闭后配置变更 → 预览置灰提示，点执行查询后消失', async () => {
+      renderChartBuilder();
+
+      await waitFor(() => {
+        expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+      });
+
+      act(() => {
+        useStore.setState({ autoQuery: false });
+      });
+      // limit 不进查询请求（默认值不下发），改请求可见的指标才构成「配置已变更」
+      act(() => {
+        useStore.setState({
+          queryConfig: {
+            ...useStore.getState().queryConfig,
+            metricGroups: [
+              { id: 'metric-group-main', bindings: [{ bindingId: 'b-m0', fieldId: 'revenue' }] },
+            ],
+          },
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/配置已变更/)).toBeTruthy();
+      });
+      expect(screen.getByText('执行查询')).toBeTruthy();
+
+      fireEvent.click(screen.getByText('执行查询'));
+      await waitFor(() => {
+        expect(mockExecuteChartQuery).toHaveBeenCalledTimes(2);
+      });
+      await waitFor(() => {
+        expect(screen.queryByText(/配置已变更/)).toBeNull();
+      });
+    });
+
+    it('查询历史记录每次成功查询的快照，点击回填旧配置', async () => {
+      renderChartBuilder();
+
+      await waitFor(() => {
+        expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+      });
+
+      // 自动查询开着：加一个指标直接触发第二次查询
+      act(() => {
+        useStore.setState({
+          queryConfig: {
+            ...useStore.getState().queryConfig,
+            metricGroups: [
+              { id: 'metric-group-main', bindings: [{ bindingId: 'b-m0', fieldId: 'revenue' }] },
+            ],
+          },
+        });
+      });
+      await waitFor(() => {
+        expect(mockExecuteChartQuery).toHaveBeenCalledTimes(2);
+      });
+
+      fireEvent.click(screen.getByTestId('query-history-button'));
+      const entries = screen.getAllByTestId(/^query-history-entry-/);
+      expect(entries).toHaveLength(2);
+
+      // 回填最早一次（无指标的初始查询）
+      fireEvent.click(entries[entries.length - 1]);
+      await waitFor(() => {
+        expect(useStore.getState().queryConfig.metricGroups[0]?.bindings).toHaveLength(0);
+      });
+    });
+  });
 });
 
 /**
