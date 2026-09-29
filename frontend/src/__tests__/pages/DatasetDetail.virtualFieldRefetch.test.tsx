@@ -91,7 +91,8 @@ describe('DatasetDetailPage 虚拟字段保存后重取列', () => {
     const saveButton = Array.from(modal.querySelectorAll('button')).find((b) =>
       b.textContent?.includes('common.save')
     );
-    fireEvent.click(saveButton!);
+    if (!saveButton) throw new Error('save button not found');
+    fireEvent.click(saveButton);
 
     await waitFor(() => expect(mockUpdateColumns).toHaveBeenCalledTimes(1));
     // 修复前：setColumns(本地数组) 后不再发 GET；修复后必须重取

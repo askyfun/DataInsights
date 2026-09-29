@@ -52,8 +52,8 @@ beforeEach(() => {
 /** rc-select 的 placeholder 文本渲染在 .ant-select 内；mouseDown 它即可展开下拉。 */
 const openSelectByPlaceholder = (placeholder: string) => {
   const node = screen.getByText(placeholder).closest('.ant-select');
-  expect(node).not.toBeNull();
-  fireEvent.mouseDown(node!.querySelector('.ant-select-selector') ?? node!);
+  if (!node) throw new Error(`select for ${placeholder} not found`);
+  fireEvent.mouseDown(node.querySelector('.ant-select-selector') ?? node);
 };
 
 const pickOption = async (label: string) => {
@@ -138,8 +138,10 @@ describe('Dataset wizard virtual fields', () => {
     // 编辑第一行（name 'a'）：向导期两行 id 都是空串，按 id 匹配会把 b 一起覆写。
     // 行内按钮顺序：[Switch(角色), 编辑, 删除]，编辑取第一个 text 按钮（删除带 dangerous）
     const rowA = fieldRows().find((tr) => tr.textContent?.includes('a'));
-    expect(rowA).toBeTruthy();
-    fireEvent.click(rowA!.querySelector('button.ant-btn-text')!);
+    if (!rowA) throw new Error("row containing 'a' not found");
+    const editButton = rowA.querySelector('button.ant-btn-text');
+    if (!editButton) throw new Error('edit button not found');
+    fireEvent.click(editButton);
     await submitVirtualField('a', '[x] + 99', /更\s*新/);
 
     await waitFor(() => {
