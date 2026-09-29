@@ -346,11 +346,16 @@ export interface ReferenceLine {
  * - limit：正整数（后端钳位 ≤10000，非法即整节不生效）；
  * - metric：排名指标的列 ID（DatasetColumn.id），缺省取首指标；
  * - order：asc|desc，缺省 desc（「取最大的 N 个」是默认心智）。
+ * - mergeOther：其余取值合并为「其他」一行（issue #116 验收行）；wire 上以
+ *   snake_case merge_other 发送，只在打开时携带。后端仅在 bar/line/area/pie +
+ *   恰好一个维度 + **全部指标可加（sum/count）** 时接受，否则显式报错——所以
+ *   界面在非可加指标下把它置灰，并在失效时于源头清掉（见 ChartBuilder 的 Top N 清理 effect）。
  */
 export interface TopNConfig {
   limit: number;
   metric?: string;
   order?: 'asc' | 'desc';
+  mergeOther?: boolean;
 }
 
 /**

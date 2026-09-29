@@ -39,4 +39,20 @@ func TestNormalizePersistedQueryOptions(t *testing.T) {
 	if !reflect.DeepEqual(snake["top_n"], map[string]any{"limit": 3}) {
 		t.Errorf("snake passthrough: %+v", snake)
 	}
+
+	// 归一只改**顶层**键：top_n 内部的 camelCase mergeOther（issue #116「其余合并为
+	// 其他」）必须原样留着——分享页/仪表盘这两条读持久化文档的链路不经
+	// composeChartQueryRequest，没人把嵌套键翻成 snake_case。下游
+	// query.parseTopNMergeOther 两个拼法都认（它的用例在 query 包的
+	// TestParseTopN_MergeOther），这条与那条合起来才是「保存后分享页也生效」。
+	merged := normalizePersistedQueryOptions(map[string]any{
+		"topN": map[string]any{"limit": 5, "mergeOther": true},
+	})
+	section, ok := merged["top_n"].(map[string]any)
+	if !ok {
+		t.Fatalf("top_n section lost: %+v", merged)
+	}
+	if v, ok := section["mergeOther"].(bool); !ok || !v {
+		t.Errorf("nested camelCase mergeOther must survive normalization: %+v", section)
+	}
 }

@@ -92,6 +92,24 @@ describe('composeChartQueryRequest：Top N wire', () => {
     expect(composeWith('table', { topN: { limit: 5 } })?.query_options).toBeUndefined();
   });
 
+  // 「其余合并为其他」（issue #116 验收行）：store 里是 camelCase mergeOther，
+  // wire 上一律 snake_case merge_other，且只在打开时携带该键。
+  it('mergeOther 打开 → wire 出 merge_other，且不留 camelCase', () => {
+    const request = composeWith('bar', { topN: { limit: 5, metric: 'famount', mergeOther: true } });
+    expect(request?.query_options).toEqual({
+      top_n: { limit: 5, metric: 'famount', merge_other: true },
+    });
+  });
+
+  it('mergeOther 关闭/未设置 → 不发该键（请求形状与改动前一致）', () => {
+    expect(composeWith('bar', { topN: { limit: 5, mergeOther: false } })?.query_options).toEqual({
+      top_n: { limit: 5 },
+    });
+    expect(composeWith('bar', { topN: { limit: 5 } })?.query_options).toEqual({
+      top_n: { limit: 5 },
+    });
+  });
+
   it('histogram 的 bin_count 与 topN 同袋共存', () => {
     const request = composeWith('histogram', { binCount: 15, topN: { limit: 3 } });
     // histogram 不在 Top N 门控图型里 → 只发 bin_count
@@ -249,6 +267,82 @@ describe('ChartBuilder Top N 卡片（恢复已存图表）', () => {
 
     await waitFor(() => {
       expect(useStore.getState().chartQueryOptions.topN).toBeUndefined();
+    });
+  });
+});
+
+// 「其余合并为其他」的界面门控（issue #116 验收行）：只有全部活动指标可加
+// （sum/count）才允许打开；不可加时置灰并写明原因，且已存的 mergeOther 在源头
+// 被清掉——后端此时是显式报错而不是忽略，留着就等于把整张图打成一次失败查询。
+const chartDocWithAgg = (topN: unknown, aggregation: string) =>
+  JSON.stringify({
+    version: 2,
+    chartType: 'bar',
+    title: 'T',
+    query: {
+      dimensionGroups: [
+        { id: 'dim-group-main', bindings: [{ bindingId: 'b-0', fieldId: 'fbrand' }] },
+      ],
+      metricGroups: [
+        { id: 'metric-group-main', bindings: [{ bindingId: 'b-m0', fieldId: 'famount' }] },
+      ],
+      filters: [],
+    },
+    fieldMeta: { 'b-m0': { aggregation } },
+    style: {},
+    queryOptions: topN ? { topN } : {},
+  });
+
+const mergeSwitch = () =>
+  screen.getByRole('switch', { name: 'Top N 其余合并为其他' }) as HTMLInputElement;
+
+describe('ChartBuilder Top N「其余合并为其他」', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.getState().resetChartBuilder();
+  });
+
+  it('sum 指标：开关可用，打开后 wire 带 merge_other', async () => {
+    seedApis(chartDocWithAgg({ limit: 5, metric: 'famount' }, 'sum'));
+    renderBuilder();
+
+    await waitFor(() => expect(mergeSwitch()).not.toBeDisabled());
+    fireEvent.click(mergeSwitch());
+    await waitFor(() => {
+      const last =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(last?.query_options).toEqual({
+        top_n: { limit: 5, metric: 'famount', merge_other: true },
+      });
+    });
+  });
+
+  it('count 指标同样可加', async () => {
+    seedApis(chartDocWithAgg({ limit: 5, metric: 'famount' }, 'count'));
+    renderBuilder();
+    await waitFor(() => expect(mergeSwitch()).not.toBeDisabled());
+  });
+
+  it('avg 指标：开关置灰并说明原因', async () => {
+    seedApis(chartDocWithAgg({ limit: 5, metric: 'famount' }, 'avg'));
+    renderBuilder();
+
+    await waitFor(() => expect(mergeSwitch()).toBeDisabled());
+    expect(mergeSwitch()).not.toBeChecked();
+  });
+
+  it('存过的 mergeOther + 不可加指标：只清这一个子键，Top N 截断本身保留', async () => {
+    seedApis(chartDocWithAgg({ limit: 5, metric: 'famount', mergeOther: true }, 'avg'));
+    renderBuilder();
+
+    await waitFor(() =>
+      expect(useStore.getState().chartQueryOptions.topN?.mergeOther).toBeUndefined()
+    );
+    expect(useStore.getState().chartQueryOptions.topN?.limit).toBe(5);
+    await waitFor(() => {
+      const last =
+        mockExecuteChartQuery.mock.calls[mockExecuteChartQuery.mock.calls.length - 1]?.[0];
+      expect(last?.query_options).toEqual({ top_n: { limit: 5, metric: 'famount' } });
     });
   });
 });
