@@ -51,7 +51,7 @@ frontend/src/
 ├── api/           # API 端点封装（40 个接口，复用 lib/api/client 的单一 axios 实例）
 ├── store/         # Zustand 状态管理
 ├── pages/         # 页面组件
-├── components/    # 可复用组件（日期筛选器在 components/DateFilter/，过滤弹窗在 components/ChartBuilder/）
+├── components/    # 可复用组件（日期筛选器在 components/DateFilter/，过滤弹窗在 components/ChartBuilder/，盘底部页面标签条在 components/DashboardPageTabs/）
 ├── idls/          # API 类型定义（现仅 gen_types.ts 生成物；Batch 2 已删除手写 chart/dataset/datasource/share.ts）
 ├── lib/           # 工具库（API 客户端在 lib/api/client.ts；图表配置 schema 在 lib/chartConfigSchema.ts；日期筛选语义在 lib/dateFilter.ts）
 ├── i18n/          # 国际化
@@ -81,6 +81,30 @@ frontend/src/
 - 日期字段拖入「筛选」区进日期筛选弹窗；`FilterCondition.fieldId` 存的是**列的稳定 id**
   （`DatasetColumn.id`，形如 `0000i529`），**不是列名**——列名只用于展示与 SQL 输出别名。
 
+### 仪表盘多页面
+
+`components/DashboardPageTabs/`（底部标签条，dnd-kit 拖拽排序）+ `lib/dashboardLayoutSchema.ts` 的
+页面纯逻辑（`normalizePages` / `reorderPages` / `widgetsOfPage` / `applicableFilterWidgets`）：
+
+- **布局文档 v2**：`pages: [{id, name}]`（**至少一页**）+ 每个 widget 带 `pageId`。归属刻意用
+  **扁平** `widgets[] + pageId` 而不是把 widgets 嵌进 page —— 后端投影（`projectLayout`）与图表引用计数的
+  jsonpath（`$.widgets[*] ? (@.chartId == …)`）都建立在这个扁平形状上，嵌套会让那两个读路径失效。
+  代价是 `widgetId` 的唯一域是**整盘**（复制页面必须换新 widgetId）。
+- **v1 → v2 无损**：`migrateDashboardLayout` 把 v1 的 widgets 全部落到迁移合成的那一页上（`p-recovered-0`），
+  旧盘不掉块；**保存时写回 v2**，所以迁移产物会回到后端。
+- **按页取数**：`POST /api/dashboards/{id}/query` 接受可选 `page_id`。后端 `chartInPage` 只取该页的图表块，
+  并额外纳入**缺 `pageId` 的块**（v1 旧文档，排除它们会让旧盘直接空白）；`filters` 侧由 `filterInPage`
+  多纳入 `scope: 'all'` 的筛选器。**前后端这份口径是一对镜像**：前端 `applicableFilterWidgets` 决定发什么，
+  后端 `projectLayout` 决定认什么，改一边必须改另一边。
+- **筛选器作用范围**：`DashboardFilterWidget.scope`（缺省 `'page'`、只作用所在页；`'all'` 作用所有页）。
+  它存在 widget 上而不是盘级设置里——「作用于哪一页」是这条筛选器自身的属性。
+- **激活页是会话态，不落库**：`activePageId` 只活在组件状态里（打开盘落回首页），切换页面不重置筛选器取值
+  （取值按 widgetId 存在会话状态，与页无关）。
+- **盘至少保留一页**：删到最后一页时删除项禁用并给提示（`canRemove`）；删除页面会连带删掉该页的块。
+- **页面菜单要 `destroyOnHidden`**：antd 关闭下拉后默认把面板留在 DOM 里，旧面板的回调闭包会一直挂着，
+  再打开别的页的菜单时可能命中上一个页的旧菜单项（带着上一轮文档快照执行）。同理，**页面级写操作
+  必须在 `setDoc` 的 updater 里从 `prev` 现算**，不能用闭包里那份 `doc`。
+
 ### 仪表盘盘级筛选器
 
 `components/DashboardFilterBlock/` + `lib/dashboardFilterValue.ts`（取值下发契约），
@@ -91,7 +115,7 @@ frontend/src/
   三条链路的取值下发是**同一条**，只有控件形态与算子词表分族（`FAMILY_OPERATORS`）。
 - **布局侧**：`DashboardFilterWidget`（`type: 'filter'`）带 `binding.datasetId + binding.column`
   （**column 是列 ID**，见 `dashboardLayoutSchema.ts` 的注释——盘级条件与图表自身条件的
-  「覆盖可见标识」判定靠它求交集）、`label`、`dataType`、`operator`、`multi`、
+  「覆盖可见标识」判定靠它求交集）、`label`、`dataType`、`operator`、`multi`、`scope`、
   `defaultValue`（该筛选器的默认选中值，重开盘时做控件初值；日期族是 `DateFilterValue`，
   其余族是数组）与日期族专有的 `date.granularity/weekStart`。
 - **下发侧**：`POST /api/dashboards/{id}/query` 只收**筛选器当前取值** `{widgetId, value[]}`，

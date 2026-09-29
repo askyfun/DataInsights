@@ -311,7 +311,7 @@ type ChartSpecQueryRequest struct {
 	// Pagination 图表查询分页（entity.Pagination / query.Pagination，字段一致）。契约统一为 limit/offset，page/page_size 是旧协议遗留：Batch 3 迁移到 limit/offset， 当前实现仍以本对象为准，故字段保留并标记 deprecated。
 	Pagination *ChartPagination `json:"pagination,omitempty"`
 
-	// QueryOptions 查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go map[string]any omitempty，Task 3-1a 接线）：histogram 读取 bin_count （数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的 宽度）；table 读取 show_total（布尔，true 时响应额外返回合计行，见 ChartTableResponse.total）。executor 从请求结构体直接消费，不进入 QuerySpec/AST；其他 chart_type 忽略本节。 宽度）。Top N（issue #130）读取 top_n 对象 {limit: 正整数, metric?: 列ID, order?: asc|desc}：executor 把「按指标取前 N 个维度值」 翻译进查询计划（AST 的 Sort + Limit，由数据库完成排序截断）， order 缺省 desc；指标解析不到时显式报错。executor 从请求结构体直接 宽度）。同环比（issue #129）读取 comparison 对象 {type: mom|yoy, field?: 列ID}：executor 用窗口平移的基线查询为 bar/line/area/table 追加「(上期)」「(增长率%)」系列/列（mom 平移整个筛选窗口的天数+1， yoy 平移一个日历年；field 缺省取首维度）。executor 从请求结构体直接 消费，不进入 QuerySpec/AST；其他 chart_type 忽略本节。
+	// QueryOptions 查询选项扩展袋（entity/query.ChartQueryRequest.QueryOptions，Go map[string]any omitempty，Task 3-1a 接线）。executor 从请求结构体直接消费， 不进入 QuerySpec/AST；未识别的键与其他 chart_type 忽略本节。各键：histogram 读 bin_count（数值，默认 20）与 bin_width（数值，可选；指定则覆盖 bin_count 推算的宽度）；table 读 show_total（布尔，true 时响应额外返回合计行，见 ChartTableResponse.total）；Top N（issue #130）读 top_n 对象 {limit: 正整数, metric?: 列ID, order?: asc|desc, merge_other?: 布尔}， 把「按指标取前 N 个维度值」翻译进查询计划（AST 的 Sort + Limit，由数据库完成 排序截断），order 缺省 desc，指标解析不到时显式报错；其中 merge_other （issue #116 验收行）打开后再发一条全量分组汇总，把被截断的取值压成结果末尾 一行「其他」，仅 bar/line/area/pie + 恰好一个维度 + 全部指标可加（sum/count） 时可用，否则显式报错；同环比（issue #129）读 comparison 对象 {type: mom|yoy, field?: 列ID}，用窗口平移的基线查询为 bar/line/area/table 追加「(上期)」「(增长率%)」系列/列（mom 平移整个筛选窗口的天数+1，yoy 平移 一个日历年；field 缺省取首维度）。
 	QueryOptions *map[string]interface{} `json:"query_options,omitempty"`
 	Sort         *SortConfig             `json:"sort,omitempty"`
 
@@ -490,6 +490,9 @@ type DashboardQueryLinkage struct {
 // DashboardQueryRequest POST /api/dashboards/{id}/query 请求体（PRD §6.3）。前端只下筛选器与联动的当前值， **不解析 chart config、不下发合并结果**：筛选合并是后端单点逻辑（可测）。
 type DashboardQueryRequest struct {
 	Filters *[]DashboardQueryFilter `json:"filters,omitempty"`
+
+	// PageId 多页面文档（layout v2）的「当前激活页」页面 id。非空时只取该页的图表块， 并额外带上任意页里 `scope: all` 的筛选器；缺 pageId 的块（v1 旧文档） 不受按页收窄影响。省略或空串 = 不按页收窄（单页语义）。
+	PageId *string `json:"page_id,omitempty"`
 
 	// Linkages 已激活的图表联动（issue #143）。同一来源只应出现一次；未点击的来源不要下发。
 	Linkages *[]DashboardQueryLinkage `json:"linkages,omitempty"`

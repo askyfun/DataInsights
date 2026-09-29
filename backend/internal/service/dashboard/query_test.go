@@ -815,6 +815,190 @@ func TestQueryEmptyDashboardReturnsEmptySlice(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 多页面（layout v2）：按页收窄
+//
+// layout 文档的归属用**扁平** widgets[].pageId 表达，所以收窄逻辑就是投影时的
+// 一个谓词（chartInPage / filterInPage），不需要动 jsonpath 或响应结构。
+// ---------------------------------------------------------------------------
+
+// layoutChartOnPage 是带页面归属的图表块（v2 文档的块多一个 pageId）。
+func layoutChartOnPage(widgetID, pageID string, chartID int) string {
+	return fmt.Sprintf(
+		`{"widgetId":%q,"pageId":%q,"type":"chart","x":0,"y":0,"w":6,"h":4,"chartId":%d}`,
+		widgetID, pageID, chartID)
+}
+
+// layoutScopedFilter 是带页面归属与作用范围的筛选器块；scope 传空串表示不写该键
+// （缺省 = 只作用本页）。刻意不带 defaultValue，与 layoutFilter 同样用来证伪
+// 「未下发取值时回落 layout 默认值」。
+func layoutScopedFilter(widgetID, pageID string, datasetID int, column, operator, scope string) string {
+	scopeJSON := ""
+	if scope != "" {
+		scopeJSON = fmt.Sprintf(`"scope":%q,`, scope)
+	}
+	return fmt.Sprintf(
+		`{"widgetId":%q,"pageId":%q,"type":"filter",%s"x":0,"y":4,"w":6,"h":2,"operator":%q,"multi":true,"binding":{"datasetId":%d,"column":%q}}`,
+		widgetID, pageID, scopeJSON, operator, datasetID, column)
+}
+
+func projectedChartIDs(blocks []layoutChartBlock) []string {
+	out := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		out = append(out, b.WidgetID)
+	}
+	return out
+}
+
+func projectedFilterIDs(bindings []layoutFilterBinding) []string {
+	out := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		out = append(out, b.WidgetID)
+	}
+	return out
+}
+
+// TestProjectLayoutScopesByPage 覆盖三条谓词语义：
+//   - page_id 空 = 不按页收窄（单页时代的调用方）；
+//   - 该页的块 + **缺 pageId 的旧块**都要取（旧块若被排除，打开旧盘会整盘空白）；
+//   - 筛选器额外纳入 scope=all 的（它作用于所有页）。
+func TestProjectLayoutScopesByPage(t *testing.T) {
+	doc := `{"version":2,"grid":{"cols":12},"pages":[{"id":"p-1","name":"总览"},{"id":"p-2","name":"明细"}],"widgets":[` +
+		strings.Join([]string{
+			layoutChartOnPage("c-p1", "p-1", 11),
+			layoutChartOnPage("c-p2", "p-2", 22),
+			layoutChart("c-legacy", 33),
+			layoutScopedFilter("f-p1", "p-1", 7, "region", "in", ""),
+			layoutScopedFilter("f-p2", "p-2", 7, "city", "in", ""),
+			layoutScopedFilter("f-global", "p-2", 7, "channel", "in", "all"),
+			layoutFilter("f-legacy", 7, "shop", "in"),
+		}, ",") + `]}`
+
+	cases := []struct {
+		name        string
+		pageID      string
+		wantCharts  []string
+		wantFilters []string
+	}{
+		{
+			name:        "空 page_id = 不按页收窄",
+			pageID:      "",
+			wantCharts:  []string{"c-p1", "c-p2", "c-legacy"},
+			wantFilters: []string{"f-p1", "f-p2", "f-global", "f-legacy"},
+		},
+		{
+			name:        "p-1",
+			pageID:      "p-1",
+			wantCharts:  []string{"c-p1", "c-legacy"},
+			wantFilters: []string{"f-p1", "f-global", "f-legacy"},
+		},
+		{
+			name:        "p-2",
+			pageID:      "p-2",
+			wantCharts:  []string{"c-p2", "c-legacy"},
+			wantFilters: []string{"f-p2", "f-global", "f-legacy"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := projectLayout(doc, tc.pageID)
+			if charts := projectedChartIDs(got.Charts); !reflect.DeepEqual(charts, tc.wantCharts) {
+				t.Errorf("charts = %v, want %v", charts, tc.wantCharts)
+			}
+			if filters := projectedFilterIDs(got.Filters); !reflect.DeepEqual(filters, tc.wantFilters) {
+				t.Errorf("filters = %v, want %v", filters, tc.wantFilters)
+			}
+		})
+	}
+}
+
+// TestProjectLayoutUnknownPageKeepsLegacyBlocks 页面 id 认不出（跨版本错配 / 手改坏）
+// 时只剩缺 pageId 的旧块：不返回错误，也不把整盘判空——与其它解析失败同一口径。
+func TestProjectLayoutUnknownPageKeepsLegacyBlocks(t *testing.T) {
+	doc := `{"version":2,"pages":[{"id":"p-1","name":"A"}],"widgets":[` +
+		layoutChartOnPage("c-p1", "p-1", 11) + `,` + layoutChart("c-legacy", 33) + `]}`
+
+	got := projectLayout(doc, "p-gone")
+
+	if charts := projectedChartIDs(got.Charts); !reflect.DeepEqual(charts, []string{"c-legacy"}) {
+		t.Fatalf("charts = %v, want [c-legacy]", charts)
+	}
+}
+
+// TestQueryScopesByPage 端到端：请求带 page_id 时只取该页的块，且筛选器口径同步收窄
+// —— 别页的筛选器即使前端把取值发过来了也不生效，作用所有页的照常生效。
+func TestQueryScopesByPage(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	doc := `{"version":2,"grid":{"cols":12},"pages":[{"id":"p-1","name":"总览"},{"id":"p-2","name":"明细"}],"widgets":[` +
+		strings.Join([]string{
+			layoutChartOnPage("c-p1", "p-1", 11),
+			layoutChartOnPage("c-p2", "p-2", 22),
+			layoutScopedFilter("f-p1", "p-1", 7, "region", "in", ""),
+			layoutScopedFilter("f-global", "p-1", 7, "channel", "in", "all"),
+		}, ",") + `]}`
+	expectDashboardRead(t, mock, doc)
+
+	fake := &fakeChartProvider{
+		metaFn: func(_ context.Context, _ int) (*entity.ChartQueryContext, error) {
+			return &entity.ChartQueryContext{Exists: true, DatasetID: 7}, nil
+		},
+	}
+	svc.chartProvider = fake
+
+	got, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+		PageID: "p-2",
+		Filters: []entity.DashboardQueryFilter{
+			{WidgetID: "f-p1", Value: []any{"华东"}},
+			{WidgetID: "f-global", Value: []any{"线上"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	if n := fake.dataCallCount(); n != 1 {
+		t.Fatalf("取数次数 = %d, want 1（只取当前页的块）", n)
+	}
+	if len(got.Results) != 1 || got.Results[0].WidgetID != "c-p2" {
+		t.Fatalf("results = %+v, want 只有 c-p2", got.Results)
+	}
+
+	overrides, ok := fake.overridesFor(22)
+	if !ok {
+		t.Fatal("chart 22 未取数")
+	}
+	fields := make([]string, 0, len(overrides))
+	for _, o := range overrides {
+		fields = append(fields, o.Field)
+	}
+	if !reflect.DeepEqual(fields, []string{"channel"}) {
+		t.Fatalf("生效字段 = %v, want [channel]（region 属于别页，不该生效）", fields)
+	}
+	if !reflect.DeepEqual(got.Results[0].AppliedFields, []string{"channel"}) {
+		t.Fatalf("appliedFields = %v, want [channel]", got.Results[0].AppliedFields)
+	}
+}
+
+// TestQueryWithoutPageIDCoversEveryPage 不传 page_id 时保持单页时代的语义：整盘所有
+// 块都取。这条是旧客户端 / 未升级调用方的兼容底线。
+func TestQueryWithoutPageIDCoversEveryPage(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	doc := `{"version":2,"pages":[{"id":"p-1","name":"A"},{"id":"p-2","name":"B"}],"widgets":[` +
+		layoutChartOnPage("c-p1", "p-1", 11) + `,` + layoutChartOnPage("c-p2", "p-2", 22) + `]}`
+	expectDashboardRead(t, mock, doc)
+
+	fake := &fakeChartProvider{}
+	svc.chartProvider = fake
+
+	got, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got.Results) != 2 || fake.dataCallCount() != 2 {
+		t.Fatalf("results=%d 取数=%d, want 2/2", len(got.Results), fake.dataCallCount())
+	}
+}
+
 // 图表联动（issue #143）
 // ---------------------------------------------------------------------------
 
@@ -1042,7 +1226,7 @@ func TestProjectLinkageTargetsDropsUnusableAndDedupes(t *testing.T) {
 		linkageTarget("w-2", "region"),
 		linkageTarget("w-2", "city"),
 	))
-	got := projectLayout(layout)
+	got := projectLayout(layout, "")
 
 	if len(got.Charts) != 1 {
 		t.Fatalf("期望 1 块图表，实际 %d", len(got.Charts))

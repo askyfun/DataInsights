@@ -116,6 +116,21 @@ const ChartView: React.FC<ChartViewProps> = ({
     return labels;
   }, [chartDoc, nameOf]);
 
+  // 指标显示格式（fieldMeta.format），键空间与 displayLabels 一致（输出列名）。
+  // 两条消费路径共用：数据标注（option 构造）与表格占比列判定（见下方 isTableLike 分支）。
+  const metricFormatByOutputName = useMemo(() => {
+    const formats: Record<string, string> = Object.create(null);
+    for (const group of chartDoc.query.metricGroups) {
+      for (const binding of group.bindings) {
+        const format = chartDoc.fieldMeta[binding.bindingId]?.format;
+        if (format) {
+          formats[nameOf(binding.fieldId)] = format;
+        }
+      }
+    }
+    return formats;
+  }, [chartDoc, nameOf]);
+
   // 样式来自持久化 v1 文档的 style 小节（schema 上是 unknown）：
   // 缺失/形状非法时经 normalizeChartStyle 回落 ChartStyleConfig 默认值。
   const chartStyle = useMemo(() => normalizeChartStyle(chartDoc.style), [chartDoc]);
@@ -172,11 +187,23 @@ const ChartView: React.FC<ChartViewProps> = ({
         referenceLines: normalizeReferenceLines(
           (chartDoc.queryOptions as { referenceLines?: unknown }).referenceLines
         ),
+        // 指标显示格式（数据标注用）：与 displayLabels 同一键空间（输出列名）。
+        metricFormats: metricFormatByOutputName,
       },
       resolvedTheme,
       hostEl
     );
-  }, [chart, chartDoc, data, chartStyle, displayLabels, nameOf, hostEl, resolvedTheme]);
+  }, [
+    chart,
+    chartDoc,
+    data,
+    chartStyle,
+    displayLabels,
+    nameOf,
+    hostEl,
+    resolvedTheme,
+    metricFormatByOutputName,
+  ]);
 
   const isTableLike = chartDoc.chartType === 'table' || chartDoc.chartType === 'pivot';
 
@@ -259,27 +286,15 @@ const ChartView: React.FC<ChartViewProps> = ({
     // 占比列（issue #132）：配在 fieldMeta 的「格式」上（`%` 后缀），分母同样来自
     // 响应的 total —— 后端在占比列存在时一定会算 total（见 composeChartQueryRequest），
     // 拿不到分母时该列留空，不用本页合计兜底。
-    const metricFormats: Record<string, string> = Object.create(null);
-    const percentColumns: string[] = [];
-    for (const group of chartDoc.query.metricGroups) {
-      for (const binding of group.bindings) {
-        const format = chartDoc.fieldMeta[binding.bindingId]?.format;
-        if (!format) {
-          continue;
-        }
-        const outputName = nameOf(binding.fieldId);
-        metricFormats[outputName] = format;
-        if (isPercentOfTotalFormat(format)) {
-          percentColumns.push(outputName);
-        }
-      }
-    }
+    const percentColumns = Object.keys(metricFormatByOutputName).filter((outputName) =>
+      isPercentOfTotalFormat(metricFormatByOutputName[outputName])
+    );
     return (
       <TableChart
         data={tablePayload ? tablePayload.data : (data as RawRow[])}
         columns={tablePayload ? tablePayload.columns : undefined}
         totalRow={showTotal ? tablePayload?.total : undefined}
-        metricFormats={metricFormats}
+        metricFormats={metricFormatByOutputName}
         metricPercentOfTotal={percentColumns}
         grandTotal={tablePayload?.total}
         loading={false}

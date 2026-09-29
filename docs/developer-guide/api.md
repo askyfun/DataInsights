@@ -229,11 +229,13 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 响应实体 `Dashboard`：`id / name / description / layout_json / status / created_at / updated_at`。
 
 - `id` 为后端生成的 **UUIDv7 字符串**（非自增）；非 UUID → 20100，不存在/已软删 → 20300。
-- `layout_json` 是 `{"version":1,"widgets":[...]}` 文档的字符串形态（见 1.6 的 JSONB 警告）。
+- `layout_json` 是 `{"version":2,"pages":[...],"widgets":[...]}` 文档的字符串形态（见 1.6 的 JSONB 警告）。
   文档结构（DashboardLayout）**归前端所有**（`frontend/src/lib/dashboardLayoutSchema.ts`），
-  后端只做防御性投影读取。widget 按 `type` 判别：`chart`（存 `chartId` 引用，非快照）/
-  `text`（markdown，渲染前必须 sanitize）/ `filter`（盘级筛选器，`binding` 是
-  `(datasetId, column)` 二元组，**column 存列 id 非列名**）。`widgetId` 盘内唯一且 ≠ chartId。
+  后端只做防御性投影读取。**v2 = 多页面**：`pages` 至少一页，每个 widget 用 `pageId` 归属一页
+  （扁平表达，不嵌套）；v1 文档（无 `pages`）在加载时**无损迁移**到 v2。widget 按 `type` 判别：
+  `chart`（存 `chartId` 引用，非快照）/ `text`（markdown，渲染前必须 sanitize）/
+  `filter`（盘级筛选器，`binding` 是 `(datasetId, column)` 二元组，**column 存列 id 非列名**；
+  `scope` 缺省只作用所在页、`all` 作用所有页）。`widgetId` **整盘**唯一且 ≠ chartId。
 - `status`：v1 只会出现 `draft`（published 为将来分享预留），后端不做枚举校验。
 
 | # | 方法与路径 | 说明 |
@@ -247,9 +249,12 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 
 ### 6.1 `POST /api/dashboards/{id}/query` 合并语义
 
-请求体只下筛选器**当前取值**：`{filters: [{widgetId, value[]}]}`。前端不解析 chart config、
-不下发合并结果；合并在后端单点完成（运行期覆盖 + 追加，**绝不写回 bi_chart.config**）。
+请求体只下筛选器**当前取值**与（可选）当前页：`{page_id, filters: [{widgetId, value[]}]}`。
+前端不解析 chart config、不下发合并结果；合并在后端单点完成（运行期覆盖 + 追加，**绝不写回 bi_chart.config**）。
 
+- `page_id` 非空时**只取该页的图表块**（多页面盘不必把没在看的页也跑一遍 SQL），并额外纳入
+  任意页里 `scope: all` 的筛选器；**缺 `pageId` 的块不受按页收窄影响**（那是 v1 旧文档，排除它们
+  会让旧盘直接空白）。省略或空串 = 不按页收窄（单页语义，旧客户端的兼容底线）。
 - 请求里没出现的筛选器 = 未激活：不回落 layout 的 `defaultValue`，不参与合并不触发覆盖。
 - 适用条件按 `(binding.datasetId, binding.column)` 命中该图表的数据集（避免跨数据集同名误伤）。
 - 取值形状按算子分流：`in/notIn` 数组、`between` 两元素、其余标量一元素、`isNull/notNull`

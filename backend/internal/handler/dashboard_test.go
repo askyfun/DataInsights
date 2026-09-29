@@ -520,12 +520,15 @@ func TestDashboardQuery_ForwardsFiltersAndId(t *testing.T) {
 		},
 	})
 	w := serve(newDashboardTestRouter(h), http.MethodPost, "/api/dashboards/"+dashID+"/query",
-		`{"filters":[{"widgetId":"w-1","value":["华东"]}]}`)
+		`{"page_id":"p-2","filters":[{"widgetId":"w-1","value":["华东"]}]}`)
 	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"results":[`+
 		`{"widgetId":"w-1","chartId":42,"status":"ok","data":{"data":[{"region":"华东"}]},"appliedFields":["region"]}]}}`)
 
 	if gotID != dashID {
 		t.Errorf("path id 未透传: %q", gotID)
+	}
+	if got.PageID != "p-2" {
+		t.Errorf("page_id 未透传: %q", got.PageID)
 	}
 	if len(got.Filters) != 1 || got.Filters[0].WidgetID != "w-1" {
 		t.Fatalf("filters 未透传: %+v", got.Filters)
@@ -565,13 +568,16 @@ func TestDashboardQuery_QueryMustNotPolluteBody(t *testing.T) {
 		},
 	})
 	w := serve(newDashboardTestRouter(h), http.MethodPost,
-		"/api/dashboards/"+dashID+"/query?Filters=evil",
+		"/api/dashboards/"+dashID+"/query?Filters=evil&page_id=evil",
 		`{"filters":[{"widgetId":"w-1","value":["华东"]}]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected HTTP 200, got %d (body: %s)", w.Code, w.Body.String())
 	}
 	if len(got.Filters) != 1 || got.Filters[0].WidgetID != "w-1" {
 		t.Fatalf("query 参数污染了 body struct: %+v", got.Filters)
+	}
+	if got.PageID != "" {
+		t.Fatalf("query 参数污染了 page_id: %q", got.PageID)
 	}
 }
 

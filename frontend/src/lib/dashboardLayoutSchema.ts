@@ -1,25 +1,40 @@
 /**
- * bi_dashboard.layout_json 的 v1 文档 schema 与迁移函数（纯逻辑，不依赖 UI/store 运行时）。
+ * bi_dashboard.layout_json 的文档 schema 与迁移函数（纯逻辑，不依赖 UI/store 运行时）。
  *
  * 与 bi_chart.config 的关系：两者是**独立**的版本化文档，各自带 version 与迁移函数。
  * 仪表盘文档只**引用**图表（存 chartId），不内嵌图表 config——图表配置的演进归
  * `chartConfigSchema.migrateChartConfig` 管，本文件不复制一份会漂移的类型定义。
  *
- * v1 约定（本版本）：
+ * v2 约定（本版本，v1 是「单页」）：
  * - `grid.cols` 恒定 12。**注意**：若将来引入 >12 列的文档，本函数必须改为"按原
- *   grid.cols 缩放后再归一到渲染列数"，否则会静默位移既有块。v1 不存在这种文档，
+ *   grid.cols 缩放后再归一到渲染列数"，否则会静默位移既有块。不存在这种文档，
  *   故此处直接归一到 12 并在超界时收敛。
+ * - **多页面**：一个盘有 `pages[]`（至少一页），每个 widget 用 `pageId` 归属恰好一页。
+ *   页面顺序 **就是 `pages` 数组顺序**（拖拽排序即重排数组）。
+ * - 页面归属用**扁平** `widgets[] + pageId` 表达，而不是把 widgets 嵌进 page 里。
+ *   这是刻意的：后端 `service/dashboard/query.go` 的投影与
+ *   `impl.go` 的引用计数 jsonpath（`$.widgets[*] ? (@.chartId == …)`）都建立在这个
+ *   扁平形状上，嵌套会让那两个「按块」的读路径全部失效；扁平则只需多读一个属性。
+ *   代价是 `widgetId` 的唯一域是**整盘**而非单页（与 v1 的 D1 不变量一致）。
  * - 每个 widget 持有**盘内唯一**的 `widgetId`。同一 chartId 允许在同一盘出现多次，
  *   各自独立 x/y/w/h——这是"同图复用"能力的实现基础，故 widgetId 绝不等于 chartId。
  * - 三种 widget：`chart`（引用）/ `text`（Markdown）/ `filter`（绑定数据集字段）。
  *   筛选器绑定的是 `(datasetId, column)` 二元组而非纯列名：因允许跨数据集混搭，
  *   纯列名会让不同数据集里的同名列互相误伤。
+ * - 筛选器另有 `scope`：缺省 `'page'` 只作用于**所在页**；`'all'` 作用于**所有页**
+ *   （取数时任意页都下发它）。作用于哪一页是这条筛选器自身的属性，故存在 widget
+ *   上而不是盘级设置里。
  * - 占位与错误是**运行期渲染行为**，不进文档：图表被软删后 widget 仍保留原位，
  *   由取数响应里的 status 决定渲染占位块。文档层不做任何级联删除。
  *
  * 迁移是全覆盖函数：任何输入（空串、损坏 JSON、非对象、字段缺失/类型错误）都返回
- * 合法 v1 文档，绝不抛异常。无法修复的 widget 被丢弃（例如 chart 块没有合法 chartId
- * ——它取不到数），可修复的则就地修复（缺失 widgetId 按位置补确定性 id、位置超界收敛）。
+ * 合法 v2 文档，绝不抛异常。无法修复的 widget 被丢弃（例如 chart 块没有合法 chartId
+ * ——它取不到数），可修复的则就地修复（缺失 widgetId 按位置补确定性 id、位置超界收敛、
+ * 页面引用悬空/重复时归到首个页面）。**v1 → v2 是无损的**：v1 的 widgets 全部落到
+ * 迁移合成的那一页上。
+ *
+ * 两个默认名（`页面 1` / `未命名页面`）是**数据层**取值而非 UI 文案：它们会成为落库
+ * 内容、由用户改名，不随界面语言切换（与 `w-recovered-<n>` 这类修复产物同一性质）。
  */
 
 import type { FilterOperator } from '../store';
@@ -71,8 +86,18 @@ export interface DashboardChartLinkage {
   targets: DashboardLinkageTarget[];
 }
 
-export interface DashboardChartWidget extends DashboardPlacement {
+/** 一块 widget 的公共标识：盘内唯一 id + 所属页面。 */
+export interface DashboardWidgetBase extends DashboardPlacement {
   widgetId: string;
+  /**
+   * 所属页面 id。迁移保证它**恒指向 `pages` 里存在的页**：指向不存在页面的块在
+   * 渲染上会整块消失（不像文件夹的悬空引用还能退化成根级），所以这里选择归到首页
+   * 而不是原样保留。
+   */
+  pageId: string;
+}
+
+export interface DashboardChartWidget extends DashboardWidgetBase {
   type: 'chart';
   /** 引用既有 bi_chart.id；不存快照。 */
   chartId: number;
@@ -82,8 +107,7 @@ export interface DashboardChartWidget extends DashboardPlacement {
   linkage?: DashboardChartLinkage;
 }
 
-export interface DashboardTextWidget extends DashboardPlacement {
-  widgetId: string;
+export interface DashboardTextWidget extends DashboardWidgetBase {
   type: 'text';
   markdown: string;
 }
@@ -94,15 +118,19 @@ export interface DashboardTextWidget extends DashboardPlacement {
  * ⚠️ 取值必须是列 ID 而不是列名：盘级条件最终以 `entity.Filter.Field` 传给图表取数，
  * 而「哪些字段被盘级条件覆盖」的判定（`overriddenFields`）拿的是图表自身过滤条件里的
  * **列 ID** 去求交集 —— 存列名会让这个可见标识永远匹配不上。列名可变，只用于展示。
- * （openapi 里 `binding.column` 的描述仍写着「列名」，是列 ID 改造前的口径，待同步。）
  */
 export interface DashboardFilterBinding {
   datasetId: number;
   column: string;
 }
 
-export interface DashboardFilterWidget extends DashboardPlacement {
-  widgetId: string;
+/**
+ * 筛选器的作用范围：`'page'`（缺省）= 只作用于所在页；`'all'` = 作用于所有页。
+ * 缺省值刻意用「键不存在」表达（而不是显式 `'page'`），省得把默认值写进每一份布局。
+ */
+export type DashboardFilterScope = 'page' | 'all';
+
+export interface DashboardFilterWidget extends DashboardWidgetBase {
   type: 'filter';
   binding: DashboardFilterBinding;
   label: string;
@@ -112,6 +140,8 @@ export interface DashboardFilterWidget extends DashboardPlacement {
   multi: boolean;
   /** 未选择（undefined/null/空数组）表示"未激活"，不参与筛选合并。 */
   defaultValue?: unknown;
+  /** 只有 `'all'` 会被显式写进文档；缺省即 `'page'`。 */
+  scope?: DashboardFilterScope;
   /**
    * 日期型筛选器的粒度与周计算逻辑。只对 `dataType` 是 date/datetime 的筛选器有意义：
    * 控件据它决定快捷选项集合、周起始日与展示格式（见 `lib/dateFilter.ts`）。
@@ -122,11 +152,26 @@ export interface DashboardFilterWidget extends DashboardPlacement {
 
 export type DashboardWidget = DashboardChartWidget | DashboardTextWidget | DashboardFilterWidget;
 
+/** 一个页面（独立画布）。顺序即标签顺序。 */
+export interface DashboardPage {
+  id: string;
+  name: string;
+}
+
 export interface DashboardLayoutDocument {
-  version: 1;
+  version: 2;
   grid: { cols: number };
+  /** 至少一页（迁移保证非空）。 */
+  pages: DashboardPage[];
+  /** 全部页面的块，用 `pageId` 归属；widgetId 的唯一域是整盘。 */
   widgets: DashboardWidget[];
 }
+
+/** 迁移合成页面时用的默认名（数据层取值，不是 UI 文案，见文件头）。 */
+export const DASHBOARD_DEFAULT_PAGE_NAME = '页面 1';
+
+/** 页面名为空/非法时的兜底名（数据层取值，见文件头）。 */
+export const DASHBOARD_UNTITLED_PAGE_NAME = '未命名页面';
 
 const WIDGET_TYPES: readonly DashboardWidgetType[] = ['chart', 'text', 'filter'];
 
@@ -164,7 +209,12 @@ function isNonNegativeInt(value: unknown): value is number {
 }
 
 export function emptyDashboardLayout(): DashboardLayoutDocument {
-  return { version: 1, grid: { cols: DASHBOARD_GRID_COLS }, widgets: [] };
+  return {
+    version: 2,
+    grid: { cols: DASHBOARD_GRID_COLS },
+    pages: [{ id: 'p-recovered-0', name: DASHBOARD_DEFAULT_PAGE_NAME }],
+    widgets: [],
+  };
 }
 
 /**
@@ -176,6 +226,91 @@ export function createWidgetId(): string {
     return `w-${crypto.randomUUID()}`;
   }
   return `w-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 生成页面 id（与 widgetId 同一范式，但前缀区分，便于日志里一眼认出）。 */
+export function createPageId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `p-${crypto.randomUUID()}`;
+  }
+  return `p-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 归一页面数组：丢弃非对象项、按位置补齐缺失 id、**首个同 id 胜出**。
+ * 结果保证非空——空文档也要有一页可编辑，否则「加图表」无处可放。
+ */
+export function normalizePages(raw: unknown): DashboardPage[] {
+  const pages: DashboardPage[] = [];
+  const seen = new Set<string>();
+  if (Array.isArray(raw)) {
+    raw.forEach((entry, index) => {
+      if (!isPlainObject(entry)) {
+        return;
+      }
+      const id = isNonEmptyString(entry.id) ? entry.id : `p-recovered-${index}`;
+      if (seen.has(id)) {
+        return;
+      }
+      seen.add(id);
+      pages.push({
+        id,
+        name: isNonEmptyString(entry.name) ? entry.name : DASHBOARD_UNTITLED_PAGE_NAME,
+      });
+    });
+  }
+  if (pages.length === 0) {
+    pages.push({ id: 'p-recovered-0', name: DASHBOARD_DEFAULT_PAGE_NAME });
+  }
+  return pages;
+}
+
+/**
+ * 把 `fromId` 页移动到 `toId` 页**原来的位置**（拖拽落点的语义）。
+ * 纯函数；任一 id 不存在或两者相同则原样返回（复制一份，不泄漏引用）。
+ */
+export function reorderPages(
+  pages: readonly DashboardPage[],
+  fromId: string,
+  toId: string
+): DashboardPage[] {
+  const from = pages.findIndex((page) => page.id === fromId);
+  const to = pages.findIndex((page) => page.id === toId);
+  if (from < 0 || to < 0 || from === to) {
+    return [...pages];
+  }
+  const next = [...pages];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/** 挑出布局里的筛选器块（类型守卫版本，多处复用）。 */
+export function filterWidgetsOf(widgets: readonly DashboardWidget[]): DashboardFilterWidget[] {
+  return widgets.filter((widget): widget is DashboardFilterWidget => widget.type === 'filter');
+}
+
+/** 挑出某一页的全部块（保持文档内顺序）。 */
+export function widgetsOfPage(
+  widgets: readonly DashboardWidget[],
+  pageId: string
+): DashboardWidget[] {
+  return widgets.filter((widget) => widget.pageId === pageId);
+}
+
+/**
+ * 某一页取数时真正该下发的筛选器：**本页的** + **任意页里 `scope: 'all'` 的**。
+ *
+ * 与后端 `projectLayout` 的按页收窄口径一致（那里按 `pageId` 与 `scope` 两条判定），
+ * 两边一起改才不会出现「前端不发、后端也认不出」的死筛选器。
+ */
+export function applicableFilterWidgets(
+  widgets: readonly DashboardWidget[],
+  pageId: string
+): DashboardFilterWidget[] {
+  return filterWidgetsOf(widgets).filter(
+    (widget) => widget.pageId === pageId || widget.scope === 'all'
+  );
 }
 
 /**
@@ -257,7 +392,12 @@ function normalizeLinkage(raw: unknown): DashboardChartLinkage | undefined {
 }
 
 /** 归一单个 widget；无法修复时返回 null（调用方负责丢弃）。 */
-function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
+function normalizeWidget(
+  raw: unknown,
+  index: number,
+  pageIds: ReadonlySet<string>,
+  fallbackPageId: string
+): DashboardWidget | null {
   if (!isPlainObject(raw)) {
     return null;
   }
@@ -271,6 +411,11 @@ function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
   // 且不丢失这块内容——比直接丢弃更保守。
   const widgetId = isNonEmptyString(raw.widgetId) ? raw.widgetId : `w-recovered-${index}`;
 
+  // 页面归属：悬空（指向不存在的页）或缺省一律归到首页。归首页而不是丢弃，
+  // 是因为「块在渲染上凭空消失」比「块换了位置」难懂得多。
+  const pageId =
+    isNonEmptyString(raw.pageId) && pageIds.has(raw.pageId) ? raw.pageId : fallbackPageId;
+
   const placement = normalizePlacement(raw, DASHBOARD_DEFAULT_SIZE[widgetType]);
 
   if (widgetType === 'chart') {
@@ -280,6 +425,7 @@ function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
     }
     const widget: DashboardChartWidget = {
       widgetId,
+      pageId,
       type: 'chart',
       chartId: raw.chartId,
       ...placement,
@@ -300,7 +446,7 @@ function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
     if (typeof raw.markdown !== 'string') {
       return null;
     }
-    return { widgetId, type: 'text', markdown: raw.markdown, ...placement };
+    return { widgetId, pageId, type: 'text', markdown: raw.markdown, ...placement };
   }
 
   // filter
@@ -314,6 +460,7 @@ function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
   }
   const widget: DashboardFilterWidget = {
     widgetId,
+    pageId,
     type: 'filter',
     binding: { datasetId: binding.datasetId, column: binding.column },
     label: isNonEmptyString(raw.label) ? raw.label : binding.column,
@@ -327,6 +474,11 @@ function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
   };
   if (raw.defaultValue !== undefined) {
     widget.defaultValue = raw.defaultValue;
+  }
+  // 只有显式 'all' 才写进文档；其余（含 'page' / 脏值）都按缺省处理，省得把默认值
+  // 散落进每一份布局里。
+  if (raw.scope === 'all') {
+    widget.scope = 'all';
   }
   // 日期粒度 / 周计算逻辑：两个字段都合法才采纳。半截配置当没有——宁可退回默认口径，
   // 也不要拿一个「粒度来自布局、周起始日来自默认值」的混合配置去求值。
@@ -342,7 +494,7 @@ function normalizeWidget(raw: unknown, index: number): DashboardWidget | null {
 }
 
 /**
- * 把任意 bi_dashboard.layout_json 字符串转为合法 v1 文档。
+ * 把任意 bi_dashboard.layout_json 字符串转为合法 v2 文档。
  *
  * @param raw layout_json 的 JSON 字符串（可能是空串、损坏内容、旧结构或未来版本）
  */
@@ -357,22 +509,25 @@ export function migrateDashboardLayout(raw: string): DashboardLayoutDocument {
     return emptyDashboardLayout();
   }
 
-  // v1 恒定 12 列：原文档的 grid.cols 一律归一到渲染列数（见文件头关于 >12 列的说明）。
+  // 恒定 12 列：原文档的 grid.cols 一律归一到渲染列数（见文件头关于 >12 列的说明）。
   const cols = DASHBOARD_GRID_COLS;
+  const pages = normalizePages(parsed.pages);
+  const pageIds = new Set(pages.map((page) => page.id));
+  const fallbackPageId = pages[0].id;
   const source = parsed.widgets;
   if (!Array.isArray(source)) {
-    return { version: 1, grid: { cols }, widgets: [] };
+    return { version: 2, grid: { cols }, pages, widgets: [] };
   }
 
   const widgets: DashboardWidget[] = [];
   source.forEach((entry, index) => {
-    const widget = normalizeWidget(entry, index);
+    const widget = normalizeWidget(entry, index, pageIds, fallbackPageId);
     if (widget) {
       widgets.push(widget);
     }
   });
 
-  return { version: 1, grid: { cols }, widgets };
+  return { version: 2, grid: { cols }, pages, widgets };
 }
 
 /** 序列化为落库字符串。布局全量覆写，故 PUT 时直接替换整串。 */

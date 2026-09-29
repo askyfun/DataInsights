@@ -50,6 +50,7 @@ import AddFilterWidgetModal, {
   type NewFilterWidgetConfig,
 } from '../components/DashboardFilterBlock/AddFilterWidgetModal';
 import DashboardFilterBlock from '../components/DashboardFilterBlock/DashboardFilterBlock';
+import DashboardPageTabs from '../components/DashboardPageTabs';
 import DateFilterModal, {
   type DateFilterModalPayload,
 } from '../components/DateFilter/DateFilterModal';
@@ -62,6 +63,8 @@ import {
   initialFilterWidgetValues,
 } from '../lib/dashboardFilterValue';
 import {
+  applicableFilterWidgets,
+  createPageId,
   createWidgetId,
   DASHBOARD_DEFAULT_SIZE,
   DASHBOARD_GRID_COLS,
@@ -71,11 +74,15 @@ import {
   type DashboardFilterWidget,
   type DashboardLayoutDocument,
   type DashboardLinkageTarget,
+  type DashboardPage,
   type DashboardWidget,
+  filterWidgetsOf,
   findFreePlacement,
   migrateDashboardLayout,
   normalizePlacement,
+  reorderPages,
   serializeDashboardLayout,
+  widgetsOfPage,
 } from '../lib/dashboardLayoutSchema';
 import {
   type ActiveLinkageMap,
@@ -89,11 +96,6 @@ import { isDateFilterValue } from '../lib/dateFilter';
 import { useStore } from '../store';
 
 const { Text } = Typography;
-
-/** 挑出布局里的筛选器块（类型守卫版本，多处复用）。 */
-function filterWidgetsOf(widgets: readonly DashboardWidget[]): DashboardFilterWidget[] {
-  return widgets.filter((widget): widget is DashboardFilterWidget => widget.type === 'filter');
-}
 
 /** 草稿 key：PRD §11-8 的「key 命名」在本批定为 `<前缀><dashboardId>`。 */
 const DRAFT_PREFIX = 'dashboard-draft:';
@@ -168,6 +170,11 @@ const DashboardEditor: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [doc, setDoc] = useState<DashboardLayoutDocument>(() => migrateDashboardLayout(''));
+  /**
+   * 当前激活的页面 id。刻意**不写进文档**：它是「正在看哪一页」这个会话态，
+   * 不是布局的一部分（落库会让两个用户互相抢视图）。打开盘时取首页。
+   */
+  const [activePageId, setActivePageId] = useState<string>('');
   const [baseline, setBaseline] = useState<{ name: string; layout: string } | null>(null);
   const [charts, setCharts] = useState<Chart[]>([]);
   const [chartsById, setChartsById] = useState<Record<number, Chart>>({});
@@ -214,16 +221,22 @@ const DashboardEditor: React.FC = () => {
    * `filters` / `linkages` 都是**当前取值**（不是合并结果）：合并由后端单点完成（PRD §6.3），
    * 前端只负责把「哪个筛选器现在选了什么」「哪块图被点了什么值」如实下发，形状规则见
    * `lib/dashboardFilterValue` 与 `lib/dashboardLinkage`。
+   * `pageId` 让后端只取当前页的块（多页面盘不必把没在看的页也跑一遍 SQL）。
    */
   const runQuery = useCallback(
     async (
       dashboardId: string,
+      pageId: string,
       filters: DashboardQueryFilterValue[],
       linkages: ReturnType<typeof linkageQueryPayload>
     ) => {
       setQuerying(true);
       try {
-        const response = await dashboardsApi.query(dashboardId, { filters, linkages });
+        const response = await dashboardsApi.query(dashboardId, {
+          page_id: pageId,
+          filters,
+          linkages,
+        });
         const map: Record<string, DashboardQueryResult> = {};
         for (const result of response.data.data.results ?? []) {
           map[result.widgetId] = result;
@@ -240,21 +253,24 @@ const DashboardEditor: React.FC = () => {
   );
 
   /**
-   * 按给定的筛选器 / 联动状态重取一整盘。
+   * 按给定的筛选器 / 联动状态重取**当前页**。
    *
-   * 只把**已落库**的筛选器下发出去：后端是按已落库的 layout 逐块取数、并按同一份 layout
-   * 建筛选器与联动去向索引的，未保存的块它根本认不出来 —— 发了也只是白跑一趟。
-   * 调用方传显式的 widgets/values/linkages 而不是读组件状态：改筛选取值、改粒度这些场景下
-   * 新状态还没落进 state，读旧值会算出上一轮的载荷。
+   * 只把**已落库**的筛选器 / 联动来源下发出去：后端是按已落库的 layout 逐块取数、并按同一份
+   * layout 建筛选器与联动去向索引的，未保存的块它根本认不出来 —— 发了也只是白跑一趟。
+   * 下发的筛选器集合是**本页的 + 任意页 `scope: 'all'` 的**（`applicableFilterWidgets`），
+   * 与后端 `projectLayout` 的按页收窄是同一口径。
+   * 调用方传显式的 widgets/values/pageId/linkages 而不是读组件状态：改筛选取值、改粒度
+   * 这些场景下新状态还没落进 state，读旧值会算出上一轮的载荷。
    */
   const queryWithState = useCallback(
     (
       dashboardId: string,
       widgets: readonly DashboardWidget[],
       values: Record<string, unknown>,
+      pageId: string,
       linkages: ActiveLinkageMap
     ) => {
-      const active = filterWidgetsOf(widgets).filter((widget) =>
+      const active = applicableFilterWidgets(widgets, pageId).filter((widget) =>
         persistedIdsRef.current.has(widget.widgetId)
       );
       // 来源也必须已落库：后端从 layout 读「这块图打到哪些目标」，未保存的配置读不到。
@@ -263,7 +279,12 @@ const DashboardEditor: React.FC = () => {
           Object.entries(linkages).filter(([widgetId]) => persistedIdsRef.current.has(widgetId))
         )
       );
-      return runQuery(dashboardId, dashboardFiltersPayload(active, values), persistedLinkages);
+      return runQuery(
+        dashboardId,
+        pageId,
+        dashboardFiltersPayload(active, values),
+        persistedLinkages
+      );
     },
     [runQuery]
   );
@@ -324,14 +345,18 @@ const DashboardEditor: React.FC = () => {
 
         setDoc(nextDoc);
         setName(nextName);
+        // 打开盘时落回首页：激活页是会话态，不落库（见 activePageId 的注释）。
+        const firstPageId = nextDoc.pages[0].id;
+        setActivePageId(firstPageId);
         setBaseline({ name: dashboard.name, layout: serverLayout });
         setDraftRestored(restored);
 
         // 筛选器初值取布局里落库的「默认选中值」：控件与首屏取数用同一份，
         // 否则会出现"控件显示最近 7 天、实际查的是全量"这种不一致。
+        // 取全部页面的筛选器（含别的页上的 `scope: all`）：它们在任何页都要有初值。
         const seeded = initialFilterWidgetValues(filterWidgetsOf(nextDoc.widgets));
         setFilterValues(seeded);
-        await queryWithState(dashboardId, nextDoc.widgets, seeded, {});
+        await queryWithState(dashboardId, nextDoc.widgets, seeded, firstPageId, {});
       } catch (error: any) {
         setLoadError(error.message || intl.formatMessage({ id: 'dashboard.loadFailed' }));
       } finally {
@@ -375,6 +400,16 @@ const DashboardEditor: React.FC = () => {
     localStorage.setItem(key, JSON.stringify({ name, layout: serializeDashboardLayout(doc) }));
   }, [id, baseline, dirty, doc, name]);
 
+  const pages = doc.pages;
+  /**
+   * 当前页的块。用 useMemo 而不是就地 filter：下面几个 effect 拿它当依赖，
+   * 每次渲染都新建数组会让它们每渲染一次就跑一遍（虽然体内有幂等守卫，但白跑）。
+   */
+  const pageWidgets = useMemo(
+    () => widgetsOfPage(doc.widgets, activePageId),
+    [doc.widgets, activePageId]
+  );
+
   /**
    * 未持久化块的本地取数。
    *
@@ -382,12 +417,14 @@ const DashboardEditor: React.FC = () => {
    * 拿不到结果。v1 的 `filters` 恒为空数组，此时图表负载与「带盘级筛选」的结果完全等价，
    * 故直接用图表自身取数端点补上，避免"加进来却一片空白、必须保存才看得见"。
    * 保存后 `/query` 的结果优先（见 renderChartBlock 的判定顺序）。
+   *
+   * 只跑**当前页**的块：别的页的块此刻不渲染，取回来也没人看（切回去时本 effect 会重跑）。
    */
   useEffect(() => {
     if (!id) {
       return;
     }
-    for (const widget of doc.widgets) {
+    for (const widget of pageWidgets) {
       if (widget.type !== 'chart') {
         continue;
       }
@@ -414,7 +451,7 @@ const DashboardEditor: React.FC = () => {
           inflightRef.current.delete(widget.widgetId);
         });
     }
-  }, [id, doc.widgets, results, pendingData]);
+  }, [id, pageWidgets, results, pendingData]);
 
   /**
    * 盘内图表块引用的数据集（去重、升序）。
@@ -480,7 +517,7 @@ const DashboardEditor: React.FC = () => {
 
   const layout = useMemo<Layout>(
     () =>
-      doc.widgets.map((widget) => ({
+      pageWidgets.map((widget) => ({
         i: widget.widgetId,
         x: widget.x,
         y: widget.y,
@@ -489,7 +526,7 @@ const DashboardEditor: React.FC = () => {
         minW: DASHBOARD_MIN_W,
         minH: DASHBOARD_MIN_H,
       })),
-    [doc.widgets]
+    [pageWidgets]
   );
 
   /**
@@ -526,24 +563,29 @@ const DashboardEditor: React.FC = () => {
     });
   }, []);
 
-  const handleAddChart = useCallback((chartId: number) => {
-    setDoc((prev) => {
-      const size = DASHBOARD_DEFAULT_SIZE.chart;
-      // 放进首个空位（自上而下、自左而右），而不是一律 `x: 0` 落在最底边 —— 否则 12 列
-      // 画布上默认 6 列宽的块会全部堆在左半边、右半边长期空置（浏览器验收 D-3）。
-      // 注意：RGL 收到新 layout prop 时会自行 compact（`useGridLayout` 的 prop 同步 effect），
-      // 故渲染位置可能比这里存的 y 更靠上——两者在首次拖拽后即收敛（onDragStop 同步整盘），
-      // 落库内容始终合法，不需要在这里预压缩。
-      const spot = findFreePlacement(prev.widgets, size);
-      const widget: DashboardChartWidget = {
-        widgetId: createWidgetId(),
-        type: 'chart',
-        chartId,
-        ...normalizePlacement({ x: spot.x, y: spot.y, w: size.w, h: size.h }, size),
-      };
-      return { ...prev, widgets: [...prev.widgets, widget] };
-    });
-  }, []);
+  const handleAddChart = useCallback(
+    (chartId: number) => {
+      setDoc((prev) => {
+        const size = DASHBOARD_DEFAULT_SIZE.chart;
+        // 放进**当前页**的首个空位（自上而下、自左而右），而不是一律 `x: 0` 落在最底边
+        // —— 否则 12 列画布上默认 6 列宽的块会全部堆在左半边、右半边长期空置（浏览器验收 D-3）。
+        // 空位只在当前页里找：跨页算空位会让新块落到别的页已有的位置下。
+        // 注意：RGL 收到新 layout prop 时会自行 compact（`useGridLayout` 的 prop 同步 effect），
+        // 故渲染位置可能比这里存的 y 更靠上——两者在首次拖拽后即收敛（onDragStop 同步整页），
+        // 落库内容始终合法，不需要在这里预压缩。
+        const spot = findFreePlacement(widgetsOfPage(prev.widgets, activePageId), size);
+        const widget: DashboardChartWidget = {
+          widgetId: createWidgetId(),
+          pageId: activePageId,
+          type: 'chart',
+          chartId,
+          ...normalizePlacement({ x: spot.x, y: spot.y, w: size.w, h: size.h }, size),
+        };
+        return { ...prev, widgets: [...prev.widgets, widget] };
+      });
+    },
+    [activePageId]
+  );
 
   const handleRemoveWidget = useCallback((widgetId: string) => {
     setDoc((prev) => ({
@@ -560,6 +602,39 @@ const DashboardEditor: React.FC = () => {
       return next;
     });
     setLinkageSettingsFor((prev) => (prev === widgetId ? null : prev));
+  }, []);
+
+  /**
+   * 切页：激活 + 按新页重取。
+   *
+   * 重取是必要的，而不是「反正结果按 widgetId 归位」：`/query` 一次只取一页，
+   * 没查过的页在 `results` 里是空的，不重取就会整页停在转圈上。
+   */
+  const handleActivatePage = useCallback(
+    (pageId: string) => {
+      setActivePageId(pageId);
+      if (id) {
+        void queryWithState(id, doc.widgets, filterValues, pageId, activeLinkages);
+      }
+    },
+    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
+  );
+
+  const handleAddPage = useCallback(() => {
+    const page: DashboardPage = {
+      id: createPageId(),
+      name: intl.formatMessage({ id: 'dashboard.pageNewName' }, { index: doc.pages.length + 1 }),
+    };
+    setDoc((prev) => ({ ...prev, pages: [...prev.pages, page] }));
+    // 新页是空的，没有块可取数，故不触发查询。
+    setActivePageId(page.id);
+  }, [doc.pages.length, intl]);
+
+  const handleRenamePage = useCallback((pageId: string, name: string) => {
+    setDoc((prev) => ({
+      ...prev,
+      pages: prev.pages.map((page) => (page.id === pageId ? { ...page, name } : page)),
+    }));
   }, []);
 
   /** 已落库的图表块（只有它们的联动配置后端读得到）。 */
@@ -620,9 +695,9 @@ const DashboardEditor: React.FC = () => {
       }
       const next: ActiveLinkageMap = { ...activeLinkages, [widgetId]: { column, value } };
       setActiveLinkages(next);
-      void queryWithState(id, doc.widgets, filterValues, next);
+      void queryWithState(id, doc.widgets, filterValues, activePageId, next);
     },
-    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
+    [activeLinkages, activePageId, doc.widgets, filterValues, id, queryWithState]
   );
 
   /** 撤掉某个来源的联动（块上的「×」与 ⋮ 菜单里的「清除联动」共用这一个出口）。 */
@@ -634,9 +709,9 @@ const DashboardEditor: React.FC = () => {
       const next = { ...activeLinkages };
       delete next[sourceWidgetId];
       setActiveLinkages(next);
-      void queryWithState(id, doc.widgets, filterValues, next);
+      void queryWithState(id, doc.widgets, filterValues, activePageId, next);
     },
-    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
+    [activeLinkages, activePageId, doc.widgets, filterValues, id, queryWithState]
   );
 
   /** 一键清除所有联动（PRD 要求「清除所有联动」）。 */
@@ -645,8 +720,8 @@ const DashboardEditor: React.FC = () => {
       return;
     }
     setActiveLinkages({});
-    void queryWithState(id, doc.widgets, filterValues, {});
-  }, [activeLinkages, doc.widgets, filterValues, id, queryWithState]);
+    void queryWithState(id, doc.widgets, filterValues, activePageId, {});
+  }, [activeLinkages, activePageId, doc.widgets, filterValues, id, queryWithState]);
 
   /**
    * 联动设置确定：把「打到哪些块、哪一列」写回来源块的布局配置，然后立刻重取一次。
@@ -677,42 +752,152 @@ const DashboardEditor: React.FC = () => {
       if (!id) {
         return;
       }
-      void queryWithState(id, widgets, filterValues, activeLinkages);
+      void queryWithState(id, widgets, filterValues, activePageId, activeLinkages);
     },
-    [activeLinkages, doc.widgets, filterValues, id, linkageSettingsFor, queryWithState]
+    [
+      activeLinkages,
+      activePageId,
+      doc.widgets,
+      filterValues,
+      id,
+      linkageSettingsFor,
+      queryWithState,
+    ]
   );
 
-  /** 新建筛选器块：与图表块走同一套落位规则（放进首个空位，而不是一律落在最左边）。 */
-  const handleAddFilterWidget = useCallback((config: NewFilterWidgetConfig) => {
-    setDoc((prev) => {
-      const size = DASHBOARD_DEFAULT_SIZE.filter;
-      const spot = findFreePlacement(prev.widgets, size);
-      const widget: DashboardFilterWidget = {
-        widgetId: createWidgetId(),
-        type: 'filter',
-        binding: config.binding,
-        label: config.label,
-        dataType: config.dataType,
-        // 算子/多选由弹窗按族给默认（见 AddFilterWidgetModal.defaultOperatorFor）。
-        operator: config.operator,
-        multi: config.multi,
-        // 日期族才需要粒度与周计算逻辑；先给默认，用户在块上「配置」里再调。
-        ...(filterWidgetFamily({ dataType: config.dataType }) === 'date'
-          ? { date: { granularity: 'day' as const, weekStart: 1 as const } }
-          : {}),
-        ...normalizePlacement({ x: spot.x, y: spot.y, w: size.w, h: size.h }, size),
-      };
-      return { ...prev, widgets: [...prev.widgets, widget] };
-    });
-    setAddFilterOpen(false);
+  /**
+   * 复制页面：页面本身 + 该页全部块。
+   *
+   * 块的 `widgetId` 必须重新生成——它的唯一域是**整盘**，沿用会导致两份块在同一盘里
+   * 撞 id（渲染按 widgetId 归位、取数也按它建索引）。位置原样保留，所以副本与源页
+   * 的排版一致。
+   */
+  const handleDuplicatePage = useCallback(
+    (pageId: string) => {
+      const copyId = createPageId();
+      setDoc((prev) => {
+        const index = prev.pages.findIndex((page) => page.id === pageId);
+        if (index < 0) {
+          return prev;
+        }
+        const copy: DashboardPage = {
+          id: copyId,
+          name: `${prev.pages[index].name}${intl.formatMessage({ id: 'dashboard.pageCopySuffix' })}`,
+        };
+        const cloned = widgetsOfPage(prev.widgets, pageId).map((widget) => ({
+          ...widget,
+          widgetId: createWidgetId(),
+          pageId: copyId,
+        }));
+        const pages = [...prev.pages];
+        pages.splice(index + 1, 0, copy);
+        return { ...prev, pages, widgets: [...prev.widgets, ...cloned] };
+      });
+      setActivePageId(copyId);
+    },
+    [intl]
+  );
+
+  /**
+   * 删除页面：页 + 该页全部块。副本不做级联外的任何清洗（同一盘只有一个引用点）。
+   *
+   * 盘**必须至少留一页**：全删掉就没有「往哪加图表」的落点了。守卫在 UI 层（删到最后一页
+   * 时菜单项禁用），这里再兜一层，防止快捷键/程序调用绕过。
+   */
+  const handleRemovePage = useCallback(
+    (pageId: string) => {
+      if (doc.pages.length <= 1) {
+        return;
+      }
+      // 文档改动在 updater 里从 prev 现算，而不是用闭包里那份 doc：本页与上一次
+      // setDoc（例如刚复制出来的副本）挨得极近时，闭包里的 doc 可能落后一轮，
+      // 用它算「剩下的页」会把上一轮的结果整份覆盖掉。
+      setDoc((prev) => {
+        if (prev.pages.length <= 1) {
+          return prev;
+        }
+        return {
+          ...prev,
+          pages: prev.pages.filter((page) => page.id !== pageId),
+          widgets: prev.widgets.filter((widget) => widget.pageId !== pageId),
+        };
+      });
+      if (pageId !== activePageId) {
+        return;
+      }
+      // 删掉的是正在看的页：落到原位置的右邻，没有右邻就取左邻（保证仍有激活页）。
+      const index = doc.pages.findIndex((page) => page.id === pageId);
+      const next = doc.pages[index + 1] ?? doc.pages[index - 1];
+      if (next) {
+        setActivePageId(next.id);
+        if (id) {
+          void queryWithState(
+            id,
+            doc.widgets.filter((widget) => widget.pageId !== pageId),
+            filterValues,
+            next.id,
+            activeLinkages
+          );
+        }
+      }
+    },
+    [activeLinkages, activePageId, doc.pages, doc.widgets, filterValues, id, queryWithState]
+  );
+
+  const handleReorderPages = useCallback((fromId: string, toId: string) => {
+    setDoc((prev) => ({ ...prev, pages: reorderPages(prev.pages, fromId, toId) }));
   }, []);
+
+  /** 改筛选器作用范围（本页 / 全部页面）。范围变了要立刻重取：作用面已经不同。 */
+  const handleFilterScopeChange = useCallback(
+    (widgetId: string, scope: DashboardFilterWidget['scope']) => {
+      const widgets = doc.widgets.map((widget) =>
+        widget.widgetId === widgetId && widget.type === 'filter' ? { ...widget, scope } : widget
+      );
+      setDoc((prev) => ({ ...prev, widgets }));
+      if (!id) {
+        return;
+      }
+      void queryWithState(id, widgets, filterValues, activePageId, activeLinkages);
+    },
+    [activeLinkages, activePageId, doc.widgets, filterValues, id, queryWithState]
+  );
+
+  /** 新建筛选器块：与图表块走同一套落位规则（放进当前页首个空位，而不是一律落在最左边）。 */
+  const handleAddFilterWidget = useCallback(
+    (config: NewFilterWidgetConfig) => {
+      setDoc((prev) => {
+        const size = DASHBOARD_DEFAULT_SIZE.filter;
+        const spot = findFreePlacement(widgetsOfPage(prev.widgets, activePageId), size);
+        const widget: DashboardFilterWidget = {
+          widgetId: createWidgetId(),
+          pageId: activePageId,
+          type: 'filter',
+          binding: config.binding,
+          label: config.label,
+          dataType: config.dataType,
+          // 算子/多选由弹窗按族给默认（见 AddFilterWidgetModal.defaultOperatorFor）。
+          operator: config.operator,
+          multi: config.multi,
+          // 日期族才需要粒度与周计算逻辑；先给默认，用户在块上「配置」里再调。
+          ...(filterWidgetFamily({ dataType: config.dataType }) === 'date'
+            ? { date: { granularity: 'day' as const, weekStart: 1 as const } }
+            : {}),
+          ...normalizePlacement({ x: spot.x, y: spot.y, w: size.w, h: size.h }, size),
+        };
+        return { ...prev, widgets: [...prev.widgets, widget] };
+      });
+      setAddFilterOpen(false);
+    },
+    [activePageId]
+  );
 
   /**
    * 改筛选器状态的**唯一出口**：写 layout（`defaultValue` 就是「该筛选器的默认选中值」，
    * 重开盘时由它做初值）→ 立刻按新取值重取一次。筛选器的意义就是「切一下马上看结果」。
    *
    * 传入显式的 `nextValue`/`nextDate` 而不是读 state：粒度与取值要同一次请求生效，
-   * 读上一轮的状态会算出旧粒度的区间。重取只用**已落库**的筛选器（见 queryWithFilters）。
+   * 读上一轮的状态会算出旧粒度的区间。重取只用**已落库**的筛选器（见 queryWithState）。
    */
   const applyFilterState = useCallback(
     (
@@ -737,9 +922,9 @@ const DashboardEditor: React.FC = () => {
       if (!id) {
         return;
       }
-      void queryWithState(id, widgets, values, activeLinkages);
+      void queryWithState(id, widgets, values, activePageId, activeLinkages);
     },
-    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
+    [activeLinkages, activePageId, doc.widgets, filterValues, id, queryWithState]
   );
 
   /**
@@ -755,9 +940,9 @@ const DashboardEditor: React.FC = () => {
       if (!id) {
         return;
       }
-      void queryWithState(id, widgets, filterValues, activeLinkages);
+      void queryWithState(id, widgets, filterValues, activePageId, activeLinkages);
     },
-    [activeLinkages, doc.widgets, filterValues, id, queryWithState]
+    [activeLinkages, activePageId, doc.widgets, filterValues, id, queryWithState]
   );
 
   /** 完整日期筛选弹窗确定：取值与粒度/周计算逻辑一起落库并重取。 */
@@ -798,7 +983,7 @@ const DashboardEditor: React.FC = () => {
       message.success(intl.formatMessage({ id: 'common.success' }));
       // 落库后由后端按新布局重新逐块取数，顺手覆盖掉未持久化块的本地结果。
       // persistedIdsRef 刚在上面刷过，所以这次会把（刚保存的）筛选器与联动一并下发。
-      await queryWithState(id, doc.widgets, filterValues, activeLinkages);
+      await queryWithState(id, doc.widgets, filterValues, activePageId, activeLinkages);
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
@@ -1023,7 +1208,8 @@ const DashboardEditor: React.FC = () => {
               loading={querying}
               onClick={() => {
                 // 刷新沿用当前筛选器与联动取值（不是空载荷），否则点一下刷新就"筛了个寂寞"。
-                if (id) void queryWithState(id, doc.widgets, filterValues, activeLinkages);
+                if (id)
+                  void queryWithState(id, doc.widgets, filterValues, activePageId, activeLinkages);
               }}
             >
               {intl.formatMessage({ id: 'common.refresh' })}
@@ -1104,7 +1290,7 @@ const DashboardEditor: React.FC = () => {
                 </Button>
               }
             />
-          ) : doc.widgets.length === 0 ? (
+          ) : pageWidgets.length === 0 ? (
             <div className="dr-state">
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -1132,7 +1318,7 @@ const DashboardEditor: React.FC = () => {
               onDragStop={handleLayoutCommit}
               onResizeStop={handleLayoutCommit}
             >
-              {doc.widgets.map(
+              {pageWidgets.map(
                 (widget) =>
                   widget.type === 'chart' ? (
                     <div key={widget.widgetId}>
@@ -1213,6 +1399,7 @@ const DashboardEditor: React.FC = () => {
                         onOperatorChange={(operator) =>
                           handleFilterOperatorChange(widget.widgetId, operator)
                         }
+                        onScopeChange={(scope) => handleFilterScopeChange(widget.widgetId, scope)}
                         onConfigure={() => setConfiguringFilterId(widget.widgetId)}
                         onRemove={() => handleRemoveWidget(widget.widgetId)}
                       />
@@ -1227,6 +1414,19 @@ const DashboardEditor: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* 页面标签条：编辑区在底部（对齐火山引擎盘底部多页面编辑区）。 */}
+        <DashboardPageTabs
+          pages={pages}
+          activePageId={activePageId}
+          canRemove={pages.length > 1}
+          onActivate={handleActivatePage}
+          onAdd={handleAddPage}
+          onRename={handleRenamePage}
+          onDuplicate={handleDuplicatePage}
+          onRemove={handleRemovePage}
+          onReorder={handleReorderPages}
+        />
       </Card>
 
       <AddFilterWidgetModal

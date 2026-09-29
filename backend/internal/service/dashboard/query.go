@@ -56,6 +56,10 @@ type dashboardLayoutDoc struct {
 type dashboardLayoutWidget struct {
 	WidgetID string `json:"widgetId"`
 	Type     string `json:"type"`
+	// PageID / Scope：多页面文档（v2）的归属与作用范围。v1 文档两者都缺省，
+	// 按「不参与按页收窄、筛选器只作用本页」处理（见 chartInPage / filterInPage）。
+	PageID string `json:"pageId"`
+	Scope  string `json:"scope"`
 	// ChartID：type=chart 的图表引用。
 	ChartID int `json:"chartId"`
 	// Binding：type=filter 的绑定字段（(datasetId, column) 二元组，PRD §11-2）。
@@ -108,12 +112,33 @@ type layoutProjection struct {
 	Filters []layoutFilterBinding
 }
 
-// projectLayout 解析 layout_json 并把两类块分拣出来。
+// chartInPage 判定一块图表是否属于本次取数的页面范围。
+//
+//   - `pageID` 为空 = 不按页收窄（单页时代的调用方 / 没在用多页），一律纳入；
+//   - `pageID` 非空时纳入两种块：**属于该页**的，以及**缺 pageId** 的。
+//
+// 后者只可能来自 v1 旧文档：迁移（migrateDashboardLayout）只在前端跑，后端读到的
+// 是库里原样存的文档，v1 的块没有 pageId。若把它们按页面排除，打开一个旧盘会直接
+// 空白——那是最坏的表现。前端保存一次后整份文档升到 v2，这些块就带上 pageId 了。
+func chartInPage(widgetPageID, pageID string) bool {
+	return pageID == "" || widgetPageID == "" || widgetPageID == pageID
+}
+
+// filterInPage 在图表规则之上再加一条「全局筛选器」：`scope: "all"` 的筛选器作用于
+// **所有页**，所以查任何一页都要把它带进来；其余筛选器与图表同规则。
+//
+// 前端 lib/dashboardLayoutSchema.ts 的 applicableFilterWidgets 是同一口径的镜像：
+// 两边一起改，否则会出现「前端下发、后端不认」（白跑）或「后端认、前端不发」（永不生效）。
+func filterInPage(widgetPageID, scope, pageID string) bool {
+	return scope == "all" || chartInPage(widgetPageID, pageID)
+}
+
+// projectLayout 解析 layout_json 并把两类块分拣出来；`pageID` 非空时按页收窄。
 //
 // 任何解析失败（空串 / 损坏 JSON / 顶层不是对象 / widgets 不是数组）都返回零值投影，
 // **不返回错误**：layout 归前端所有，后端读不懂只该表现为「这一盘没有可取的块」，
 // 而不该让取数端点整体 500。
-func projectLayout(raw string) layoutProjection {
+func projectLayout(raw string, pageID string) layoutProjection {
 	var doc dashboardLayoutDoc
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		return layoutProjection{}
@@ -123,6 +148,9 @@ func projectLayout(raw string) layoutProjection {
 	for _, w := range doc.Widgets {
 		switch w.Type {
 		case "chart":
+			if !chartInPage(w.PageID, pageID) {
+				continue
+			}
 			out.Charts = append(out.Charts, layoutChartBlock{
 				WidgetID:       w.WidgetID,
 				ChartID:        w.ChartID,
@@ -130,6 +158,9 @@ func projectLayout(raw string) layoutProjection {
 			})
 		case "filter":
 			if w.Binding == nil || w.Binding.Column == "" {
+				continue
+			}
+			if !filterInPage(w.PageID, w.Scope, pageID) {
 				continue
 			}
 			out.Filters = append(out.Filters, layoutFilterBinding{
@@ -170,7 +201,8 @@ func projectLinkageTargets(linkage *layoutLinkage) []layoutLinkageTarget {
 // 语义要点：
 //   - 单块失败绝不让整盘失败：除「盘不存在」「未接线」外，一切问题都落在块级 status；
 //   - 并发上限 dashboardQueryConcurrency，结果按下标写回切片以保持与 layout 同序；
-//   - 图表不存在 / 已软删的块不取数（省掉一次必然失败的数据源连接）。
+//   - 图表不存在 / 已软删的块不取数（省掉一次必然失败的数据源连接）；
+//   - 请求带了 page_id 时只取该页的块（多页面盘不必把没在看的页也跑一遍 SQL）。
 func (s *dashboardService) Query(
 	ctx context.Context, id string, in entity.DashboardQueryRequest,
 ) (*entity.DashboardQueryResult, error) {
@@ -186,7 +218,7 @@ func (s *dashboardService) Query(
 		return nil, err
 	}
 
-	projection := projectLayout(dash.LayoutJSON)
+	projection := projectLayout(dash.LayoutJSON, in.PageID)
 	result := &entity.DashboardQueryResult{
 		Results: make([]entity.DashboardQueryBlock, len(projection.Charts)),
 	}

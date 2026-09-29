@@ -1,28 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applicableFilterWidgets,
   collectChartIds,
+  createPageId,
   createWidgetId,
+  DASHBOARD_DEFAULT_PAGE_NAME,
   DASHBOARD_GRID_COLS,
   DASHBOARD_MIN_H,
   DASHBOARD_MIN_W,
+  DASHBOARD_UNTITLED_PAGE_NAME,
   type DashboardChartWidget,
   type DashboardFilterWidget,
+  type DashboardPage,
   emptyDashboardLayout,
   findFreePlacement,
   isFilterActive,
   migrateDashboardLayout,
+  normalizePages,
   normalizePlacement,
+  reorderPages,
   serializeDashboardLayout,
+  widgetsOfPage,
 } from '@/lib/dashboardLayoutSchema';
 
 /**
- * dashboardLayoutSchema v1 迁移测试。
+ * dashboardLayoutSchema v2 迁移测试。
  *
- * 契约：migrateDashboardLayout 是**全覆盖**函数——任何输入都返回合法 v1 文档、绝不抛异常。
- * 三条与产品决策直接绑定的断言（回归防线）：
+ * 契约：migrateDashboardLayout 是**全覆盖**函数——任何输入都返回合法 v2 文档、绝不抛异常。
+ * 四条与产品决策直接绑定的断言（回归防线）：
  *   1. 同一 chartId 出现多次时，各块必须保有**各自独立**的 widgetId 与四轴（D1 同图复用）；
  *   2. 图表块只存 chartId、**不内嵌 config 快照**（D1 引用而非拷贝）；
- *   3. 缺失 widgetId 按位置补**确定性** id，保证纯函数语义（同输入同输出）。
+ *   3. 缺失 widgetId 按位置补**确定性** id，保证纯函数语义（同输入同输出）；
+ *   4. v1 → v2 **无损**：v1 的 widgets 全部落到迁移合成的那一页上（旧盘不会掉块）。
  */
 
 describe('migrateDashboardLayout：非法输入一律降级为空文档', () => {
@@ -36,7 +45,7 @@ describe('migrateDashboardLayout：非法输入一律降级为空文档', () => 
   ];
 
   for (const [name, raw] of invalidInputs) {
-    it(`${name} → 合法空 v1 文档且不抛异常`, () => {
+    it(`${name} → 合法空 v2 文档且不抛异常`, () => {
       let doc: ReturnType<typeof migrateDashboardLayout> | undefined;
       expect(() => {
         doc = migrateDashboardLayout(raw);
@@ -45,10 +54,212 @@ describe('migrateDashboardLayout：非法输入一律降级为空文档', () => 
     });
   }
 
-  it('合法对象但缺 widgets → 保留 grid，widgets 为空', () => {
+  it('合法对象但缺 widgets → 保留 grid，widgets 为空，且仍有一页', () => {
     const doc = migrateDashboardLayout(JSON.stringify({ version: 1, grid: { cols: 12 } }));
     expect(doc.widgets).toEqual([]);
     expect(doc.grid.cols).toBe(DASHBOARD_GRID_COLS);
+    expect(doc.version).toBe(2);
+    expect(doc.pages).toEqual([{ id: 'p-recovered-0', name: DASHBOARD_DEFAULT_PAGE_NAME }]);
+  });
+});
+
+describe('migrateDashboardLayout：v1 → v2 无损迁移', () => {
+  it('v1 文档的块全部落到迁移合成的那一页上，四轴不变', () => {
+    const raw = JSON.stringify({
+      version: 1,
+      widgets: [
+        { widgetId: 'w-a', type: 'chart', chartId: 9, x: 0, y: 0, w: 6, h: 6 },
+        { widgetId: 'w-b', type: 'text', markdown: 'x', x: 6, y: 0, w: 6, h: 4 },
+      ],
+    });
+
+    const doc = migrateDashboardLayout(raw);
+
+    expect(doc.version).toBe(2);
+    expect(doc.pages).toHaveLength(1);
+    for (const widget of doc.widgets) {
+      expect(widget.pageId).toBe(doc.pages[0].id);
+    }
+    expect(doc.widgets).toMatchObject([
+      { widgetId: 'w-a', x: 0, y: 0, w: 6, h: 6 },
+      { widgetId: 'w-b', x: 6, y: 0, w: 6, h: 4 },
+    ]);
+  });
+
+  it('v2 文档的页面顺序与块归属原样保留', () => {
+    const raw = JSON.stringify({
+      version: 2,
+      grid: { cols: 12 },
+      pages: [
+        { id: 'p-a', name: '总览' },
+        { id: 'p-b', name: '明细' },
+      ],
+      widgets: [
+        { widgetId: 'w-1', pageId: 'p-b', type: 'chart', chartId: 1, x: 0, y: 0, w: 6, h: 6 },
+        { widgetId: 'w-2', pageId: 'p-a', type: 'chart', chartId: 2, x: 6, y: 0, w: 6, h: 6 },
+      ],
+    });
+
+    const doc = migrateDashboardLayout(raw);
+
+    expect(doc.pages).toEqual([
+      { id: 'p-a', name: '总览' },
+      { id: 'p-b', name: '明细' },
+    ]);
+    expect(widgetsOfPage(doc.widgets, 'p-b').map((w) => w.widgetId)).toEqual(['w-1']);
+    expect(widgetsOfPage(doc.widgets, 'p-a').map((w) => w.widgetId)).toEqual(['w-2']);
+  });
+});
+
+describe('normalizePages：页面数组的修复', () => {
+  it('非数组 / 空数组 → 合成一页（盘必须至少有一页）', () => {
+    for (const raw of [undefined, null, 'x', 42, {}]) {
+      expect(normalizePages(raw)).toEqual([
+        { id: 'p-recovered-0', name: DASHBOARD_DEFAULT_PAGE_NAME },
+      ]);
+    }
+    expect(normalizePages([])).toEqual([
+      { id: 'p-recovered-0', name: DASHBOARD_DEFAULT_PAGE_NAME },
+    ]);
+  });
+
+  it('丢弃非对象项；缺 id 按位置补确定性 id；缺名给兜底名', () => {
+    const pages = normalizePages(['nope', { name: '有名字没 id' }, { id: 'p-1' }]);
+    expect(pages).toEqual([
+      { id: 'p-recovered-1', name: '有名字没 id' },
+      { id: 'p-1', name: DASHBOARD_UNTITLED_PAGE_NAME },
+    ]);
+  });
+
+  it('重复 id：首个胜出，后续同名项被丢弃', () => {
+    expect(
+      normalizePages([
+        { id: 'p-1', name: 'A' },
+        { id: 'p-1', name: 'B' },
+      ])
+    ).toEqual([{ id: 'p-1', name: 'A' }]);
+  });
+
+  it('悬空 pageId 的块归到首页（块不会因归属失效而消失）', () => {
+    const doc = migrateDashboardLayout(
+      JSON.stringify({
+        version: 2,
+        pages: [{ id: 'p-real', name: '真页' }],
+        widgets: [
+          { widgetId: 'w-x', pageId: 'p-gone', type: 'chart', chartId: 3, w: 6, h: 6 },
+          { widgetId: 'w-y', type: 'chart', chartId: 4, w: 6, h: 6 },
+        ],
+      })
+    );
+
+    expect(doc.widgets.map((w) => w.pageId)).toEqual(['p-real', 'p-real']);
+    expect(doc.widgets).toHaveLength(2);
+  });
+});
+
+describe('reorderPages：拖拽落点', () => {
+  const pages: DashboardPage[] = [
+    { id: 'a', name: 'A' },
+    { id: 'b', name: 'B' },
+    { id: 'c', name: 'C' },
+  ];
+
+  it('往后拖：插到目标原来的位置', () => {
+    expect(reorderPages(pages, 'a', 'c').map((p) => p.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('往前拖：插到目标原来的位置', () => {
+    expect(reorderPages(pages, 'c', 'a').map((p) => p.id)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('id 不存在 / 原地不动 → 原序返回（且不返回同一引用）', () => {
+    expect(reorderPages(pages, 'a', 'a').map((p) => p.id)).toEqual(['a', 'b', 'c']);
+    expect(reorderPages(pages, 'nope', 'a').map((p) => p.id)).toEqual(['a', 'b', 'c']);
+    expect(reorderPages(pages, 'a', 'nope')).not.toBe(pages);
+  });
+});
+
+describe('applicableFilterWidgets：本页的 + 任意页 scope=all 的', () => {
+  const widget = (widgetId: string, pageId: string, scope?: 'all') => ({
+    widgetId,
+    pageId,
+    scope,
+    type: 'filter' as const,
+    binding: { datasetId: 1, column: 'region' },
+    label: widgetId,
+    dataType: 'string',
+    operator: 'in' as const,
+    multi: false,
+    x: 0,
+    y: 0,
+    w: 3,
+    h: 3,
+  });
+  const chart = (widgetId: string, pageId: string) => ({
+    widgetId,
+    pageId,
+    type: 'chart' as const,
+    chartId: 1,
+    x: 0,
+    y: 0,
+    w: 6,
+    h: 6,
+  });
+
+  it('只挑筛选器、只挑本页与全局的', () => {
+    const widgets = [
+      widget('f-a', 'p-a'),
+      widget('f-b', 'p-b'),
+      widget('f-global', 'p-b', 'all'),
+      chart('c-a', 'p-a'),
+    ];
+
+    expect(applicableFilterWidgets(widgets, 'p-a').map((w) => w.widgetId)).toEqual([
+      'f-a',
+      'f-global',
+    ]);
+    expect(applicableFilterWidgets(widgets, 'p-b').map((w) => w.widgetId)).toEqual([
+      'f-b',
+      'f-global',
+    ]);
+  });
+});
+
+describe('migrateDashboardLayout：筛选器 scope 归一', () => {
+  const filterAt = (scope: unknown) =>
+    migrateDashboardLayout(
+      JSON.stringify({
+        version: 1,
+        widgets: [
+          {
+            widgetId: 'w-f',
+            type: 'filter',
+            binding: { datasetId: 1, column: 'region' },
+            operator: 'in',
+            scope,
+            w: 3,
+            h: 3,
+          },
+        ],
+      })
+    ).widgets[0] as DashboardFilterWidget;
+
+  it("只有显式 'all' 写进文档；缺省 / 'page' / 脏值都不带 scope 键", () => {
+    expect(filterAt('all').scope).toBe('all');
+    expect(filterAt('page').scope).toBeUndefined();
+    expect(filterAt(undefined).scope).toBeUndefined();
+    expect(filterAt('everywhere').scope).toBeUndefined();
+  });
+
+  it("scope='all' 能原样往返（序列化 → 迁移）", () => {
+    const doc = migrateDashboardLayout(
+      JSON.stringify({ version: 1, widgets: [{ type: 'text', markdown: 'x' }] })
+    );
+    const withScope: typeof doc = {
+      ...doc,
+      widgets: [...doc.widgets, filterAt('all')],
+    };
+    expect(migrateDashboardLayout(serializeDashboardLayout(withScope))).toEqual(withScope);
   });
 });
 
@@ -82,6 +293,7 @@ describe('migrateDashboardLayout：三类 widget 的保留与修复', () => {
     expect(doc.widgets).toHaveLength(3);
     expect(doc.widgets[0]).toEqual({
       widgetId: 'w-1',
+      pageId: 'p-recovered-0',
       type: 'chart',
       chartId: 42,
       x: 0,
@@ -91,6 +303,7 @@ describe('migrateDashboardLayout：三类 widget 的保留与修复', () => {
     });
     expect(doc.widgets[1]).toEqual({
       widgetId: 'w-2',
+      pageId: 'p-recovered-0',
       type: 'text',
       markdown: '# 口径',
       x: 6,
@@ -100,6 +313,7 @@ describe('migrateDashboardLayout：三类 widget 的保留与修复', () => {
     });
     expect(doc.widgets[2]).toEqual({
       widgetId: 'w-3',
+      pageId: 'p-recovered-0',
       type: 'filter',
       binding: { datasetId: 7, column: 'region' },
       label: '区域',
@@ -312,11 +526,20 @@ describe('文档级工具函数', () => {
       expect(id.startsWith('w-')).toBe(true);
     }
   });
+
+  it('createPageId 带有 p- 前缀且互不相同', () => {
+    const ids = new Set(Array.from({ length: 50 }, () => createPageId()));
+    expect(ids.size).toBe(50);
+    for (const id of ids) {
+      expect(id.startsWith('p-')).toBe(true);
+    }
+  });
 });
 
 describe('isFilterActive：只有"有值"的筛选器才参与合并', () => {
   const base: DashboardFilterWidget = {
     widgetId: 'w-1',
+    pageId: 'p-1',
     type: 'filter',
     binding: { datasetId: 1, column: 'region' },
     label: '区域',

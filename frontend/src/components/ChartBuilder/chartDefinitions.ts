@@ -105,7 +105,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     icon: BarChartOutlined,
     // bar 分支不消费 smooth（buildChartOption 里 bar 恒为 {}），故不列入 styleKeys，
     // 避免渲染一个不起作用的开关（裁定见 task-1-1-brief.md D 部分）。
-    styleKeys: ['colors', 'stack', 'orientation'],
+    styleKeys: ['colors', 'stack', 'orientation', 'dataLabel'],
     fieldGroups: [
       {
         id: 'x_axis',
@@ -128,7 +128,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '折线图',
     resultShape: 'axis',
     icon: LineChartOutlined,
-    styleKeys: ['colors', 'smooth', 'stack'],
+    styleKeys: ['colors', 'smooth', 'stack', 'dataLabel'],
     fieldGroups: [
       {
         id: 'x_axis',
@@ -174,7 +174,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '面积图',
     resultShape: 'axis',
     icon: AreaChartOutlined,
-    styleKeys: ['colors', 'smooth', 'stack'],
+    styleKeys: ['colors', 'smooth', 'stack', 'dataLabel'],
     fieldGroups: [
       {
         id: 'x_axis',

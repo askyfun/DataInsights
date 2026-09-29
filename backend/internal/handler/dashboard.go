@@ -215,6 +215,7 @@ func (h *DashboardHandler) ListChartReferences(req router.Request[chartPathIn], 
 // datasetQueryIn does with entity.Filter: they are pure data with no binding
 // tags of their own to worry about.
 type dashboardQueryIn struct {
+	PageID   string                         `json:"page_id" form:"-"`
 	Filters  []entity.DashboardQueryFilter  `json:"filters" form:"-"`
 	Linkages []entity.DashboardQueryLinkage `json:"linkages" form:"-"`
 }
@@ -222,7 +223,7 @@ type dashboardQueryIn struct {
 // Query handles POST /api/dashboards/:id/query: the dashboard's batch fetch.
 // The per-block merge of dashboard filters into the charts' own conditions is a
 // single-point server-side algorithm (PRD §8.3) — the handler only forwards the
-// filter and linkage values plus the path id.
+// filter and linkage values, the optional active page id, and the path id.
 func (h *DashboardHandler) Query(
 	req router.Request[dashboardQueryIn], res *router.Response[*entity.DashboardQueryResult],
 ) error {
@@ -232,6 +233,7 @@ func (h *DashboardHandler) Query(
 	}
 
 	result, err := h.svc.Query(req.Ctx.Request.Context(), id, entity.DashboardQueryRequest{
+		PageID:   req.In.PageID,
 		Filters:  req.In.Filters,
 		Linkages: req.In.Linkages,
 	})
