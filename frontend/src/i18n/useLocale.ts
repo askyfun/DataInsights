@@ -416,6 +416,20 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'dashboard.blockError': '取数失败',
     'dashboard.blockErrorDesc': '该图表的数据未能取回，可稍后重试或移除该块。',
     'dashboard.removeBlock': '移除该块',
+    'dashboard.blockMenu': '更多操作',
+    'dashboard.linkageSettings': '联动设置',
+    'dashboard.linkageSettingsDesc':
+      '勾选目标图表：点击本图的数据项时，这些图表会按所选维度值自动过滤。',
+    'dashboard.linkageActive': '联动中',
+    'dashboard.linkageClearOne': '清除联动',
+    'dashboard.linkageClearAll': '清除所有联动',
+    'dashboard.linkageNeedSave': '该图表块尚未保存，联动配置保存后才会生效。',
+    'dashboard.linkageNoKeyColumn': '该图有多个维度（或图型不支持点击数据项），不能作为联动来源。',
+    'dashboard.linkageNoCandidate': '盘内没有其它图表块，先添加一块图表再配置联动。',
+    'dashboard.linkageNoColumns': '目标数据集的字段加载失败，无法指定关联字段。',
+    'dashboard.linkageColumn': '关联字段',
+    'dashboard.linkageColumnPlaceholder': '选择目标数据集字段',
+    'dashboard.linkageCrossDatasetHint': '目标图表来自其它数据集，请指定用于关联的字段。',
     'dashboard.loadFailed': '仪表盘加载失败',
     'dashboard.notFound': '仪表盘不存在',
     'dashboard.folderRoot': '全部仪表盘',
@@ -864,6 +878,25 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'dashboard.blockErrorDesc':
       "This chart's data could not be loaded. Retry later or remove the block.",
     'dashboard.removeBlock': 'Remove block',
+    'dashboard.blockMenu': 'More actions',
+    'dashboard.linkageSettings': 'Linkage settings',
+    'dashboard.linkageSettingsDesc':
+      'Select target charts: clicking a data item in this chart filters them by the selected dimension value.',
+    'dashboard.linkageActive': 'Linked',
+    'dashboard.linkageClearOne': 'Clear linkage',
+    'dashboard.linkageClearAll': 'Clear all linkages',
+    'dashboard.linkageNeedSave':
+      'This chart block is not saved yet. Linkage settings take effect after you save.',
+    'dashboard.linkageNoKeyColumn':
+      'This chart has multiple dimensions (or its type has no clickable data items), so it cannot drive a linkage.',
+    'dashboard.linkageNoCandidate':
+      'There are no other chart blocks on this dashboard. Add one before configuring a linkage.',
+    'dashboard.linkageNoColumns':
+      'Failed to load the target dataset fields, so no join field can be picked.',
+    'dashboard.linkageColumn': 'Join field',
+    'dashboard.linkageColumnPlaceholder': 'Pick a field on the target dataset',
+    'dashboard.linkageCrossDatasetHint':
+      'The target chart uses a different dataset — pick the field to join on.',
     'dashboard.loadFailed': 'Failed to load dashboard',
     'dashboard.notFound': 'Dashboard not found',
     'dashboard.folderRoot': 'All dashboards',

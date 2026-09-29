@@ -9,6 +9,7 @@ import {
   DASHBOARD_MIN_H,
   DASHBOARD_MIN_W,
   DASHBOARD_UNTITLED_PAGE_NAME,
+  type DashboardChartWidget,
   type DashboardFilterWidget,
   type DashboardPage,
   emptyDashboardLayout,
@@ -711,5 +712,50 @@ describe('筛选器块的 date 配置（粒度 / 周计算逻辑）', () => {
     expect(dateOf('day')).toBeUndefined();
     expect(dateOf(null)).toBeUndefined();
     expect(dateOf(undefined)).toBeUndefined();
+  });
+});
+
+describe('图表块的 linkage 配置（issue #143）', () => {
+  const chartOf = (linkage: unknown): DashboardChartWidget => {
+    const widget = migrateDashboardLayout(
+      JSON.stringify({
+        version: 1,
+        widgets: [{ widgetId: 'w-1', type: 'chart', chartId: 42, linkage }],
+      })
+    ).widgets[0];
+    // 该布局里唯一一块就是 chart 块；断言类型只为让 `linkage` 可达。
+    return widget as DashboardChartWidget;
+  };
+
+  it('合法去向逐字段保留', () => {
+    expect(chartOf({ targets: [{ widgetId: 'w-2', column: 'region' }] })).toMatchObject({
+      linkage: { targets: [{ widgetId: 'w-2', column: 'region' }] },
+    });
+  });
+
+  it('声明不了条件的去向被丢弃（缺 widgetId / 缺列 ID / 非对象）', () => {
+    expect(chartOf({ targets: [{ widgetId: '', column: 'region' }] }).linkage).toBeUndefined();
+    expect(chartOf({ targets: [{ widgetId: 'w-2', column: '' }] }).linkage).toBeUndefined();
+    expect(chartOf({ targets: ['w-2', null, 7] }).linkage).toBeUndefined();
+  });
+
+  it('同一目标只保留首条（重复声明不该变成两条条件）', () => {
+    const widget = chartOf({
+      targets: [
+        { widgetId: 'w-2', column: 'region' },
+        { widgetId: 'w-2', column: 'city' },
+      ],
+    }) as { linkage: { targets: unknown[] } };
+    expect(widget.linkage.targets).toEqual([{ widgetId: 'w-2', column: 'region' }]);
+  });
+
+  it('形状非法时整个键不落盘（targets 不是数组 / linkage 不是对象）', () => {
+    expect(chartOf({ targets: 'w-2' })).not.toHaveProperty('linkage');
+    expect(chartOf('w-2')).not.toHaveProperty('linkage');
+    expect(chartOf(undefined)).not.toHaveProperty('linkage');
+  });
+
+  it('一个去向都不剩时不落盘空壳', () => {
+    expect(chartOf({ targets: [] })).not.toHaveProperty('linkage');
   });
 });

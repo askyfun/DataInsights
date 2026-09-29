@@ -69,13 +69,28 @@ type dashboardLayoutWidget struct {
 	} `json:"binding"`
 	// Operator：type=filter 的算子（与图表过滤算子同一词表）。
 	Operator string `json:"operator"`
+	// Linkage：type=chart 的联动配置（issue #143）。targets 是「这块图被点击时，
+	// 要打到哪些图表块的哪一列上」；column 是**目标数据集**的列 ID。
+	Linkage *layoutLinkage `json:"linkage"`
+}
+
+// layoutLinkage 是 chart 块的联动配置投影（可能多出一条源 → 多条去向）。
+type layoutLinkage struct {
+	Targets []layoutLinkageTarget `json:"targets"`
+}
+
+// layoutLinkageTarget 是联动配置里的一条去向（column 为目标数据集的列 ID）。
+type layoutLinkageTarget struct {
+	WidgetID string `json:"widgetId"`
+	Column   string `json:"column"`
 }
 
 // layoutChartBlock 是投影出的一块待取数图表：widgetId 用于归位与建筛选索引，
-// chartId 用于取数。
+// chartId 用于取数，linkageTargets 是它作为联动**来源**时要打到的目标。
 type layoutChartBlock struct {
-	WidgetID string
-	ChartID  int
+	WidgetID       string
+	ChartID        int
+	LinkageTargets []layoutLinkageTarget
 }
 
 // layoutFilterBinding 是一块已激活的筛选器绑定：属于哪个 widget、绑到哪个数据集
@@ -136,7 +151,11 @@ func projectLayout(raw string, pageID string) layoutProjection {
 			if !chartInPage(w.PageID, pageID) {
 				continue
 			}
-			out.Charts = append(out.Charts, layoutChartBlock{WidgetID: w.WidgetID, ChartID: w.ChartID})
+			out.Charts = append(out.Charts, layoutChartBlock{
+				WidgetID:       w.WidgetID,
+				ChartID:        w.ChartID,
+				LinkageTargets: projectLinkageTargets(w.Linkage),
+			})
 		case "filter":
 			if w.Binding == nil || w.Binding.Column == "" {
 				continue
@@ -151,6 +170,28 @@ func projectLayout(raw string, pageID string) layoutProjection {
 				Operator:  w.Operator,
 			})
 		}
+	}
+	return out
+}
+
+// projectLinkageTargets 把 chart 块的 linkage.targets 收敛成可用去向：没有目标
+// widgetId 或没有列 ID 的项声明不了任何条件（与筛选器「没有列名的绑定认领不了条件」同例），
+// 直接丢弃；同一目标重复出现时只保留首条（重复声明不该变成两条 AND 条件）。
+func projectLinkageTargets(linkage *layoutLinkage) []layoutLinkageTarget {
+	if linkage == nil {
+		return nil
+	}
+	var out []layoutLinkageTarget
+	seen := make(map[string]struct{}, len(linkage.Targets))
+	for _, t := range linkage.Targets {
+		if t.WidgetID == "" || t.Column == "" {
+			continue
+		}
+		if _, dup := seen[t.WidgetID]; dup {
+			continue
+		}
+		seen[t.WidgetID] = struct{}{}
+		out = append(out, t)
 	}
 	return out
 }
@@ -191,6 +232,15 @@ func (s *dashboardService) Query(
 		values[f.WidgetID] = f.Value
 	}
 
+	// 联动去向按**来源 widget** 建索引（一块源可打多块目标）；请求里的联动同样
+	// 「没出现 = 未激活」。去向只在 layout 里，来源侧只需带上「点了什么值」。
+	targetsBySource := make(map[string][]layoutLinkageTarget, len(projection.Charts))
+	for _, block := range projection.Charts {
+		if len(block.LinkageTargets) > 0 {
+			targetsBySource[block.WidgetID] = block.LinkageTargets
+		}
+	}
+
 	sem := make(chan struct{}, dashboardQueryConcurrency)
 	var wg sync.WaitGroup
 	for i := range projection.Charts {
@@ -201,7 +251,9 @@ func (s *dashboardService) Query(
 			defer func() { <-sem }()
 			// 按下标写回（每块只写自己那一格），因此无需额外加锁，结果顺序
 			// 恒等于 layout 顺序。
-			result.Results[i] = s.queryBlock(ctx, projection.Filters, projection.Charts[i], values)
+			result.Results[i] = s.queryBlock(
+				ctx, projection.Filters, projection.Charts[i], values, in.Linkages, targetsBySource,
+			)
 		}(i)
 	}
 	wg.Wait()
@@ -212,7 +264,9 @@ func (s *dashboardService) Query(
 // queryBlock 取一块的数据：先判三态，再算合并条件，最后取数。任何失败都收敛成块级
 // status/message，绝不返回 error。
 func (s *dashboardService) queryBlock(
-	ctx context.Context, filters []layoutFilterBinding, block layoutChartBlock, values map[string][]any,
+	ctx context.Context, filters []layoutFilterBinding, block layoutChartBlock,
+	values map[string][]any, linkages []entity.DashboardQueryLinkage,
+	targetsBySource map[string][]layoutLinkageTarget,
 ) entity.DashboardQueryBlock {
 	out := entity.DashboardQueryBlock{WidgetID: block.WidgetID, ChartID: block.ChartID}
 
@@ -231,7 +285,9 @@ func (s *dashboardService) queryBlock(
 		return out
 	}
 
-	overrides, appliedFields := buildOverrides(filters, values, meta.DatasetID)
+	filterOverrides := buildOverrides(filters, values, meta.DatasetID)
+	linkageOverrides := buildLinkageOverrides(linkages, targetsBySource, block.WidgetID)
+	overrides, appliedFields := mergeOverrides(filterOverrides, linkageOverrides)
 
 	var data entity.ChartDataResult
 	if len(overrides) == 0 {
@@ -282,10 +338,8 @@ func blockError(out entity.DashboardQueryBlock, err error) entity.DashboardQuery
 //     而请求给了多个值，语义只能是「属于其中之一」。
 func buildOverrides(
 	filters []layoutFilterBinding, values map[string][]any, datasetID int,
-) ([]entity.Filter, []string) {
+) []entity.Filter {
 	var overrides []entity.Filter
-	var applied []string
-	seen := make(map[string]struct{}, len(filters))
 
 	for _, f := range filters {
 		if f.DatasetID != datasetID {
@@ -318,13 +372,99 @@ func buildOverrides(
 			ValueEnd: valueEndArg,
 			Logic:    "and",
 		})
+	}
+	return overrides
+}
 
-		if _, dup := seen[f.Column]; !dup {
-			seen[f.Column] = struct{}{}
-			applied = append(applied, f.Column)
+// buildLinkageOverrides 把已激活的图表联动翻成**本块**的覆盖条件（issue #143）。
+//
+// 与盘级筛选器同款的两条纪律：
+//   - 取值形状按个数分流：单值 → eq、多值 → in（复用同一词表，不给联动另设一套算子）；
+//   - 空数组或请求里没出现的来源 = 未激活，不产生条件、也不计入 applied。
+//
+// 落点完全由 layout 决定：一块源图在 `linkage.targets` 里声明「打到哪块图的哪一列」，
+// 所以请求方只能表达「点了什么值」，表达不了「往哪一列注入」——列标识仍只来自已落库文档。
+func buildLinkageOverrides(
+	linkages []entity.DashboardQueryLinkage,
+	targetsBySource map[string][]layoutLinkageTarget,
+	blockWidgetID string,
+) []entity.Filter {
+	if len(linkages) == 0 || len(targetsBySource) == 0 {
+		return nil
+	}
+
+	var overrides []entity.Filter
+	for _, linkage := range linkages {
+		if len(linkage.Value) == 0 {
+			continue
+		}
+		operator := "eq"
+		valueArg := linkage.Value[0]
+		if len(linkage.Value) > 1 {
+			operator = "in"
+			valueArg = linkage.Value
+		}
+		for _, target := range targetsBySource[linkage.SourceWidgetID] {
+			if target.WidgetID != blockWidgetID {
+				continue
+			}
+			overrides = append(overrides, entity.Filter{
+				// 稳定的 id 只为排查方便（该 Filter 不落库、只活一次查询）。
+				ID:       "link-" + linkage.SourceWidgetID,
+				Field:    target.Column,
+				Operator: operator,
+				Value:    valueArg,
+				Logic:    "and",
+			})
 		}
 	}
-	return overrides, applied
+	return overrides
+}
+
+// mergeOverrides 把盘级筛选条件与联动条件合成一份下发给 chart 侧的覆盖列表。
+//
+// 字段冲突时**联动优先**：点击是更晚、更具体的一次用户意图，而且两条同字段条件
+// AND 在一起会互相排斥成空集（`region='华南' AND region='华东'`）。被顶掉的那条整条丢弃，
+// 位置沿用盘级筛选器那一格，避免同字段出现两条条件。
+//
+// 返回的 appliedFields 是最终生效字段（去重、保序），供「覆盖可见标识」使用。
+func mergeOverrides(filters, linkages []entity.Filter) ([]entity.Filter, []string) {
+	if len(linkages) == 0 {
+		return filters, filterFields(filters)
+	}
+	if len(filters) == 0 {
+		return linkages, filterFields(linkages)
+	}
+
+	merged := make([]entity.Filter, len(filters), len(filters)+len(linkages))
+	copy(merged, filters)
+	index := make(map[string]int, len(filters))
+	for i, f := range filters {
+		index[f.Field] = i
+	}
+	for _, linkage := range linkages {
+		if at, hit := index[linkage.Field]; hit {
+			merged[at] = linkage
+			continue
+		}
+		index[linkage.Field] = len(merged)
+		merged = append(merged, linkage)
+	}
+	return merged, filterFields(merged)
+}
+
+// filterFields 取覆盖列表里出现过的字段（去重、保序）。
+func filterFields(overrides []entity.Filter) []string {
+	var out []string
+	seen := make(map[string]struct{}, len(overrides))
+	for _, o := range overrides {
+		if _, dup := seen[o.Field]; dup {
+			continue
+		}
+		seen[o.Field] = struct{}{}
+		out = append(out, o.Field)
+	}
+	return out
 }
 
 // intersectFields 返回 appliedFields 中同时出现在图表自身过滤字段里的那些（去重保序）

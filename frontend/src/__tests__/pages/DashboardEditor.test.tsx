@@ -171,8 +171,13 @@ describe('仪表盘画布页', () => {
 
     await waitFor(() => expect(screen.getByTestId('echarts')).toBeInTheDocument());
     expect(screen.getByText('图表已删除')).toBeInTheDocument();
-    // 盘级取数只发一次，按当前页取（v1 文档迁移出单页，块都在这一页上）。
-    expect(mockQuery).toHaveBeenCalledWith('d-1', { page_id: migrationPageId, filters: [] });
+    // 盘级取数只发一次，按当前页取（v1 文档迁移出单页，块都在这一页上）；
+    // 下发的是空筛选 / 空联动（本盘既无筛选器入口，也没点击过数据项）。
+    expect(mockQuery).toHaveBeenCalledWith('d-1', {
+      page_id: migrationPageId,
+      filters: [],
+      linkages: [],
+    });
     // 已被 /query 覆盖的块不应再走图表自身的取数端点。
     expect(mockGetChartData).not.toHaveBeenCalled();
   });

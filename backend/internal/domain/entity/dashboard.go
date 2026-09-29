@@ -100,15 +100,27 @@ type DashboardQueryFilter struct {
 	Value    []any  `json:"value"`
 }
 
-// DashboardQueryRequest 是批量取数端点的请求体（PRD §6.3）。前端只下发筛选器的
+// DashboardQueryLinkage 是一块图表被点击后产出的联动取值（POST /api/dashboards/{id}/query
+// 请求体的一项，issue #143）。value 空数组或该项缺失 = 该来源**未激活**联动。
+//
+// 刻意只带「哪块图被点了」与「点了什么值」，不带列名：联动要打到哪些图表、打在哪一列上，
+// 全部由后端从 layout_json 里读（与盘级筛选器同一条信任边界：列标识只来自已落库的文档，
+// 不接受请求方指定）。
+type DashboardQueryLinkage struct {
+	SourceWidgetID string `json:"sourceWidgetId"`
+	Value          []any  `json:"value"`
+}
+
+// DashboardQueryRequest 是批量取数端点的请求体（PRD §6.3）。前端只下发筛选器与联动的
 // 当前值，不解析 chart config、不下发合并结果：筛选合并是后端单点逻辑（可测）。
 //
 // PageID 是多页面文档（layout_json v2）的「当前激活页」：非空时只取该页的图表块，
 // 外加任意页里 scope=all 的筛选器（见 service/dashboard 的 projectLayout）。
 // 省略或空串 = 不按页收窄，退回单页时代的「整盘取数」语义。
 type DashboardQueryRequest struct {
-	PageID  string                 `json:"page_id"`
-	Filters []DashboardQueryFilter `json:"filters"`
+	PageID   string                  `json:"page_id"`
+	Filters  []DashboardQueryFilter  `json:"filters"`
+	Linkages []DashboardQueryLinkage `json:"linkages"`
 }
 
 // DashboardQueryBlock 是单块的取数结果。Data 为 nil 时 JSON 输出 null（与

@@ -66,6 +66,26 @@ export interface DashboardPlacement {
   h: number;
 }
 
+/**
+ * 图表联动的一条去向（issue #143）：这块图被点击时，把所选维度值下发到哪个目标块、
+ * 落在目标数据集的哪一列上。
+ *
+ * `column` 是**目标数据集**的列 ID（`DatasetColumn.id`）：同数据集联动时它就是来源那条
+ * 维度列，跨数据集联动则由用户在联动设置里显式选一列。把落点写死在布局里（而不是让请求
+ * 方指定），联动就与盘级筛选器共享同一条信任边界——列标识只来自已落库文档。
+ */
+export interface DashboardLinkageTarget {
+  /** 目标图表块的 widgetId（盘内唯一，不存 chartId：同图复用要分别联动）。 */
+  widgetId: string;
+  /** 目标数据集上的列 ID。 */
+  column: string;
+}
+
+export interface DashboardChartLinkage {
+  /** 勾选为联动目标的图表块。空数组等同未配置联动。 */
+  targets: DashboardLinkageTarget[];
+}
+
 /** 一块 widget 的公共标识：盘内唯一 id + 所属页面。 */
 export interface DashboardWidgetBase extends DashboardPlacement {
   widgetId: string;
@@ -83,6 +103,8 @@ export interface DashboardChartWidget extends DashboardWidgetBase {
   chartId: number;
   /** 仅覆盖盘内显示标题，不写回图表；null/缺省表示用图表自身标题。 */
   titleOverride?: string | null;
+  /** 联动设置（issue #143）：缺省 = 不发起联动。 */
+  linkage?: DashboardChartLinkage;
 }
 
 export interface DashboardTextWidget extends DashboardWidgetBase {
@@ -342,6 +364,33 @@ export function findFreePlacement(
   return { x: 0, y: bottom };
 }
 
+/**
+ * 归一 chart 块的联动配置：丢掉声明不了条件的去向（缺 widgetId / 缺列 ID——与后端
+ * `projectLinkageTargets` 同一口径，两侧都丢才不会出现「前端显示已联动、后端不生效」），
+ * 同一目标只保留首条。一个去向都不剩时整个 linkage 键不落盘。
+ */
+function normalizeLinkage(raw: unknown): DashboardChartLinkage | undefined {
+  if (!isPlainObject(raw) || !Array.isArray(raw.targets)) {
+    return undefined;
+  }
+  const targets: DashboardLinkageTarget[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw.targets) {
+    if (!isPlainObject(entry)) {
+      continue;
+    }
+    if (!isNonEmptyString(entry.widgetId) || !isNonEmptyString(entry.column)) {
+      continue;
+    }
+    if (seen.has(entry.widgetId)) {
+      continue;
+    }
+    seen.add(entry.widgetId);
+    targets.push({ widgetId: entry.widgetId, column: entry.column });
+  }
+  return targets.length > 0 ? { targets } : undefined;
+}
+
 /** 归一单个 widget；无法修复时返回 null（调用方负责丢弃）。 */
 function normalizeWidget(
   raw: unknown,
@@ -385,6 +434,10 @@ function normalizeWidget(
       widget.titleOverride = raw.titleOverride;
     } else if (raw.titleOverride === null) {
       widget.titleOverride = null;
+    }
+    const linkage = normalizeLinkage(raw.linkage);
+    if (linkage) {
+      widget.linkage = linkage;
     }
     return widget;
   }
