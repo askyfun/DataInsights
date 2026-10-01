@@ -3,6 +3,7 @@ import { Empty, Table } from 'antd';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { formatMetricValue, formatPercentOfTotal, splitPercentFormat } from '@/lib/format';
+import { type ConditionalFormat, resolveCellBackground } from '@/lib/tableConditionalFormat';
 import LoadingPlaceholder from '../LoadingPlaceholder';
 
 interface TableChartProps {
@@ -34,6 +35,12 @@ interface TableChartProps {
   nullDisplay?: 'raw' | 'dash' | 'blank' | 'zero';
   /** 冻结维度列：横向滚动时把维度列（含序号列）固定在左侧。 */
   freezeDimensions?: boolean;
+  /**
+   * 条件格式规则（issue #156 AC1）：按指标列的值给单元格着背景色。
+   * 语义见 lib/tableConditionalFormat.ts；缺省/空数组不着色。
+   * 只作用于明细行——合计行走 Summary 单元格，不参与着色。
+   */
+  conditionalFormat?: ConditionalFormat[];
   /**
    * 合计行（issue #131）：键为指标列的输出列名，值由后端在过滤后的**完整数据集**上
    * 重算。传入即在表尾渲染一行合计；缺省不渲染。
@@ -81,6 +88,7 @@ const TableChart: React.FC<TableChartProps> = ({
   wordWrap,
   nullDisplay,
   freezeDimensions,
+  conditionalFormat,
   totalRow,
   rowSize = 'small',
   pagination,
@@ -136,6 +144,10 @@ const TableChart: React.FC<TableChartProps> = ({
 
     const dataColumns = orderedKeys.map((key) => {
       const format = metricFormats?.[key];
+      // 条件格式（#156 AC1）：该列的规则与列内全部取值（scale 归一分母取当前渲染数据）。
+      // 着色挂在 onCell 上（整格背景），与 render 的文本格式化互不干扰。
+      const cfRule = conditionalFormat?.find((r) => r.metric === key);
+      const cfColumnValues = cfRule ? (data || []).map((row) => row?.[key]) : [];
       // 占比列：值渲染成 value/全集合计，`%` 作为独立文本节点拼接（不进格式化器，
       // 否则 `0,0.00%` 的后缀会被当成小数位数的一部分）。
       const asPercent = percentSet.has(key) && Boolean(format);
@@ -155,6 +167,15 @@ const TableChart: React.FC<TableChartProps> = ({
         ellipsis: !wordWrap,
         // 冻结时把维度列固定在左侧（指标列不固定，避免全表锁死无法横向看指标）。
         ...(freeze && dimensionSet.has(key) ? { fixed: 'left' as const } : {}),
+        // 条件格式：按行取值解析背景色（resolveCellBackground 自带 metric 匹配守卫）。
+        ...(cfRule
+          ? {
+              onCell: (record: Record<string, unknown>) => {
+                const bg = resolveCellBackground(cfRule, record?.[key], cfColumnValues, key);
+                return bg ? { style: { backgroundColor: bg } } : {};
+              },
+            }
+          : {}),
         // 展示层渲染：空值按 nullDisplay 占位，指标列套格式（'raw' 且无格式时不进入这里）。
         ...(needsRender
           ? {
@@ -206,6 +227,7 @@ const TableChart: React.FC<TableChartProps> = ({
     wordWrap,
     nullDisplay,
     freezeDimensions,
+    conditionalFormat,
     pagination,
     onSortChange,
     sortField,

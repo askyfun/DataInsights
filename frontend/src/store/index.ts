@@ -3,6 +3,7 @@ import { message } from 'antd';
 import { create } from 'zustand';
 import { isNumericType, normalizeDataType } from '@/lib/dataTypes';
 import type { DateFilterIntent } from '@/lib/dateFilter';
+import type { ConditionalFormat } from '@/lib/tableConditionalFormat';
 import {
   Chart,
   ChartDataResponse,
@@ -324,6 +325,12 @@ export interface ChartStyleConfig {
    * 词表取轴图通用位置，不逐图型再分叉（饼图/漏斗自带标签，不走本项）。
    */
   dataLabelPosition?: 'top' | 'inside' | 'center';
+  /**
+   * 表格条件格式（仅 table，issue #156 AC1）：按指标列的值着色（阈值/色阶/涨跌色）。
+   * 规则的 metric 存输出列名（与 TableChart 的 dataIndex 同一命名空间）；
+   * undefined 等价于空数组（无着色）。语义实现在 lib/tableConditionalFormat.ts。
+   */
+  tableConditionalFormat?: ConditionalFormat[];
 }
 
 /**

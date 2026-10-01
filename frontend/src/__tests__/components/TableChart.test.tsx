@@ -335,3 +335,40 @@ describe('TableChart 占比列', () => {
     expect(cells).toEqual(['合计', '100.00%']);
   });
 });
+
+/**
+ * 条件格式（issue #156 AC1）：规则命中时单元格 onCell 背景色生效；
+ * 语义解析本身在 lib/tableConditionalFormat.ts，这里只验证渲染接线。
+ */
+describe('TableChart 条件格式', () => {
+  it('阈值命中的单元格上背景色，未命中与维度列不上色', () => {
+    const { container } = renderTable({
+      conditionalFormat: [
+        { metric: 'revenue', kind: 'threshold', op: '>', value: 10, color: '#fa8c16' },
+      ],
+    });
+    const cells = Array.from(container.querySelectorAll('.ant-table-tbody td'));
+    const colored = cells.filter((td) => (td as HTMLElement).style.backgroundColor !== '');
+    // 42 命中；7 不命中；region 列永不命中
+    expect(colored.length).toBe(1);
+    expect((colored[0] as HTMLElement).style.backgroundColor).toBe('rgb(250, 140, 22)');
+    expect(colored[0].textContent).toBe('42');
+  });
+
+  it('涨跌色：正负值分别取涨/跌色，0 不着色', () => {
+    const { container } = renderTable({
+      data: [
+        { region: 'East', revenue: 5 },
+        { region: 'West', revenue: -3 },
+        { region: 'North', revenue: 0 },
+      ],
+      conditionalFormat: [{ metric: 'revenue', kind: 'diff' }],
+    });
+    const cells = Array.from(container.querySelectorAll('.ant-table-tbody td'));
+    const colored = cells.filter((td) => (td as HTMLElement).style.backgroundColor !== '');
+    // 5 → 涨红、-3 → 跌绿；0 与维度列不着色
+    expect(colored.map((td) => td.textContent)).toEqual(['5', '-3']);
+    expect((colored[0] as HTMLElement).style.backgroundColor).toBe('rgb(207, 19, 34)');
+    expect((colored[1] as HTMLElement).style.backgroundColor).toBe('rgb(56, 158, 13)');
+  });
+});

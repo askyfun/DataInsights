@@ -80,6 +80,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
       'tableWordWrap',
       'tableNullDisplay',
       'tableFreezeDimensions',
+      'tableConditionalFormat',
     ],
     fieldGroups: [
       {
