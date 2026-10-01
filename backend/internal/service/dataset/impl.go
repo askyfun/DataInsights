@@ -12,6 +12,7 @@ import (
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/extract"
+	"data-insights/internal/expr"
 	"data-insights/internal/idgen"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
@@ -312,6 +313,17 @@ func mapDatasetColumns(dbColumns []datasource.ColumnInfo, dsType string) []entit
 
 // UpdateColumns updates columns for a dataset
 func (s *datasetService) UpdateColumns(ctx context.Context, id int, columns []entity.DatasetColumn) (*entity.Dataset, error) {
+	// 表达式围栏（issue #170）：虚拟字段 expr 会原样进入 SQL，写入口先过
+	// internal/expr 白名单，恶意表达式在落库前即被拒绝（校验前移）。
+	for _, col := range columns {
+		if col.Expr == "" {
+			continue
+		}
+		if err := expr.Validate(col.Expr); err != nil {
+			return nil, router.NewBusinessError(response.CodeBadRequest, fmt.Sprintf("column %q: %v", col.Name, err))
+		}
+	}
+
 	ds, err := s.getDatasetModel(ctx, id)
 	if err != nil {
 		return nil, err
