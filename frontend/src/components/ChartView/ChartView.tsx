@@ -10,6 +10,7 @@ import {
   normalizeReferenceLines,
 } from '../../lib/chartOptions';
 import { isPercentOfTotalFormat } from '../../lib/format';
+import { usePrefersReducedMotion } from '../../lib/reducedMotion';
 import { useResolvedTheme } from '../../lib/theme';
 import { chartDefinitions } from '../ChartBuilder/chartDefinitions';
 import KpiCard from '../ChartBuilder/KpiCard';
@@ -145,6 +146,8 @@ const ChartView: React.FC<ChartViewProps> = ({
   //    store 先行更新，探针（若已挂载）即反映新主题 → 实时重绘。
   // resolvedTheme 入依赖是重算的扳机（其值本身不参与 option 构造，只驱动重算时机）。
   const resolvedTheme = useResolvedTheme();
+  // 无障碍（issue #67）：系统要求减少动态效果时关掉 ECharts 动画（canvas 动效取不到 CSS）。
+  const reducedMotion = usePrefersReducedMotion();
   const hostRef = useRef<HTMLDivElement>(null);
   const [hostEl, setHostEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -189,6 +192,7 @@ const ChartView: React.FC<ChartViewProps> = ({
         ),
         // 指标显示格式（数据标注用）：与 displayLabels 同一键空间（输出列名）。
         metricFormats: metricFormatByOutputName,
+        reducedMotion,
       },
       resolvedTheme,
       hostEl
@@ -203,6 +207,7 @@ const ChartView: React.FC<ChartViewProps> = ({
     hostEl,
     resolvedTheme,
     metricFormatByOutputName,
+    reducedMotion,
   ]);
 
   const isTableLike = chartDoc.chartType === 'table' || chartDoc.chartType === 'pivot';

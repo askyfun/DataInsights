@@ -347,6 +347,23 @@ describe('buildChartOption：结构化聚合响应（正常路径）', () => {
   });
 });
 
+describe('buildChartOption：减少动态效果（无障碍 issue #67）', () => {
+  const context = { title: 'Sales', dimensions: ['product'], metrics: ['revenue'] };
+
+  it('reducedMotion 为 true 时顶层关闭 ECharts 动画（初始化与更新都不位移）', () => {
+    const option = view<{ animation?: unknown }>(
+      buildChartOption('bar', axisPayload, baseStyle, {}, { ...context, reducedMotion: true })
+    );
+    expect(option.animation).toBe(false);
+  });
+
+  it('reducedMotion 缺省时**不带** animation 键（走 ECharts 默认，零回归）', () => {
+    const option = buildChartOption('bar', axisPayload, baseStyle, {}, context);
+    expect(option).not.toBeNull();
+    expect(Object.prototype.hasOwnProperty.call(option, 'animation')).toBe(false);
+  });
+});
+
 describe('buildChartOption：返回 null 的边界', () => {
   it('table/pivot 走 TableChart，不产出 ECharts option', () => {
     const tablePayload = {

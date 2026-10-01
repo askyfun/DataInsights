@@ -135,6 +135,12 @@ export interface ChartOptionContext {
    * 缺省/未配的指标原样输出数值，与 TableChart 对无格式列的行为一致。
    */
   metricFormats?: Record<string, string>;
+  /**
+   * 减少动态效果（无障碍，issue #67）：为 true 时在 option 顶层关闭 ECharts 动画
+   * （初始化与更新都不再位移）。缺省/false 不带 animation 键，走 ECharts 默认。
+   * 由调用方用 usePrefersReducedMotion() 提供。
+   */
+  reducedMotion?: boolean;
 }
 
 /** 参考线缺省展示名（用户未填 name 时） */
@@ -485,6 +491,9 @@ export function buildChartOption(
   const chartColors = chartPalette(host ?? null, theme ?? 'light');
 
   const commonOptions = {
+    // 无障碍（issue #67）：系统要求减少动态效果时关掉 ECharts 动画。其余情况**不带**
+    // animation 键——显式 animation:true 虽与默认等价，但会把 ECharts 的默认值钉死。
+    ...(context.reducedMotion ? { animation: false } : {}),
     textStyle: { color: chartColors.text },
     title: {
       text: context.title,
