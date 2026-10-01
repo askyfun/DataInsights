@@ -7,6 +7,7 @@ import {
   buildChartOption,
   isEmptyPayload,
   normalizeChartStyle,
+  normalizePieMergeRatio,
   normalizeReferenceLines,
 } from '../../lib/chartOptions';
 import { isPercentOfTotalFormat } from '../../lib/format';
@@ -186,6 +187,11 @@ const ChartView: React.FC<ChartViewProps> = ({
         // 同款窄化后透传（binCount 等其余键 ChartView 不消费）。
         referenceLines: normalizeReferenceLines(
           (chartDoc.queryOptions as { referenceLines?: unknown }).referenceLines
+        ),
+        // 长尾合并阈值（issue #27，仅 pie 消费）：持久化文档 queryOptions 小节是 unknown，
+        // 与参考线同款窄化后透传。
+        pieMergeOtherBelowRatio: normalizePieMergeRatio(
+          (chartDoc.queryOptions as { pieMergeOtherBelowRatio?: unknown }).pieMergeOtherBelowRatio
         ),
         // 指标显示格式（数据标注用）：与 displayLabels 同一键空间（输出列名）。
         metricFormats: metricFormatByOutputName,

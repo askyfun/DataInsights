@@ -151,7 +151,7 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
     label: '饼图',
     resultShape: 'pie',
     icon: PieChartOutlined,
-    styleKeys: ['colors', 'donut'],
+    styleKeys: ['colors', 'donut', 'pieLabelDisplay'],
     fieldGroups: [
       {
         id: 'category',
