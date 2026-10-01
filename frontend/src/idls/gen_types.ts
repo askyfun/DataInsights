@@ -1697,6 +1697,54 @@ export interface components {
         ChartReferenceResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["ChartReference"];
         };
+        /** @description 预警规则实体（entity.AlertRule）。metric 为图表查询结果数据行的列键（指标的输出别名：字段 meta alias 优先，否则指标字段的 bindingId）。触发 = 任一数据行越线；同日同规则去重。 */
+        AlertRule: {
+            /** @description UUID，由后端生成。 */
+            id: string;
+            name: string;
+            chart_id: number;
+            metric: string;
+            /** @description 比较算子：gt（大于）/ lt（小于）/ eq（等于）。 */
+            operator: "gt" | "lt" | "eq";
+            threshold: number;
+            enabled: boolean;
+            /** @description 最近触发日（YYYY-MM-DD）；从未触发为 null。 */
+            last_triggered_date: string | null;
+            created_at: string;
+            updated_at: string;
+        };
+        /** @description POST /api/alerts 请求体（entity.AlertRuleCreate）。不含 id：主键由后端生成。 */
+        AlertRuleCreate: {
+            name: string;
+            chart_id: number;
+            metric: string;
+            operator: "gt" | "lt" | "eq";
+            threshold: number;
+        };
+        /** @description PUT /api/alerts/{id} 请求体（entity.AlertRuleUpdate）。字段全部可选，遵循「未提供则保留」。 */
+        AlertRuleUpdate: {
+            name?: string;
+            chart_id?: number;
+            metric?: string;
+            operator?: "gt" | "lt" | "eq";
+            threshold?: number;
+            enabled?: boolean;
+        };
+        /** @description 预警触发记录（entity.AlertTrigger）。倒序返回，最多 50 条。 */
+        AlertTrigger: {
+            id: string;
+            rule_id: string;
+            /** @description 触发时的指标值。 */
+            metric_value: number;
+            threshold: number;
+            /** @description 人读的触发消息。 */
+            message: string;
+            /** @description 通知是否发送成功。 */
+            notified: boolean;
+            /** @description 通知失败原因；未失败为 null。 */
+            notify_error: string | null;
+            created_at: string;
+        };
     };
     responses: never;
     parameters: {

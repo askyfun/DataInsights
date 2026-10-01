@@ -1,4 +1,5 @@
 import {
+  AlertOutlined,
   AppstoreOutlined,
   BarChartOutlined,
   BuildOutlined,
@@ -14,6 +15,7 @@ import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { useLocale } from './i18n/useLocale';
 import { type ThemeMode, useTheme } from './lib/theme';
+import AlertsPage from './pages/Alerts';
 import ChartBuilder from './pages/ChartBuilder';
 import ChartsPage from './pages/Charts';
 import DashboardEditor from './pages/DashboardEditor';
@@ -82,6 +84,11 @@ const App: React.FC = () => {
       key: '/datasources',
       icon: <DatabaseOutlined />,
       label: <Link to="/datasources">{intl.formatMessage({ id: 'nav.datasources' })}</Link>,
+    },
+    {
+      key: '/alerts',
+      icon: <AlertOutlined />,
+      label: <Link to="/alerts">{intl.formatMessage({ id: 'nav.alerts' })}</Link>,
     },
   ];
 
@@ -224,6 +231,7 @@ const App: React.FC = () => {
               <Route path="/datasets/:id/edit" element={<DatasetEdit />} />
               <Route path="/chart-builder" element={<ChartBuilder />} />
               <Route path="/charts" element={<ChartsPage />} />
+              <Route path="/alerts" element={<AlertsPage />} />
             </Routes>
           </Content>
         </Layout>
