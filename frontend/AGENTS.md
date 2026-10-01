@@ -25,8 +25,14 @@ frontend/src/
 │   ├── querySpec.ts      # store QueryConfig → 后端 QuerySpec 的映射
 │   ├── format.ts         # 数值/单位格式化
 │   └── dataTypes.ts      # 数据类型工具
-├── store/
-│   └── index.ts          # 单一 Zustand Store（全部应用状态 + 异步 actions）
+├── store/                # 单一 Zustand Store，按领域拆成切片文件（index.ts 只做合成）
+│   ├── index.ts          # 合成入口：AppState + useStore，并再导出类型/纯工具
+│   ├── types.ts          # 跨切片共享的类型与纯工具（bindingId/元数据清理等）
+│   ├── datasources.ts    # 数据源切片（状态 + CRUD actions）
+│   ├── datasets.ts       # 数据集切片（状态 + CRUD actions）
+│   ├── charts.ts         # 图表切片（状态 + CRUD actions）
+│   ├── chartBuilder.ts   # 图表构建器切片（查询配置/样式/执行查询）
+│   └── history.ts        # 撤销重做时间线中间件
 ├── idls/                 # API 类型定义（现仅 gen_types.ts 生成物；Batch 2 已删除手写类型）
 ├── pages/                # 页面组件（每个页面自包含）
 │   ├── Datasource.tsx        # 数据源 CRUD 列表
@@ -69,8 +75,9 @@ frontend/src/
 
 ### 状态管理
 
-单一 Zustand Store（`store/index.ts`），管理所有应用状态：
-- `datasources/datasets/charts` — CRUD 数据数组 + loading/error 状态
+单一 Zustand Store，**按领域拆成切片文件**（`store/index.ts` 只做合成与对外再导出）。切片共用同一个 `create`/`set`，合成后仍是同一个 store——`useStore.getState()/setState()`、跨切片读写与撤销重做语义都不变；消费方一律 `import { useStore, ... } from '@/store'`：
+
+- `datasources/datasets/charts` — CRUD 数据数组 + loading/error 状态（各自切片）
 - `chartBuilderFields` — 当前数据集的可用字段
 - `chartBuilderConfig` — 图表类型、标题、轴配置
 - `queryConfig` — 维度组、指标组、过滤器、排序、限制
