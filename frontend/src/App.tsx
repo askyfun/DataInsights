@@ -9,20 +9,23 @@ import {
   MenuOutlined,
 } from '@ant-design/icons';
 import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import LoadingPlaceholder from './components/LoadingPlaceholder';
 import { useLocale } from './i18n/useLocale';
 import { type ThemeMode, useTheme } from './lib/theme';
-import ChartBuilder from './pages/ChartBuilder';
-import ChartsPage from './pages/Charts';
-import DashboardEditor from './pages/DashboardEditor';
-import DashboardsPage from './pages/Dashboards';
-import DatasetPage from './pages/Dataset';
-import DatasetDetail from './pages/DatasetDetail';
-import DatasetEdit from './pages/DatasetEdit';
-import DatasourcePage from './pages/Datasource';
-import DatasourceDetailPage from './pages/DatasourceDetail';
+
+// 页面级代码分割：各路由按需加载，echarts / 图表构建等重资源不再进首屏 bundle。
+const ChartBuilder = lazy(() => import('./pages/ChartBuilder'));
+const ChartsPage = lazy(() => import('./pages/Charts'));
+const DashboardEditor = lazy(() => import('./pages/DashboardEditor'));
+const DashboardsPage = lazy(() => import('./pages/Dashboards'));
+const DatasetPage = lazy(() => import('./pages/Dataset'));
+const DatasetDetail = lazy(() => import('./pages/DatasetDetail'));
+const DatasetEdit = lazy(() => import('./pages/DatasetEdit'));
+const DatasourcePage = lazy(() => import('./pages/Datasource'));
+const DatasourceDetailPage = lazy(() => import('./pages/DatasourceDetail'));
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
@@ -212,19 +215,23 @@ const App: React.FC = () => {
               而不是白，页面骨架的"白面板浮在灰画布上"才不会在底部断掉。
               图表构建页自带三栏自绘底色，会完整覆盖这一层。 */}
           <Content id="main-content" style={{ background: 'var(--dr-canvas)', minHeight: 280 }}>
-            <Routes>
-              {/* 首页即仪表盘列表（导航项 nav.dashboard 一直指向 /）。 */}
-              <Route path="/" element={<DashboardsPage />} />
-              <Route path="/dashboards/:id" element={<DashboardEditor />} />
-              <Route path="/datasources" element={<DatasourcePage />} />
-              <Route path="/datasources/:id" element={<DatasourceDetailPage />} />
-              <Route path="/datasets" element={<DatasetPage />} />
-              <Route path="/datasets/new" element={<DatasetEdit />} />
-              <Route path="/datasets/:id" element={<DatasetDetail />} />
-              <Route path="/datasets/:id/edit" element={<DatasetEdit />} />
-              <Route path="/chart-builder" element={<ChartBuilder />} />
-              <Route path="/charts" element={<ChartsPage />} />
-            </Routes>
+            <Suspense
+              fallback={<LoadingPlaceholder text={intl.formatMessage({ id: 'common.loading' })} />}
+            >
+              <Routes>
+                {/* 首页即仪表盘列表（导航项 nav.dashboard 一直指向 /）。 */}
+                <Route path="/" element={<DashboardsPage />} />
+                <Route path="/dashboards/:id" element={<DashboardEditor />} />
+                <Route path="/datasources" element={<DatasourcePage />} />
+                <Route path="/datasources/:id" element={<DatasourceDetailPage />} />
+                <Route path="/datasets" element={<DatasetPage />} />
+                <Route path="/datasets/new" element={<DatasetEdit />} />
+                <Route path="/datasets/:id" element={<DatasetDetail />} />
+                <Route path="/datasets/:id/edit" element={<DatasetEdit />} />
+                <Route path="/chart-builder" element={<ChartBuilder />} />
+                <Route path="/charts" element={<ChartsPage />} />
+              </Routes>
+            </Suspense>
           </Content>
         </Layout>
       </Layout>
