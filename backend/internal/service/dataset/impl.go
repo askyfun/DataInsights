@@ -39,6 +39,14 @@ type Service interface {
 	Preview(ctx context.Context, id int) (*entity.PreviewResult, error)
 	Query(ctx context.Context, id int, config entity.QueryConfig) ([]map[string]any, error)
 
+	// File import (issue #138): land an uploaded CSV/XLSX in the extract
+	// storage datasource and register the resulting extract dataset.
+	ImportFile(ctx context.Context, req ImportRequest) (*entity.Dataset, error)
+
+	// ReplaceFile re-uploads a file over an existing extract dataset,
+	// preserving column ids whose display name is unchanged.
+	ReplaceFile(ctx context.Context, id int, req ImportRequest) (*entity.Dataset, error)
+
 	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
 	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
 	SetSecurityKey(key []byte)
@@ -140,6 +148,18 @@ func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entit
 // charts — within a single transaction.
 // The row is never physically removed (deleted_at is stamped instead).
 func (s *datasetService) Delete(ctx context.Context, id int) error {
+	// Only when extract storage is configured is there a physical table to
+	// release; the lookup is skipped otherwise so the disabled path stays a
+	// single idempotent transaction. A missing/already-deleted row keeps the
+	// historical no-op behaviour.
+	if s.extract.Enabled() {
+		if ds, err := s.getDatasetModel(ctx, id); err == nil &&
+			ds.Mode == "extract" && ds.DatasourceID == s.extract.DatasourceID {
+			if err := s.dropExtractTable(ctx, id); err != nil {
+				return err
+			}
+		}
+	}
 	return database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
 		// 软删数据集自身（幂等：已删除/不存在影响 0 行不报错）。
 		if _, err := tx.NewUpdate().
