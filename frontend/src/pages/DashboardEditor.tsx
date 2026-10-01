@@ -255,10 +255,15 @@ const DashboardEditor: React.FC = () => {
   /**
    * 按给定的筛选器 / 联动状态重取**当前页**。
    *
-   * 只把**已落库**的筛选器 / 联动来源下发出去：后端是按已落库的 layout 逐块取数、并按同一份
-   * layout 建筛选器与联动去向索引的，未保存的块它根本认不出来 —— 发了也只是白跑一趟。
-   * 下发的筛选器集合是**本页的 + 任意页 `scope: 'all'` 的**（`applicableFilterWidgets`），
-   * 与后端 `projectLayout` 的按页收窄是同一口径。
+   * 筛选器**不再按落库过滤**：未落库的（新拖入 / 改了配置没保存）也照常下发，载荷里带上
+   * 它的 binding + operator，后端据此认领（issue #172）——这才是「配好取值立刻生效」。
+   * 已落库的筛选器同样带上（与 layout 等价的绑定，结果不变）。下发的筛选器集合是
+   * **本页的 + 任意页 `scope: 'all'` 的**（`applicableFilterWidgets`），与后端 `projectLayout`
+   * 的按页收窄是同一口径。
+   *
+   * 联动**来源仍必须已落库**：后端按已落库 layout 逐块取数、并从同一份 layout 读「这块图
+   * 打到哪些目标」，未保存的联动配置它认不出来，发了只是白跑一趟。
+   *
    * 调用方传显式的 widgets/values/pageId/linkages 而不是读组件状态：改筛选取值、改粒度
    * 这些场景下新状态还没落进 state，读旧值会算出上一轮的载荷。
    */
@@ -270,9 +275,7 @@ const DashboardEditor: React.FC = () => {
       pageId: string,
       linkages: ActiveLinkageMap
     ) => {
-      const active = applicableFilterWidgets(widgets, pageId).filter((widget) =>
-        persistedIdsRef.current.has(widget.widgetId)
-      );
+      const active = applicableFilterWidgets(widgets, pageId);
       // 来源也必须已落库：后端从 layout 读「这块图打到哪些目标」，未保存的配置读不到。
       const persistedLinkages = linkageQueryPayload(
         Object.fromEntries(
@@ -1393,8 +1396,6 @@ const DashboardEditor: React.FC = () => {
                       <DashboardFilterBlock
                         widget={widget}
                         value={filterValues[widget.widgetId]}
-                        // 未落库的筛选器后端读不到（盘级取数按已落库 layout 建索引）。
-                        unsaved={!persistedIdsRef.current.has(widget.widgetId)}
                         onChange={(next) => applyFilterState(widget.widgetId, next)}
                         onOperatorChange={(operator) =>
                           handleFilterOperatorChange(widget.widgetId, operator)

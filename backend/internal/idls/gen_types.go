@@ -469,8 +469,18 @@ type DashboardListResponse struct {
 	Trace string `json:"trace"`
 }
 
-// DashboardQueryFilter POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。
+// DashboardQueryFilter POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。 已落库的筛选器只带 widgetId + value，绑定与算子由后端从 layout_json 读； **未落库**的筛选器（本次会话新拖入、或改了配置还没保存，issue #172）额外带上 binding + operator —— 后端没有它的 layout 记录，只能从请求读绑定，否则会 「配好取值却没反应」。一旦携带 binding，即以请求为准（覆盖 layout 里的同 widgetId 记录）。
 type DashboardQueryFilter struct {
+	// Binding 仅未落库的筛选器需要：绑定字段 (datasetId, column)。已落库时省略，后端从 layout 读。
+	Binding *struct {
+		// Column 列的稳定 id（DatasetColumn.id），与布局里 binding.column 同口径。
+		Column    *string `json:"column,omitempty"`
+		DatasetId *int    `json:"datasetId,omitempty"`
+	} `json:"binding,omitempty"`
+
+	// Operator 仅未落库的筛选器需要：算子（与图表过滤算子同一词表）。与 binding 配套下发。
+	Operator *string `json:"operator,omitempty"`
+
 	// Value 当前选中值；空数组等同于未激活。
 	Value *[]interface{} `json:"value,omitempty"`
 
@@ -491,11 +501,11 @@ type DashboardQueryLinkage struct {
 type DashboardQueryRequest struct {
 	Filters *[]DashboardQueryFilter `json:"filters,omitempty"`
 
-	// PageId 多页面文档（layout v2）的「当前激活页」页面 id。非空时只取该页的图表块， 并额外带上任意页里 `scope: all` 的筛选器；缺 pageId 的块（v1 旧文档） 不受按页收窄影响。省略或空串 = 不按页收窄（单页语义）。
-	PageId *string `json:"page_id,omitempty"`
-
 	// Linkages 已激活的图表联动（issue #143）。同一来源只应出现一次；未点击的来源不要下发。
 	Linkages *[]DashboardQueryLinkage `json:"linkages,omitempty"`
+
+	// PageId 多页面文档（layout v2）的「当前激活页」页面 id。非空时只取该页的图表块， 并额外带上任意页里 `scope: all` 的筛选器；缺 pageId 的块（v1 旧文档） 不受按页收窄影响。省略或空串 = 不按页收窄（单页语义）。
+	PageId *string `json:"page_id,omitempty"`
 }
 
 // DashboardQueryResponse POST /api/dashboards/{id}/query 响应：data.results 为逐块结果数组，顺序与 layout 里 type=chart 的块一致（前端据 widgetId 归位）。单块失败不整盘失败： 该块 status=error 并带 message，其余块照常返回；无图表块（或无图表块的合法 布局）返回空数组。

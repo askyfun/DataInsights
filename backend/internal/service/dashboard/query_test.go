@@ -661,6 +661,145 @@ func TestQueryFilterWithoutBindingIgnored(t *testing.T) {
 	}
 }
 
+// TestMergeRequestFilterBindings 请求自带绑定的筛选器并入 layout 投影（issue #172）。
+// 不带绑定的请求项是老写法（绑定仍来自 layout），空列名的绑定等同未绑定。
+func TestMergeRequestFilterBindings(t *testing.T) {
+	base := []layoutFilterBinding{{WidgetID: "f-1", DatasetID: 7, Column: "region", Operator: "in"}}
+	cases := []struct {
+		name string
+		req  []entity.DashboardQueryFilter
+		want []layoutFilterBinding
+	}{
+		{
+			name: "不带绑定（老写法）不并入，layout 那条原样保留",
+			req:  []entity.DashboardQueryFilter{{WidgetID: "f-1", Value: []any{"华东"}}},
+			want: base,
+		},
+		{
+			name: "空列名的绑定视为未绑定，忽略",
+			req: []entity.DashboardQueryFilter{{
+				WidgetID: "f-2",
+				Binding:  &entity.DashboardQueryFilterBinding{DatasetID: 7, Column: ""},
+			}},
+			want: base,
+		},
+		{
+			name: "新 widgetId 的绑定追加进表",
+			req: []entity.DashboardQueryFilter{{
+				WidgetID: "f-2",
+				Binding:  &entity.DashboardQueryFilterBinding{DatasetID: 7, Column: "amount"},
+				Operator: "gt",
+			}},
+			want: []layoutFilterBinding{
+				{WidgetID: "f-1", DatasetID: 7, Column: "region", Operator: "in"},
+				{WidgetID: "f-2", DatasetID: 7, Column: "amount", Operator: "gt"},
+			},
+		},
+		{
+			name: "同名 widgetId 的绑定覆盖 layout 里的那条（改了配置未保存）",
+			req: []entity.DashboardQueryFilter{{
+				WidgetID: "f-1",
+				Binding:  &entity.DashboardQueryFilterBinding{DatasetID: 8, Column: "city"},
+				Operator: "eq",
+			}},
+			want: []layoutFilterBinding{{WidgetID: "f-1", DatasetID: 8, Column: "city", Operator: "eq"}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeRequestFilterBindings(base, tc.req)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestQueryRequestCarriedBindingAppliesUnsavedFilter 未落库的筛选器（layout 里根本没有它）
+// 只要请求自带 binding，就能被认领并产生覆盖——这正是 issue #172 要修的「配好取值却没反应」。
+func TestQueryRequestCarriedBindingAppliesUnsavedFilter(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	expectDashboardRead(t, mock, layoutDoc(layoutChart("w-1", 42)))
+
+	fake := &fakeChartProvider{metaFn: func(_ context.Context, _ int) (*entity.ChartQueryContext, error) {
+		return &entity.ChartQueryContext{
+			Exists: true, DatasetID: 7, OwnFilterFields: []string{"region"},
+		}, nil
+	}}
+	svc.chartProvider = fake
+
+	got, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+		Filters: []entity.DashboardQueryFilter{{
+			WidgetID: "f-unsaved",
+			Value:    []any{"华东"},
+			Binding:  &entity.DashboardQueryFilterBinding{DatasetID: 7, Column: "region"},
+			Operator: "in",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	overrides, ok := fake.overridesFor(42)
+	if !ok {
+		t.Fatal("未观察到取数调用")
+	}
+	want := []entity.Filter{{
+		ID:       "dash-f-unsaved",
+		Field:    "region",
+		Operator: "in",
+		Value:    []any{"华东"},
+		Logic:    "and",
+	}}
+	if !reflect.DeepEqual(overrides, want) {
+		t.Errorf("overrides = %#v, want %#v", overrides, want)
+	}
+	if !reflect.DeepEqual(got.Results[0].AppliedFields, []string{"region"}) {
+		t.Errorf("appliedFields = %#v, want [region]", got.Results[0].AppliedFields)
+	}
+}
+
+// TestQueryRequestBindingOverridesPersistedFilter 请求自带的绑定优先于 layout：
+// 改了算子/绑定但没保存的筛选器也要立刻生效（新增与改动是同一条路径）。
+func TestQueryRequestBindingOverridesPersistedFilter(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	expectDashboardRead(t, mock, layoutDoc(
+		layoutChart("w-1", 42),
+		layoutFilter("f-1", 7, "region", "in"),
+	))
+
+	fake := &fakeChartProvider{metaFn: func(_ context.Context, _ int) (*entity.ChartQueryContext, error) {
+		return &entity.ChartQueryContext{Exists: true, DatasetID: 7}, nil
+	}}
+	svc.chartProvider = fake
+
+	if _, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+		Filters: []entity.DashboardQueryFilter{{
+			WidgetID: "f-1",
+			Value:    []any{100},
+			Binding:  &entity.DashboardQueryFilterBinding{DatasetID: 7, Column: "amount"},
+			Operator: "gt",
+		}},
+	}); err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	overrides, ok := fake.overridesFor(42)
+	if !ok {
+		t.Fatal("未观察到取数调用")
+	}
+	want := []entity.Filter{{
+		ID:       "dash-f-1",
+		Field:    "amount",
+		Operator: "gt",
+		Value:    100,
+		Logic:    "and",
+	}}
+	if !reflect.DeepEqual(overrides, want) {
+		t.Errorf("overrides = %#v, want %#v（请求绑定必须覆盖 layout）", overrides, want)
+	}
+}
+
 // TestQueryAppliedFieldsDedupeKeepsOrder 同一列被两块筛选器绑定时，overrides 保留
 // 两条（各自是一条件），但 appliedFields 去重保序。
 func TestQueryAppliedFieldsDedupeKeepsOrder(t *testing.T) {

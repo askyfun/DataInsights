@@ -174,6 +174,49 @@ func projectLayout(raw string, pageID string) layoutProjection {
 	return out
 }
 
+// mergeRequestFilterBindings 把请求里自带绑定的筛选器并入 layout 投影出的绑定表
+// （issue #172）。
+//
+// 未落库的筛选器（新拖入 / 改了配置未保存）在 layout 里没有记录，后端认不出它，
+// 于是「配好取值却没反应」。前端把这类筛选器的 binding/operator 显式下发，这里并入即可。
+//
+// 两条规则：
+//   - 携带绑定（binding.column 非空）才纳入——只带 widgetId + value 的请求项是「已落库
+//     筛选器」的老写法，绑定仍从 layout 读，行为不变；
+//   - 同一 widgetId 已在投影里存在时**覆盖**它：请求反映的是「当前配置」，改了算子/绑定
+//     但没保存的筛选器也要立刻生效（改与新增是同一条路径）。
+func mergeRequestFilterBindings(
+	base []layoutFilterBinding, req []entity.DashboardQueryFilter,
+) []layoutFilterBinding {
+	if len(req) == 0 {
+		return base
+	}
+	out := make([]layoutFilterBinding, len(base), len(base)+len(req))
+	copy(out, base)
+	index := make(map[string]int, len(base))
+	for i, f := range base {
+		index[f.WidgetID] = i
+	}
+	for _, r := range req {
+		if r.Binding == nil || r.Binding.Column == "" {
+			continue
+		}
+		binding := layoutFilterBinding{
+			WidgetID:  r.WidgetID,
+			DatasetID: r.Binding.DatasetID,
+			Column:    r.Binding.Column,
+			Operator:  r.Operator,
+		}
+		if at, hit := index[r.WidgetID]; hit {
+			out[at] = binding
+			continue
+		}
+		index[r.WidgetID] = len(out)
+		out = append(out, binding)
+	}
+	return out
+}
+
 // projectLinkageTargets 把 chart 块的 linkage.targets 收敛成可用去向：没有目标
 // widgetId 或没有列 ID 的项声明不了任何条件（与筛选器「没有列名的绑定认领不了条件」同例），
 // 直接丢弃；同一目标重复出现时只保留首条（重复声明不该变成两条 AND 条件）。
@@ -226,6 +269,10 @@ func (s *dashboardService) Query(
 		return result, nil
 	}
 
+	// 筛选器绑定：以已落库 layout 的投影为底，再叠加请求里**自带绑定**的项
+	// （未落库筛选器 + 改了配置未保存的筛选器，issue #172）。
+	filters := mergeRequestFilterBindings(projection.Filters, in.Filters)
+
 	// 请求是取值的唯一真相源：按 widgetId 建索引，请求里没出现的筛选器就是未激活。
 	values := make(map[string][]any, len(in.Filters))
 	for _, f := range in.Filters {
@@ -252,7 +299,7 @@ func (s *dashboardService) Query(
 			// 按下标写回（每块只写自己那一格），因此无需额外加锁，结果顺序
 			// 恒等于 layout 顺序。
 			result.Results[i] = s.queryBlock(
-				ctx, projection.Filters, projection.Charts[i], values, in.Linkages, targetsBySource,
+				ctx, filters, projection.Charts[i], values, in.Linkages, targetsBySource,
 			)
 		}(i)
 	}
