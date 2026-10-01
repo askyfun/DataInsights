@@ -81,6 +81,8 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
       'tableNullDisplay',
       'tableFreezeDimensions',
       'tableMergeCells',
+      'tableTranspose',
+      'tableSparkline',
       'tableConditionalFormat',
     ],
     fieldGroups: [

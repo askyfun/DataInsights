@@ -436,3 +436,100 @@ describe('TableChart 维度列合并', () => {
     expect(screen.getAllByText('East')).toHaveLength(2);
   });
 });
+
+describe('TableChart 行列转置（issue #156 AC2）', () => {
+  const rows2 = [
+    { region: '华东', revenue: 100, cost: 40 },
+    { region: '华北', revenue: 80, cost: 30 },
+  ];
+
+  it('开启转置：维度取值变列标题、指标变行', () => {
+    renderTable({
+      data: rows2,
+      columns: ['region', 'revenue', 'cost'],
+      dimensionNames: ['region'],
+      metricNames: ['revenue', 'cost'],
+      transpose: true,
+    });
+    // 列标题来自维度取值；首列是「指标」
+    expect(screen.getByRole('columnheader', { name: /指标/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /华东/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /华北/ })).toBeInTheDocument();
+    // 每个指标一行（行首格显示指标名）
+    expect(screen.getByText('revenue')).toBeInTheDocument();
+    expect(screen.getByText('cost')).toBeInTheDocument();
+    // 值落位：revenue 行包含华东列的 100
+    const revRow = screen.getByText('revenue').closest('tr');
+    expect(revRow?.textContent).toContain('100');
+  });
+
+  it('没有维度列时转置无从谈起，回落普通渲染', () => {
+    renderTable({ data: rows2, columns: ['region', 'revenue'], transpose: true });
+    expect(screen.queryByRole('columnheader', { name: /指标/ })).toBeNull();
+    expect(screen.getByRole('columnheader', { name: /region/ })).toBeInTheDocument();
+  });
+
+  it('开启转置时排序/合并/序号列不参与（列语义已互换）', () => {
+    const { container } = renderTable({
+      data: rows2,
+      columns: ['region', 'revenue'],
+      dimensionNames: ['region'],
+      metricNames: ['revenue'],
+      transpose: true,
+      showIndex: true,
+      mergeCells: true,
+      onSortChange: vi.fn(),
+    });
+    expect(screen.queryByRole('columnheader', { name: /^#$/ })).toBeNull();
+    expect(container.querySelector('.ant-table-column-sorter')).toBeNull();
+  });
+});
+
+describe('TableChart 迷你图列（issue #156 AC4）', () => {
+  const sparkRows = [
+    { city: '北京', day: '2026-09-01', temp: 20 },
+    { city: '北京', day: '2026-09-02', temp: 22 },
+    { city: '上海', day: '2026-09-01', temp: 25 },
+    { city: '上海', day: '2026-09-02', temp: 27 },
+  ];
+
+  it('含日期维度时追加「趋势」列，行内渲染 sparkline SVG', () => {
+    const { container } = renderTable({
+      data: sparkRows,
+      columns: ['city', 'day', 'temp'],
+      dimensionNames: ['city', 'day'],
+      metricNames: ['temp'],
+      sparkline: true,
+    });
+    expect(screen.getByRole('columnheader', { name: /趋势/ })).toBeInTheDocument();
+    // 4 行数据每行都有内联 SVG
+    expect(container.querySelectorAll('.ant-table-tbody svg')).toHaveLength(4);
+  });
+
+  it('没有日期形状的维度列时不启用（列不出现）', () => {
+    renderTable({
+      data: [
+        { city: '北京', temp: 20 },
+        { city: '上海', temp: 25 },
+      ],
+      columns: ['city', 'temp'],
+      dimensionNames: ['city'],
+      metricNames: ['temp'],
+      sparkline: true,
+    });
+    expect(screen.queryByRole('columnheader', { name: /趋势/ })).toBeNull();
+  });
+
+  it('转置优先：转置开启时不再追加趋势列', () => {
+    renderTable({
+      data: sparkRows,
+      columns: ['city', 'day', 'temp'],
+      dimensionNames: ['city', 'day'],
+      metricNames: ['temp'],
+      transpose: true,
+      sparkline: true,
+    });
+    expect(screen.queryByRole('columnheader', { name: /趋势/ })).toBeNull();
+    expect(screen.getByRole('columnheader', { name: /指标/ })).toBeInTheDocument();
+  });
+});

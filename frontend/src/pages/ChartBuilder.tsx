@@ -1401,6 +1401,26 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               </SettingRow>
             )}
 
+            {/* 行列转置（#156 AC2）：维度取值变列标题、指标变行。 */}
+            {showStyleControl('tableTranspose') && (
+              <SettingRow label="行列转置">
+                <Switch
+                  checked={chartStyle.tableTranspose ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableTranspose: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {/* 迷你图列（#156 AC4）：行尾趋势列；需存在日期形状的维度列才出现。 */}
+            {showStyleControl('tableSparkline') && (
+              <SettingRow label="迷你图列">
+                <Switch
+                  checked={chartStyle.tableSparkline ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableSparkline: checked })}
+                />
+              </SettingRow>
+            )}
+
             {showStyleControl('tableNullDisplay') && (
               <SettingRow label="空值显示">
                 <Select
@@ -3350,6 +3370,8 @@ const ChartBuilder: React.FC = () => {
           nullDisplay={chartStyle.tableNullDisplay}
           freezeDimensions={chartStyle.tableFreezeDimensions}
           mergeCells={chartStyle.tableMergeCells}
+          transpose={chartStyle.tableTranspose}
+          sparkline={chartStyle.tableSparkline}
           conditionalFormat={chartStyle.tableConditionalFormat}
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
           // 排序状态受控：单一事实源是 queryConfig.sort（bindingId 引用），

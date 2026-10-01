@@ -336,6 +336,17 @@ export interface ChartStyleConfig {
    * 跨多行的单元格。undefined 等价于 false。语义实现在 lib/tableCellMerge.ts。
    */
   tableMergeCells?: boolean;
+  /**
+   * 行列转置（仅 table，issue #156 AC2）：维度取值变列标题、指标变行，纯渲染层换位。
+   * undefined 等价于 false。语义实现在 lib/tableTranspose.ts；没有维度列时回落普通渲染。
+   */
+  tableTranspose?: boolean;
+  /**
+   * 迷你图列（仅 table，issue #156 AC4）：行尾「趋势」列画该行维度组合的指标序列
+   * （需存在日期形状的维度列才启用，列由数据形状探测）。undefined 等价于 false。
+   * 语义实现在 lib/tableSparkline.ts；服务端分页下序列只含当前页的行。
+   */
+  tableSparkline?: boolean;
 }
 
 /**
