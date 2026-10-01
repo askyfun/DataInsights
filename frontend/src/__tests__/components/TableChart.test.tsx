@@ -372,3 +372,67 @@ describe('TableChart 条件格式', () => {
     expect((colored[1] as HTMLElement).style.backgroundColor).toBe('rgb(56, 158, 13)');
   });
 });
+
+/**
+ * 维度列纵向合并（issue #156 AC3）：合并跨度由 lib/tableCellMerge.ts 计算，
+ * 这里只验证 rowSpan 是否正确挂到维度列单元格上、以及指标列不参与合并。
+ */
+describe('TableChart 维度列合并', () => {
+  const mergeRows = [
+    { region: 'East', city: 'Boston', revenue: 10 },
+    { region: 'East', city: 'Boston', revenue: 20 },
+    { region: 'West', city: 'Seattle', revenue: 30 },
+  ];
+  const mergeColumns = ['region', 'city', 'revenue'];
+
+  const renderMerge = (props: Partial<React.ComponentProps<typeof TableChart>> = {}) =>
+    renderTable({
+      data: mergeRows,
+      columns: mergeColumns,
+      dimensionNames: ['region', 'city'],
+      metricNames: ['revenue'],
+      ...props,
+    });
+
+  /** 取文本所在单元格；合并后同值只渲染一次，故这里断言唯一命中。 */
+  const cellOfText = (text: string): HTMLTableCellElement => {
+    const nodes = screen.getAllByText(text);
+    expect(nodes).toHaveLength(1);
+    const td = nodes[0].closest('td');
+    expect(td).not.toBeNull();
+    return td as HTMLTableCellElement;
+  };
+
+  it('开启合并：同值相邻的维度列各自跨行，被吞并的格子不再渲染', () => {
+    const { container } = renderMerge({ mergeCells: true });
+    // 两行 East 并成一格，且只出现一次文本
+    expect(cellOfText('East').getAttribute('rowspan')).toBe('2');
+    expect(cellOfText('Boston').getAttribute('rowspan')).toBe('2');
+    // 单值行（West / Seattle）不设 rowSpan
+    expect(cellOfText('West').getAttribute('rowspan')).toBeNull();
+    expect(cellOfText('Seattle').getAttribute('rowspan')).toBeNull();
+    // 指标列重复取值也不合并：指标格永不带 rowSpan
+    const metricCells = Array.from(container.querySelectorAll('.ant-table-row td')).filter((td) =>
+      ['10', '20', '30'].includes(td.textContent ?? '')
+    );
+    expect(metricCells).toHaveLength(3);
+    expect(metricCells.every((td) => td.getAttribute('rowspan') === null)).toBe(true);
+    // 合并后总格子数：3 + 1 + 3 = 7（两行 East/Boston 的行只留指标格）。
+    // 用 .ant-table-row 排除 antd 为 scroll.x 渲染的测量行（ant-table-measure-row）。
+    expect(container.querySelectorAll('.ant-table-row td')).toHaveLength(7);
+  });
+
+  it('未开启合并：同值维度单元格各自成格', () => {
+    const { container } = renderMerge({ mergeCells: false });
+    expect(screen.getAllByText('East')).toHaveLength(2);
+    const spanned = Array.from(container.querySelectorAll('.ant-table-tbody td')).filter(
+      (td) => td.getAttribute('rowspan') !== null
+    );
+    expect(spanned).toHaveLength(0);
+  });
+
+  it('缺少 dimensionNames 时无从判断维度列，不合并', () => {
+    renderMerge({ mergeCells: true, dimensionNames: undefined, metricNames: undefined });
+    expect(screen.getAllByText('East')).toHaveLength(2);
+  });
+});

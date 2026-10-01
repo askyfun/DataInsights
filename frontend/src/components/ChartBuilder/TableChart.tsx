@@ -3,6 +3,7 @@ import { Empty, Table } from 'antd';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { formatMetricValue, formatPercentOfTotal, splitPercentFormat } from '@/lib/format';
+import { computeRowSpans } from '@/lib/tableCellMerge';
 import { type ConditionalFormat, resolveCellBackground } from '@/lib/tableConditionalFormat';
 import LoadingPlaceholder from '../LoadingPlaceholder';
 
@@ -41,6 +42,12 @@ interface TableChartProps {
    * 只作用于明细行——合计行走 Summary 单元格，不参与着色。
    */
   conditionalFormat?: ConditionalFormat[];
+  /**
+   * 维度列纵向合并（issue #156 AC3）：把「同值相邻」的维度单元格并成一个跨多行的单元格。
+   * 语义见 lib/tableCellMerge.ts（空值不合并、只处理当前渲染的这批行）。只合并维度列——
+   * 指标列出现重复取值是常态，合并它没有意义。缺省 false（不着合并）。
+   */
+  mergeCells?: boolean;
   /**
    * 合计行（issue #131）：键为指标列的输出列名，值由后端在过滤后的**完整数据集**上
    * 重算。传入即在表尾渲染一行合计；缺省不渲染。
@@ -89,6 +96,7 @@ const TableChart: React.FC<TableChartProps> = ({
   nullDisplay,
   freezeDimensions,
   conditionalFormat,
+  mergeCells,
   totalRow,
   rowSize = 'small',
   pagination,
@@ -142,12 +150,23 @@ const TableChart: React.FC<TableChartProps> = ({
     const freeze = Boolean(freezeDimensions) && dimensionSet.size > 0;
     const percentSet = new Set(metricPercentOfTotal || []);
 
+    // 维度列合并（#156 AC3）：只对维度列、且只在开启时预计算每行的 rowSpan。
+    // 没有 dimensionNames 就无从判断哪些列是维度（分享页只读表格常如此），此时不合并。
+    const rowSpansByKey = new Map<string, number[]>();
+    if (mergeCells && dimensionSet.size > 0) {
+      for (const key of dimensionSet) {
+        rowSpansByKey.set(key, computeRowSpans((data || []).map((row) => row?.[key])));
+      }
+    }
+
     const dataColumns = orderedKeys.map((key) => {
       const format = metricFormats?.[key];
       // 条件格式（#156 AC1）：该列的规则与列内全部取值（scale 归一分母取当前渲染数据）。
       // 着色挂在 onCell 上（整格背景），与 render 的文本格式化互不干扰。
       const cfRule = conditionalFormat?.find((r) => r.metric === key);
       const cfColumnValues = cfRule ? (data || []).map((row) => row?.[key]) : [];
+      // 维度列合并（#156 AC3）：该列每行的 rowSpan（未开启合并 / 非维度列为 undefined）。
+      const spans = rowSpansByKey.get(key);
       // 占比列：值渲染成 value/全集合计，`%` 作为独立文本节点拼接（不进格式化器，
       // 否则 `0,0.00%` 的后缀会被当成小数位数的一部分）。
       const asPercent = percentSet.has(key) && Boolean(format);
@@ -167,12 +186,26 @@ const TableChart: React.FC<TableChartProps> = ({
         ellipsis: !wordWrap,
         // 冻结时把维度列固定在左侧（指标列不固定，避免全表锁死无法横向看指标）。
         ...(freeze && dimensionSet.has(key) ? { fixed: 'left' as const } : {}),
-        // 条件格式：按行取值解析背景色（resolveCellBackground 自带 metric 匹配守卫）。
-        ...(cfRule
+        // 条件格式（#156 AC1）与维度列合并（#156 AC3）共用 onCell：前者按行取值解析背景色
+        // （resolveCellBackground 自带 metric 匹配守卫），后者把预计算的 rowSpan 挂上去。
+        ...(cfRule || spans
           ? {
-              onCell: (record: Record<string, unknown>) => {
-                const bg = resolveCellBackground(cfRule, record?.[key], cfColumnValues, key);
-                return bg ? { style: { backgroundColor: bg } } : {};
+              onCell: (record: Record<string, unknown>, rowIndex?: number) => {
+                const cell: { style?: { backgroundColor: string }; rowSpan?: number } = {};
+                if (cfRule) {
+                  const bg = resolveCellBackground(cfRule, record?.[key], cfColumnValues, key);
+                  if (bg) {
+                    cell.style = { backgroundColor: bg };
+                  }
+                }
+                if (spans) {
+                  const span = spans[rowIndex ?? 0];
+                  // rowSpan=0 表示被上一格吞并（antd 不再渲染本格）；1 表示独占一行。
+                  if (typeof span === 'number') {
+                    cell.rowSpan = span;
+                  }
+                }
+                return cell;
               },
             }
           : {}),
@@ -228,6 +261,7 @@ const TableChart: React.FC<TableChartProps> = ({
     nullDisplay,
     freezeDimensions,
     conditionalFormat,
+    mergeCells,
     pagination,
     onSortChange,
     sortField,

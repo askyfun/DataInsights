@@ -304,6 +304,7 @@ const ChartView: React.FC<ChartViewProps> = ({
         wordWrap={chartStyle.tableWordWrap}
         nullDisplay={chartStyle.tableNullDisplay}
         freezeDimensions={chartStyle.tableFreezeDimensions}
+        mergeCells={chartStyle.tableMergeCells}
         conditionalFormat={chartStyle.tableConditionalFormat}
         // 联动（issue #143）：行点击上报该行在唯一维度列上的取值。没有可点击维度列时
         // 不挂 onRow——否则表行会出现「能点但点了没反应」的手型光标。

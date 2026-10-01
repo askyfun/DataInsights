@@ -331,6 +331,11 @@ export interface ChartStyleConfig {
    * undefined 等价于空数组（无着色）。语义实现在 lib/tableConditionalFormat.ts。
    */
   tableConditionalFormat?: ConditionalFormat[];
+  /**
+   * 表格维度列纵向合并（仅 table，issue #156 AC3）：把「同值相邻」的维度单元格并成一个
+   * 跨多行的单元格。undefined 等价于 false。语义实现在 lib/tableCellMerge.ts。
+   */
+  tableMergeCells?: boolean;
 }
 
 /**

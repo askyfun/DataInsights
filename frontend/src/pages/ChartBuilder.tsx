@@ -1392,6 +1392,15 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               </SettingRow>
             )}
 
+            {showStyleControl('tableMergeCells') && (
+              <SettingRow label="合并维度单元格">
+                <Switch
+                  checked={chartStyle.tableMergeCells ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableMergeCells: checked })}
+                />
+              </SettingRow>
+            )}
+
             {showStyleControl('tableNullDisplay') && (
               <SettingRow label="空值显示">
                 <Select
@@ -3340,6 +3349,7 @@ const ChartBuilder: React.FC = () => {
           wordWrap={chartStyle.tableWordWrap}
           nullDisplay={chartStyle.tableNullDisplay}
           freezeDimensions={chartStyle.tableFreezeDimensions}
+          mergeCells={chartStyle.tableMergeCells}
           conditionalFormat={chartStyle.tableConditionalFormat}
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
           // 排序状态受控：单一事实源是 queryConfig.sort（bindingId 引用），
