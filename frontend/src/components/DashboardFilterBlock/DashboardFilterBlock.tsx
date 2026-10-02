@@ -39,11 +39,6 @@ export interface DashboardFilterBlockProps {
   widget: DashboardFilterWidget;
   /** 原始取值：日期族是 `DateFilterValue`，字符串/数值族是 `unknown[]`。 */
   value: unknown;
-  /**
-   * 该块尚未落库。盘级取数是**后端按已落库的 layout 逐块取数**，所以未保存前这个筛选器
-   * 还作用不到任何图表——不提示的话看起来就像「筛选坏了」。
-   */
-  unsaved?: boolean;
   onChange: (next: unknown) => void;
   /** 换算子（数值族在块上直接改）。 */
   onOperatorChange: (operator: FilterOperator) => void;
@@ -65,7 +60,6 @@ export interface DashboardFilterBlockProps {
 const DashboardFilterBlock: React.FC<DashboardFilterBlockProps> = ({
   widget,
   value,
-  unsaved,
   onChange,
   onOperatorChange,
   onScopeChange,
@@ -244,11 +238,6 @@ const DashboardFilterBlock: React.FC<DashboardFilterBlockProps> = ({
       styles={{ body: { flex: 1, minHeight: 0, padding: 12, overflow: 'auto' } }}
     >
       {renderBody()}
-      {unsaved && (
-        <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-          保存仪表盘后，该筛选条件才会作用到图表。
-        </Text>
-      )}
     </Card>
   );
 };

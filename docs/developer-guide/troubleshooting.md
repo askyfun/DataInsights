@@ -125,7 +125,7 @@
 
 - ⚠️ **`buildOverrides` 的取值形状必须按算子分流**：请求里的值恒为数组，但 `in` / `notIn` 要数组、`between` 要**两个标量**、**标量算子（eq/neq/gt/gte/lt/lte/like）要单个标量**——`buildFilterPart` 对它们是 `append(f.Value)` 单参数绑定，塞数组进去会渲染成 `col = ARRAY[...]`（PG 42883）。`between` 的拆分还必须排在「多值降级为 in」之前，否则区间被吃成 `IN (下界, 上界)`。
 - ⚠️ **`DashboardFilterBinding.column` 必须是列 ID，不是列名**：盘级条件最终以 `entity.Filter.Field` 传给取数，而「哪些字段被盘级条件覆盖」（`overriddenFields`）是拿图表自身过滤条件里的**列 ID**（`OwnFilterFields` ← config 的 `filters[].fieldId`）求交集 —— 存列名这个可见标识永远匹配不上。⚠️ openapi 里 `binding.column` 的描述仍写着「列名」，是改造前的口径，**待同步**（改 description 要重跑 `make api-gen`）。
-- ⚠️ **未落库的筛选器后端读不到**：`/query` 是按**已落库的** `layout_json` 逐块取数、并按同一份 layout 建筛选器索引的，请求里出现未知 `widgetId` 会被静默忽略。所以新加的筛选器必须保存后才生效 —— 块上要提示「保存仪表盘后生效」，否则看起来就是「筛选坏了」。
+- ⚠️ **未落库的筛选器要自带绑定**：`/query` 的筛选器绑定默认来自**已落库的** `layout_json`，请求里出现未知 `widgetId` 会被静默忽略——所以未落库的筛选器必须在请求项里带上 `binding + operator`（issue #172，`mergeRequestFilterBindings` 把它并入投影；同名 `widgetId` 以请求为准）。忘了带就是「配好取值却没反应」。注意：**未落库的图表块**走本地取数（`GET /api/charts/{id}/data`）、不带盘级筛选，新筛选器只作用到已保存的图表块。
 - ⚠️ **盘级筛选每个筛选器每次查询最多一条合并条件**（请求的 values 以 `widgetId` 为键），因此「包含空日期」（区间 OR IS NULL）在仪表盘侧**表达不出来**；图表查询页不受影响。
 - ⚠️ **`isNull` / `isNotNull` 在盘级载荷里要放一个占位元素**：契约用「数组非空」判定激活，空数组 = 未激活。占位用 `null`（`ACTIVATION_PLACEHOLDER`）而不是 `''`，免得被误当成真实比较值。
 - ⚠️ **别用「跳过 isNull」去找展开后的主条件**：`expandDateFilterIntent` 的主条件恒为 `[0]`，「包含空日期」那条 IS NULL 追加在尾部并带 `logic:'or'`；而特殊值「空日期」的主条件**本身就是 isNull**（实测踩过：按 operator 过滤会让「空日期」与保存快照双双退化成 `eq ''`，静默查出 0 行）。
