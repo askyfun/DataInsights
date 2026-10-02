@@ -586,6 +586,46 @@ export const dashboardFoldersApi = {
   },
 };
 
+// Alerts API types（指标预警，issue #155）
+export type AlertRule = G['AlertRule'];
+export type AlertRuleCreate = G['AlertRuleCreate'];
+export type AlertRuleUpdate = G['AlertRuleUpdate'];
+export type AlertTrigger = G['AlertTrigger'];
+
+// Alerts API（指标预警）。metric 是图表查询结果数据行的列键（指标输出别名），
+// 由前端从图表 config 里解析后写入；PUT 遵循「未提供则保留」（行内启用开关只发 enabled）。
+export const alertsApi = {
+  // Get all alert rules（升序）
+  getAll: (): Promise<AxiosResponse<ApiResponse<AlertRule[]>>> => {
+    return apiClient.get<ApiResponse<AlertRule[]>>('/api/alerts');
+  },
+
+  // Get single alert rule
+  getById: (id: string): Promise<AxiosResponse<ApiResponse<AlertRule>>> => {
+    return apiClient.get<ApiResponse<AlertRule>>(`/api/alerts/${id}`);
+  },
+
+  // Create alert rule
+  create: (data: AlertRuleCreate): Promise<AxiosResponse<ApiResponse<AlertRule>>> => {
+    return apiClient.post<ApiResponse<AlertRule>>('/api/alerts', data);
+  },
+
+  // Update alert rule（未提供的字段保留存量）
+  update: (id: string, data: AlertRuleUpdate): Promise<AxiosResponse<ApiResponse<AlertRule>>> => {
+    return apiClient.put<ApiResponse<AlertRule>>(`/api/alerts/${id}`, data);
+  },
+
+  // Delete alert rule
+  delete: (id: string): Promise<AxiosResponse<ApiResponse<{ status: string }>>> => {
+    return apiClient.delete<ApiResponse<{ status: string }>>(`/api/alerts/${id}`);
+  },
+
+  // Get trigger records of one rule（倒序，最多 50 条）
+  getTriggers: (id: string): Promise<AxiosResponse<ApiResponse<AlertTrigger[]>>> => {
+    return apiClient.get<ApiResponse<AlertTrigger[]>>(`/api/alerts/${id}/triggers`);
+  },
+};
+
 // Query records API（地址栏即分享）
 export const queriesApi = {
   // Persist one query configuration; the response carries the address-bar short

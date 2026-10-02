@@ -965,6 +965,121 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OkResponse'
+  /api/alerts:
+    get:
+      tags:
+        - alerts
+      summary: 预警规则列表（issue #155）
+      description: |
+        返回全部未软删预警规则，按 `created_at ASC, id ASC` 排序。第一期不分页。
+        `last_triggered_date` 供前端展示「最近触发日」。
+      operationId: listAlerts
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertListResponse'
+    post:
+      tags:
+        - alerts
+      summary: 新建预警规则
+      description: |
+        id 由后端生成 UUIDv7，enabled 固定为 true（建好后用 PUT 停用）。
+
+        校验：name / metric 非空（否则 20100）；operator ∈ gt/lt/eq（否则 20100）；
+        chart_id 必须指向存在且未软删的图表（否则 20300）。
+      operationId: createAlert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertRuleCreate'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertRuleResponse'
+  /api/alerts/{id}:
+    get:
+      tags:
+        - alerts
+      summary: 获取预警规则详情
+      description: id 不存在或已软删 → 20300。
+      operationId: getAlert
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertRuleResponse'
+    put:
+      tags:
+        - alerts
+      summary: 更新预警规则（未提供的字段保留存量）
+      description: |
+        全部字段可选，遵循本仓库「未提供则保留」约定：缺省或 null 保留存量；
+        name / metric 显式空串 → 20100；operator 非法 → 20100；chart_id 非
+        正整数 → 20100、指向不存在图表 → 20300。enabled 用于启停规则。
+      operationId: updateAlert
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertRuleUpdate'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertRuleResponse'
+    delete:
+      tags:
+        - alerts
+      summary: 删除预警规则（软删，幂等）
+      description: |
+        软删：只打 `deleted_at = now()`，重复删除影响 0 行不报错。
+        触发历史（triggers）保留可查。
+      operationId: deleteAlert
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '200':
+          description: 'HTTP 恒 200；成功 data 为 {status: "ok"}'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /api/alerts/{id}/triggers:
+    get:
+      tags:
+        - alerts
+      summary: 预警触发历史（倒序取最近 50 条）
+      description: |
+        返回该规则的触发记录，`created_at DESC` 排序，上限 50 条（第一期不分页）。
+        规则不存在或已软删 → 20300。notified=false 且 notify_error 非空 = 通知
+        未送达（SMTP 未配置或发送失败），触发本身仍然成立。
+      operationId: listAlertTriggers
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertTriggerListResponse'
   /api/queries:
     post:
       tags:
@@ -3629,6 +3744,176 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/DashboardFolder'
+    AlertRule:
+      type: object
+      description: >-
+        预警规则响应实体（entity.AlertRule，issue #155）。绑定「图表 + 指标
+        （数据行的输出列 alias 键）+ 算子 + 阈值」；后台评估器定时取数评估，
+        同一 UTC 日同一规则只触发一次。
+      required:
+        - id
+        - name
+        - chart_id
+        - metric
+        - operator
+        - threshold
+        - enabled
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          description: UUIDv7 字符串，由后端生成。
+          example: 0198f2c3-4d5e-7a6b-8c9d-0e1f2a3b4c5d
+        name:
+          type: string
+        chart_id:
+          type: integer
+          description: 绑定图表 id；创建/更新时校验存在且未软删（20300）。
+        metric:
+          type: string
+          description: 指标名（图表数据行的输出列 alias 键）。
+        operator:
+          type: string
+          enum: [gt, lt, eq]
+          description: 比较算子：大于 / 小于 / 等于。
+        threshold:
+          type: number
+          format: double
+        enabled:
+          type: boolean
+          description: 是否参与评估；评估器每轮只扫 enabled 规则。
+        created_at:
+          type: string
+          description: RFC3339。
+        updated_at:
+          type: string
+          description: RFC3339；由后端在每次更新时显式前进。
+        last_triggered_date:
+          type: string
+          description: 最近一次触发的 UTC 日期（YYYY-MM-DD）；null/缺省 = 从未触发。
+    AlertRuleCreate:
+      type: object
+      description: >-
+        POST /api/alerts 请求体（entity.AlertRuleCreateRequest）。不含 id 与
+        enabled：主键由后端生成 UUIDv7，enabled 固定 true（用 PUT 停用）。
+      required:
+        - name
+        - chart_id
+        - metric
+        - operator
+        - threshold
+      properties:
+        name:
+          type: string
+        chart_id:
+          type: integer
+        metric:
+          type: string
+        operator:
+          type: string
+          enum: [gt, lt, eq]
+        threshold:
+          type: number
+          format: double
+    AlertRuleUpdate:
+      type: object
+      description: >-
+        PUT /api/alerts/{id} 请求体（entity.AlertRuleUpdateRequest）。全部字段
+        可选，遵循「未提供则保留」。
+      properties:
+        name:
+          type: string
+          description: 缺省/null 保留存量；空串 → 20100。
+        chart_id:
+          type: integer
+          description: 缺省/null 保留存量；指向不存在图表 → 20300。
+        metric:
+          type: string
+          description: 缺省/null 保留存量；空串 → 20100。
+        operator:
+          type: string
+          enum: [gt, lt, eq]
+          description: 缺省/null 保留存量；非法值 → 20100。
+        threshold:
+          type: number
+          format: double
+          description: 缺省/null 保留存量。
+        enabled:
+          type: boolean
+          description: 缺省/null 保留存量。
+    AlertTrigger:
+      type: object
+      description: >-
+        一次触发记录（entity.AlertTrigger）。只追加不改写：notified=false 且
+        notify_error 非空 = 通知未送达（SMTP 未配置或发送失败），触发本身仍成立。
+      required:
+        - id
+        - rule_id
+        - metric_value
+        - threshold
+        - message
+        - notified
+        - created_at
+      properties:
+        id:
+          type: string
+          description: UUIDv7 字符串，由后端生成。
+        rule_id:
+          type: string
+        metric_value:
+          type: number
+          format: double
+          description: 命中的首个越线行数值。
+        threshold:
+          type: number
+          format: double
+        message:
+          type: string
+          description: 人话描述（规则名 + 指标 + 值 + 算子 + 阈值）。
+        notified:
+          type: boolean
+        notify_error:
+          type: string
+          nullable: true
+          description: 通知未送达的原因；成功通知为 null。
+        created_at:
+          type: string
+          description: RFC3339。
+    AlertListResponse:
+      description: GET /api/alerts 响应：data 为 AlertRule 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AlertRule'
+    AlertRuleResponse:
+      description: 预警规则 CRUD 响应：data 为单个 AlertRule。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/AlertRule'
+    AlertTriggerListResponse:
+      description: GET /api/alerts/{id}/triggers 响应：data 为 AlertTrigger 数组（倒序，上限 50）。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AlertTrigger'
     ChartReferenceItem:
       type: object
       description: 引用方仪表盘的最小身份（删除提示只需要这两项）。
@@ -3676,6 +3961,15 @@ components:
         minLength: 36
         maxLength: 36
         pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    AlertId:
+      name: id
+      in: path
+      required: true
+      description: >-
+        预警规则 id（gin 通配符 :id）：UUIDv7 字符串形态（后端生成，非自增）。
+        不存在或已软删 → 20300（id 形态不做前缀校验，原样交给 service）。
+      schema:
+        type: string
     DatasourceId:
       name: id
       in: path
