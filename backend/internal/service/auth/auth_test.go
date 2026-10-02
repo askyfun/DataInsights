@@ -219,3 +219,70 @@ func TestRevoke_Token(t *testing.T) {
 		t.Fatalf("sqlmock: %v", err)
 	}
 }
+
+// --- PAT management (#184) ---
+
+func TestCreatePAT_PlaintextOnceAndExpiry(t *testing.T) {
+	s, mock := newMockAuth(t)
+	// bun renders the autoincrement+nullzero insert as a RETURNING query, not Exec.
+	mock.ExpectQuery(`INSERT INTO "bi_token"`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "revoked_at"}).AddRow(7, nil))
+
+	res, err := s.CreatePAT(context.Background(), 1, "我的 MCP 客户端", false)
+	if err != nil {
+		t.Fatalf("CreatePAT: %v", err)
+	}
+	if !strings.HasPrefix(res.Token, "di_pat_") {
+		t.Fatalf("PAT plaintext must carry di_pat_ prefix, got %q", res.Token)
+	}
+	// Metadata carries only a short head of the secret, never the full plaintext.
+	if res.Info.Prefix == "" || res.Info.Prefix == res.Token || !strings.HasPrefix(res.Token, res.Info.Prefix) {
+		t.Fatalf("info prefix must be a strict head of the token, got prefix=%q", res.Info.Prefix)
+	}
+	if res.Info.ExpiresAt == "" {
+		t.Fatal("default PAT must carry a 90-day expiry")
+	}
+	if res.Info.Name != "我的 MCP 客户端" {
+		t.Fatalf("name not persisted, got %q", res.Info.Name)
+	}
+}
+
+func TestCreatePAT_NeverExpires(t *testing.T) {
+	s, mock := newMockAuth(t)
+	mock.ExpectQuery(`INSERT INTO "bi_token"`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "revoked_at"}).AddRow(8, nil))
+	res, err := s.CreatePAT(context.Background(), 1, "long", true)
+	if err != nil {
+		t.Fatalf("CreatePAT: %v", err)
+	}
+	if res.Info.ExpiresAt != "" {
+		t.Fatalf("never-PAT must have empty expiry, got %q", res.Info.ExpiresAt)
+	}
+}
+
+func TestListPATs_ScopedAndNoSecret(t *testing.T) {
+	s, mock := newMockAuth(t)
+	mock.ExpectQuery(`SELECT .* FROM "bi_token"`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "kind", "name", "token_hash", "prefix", "expires_at", "revoked_at", "created_at"}).
+			AddRow(3, 1, "pat", "ci", "deadbeefdeadbeef", "di_pat_ABCDEF", nil, nil, time.Now()))
+	out, err := s.ListPATs(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("ListPATs: %v", err)
+	}
+	if len(out) != 1 || out[0].Prefix != "di_pat_ABCDEF" || out[0].Revoked {
+		t.Fatalf("unexpected list: %+v", out)
+	}
+}
+
+func TestRevokeByID_ScopedToUser(t *testing.T) {
+	s, mock := newMockAuth(t)
+	// The WHERE must carry user_id (self-scope) — asserting the aliased UPDATE runs.
+	mock.ExpectExec(`UPDATE "bi_token" AS "token" SET revoked_at`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := s.RevokeByID(context.Background(), 1, 3); err != nil {
+		t.Fatalf("RevokeByID: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+}

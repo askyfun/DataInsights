@@ -137,4 +137,16 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	// and logout carries none — a POST would fail on "EOF" before the handler
 	// runs. DELETE never binds a body, so revocation actually executes.
 	router.RegisterDeleteRoute(authProtected, "/logout", authHandler.Logout)
+
+	// PAT management (issue #184). Bearer(allowPAT=false): these are
+	// user-management operations, so a machine token is refused here — creating,
+	// listing and revoking PATs requires a human session (#184 acceptance 3).
+	// The guard itself lives in the middleware; #183 built it, this wires it on.
+	tokenSvc := authSvc // same service
+	tokenHandler := handler.NewTokenHandler(tokenSvc)
+	tokens := api.Group("/tokens")
+	tokens.Use(middleware.Bearer(tokenSvc, false))
+	router.RegisterPostRoute(tokens, "", tokenHandler.Create)
+	router.RegisterGetRoute(tokens, "", tokenHandler.List)
+	router.RegisterDeleteRoute(tokens, "/:id", tokenHandler.Revoke)
 }
