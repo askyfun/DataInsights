@@ -5,7 +5,10 @@ import (
 	"github.com/uptrace/bun"
 
 	"data-insights/internal/handler"
+	"data-insights/internal/middleware"
 	"data-insights/internal/router"
+	"data-insights/internal/service/alert"
+	"data-insights/internal/service/auth"
 	"data-insights/internal/service/chart"
 	"data-insights/internal/service/dashboard"
 	"data-insights/internal/service/dataset"
@@ -18,7 +21,10 @@ import (
 // extractDatasourceID 是抽取存储数据源 id（EXTRACT_DATASOURCE_ID，issue #118 预留，
 // 0=未启用）：数据源列表隐藏它、数据集创建/改指守卫拒绝它、图表查询对 extract
 // 模式数据集显式报错。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourceID int) {
+//
+// 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
+// notifier 也由 main 注入，routes.go 不读环境变量）。
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourceID int, notifier alert.Notifier) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -37,6 +43,11 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	// 归档文件夹树（第一期只归档仪表盘）与仪表盘同库同包，但独立成一个 service，
 	// 因为两者的生命周期守卫不同（夹要查子夹/子盘/环）。
 	dsFolderSvc := dashboard.NewFolderService(db)
+	// 指标预警（issue #155）：规则 CRUD + 后台评估。图表取数与通知都走窄接口
+	// 注入；评估循环由 main.go 用返回值启动。
+	alertSvc := alert.NewService(db)
+	alertSvc.SetChartProvider(dsChartSvc)
+	alertSvc.SetNotifier(notifier)
 
 	// Initialize handlers
 	datasourceHandler := handler.NewDatasourceHandler(dsSvc)
@@ -45,6 +56,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	queryHandler := handler.NewQueryHandler(dsQuerySvc)
 	dashboardHandler := handler.NewDashboardHandler(dsDashboardSvc)
 	dashboardFolderHandler := handler.NewDashboardFolderHandler(dsFolderSvc)
+	alertHandler := handler.NewAlertHandler(alertSvc)
 
 	// API routes
 	api := r.Group("/api")
@@ -74,6 +86,10 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	router.RegisterPostRoute(datasets, "/:id/columns", datasetHandler.UpdateColumns)
 	router.RegisterGetRoute(datasets, "/:id/preview", datasetHandler.Preview)
 	router.RegisterPostRoute(datasets, "/:id/query", datasetHandler.Query)
+	// 本地文件上传（issue #138）：multipart 绑定走不了泛型路由的 ShouldBindJSON，
+	// 循 /health 与 share View 的手工路由先例单独注册。
+	datasets.POST("/import", datasetHandler.ImportFile)
+	datasets.POST("/:id/replace", datasetHandler.ReplaceFile)
 
 	// Chart routes (generic router)
 	charts := api.Group("/charts")
@@ -115,4 +131,49 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	router.RegisterGetRoute(dashboardFolders, "/:id", dashboardFolderHandler.Get)
 	router.RegisterPutRoute(dashboardFolders, "/:id", dashboardFolderHandler.Update)
 	router.RegisterDeleteRoute(dashboardFolders, "/:id", dashboardFolderHandler.Delete)
+
+	// Alert routes (generic router): 指标预警规则的 CRUD、触发历史与后台评估。
+	// {id} 是 UUIDv7 字符串（非自增），按原样交给 service；DELETE 沿用
+	// {"status":"ok"} 出口。
+	alerts := api.Group("/alerts")
+	router.RegisterGetRoute(alerts, "", alertHandler.List)
+	router.RegisterPostRoute(alerts, "", alertHandler.Create)
+	router.RegisterGetRoute(alerts, "/:id", alertHandler.Get)
+	router.RegisterPutRoute(alerts, "/:id", alertHandler.Update)
+	router.RegisterDeleteRoute(alerts, "/:id", alertHandler.Delete)
+	router.RegisterGetRoute(alerts, "/:id/triggers", alertHandler.ListTriggers)
+
+	// Auth routes (R-82 / issue #183). Progressive enforcement: only these
+	// endpoints are behind the bearer middleware for now — the 40 existing
+	// resource endpoints stay open at L0 and opt in as Phase C rolls out.
+	// register/login are public (bootstrap + sign-in); me/logout require a
+	// token. allowPAT=true here because both are self-service identity
+	// operations, not user-management; the PAT-forbidden guard lives on the
+	// token-management endpoints (#184).
+	authSvc := auth.NewService(db)
+	authHandler := handler.NewAuthHandler(authSvc)
+	authPublic := api.Group("/auth")
+	router.RegisterPostRoute(authPublic, "/register", authHandler.Register)
+	router.RegisterPostRoute(authPublic, "/login", authHandler.Login)
+	authProtected := api.Group("/auth")
+	authProtected.Use(middleware.Bearer(authSvc, true))
+	router.RegisterGetRoute(authProtected, "/me", authHandler.Me)
+	// DELETE, not POST: the generic router binds a JSON body for every POST,
+	// and logout carries none — a POST would fail on "EOF" before the handler
+	// runs. DELETE never binds a body, so revocation actually executes.
+	router.RegisterDeleteRoute(authProtected, "/logout", authHandler.Logout)
+
+	// PAT management (issue #184). Bearer(allowPAT=false): these are
+	// user-management operations, so a machine token is refused here — creating,
+	// listing and revoking PATs requires a human session (#184 acceptance 3).
+	// The guard itself lives in the middleware; #183 built it, this wires it on.
+	tokenSvc := authSvc // same service
+	tokenHandler := handler.NewTokenHandler(tokenSvc)
+	tokens := api.Group("/tokens")
+	tokens.Use(middleware.Bearer(tokenSvc, false))
+	router.RegisterPostRoute(tokens, "", tokenHandler.Create)
+	router.RegisterGetRoute(tokens, "", tokenHandler.List)
+	router.RegisterDeleteRoute(tokens, "/:id", tokenHandler.Revoke)
+
+	return alertSvc
 }

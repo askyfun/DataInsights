@@ -20,7 +20,11 @@ type Datasource struct {
 	Password     string       `bun:"password" json:"password"`
 	CreatedAt    sql.NullTime `bun:"created_at" json:"created_at"`
 	UpdatedAt    sql.NullTime `bun:"updated_at" json:"updated_at"`
-	DeletedAt    sql.NullTime `bun:"deleted_at,nullzero" json:"-"`
+	// OwnerID is the R-22 audit column (migration 00009): who created the row.
+	// L0 has no accounts, so create paths stamp model.SystemOwnerID and read
+	// paths never filter on it. Hidden from the API surface (entity omits it).
+	OwnerID   sql.NullInt32 `bun:"owner_id,nullzero" json:"-"`
+	DeletedAt sql.NullTime  `bun:"deleted_at,nullzero" json:"-"`
 }
 
 // Dataset represents a data set
@@ -45,6 +49,7 @@ type Dataset struct {
 	ShardKeys        string         `bun:"shard_keys" json:"shard_keys"`
 	CreatedAt        sql.NullTime   `bun:"created_at" json:"created_at"`
 	UpdatedAt        sql.NullTime   `bun:"updated_at" json:"updated_at"`
+	OwnerID          sql.NullInt32  `bun:"owner_id,nullzero" json:"-"`
 	DeletedAt        sql.NullTime   `bun:"deleted_at,nullzero" json:"-"`
 }
 
@@ -136,12 +141,13 @@ type DatasetLineage struct {
 type Chart struct {
 	bun.BaseModel `bun:"bi_chart"`
 
-	ID        int          `bun:"id,pk,autoincrement" json:"id"`
-	Name      string       `bun:"name" json:"name"`
-	DatasetID int          `bun:"dataset_id" json:"dataset_id"`
-	ChartType string       `bun:"chart_type" json:"chart_type"`
-	Config    string       `bun:"config" json:"config"`
-	CreatedAt sql.NullTime `bun:"created_at" json:"created_at"`
-	UpdatedAt sql.NullTime `bun:"updated_at" json:"updated_at"`
-	DeletedAt sql.NullTime `bun:"deleted_at,nullzero" json:"-"`
+	ID        int           `bun:"id,pk,autoincrement" json:"id"`
+	Name      string        `bun:"name" json:"name"`
+	DatasetID int           `bun:"dataset_id" json:"dataset_id"`
+	ChartType string        `bun:"chart_type" json:"chart_type"`
+	Config    string        `bun:"config" json:"config"`
+	CreatedAt sql.NullTime  `bun:"created_at" json:"created_at"`
+	UpdatedAt sql.NullTime  `bun:"updated_at" json:"updated_at"`
+	OwnerID   sql.NullInt32 `bun:"owner_id,nullzero" json:"-"`
+	DeletedAt sql.NullTime  `bun:"deleted_at,nullzero" json:"-"`
 }

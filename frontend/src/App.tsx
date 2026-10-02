@@ -1,4 +1,5 @@
 import {
+  AlertOutlined,
   AppstoreOutlined,
   BarChartOutlined,
   BuildOutlined,
@@ -7,6 +8,7 @@ import {
   DatabaseOutlined,
   GlobalOutlined,
   MenuOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
 import { lazy, Suspense, useEffect, useState } from 'react';
@@ -17,6 +19,8 @@ import { useLocale } from './i18n/useLocale';
 import { type ThemeMode, useTheme } from './lib/theme';
 
 // 页面级代码分割：各路由按需加载，echarts / 图表构建等重资源不再进首屏 bundle。
+const AccountPage = lazy(() => import('./pages/Account'));
+const AlertsPage = lazy(() => import('./pages/Alerts'));
 const ChartBuilder = lazy(() => import('./pages/ChartBuilder'));
 const ChartsPage = lazy(() => import('./pages/Charts'));
 const DashboardEditor = lazy(() => import('./pages/DashboardEditor'));
@@ -85,6 +89,16 @@ const App: React.FC = () => {
       key: '/datasources',
       icon: <DatabaseOutlined />,
       label: <Link to="/datasources">{intl.formatMessage({ id: 'nav.datasources' })}</Link>,
+    },
+    {
+      key: '/alerts',
+      icon: <AlertOutlined />,
+      label: <Link to="/alerts">{intl.formatMessage({ id: 'nav.alerts' })}</Link>,
+    },
+    {
+      key: '/account',
+      icon: <UserOutlined />,
+      label: <Link to="/account">{intl.formatMessage({ id: 'nav.account' })}</Link>,
     },
   ];
 
@@ -230,6 +244,8 @@ const App: React.FC = () => {
                 <Route path="/datasets/:id/edit" element={<DatasetEdit />} />
                 <Route path="/chart-builder" element={<ChartBuilder />} />
                 <Route path="/charts" element={<ChartsPage />} />
+                <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/account" element={<AccountPage />} />
               </Routes>
             </Suspense>
           </Content>

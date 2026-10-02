@@ -46,6 +46,11 @@ export interface DashboardFilterWidgetRef {
   operator: string;
   multi: boolean;
   date?: { granularity: DateGranularity; weekStart: WeekStart };
+  /**
+   * 绑定字段（(datasetId, column) 二元组）。下发时随值一起带给后端，未落库的筛选器
+   * 后端才认得出绑定（issue #172）；已落库的筛选器带上它是幂等的（与 layout 一致）。
+   */
+  binding?: { datasetId: number; column: string };
 }
 
 /** 各族可用的算子（控件据此渲染下拉；也用来校验布局里被手改过的算子）。 */
@@ -76,6 +81,12 @@ export interface DashboardQueryFilterValue {
   widgetId: string;
   /** 空数组 = 未激活（不参与合并）。 */
   value: unknown[];
+  /**
+   * 绑定字段与算子。未落库的筛选器必须带上（后端没有它的 layout 记录，只能从请求读）；
+   * 已落库的筛选器带上也无妨（后端以请求为准，值与 layout 一致时结果不变）。
+   */
+  binding?: { datasetId: number; column: string };
+  operator?: string;
 }
 
 /**
@@ -167,6 +178,9 @@ export function filterWidgetQueryValue(
  *
  * 只下发**已激活**的块：未激活的块不出现在数组里（而不是出现且值为空数组）——
  * 两种写法后端行为一致，但少发一条更省事，也让「请求是取值的唯一真相源」更好读。
+ *
+ * 自带 binding 的块会把 binding + operator 一并下发：后端据此认领未落库的筛选器
+ * （issue #172），已落库的块带上等价绑定、结果不变。
  */
 export function dashboardFiltersPayload(
   widgets: readonly DashboardFilterWidgetRef[],
@@ -178,7 +192,12 @@ export function dashboardFiltersPayload(
     if (!(widget.widgetId in values)) continue;
     const value = filterWidgetQueryValue(widget, values[widget.widgetId], now);
     if (value.length === 0) continue;
-    payload.push({ widgetId: widget.widgetId, value });
+    const entry: DashboardQueryFilterValue = { widgetId: widget.widgetId, value };
+    if (widget.binding) {
+      entry.binding = { datasetId: widget.binding.datasetId, column: widget.binding.column };
+      entry.operator = widget.operator;
+    }
+    payload.push(entry);
   }
   return payload;
 }

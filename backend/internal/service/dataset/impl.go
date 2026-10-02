@@ -12,6 +12,7 @@ import (
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/extract"
+	"data-insights/internal/expr"
 	"data-insights/internal/idgen"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
@@ -38,6 +39,14 @@ type Service interface {
 	// Data operations
 	Preview(ctx context.Context, id int) (*entity.PreviewResult, error)
 	Query(ctx context.Context, id int, config entity.QueryConfig) ([]map[string]any, error)
+
+	// File import (issue #138): land an uploaded CSV/XLSX in the extract
+	// storage datasource and register the resulting extract dataset.
+	ImportFile(ctx context.Context, req ImportRequest) (*entity.Dataset, error)
+
+	// ReplaceFile re-uploads a file over an existing extract dataset,
+	// preserving column ids whose display name is unchanged.
+	ReplaceFile(ctx context.Context, id int, req ImportRequest) (*entity.Dataset, error)
 
 	// SetSecurityKey injects the 32-byte AES key used to decrypt datasource
 	// passwords at rest. A nil key keeps plaintext passthrough (dev mode).
@@ -109,6 +118,8 @@ func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entit
 	// bun 对零值 sql.NullTime 发显式 NULL（绕过列 DEFAULT CURRENT_TIMESTAMP），
 	// 故 updated_at 需与 created_at 一样在插入时显式打戳，否则新建行 updated_at 为空。
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	// R-22 归属（#171）：L0 无账号，打系统占位 id；#183 落地后换成上下文真实用户。
+	m.OwnerID = sql.NullInt32{Int32: model.SystemOwnerID, Valid: true}
 	if _, err := s.db.NewInsert().Model(m).Returning("*").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create dataset: %w", err)
 	}
@@ -126,7 +137,8 @@ func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entit
 	// 不前进（DB 无触发器兜底）。显式打当前时间，让 bun 的整行更新写入新值；
 	// created_at 仍走 toDatasetModel 的透传（merge 负责保留）。
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
-	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
+	// 归属由创建决定、Update 不改（#171 验收 2）：整行更新排除 owner_id。
+	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at", "owner_id").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update dataset: %w", err)
 	}
 	updated := &model.Dataset{ID: ds.ID}
@@ -140,6 +152,18 @@ func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entit
 // charts — within a single transaction.
 // The row is never physically removed (deleted_at is stamped instead).
 func (s *datasetService) Delete(ctx context.Context, id int) error {
+	// Only when extract storage is configured is there a physical table to
+	// release; the lookup is skipped otherwise so the disabled path stays a
+	// single idempotent transaction. A missing/already-deleted row keeps the
+	// historical no-op behaviour.
+	if s.extract.Enabled() {
+		if ds, err := s.getDatasetModel(ctx, id); err == nil &&
+			ds.Mode == "extract" && ds.DatasourceID == s.extract.DatasourceID {
+			if err := s.dropExtractTable(ctx, id); err != nil {
+				return err
+			}
+		}
+	}
 	return database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
 		// 软删数据集自身（幂等：已删除/不存在影响 0 行不报错）。
 		if _, err := tx.NewUpdate().
@@ -312,6 +336,17 @@ func mapDatasetColumns(dbColumns []datasource.ColumnInfo, dsType string) []entit
 
 // UpdateColumns updates columns for a dataset
 func (s *datasetService) UpdateColumns(ctx context.Context, id int, columns []entity.DatasetColumn) (*entity.Dataset, error) {
+	// 表达式围栏（issue #170）：虚拟字段 expr 会原样进入 SQL，写入口先过
+	// internal/expr 白名单，恶意表达式在落库前即被拒绝（校验前移）。
+	for _, col := range columns {
+		if col.Expr == "" {
+			continue
+		}
+		if err := expr.Validate(col.Expr); err != nil {
+			return nil, router.NewBusinessError(response.CodeBadRequest, fmt.Sprintf("column %q: %v", col.Name, err))
+		}
+	}
+
 	ds, err := s.getDatasetModel(ctx, id)
 	if err != nil {
 		return nil, err
@@ -326,7 +361,8 @@ func (s *datasetService) UpdateColumns(ctx context.Context, id int, columns []en
 	}
 	ds.Columns = string(columnsJSON)
 
-	if _, err := s.db.NewUpdate().Model(ds).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
+	// 归属由创建决定、写列不改（#171 验收 2）：整行更新排除 owner_id。
+	if _, err := s.db.NewUpdate().Model(ds).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at", "owner_id").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update columns: %w", err)
 	}
 

@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -51,7 +52,30 @@ type Config struct {
 	// ExtractDatasourceID 指定作为「抽取数据集统一存储」的数据源 id（issue #118 预留）。
 	// 0 = 未启用：抽取存储数据源不存在，所有抽取守卫退化为放行。
 	ExtractDatasourceID int
+	// Alert 是指标预警（issue #155）的运行期配置：评估间隔 + SMTP 通知。
+	Alert AlertConfig
 }
+
+// AlertConfig 聚合预警模块的环境变量。SMTP 五项 + 收件人任何一项缺失都不拦启动：
+// 邮件通知未配置时评估器照常运行，触发记录的 notify_error 会说明原因。
+type AlertConfig struct {
+	// EvalIntervalSeconds 是评估轮询间隔（秒），默认 defaultAlertEvalInterval。
+	EvalIntervalSeconds int
+	SMTPHost            string
+	SMTPPort            string
+	SMTPUsername        string
+	SMTPPassword        string
+	SMTPFrom            string
+	// NotifyEmails 是收件人列表（逗号分隔原样保留，拆分交给消费方）。
+	NotifyEmails string
+}
+
+const (
+	// defaultAlertEvalInterval 是未设置 ALERT_EVAL_INTERVAL 时的轮询秒数（5 分钟）。
+	defaultAlertEvalInterval = 300
+	// defaultAlertSMTPPort 是未设置 SMTP_PORT 时的提交端口（587 = STARTTLS 语义）。
+	defaultAlertSMTPPort = "587"
+)
 
 type DatabaseConfig struct {
 	Url string
@@ -147,6 +171,39 @@ func (c *Config) Load() error {
 			origins[i] = strings.TrimSpace(origins[i])
 		}
 		c.CORS.AllowedOrigins = origins
+	}
+
+	// 预警评估间隔：非法值不 fail-fast（预警是旁路功能，配置错误不该拦住整个服务
+	// 启动），回退默认值并打日志。
+	c.Alert.EvalIntervalSeconds = defaultAlertEvalInterval
+	if v := os.Getenv("ALERT_EVAL_INTERVAL"); v != "" {
+		secs, err := strconv.Atoi(v)
+		if err != nil || secs < 1 {
+			slog.Warn("invalid ALERT_EVAL_INTERVAL, falling back to default",
+				"value", v, "default", defaultAlertEvalInterval)
+		} else {
+			c.Alert.EvalIntervalSeconds = secs
+		}
+	}
+
+	if v := os.Getenv("SMTP_HOST"); v != "" {
+		c.Alert.SMTPHost = v
+	}
+	c.Alert.SMTPPort = defaultAlertSMTPPort
+	if v := os.Getenv("SMTP_PORT"); v != "" {
+		c.Alert.SMTPPort = v
+	}
+	if v := os.Getenv("SMTP_USERNAME"); v != "" {
+		c.Alert.SMTPUsername = v
+	}
+	if v := os.Getenv("SMTP_PASSWORD"); v != "" {
+		c.Alert.SMTPPassword = v
+	}
+	if v := os.Getenv("SMTP_FROM"); v != "" {
+		c.Alert.SMTPFrom = v
+	}
+	if v := os.Getenv("ALERT_NOTIFY_EMAIL"); v != "" {
+		c.Alert.NotifyEmails = v
 	}
 
 	return nil

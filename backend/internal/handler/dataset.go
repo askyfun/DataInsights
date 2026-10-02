@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/response"
@@ -362,4 +366,82 @@ func (h *DatasetHandler) Query(req router.Request[datasetQueryIn], res *router.R
 	}
 	res.Out = result
 	return nil
+}
+
+// --- 本地文件上传（issue #138） ---
+//
+// multipart/form-data 绑定与泛型路由的 ShouldBindJSON 语义不兼容（后者对 POST
+// 一律按 JSON 解），循 /health 与 share View 的手工路由先例：这两个端点以裸
+// *gin.Context handler 注册（见 cmd/routes.go），不走 RegisterRoute[In, Out]。
+
+// respondServiceError mirrors the generic router's error mapping: business
+// errors carry their code, everything else is a 500.
+func respondServiceError(c *gin.Context, err error) {
+	var bizErr router.BusinessError
+	if errors.As(err, &bizErr) {
+		response.Error(c, bizErr.Code, bizErr.Message)
+		return
+	}
+	response.InternalError(c, err.Error())
+}
+
+// readUpload pulls the multipart "file" field out of the request and loads it
+// into memory. Size/emptiness/format validation lives in the service layer
+// (parseUpload / extract.MaxUploadBytes), so the handler stays a thin shim.
+func readUpload(c *gin.Context) (dataset.ImportRequest, bool) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		response.Error(c, response.CodeBadRequest,
+			"file is required: send multipart/form-data with a 'file' field (.csv or .xlsx)")
+		return dataset.ImportRequest{}, false
+	}
+	src, err := fileHeader.Open()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return dataset.ImportRequest{}, false
+	}
+	defer src.Close()
+	data, err := io.ReadAll(src)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return dataset.ImportRequest{}, false
+	}
+	return dataset.ImportRequest{
+		Name:     c.PostForm("name"),
+		Filename: fileHeader.Filename,
+		Data:     data,
+	}, true
+}
+
+// ImportFile handles POST /api/datasets/import
+func (h *DatasetHandler) ImportFile(c *gin.Context) {
+	upload, ok := readUpload(c)
+	if !ok {
+		return
+	}
+	ds, err := h.svc.ImportFile(c.Request.Context(), upload)
+	if err != nil {
+		respondServiceError(c, err)
+		return
+	}
+	response.Success(c, ds)
+}
+
+// ReplaceFile handles POST /api/datasets/:id/replace
+func (h *DatasetHandler) ReplaceFile(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.Error(c, response.CodeBadRequest, "invalid id")
+		return
+	}
+	upload, ok := readUpload(c)
+	if !ok {
+		return
+	}
+	ds, err := h.svc.ReplaceFile(c.Request.Context(), id, upload)
+	if err != nil {
+		respondServiceError(c, err)
+		return
+	}
+	response.Success(c, ds)
 }

@@ -347,6 +347,23 @@ describe('buildChartOption：结构化聚合响应（正常路径）', () => {
   });
 });
 
+describe('buildChartOption：减少动态效果（无障碍 issue #67）', () => {
+  const context = { title: 'Sales', dimensions: ['product'], metrics: ['revenue'] };
+
+  it('reducedMotion 为 true 时顶层关闭 ECharts 动画（初始化与更新都不位移）', () => {
+    const option = view<{ animation?: unknown }>(
+      buildChartOption('bar', axisPayload, baseStyle, {}, { ...context, reducedMotion: true })
+    );
+    expect(option.animation).toBe(false);
+  });
+
+  it('reducedMotion 缺省时**不带** animation 键（走 ECharts 默认，零回归）', () => {
+    const option = buildChartOption('bar', axisPayload, baseStyle, {}, context);
+    expect(option).not.toBeNull();
+    expect(Object.prototype.hasOwnProperty.call(option, 'animation')).toBe(false);
+  });
+});
+
 describe('buildChartOption：返回 null 的边界', () => {
   it('table/pivot 走 TableChart，不产出 ECharts option', () => {
     const tablePayload = {
@@ -1978,5 +1995,121 @@ describe('buildChartOption：主题取色（host → 字面色值）', () => {
     // 浅色兜底取近黑文本，与深色兜底明显不同
     expect(option.textStyle.color).toBe('#1f2328');
     expect(option.yAxis.splitLine?.lineStyle?.color).toBe('#e6e8eb');
+  });
+});
+
+describe('buildChartOption：大数据渲染（issue #76）', () => {
+  interface DenseSeriesView {
+    type: string;
+    data: unknown;
+    sampling?: string;
+    large?: boolean;
+    largeThreshold?: number;
+  }
+  interface DenseOptionView {
+    animation?: boolean;
+    series: DenseSeriesView[];
+  }
+
+  const N = 1500;
+  const denseAxisPayload = {
+    x_axis: Array.from({ length: N }, (_, i) => `c${i}`),
+    series: [{ name: 'revenue', data: Array.from({ length: N }, (_, i) => i) }],
+  };
+
+  it('不密集（点数低于阈值）时不带抽稀/大图/动画键，option 与本改动前等价', () => {
+    const option = view<DenseOptionView>(
+      buildChartOption(
+        'line',
+        axisPayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['product'],
+          metrics: ['revenue'],
+        }
+      )
+    );
+    expect(option.animation).toBeUndefined();
+    expect(option.series[0].sampling).toBeUndefined();
+    expect(option.series[0].large).toBeUndefined();
+  });
+
+  it('折线图顶到阈值：series 挂 LTTB 抽稀 + 顶层关动画', () => {
+    const option = view<DenseOptionView>(
+      buildChartOption(
+        'line',
+        denseAxisPayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['c'],
+          metrics: ['revenue'],
+        }
+      )
+    );
+    expect(option.animation).toBe(false);
+    expect(option.series[0].sampling).toBe('lttb');
+    expect(option.series[0].large).toBeUndefined();
+  });
+
+  it('柱状图顶到阈值：series 走大图模式（large + largeThreshold）', () => {
+    const option = view<DenseOptionView>(
+      buildChartOption(
+        'bar',
+        denseAxisPayload,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['c'],
+          metrics: ['revenue'],
+        }
+      )
+    );
+    expect(option.animation).toBe(false);
+    expect(option.series[0].large).toBe(true);
+    expect(option.series[0].largeThreshold).toBe(1000);
+    expect(option.series[0].sampling).toBeUndefined();
+  });
+
+  it('散点图顶到阈值：series 走大图模式', () => {
+    const scatter = { data: Array.from({ length: 1000 }, (_, i) => [i, i]) };
+    const option = view<DenseOptionView>(
+      buildChartOption(
+        'scatter',
+        scatter,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: [],
+          metrics: ['x', 'y'],
+        }
+      )
+    );
+    expect(option.animation).toBe(false);
+    expect(option.series[0].large).toBe(true);
+  });
+
+  it('legacy 裸行回退同样受阈值驱动（>1000 行折线挂抽稀）', () => {
+    const rows = Array.from({ length: 1200 }, (_, i) => ({ c: `c${i}`, revenue: i }));
+    const option = view<DenseOptionView>(
+      buildChartOption(
+        'line',
+        rows,
+        baseStyle,
+        {},
+        {
+          title: '',
+          dimensions: ['c'],
+          metrics: ['revenue'],
+        }
+      )
+    );
+    expect(option.animation).toBe(false);
+    expect(option.series[0].sampling).toBe('lttb');
   });
 });

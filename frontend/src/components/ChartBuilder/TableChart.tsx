@@ -3,6 +3,15 @@ import { Empty, Table } from 'antd';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { formatMetricValue, formatPercentOfTotal, splitPercentFormat } from '@/lib/format';
+import { computeRowSpans } from '@/lib/tableCellMerge';
+import { type ConditionalFormat, resolveCellBackground } from '@/lib/tableConditionalFormat';
+import {
+  buildSparklineSeries,
+  detectDateDimension,
+  rowGroupKey,
+  sparklinePoints,
+} from '@/lib/tableSparkline';
+import { transposeTable } from '@/lib/tableTranspose';
 import LoadingPlaceholder from '../LoadingPlaceholder';
 
 interface TableChartProps {
@@ -34,6 +43,32 @@ interface TableChartProps {
   nullDisplay?: 'raw' | 'dash' | 'blank' | 'zero';
   /** 冻结维度列：横向滚动时把维度列（含序号列）固定在左侧。 */
   freezeDimensions?: boolean;
+  /**
+   * 条件格式规则（issue #156 AC1）：按指标列的值给单元格着背景色。
+   * 语义见 lib/tableConditionalFormat.ts；缺省/空数组不着色。
+   * 只作用于明细行——合计行走 Summary 单元格，不参与着色。
+   */
+  conditionalFormat?: ConditionalFormat[];
+  /**
+   * 维度列纵向合并（issue #156 AC3）：把「同值相邻」的维度单元格并成一个跨多行的单元格。
+   * 语义见 lib/tableCellMerge.ts（空值不合并、只处理当前渲染的这批行）。只合并维度列——
+   * 指标列出现重复取值是常态，合并它没有意义。缺省 false（不着合并）。
+   */
+  mergeCells?: boolean;
+  /**
+   * 行列转置（issue #156 AC2）：维度取值变列标题、指标变行（纯渲染层换位，见
+   * lib/tableTranspose.ts）。没有维度列时无从转置，回落普通渲染。
+   * ⚠️ 列语义已互换，转置开启时序号列/冻结列/维度合并/条件格式/表头排序/服务端
+   * 分页/合计行/行点击**均不参与**（它们都建立在「一行 = 一个维度组合」的原语义上）。
+   */
+  transpose?: boolean;
+  /**
+   * 迷你图列（issue #156 AC4）：在行尾追加「趋势」列，行内 sparkline 画该行
+   * 维度组合（非日期维度分组）的指标序列（按日期列升序）。需要存在日期形状的
+   * 维度列才启用（列由数据形状探测，见 lib/tableSparkline.ts）；没有日期维度或
+   * 转置开启时不渲染。⚠️ 服务端分页下序列只含当前页的行（扁平负载的固有限制）。
+   */
+  sparkline?: boolean;
   /**
    * 合计行（issue #131）：键为指标列的输出列名，值由后端在过滤后的**完整数据集**上
    * 重算。传入即在表尾渲染一行合计；缺省不渲染。
@@ -67,6 +102,9 @@ interface TableChartProps {
 /** 序号列的常量 dataIndex（不参与取数，仅占位）；合计行据此把它与真实数据列区分开。 */
 const INDEX_COLUMN_DATA_INDEX = '__row_index__';
 
+/** 迷你图列的常量 dataIndex（不参与取数，仅占位）。 */
+const SPARKLINE_COLUMN_KEY = '__sparkline__';
+
 const TableChart: React.FC<TableChartProps> = ({
   data,
   loading,
@@ -81,6 +119,10 @@ const TableChart: React.FC<TableChartProps> = ({
   wordWrap,
   nullDisplay,
   freezeDimensions,
+  conditionalFormat,
+  mergeCells,
+  transpose,
+  sparkline,
   totalRow,
   rowSize = 'small',
   pagination,
@@ -90,6 +132,33 @@ const TableChart: React.FC<TableChartProps> = ({
   onSortChange,
   onRowClick,
 }) => {
+  // 行列转置（#156 AC2）：纯渲染层换位；没有维度列时 transposeTable 返回 null，回落普通渲染。
+  const transposed = useMemo(
+    () => (transpose ? transposeTable(data || [], dimensionNames || []) : null),
+    [transpose, data, dimensionNames]
+  );
+
+  // 迷你图列（#156 AC4）：日期维度列按数据形状探测；序列按非日期维度分组、组内按日期
+  // 升序取第一个指标。探测不到日期维度 / 没有指标可画时为 null（列不出现）。
+  const sparklineData = useMemo(() => {
+    if (!sparkline || transpose || !dimensionNames?.length) return null;
+    const dateColumn = detectDateDimension(data || [], dimensionNames);
+    if (!dateColumn) return null;
+    const dimSet = new Set(dimensionNames);
+    const firstRow = (data || [])[0] ?? {};
+    const metricKey = Object.keys(firstRow).find((k) => !dimSet.has(k));
+    if (!metricKey) return null;
+    return {
+      groupDims: dimensionNames.filter((d) => d !== dateColumn),
+      series: buildSparklineSeries(
+        data || [],
+        dimensionNames.filter((d) => d !== dateColumn),
+        dateColumn,
+        metricKey
+      ),
+    };
+  }, [sparkline, transpose, dimensionNames, data]);
+
   const columns: TableProps<any>['columns'] = useMemo(() => {
     const keys =
       propColumns && propColumns.length > 0
@@ -134,8 +203,23 @@ const TableChart: React.FC<TableChartProps> = ({
     const freeze = Boolean(freezeDimensions) && dimensionSet.size > 0;
     const percentSet = new Set(metricPercentOfTotal || []);
 
+    // 维度列合并（#156 AC3）：只对维度列、且只在开启时预计算每行的 rowSpan。
+    // 没有 dimensionNames 就无从判断哪些列是维度（分享页只读表格常如此），此时不合并。
+    const rowSpansByKey = new Map<string, number[]>();
+    if (mergeCells && dimensionSet.size > 0) {
+      for (const key of dimensionSet) {
+        rowSpansByKey.set(key, computeRowSpans((data || []).map((row) => row?.[key])));
+      }
+    }
+
     const dataColumns = orderedKeys.map((key) => {
       const format = metricFormats?.[key];
+      // 条件格式（#156 AC1）：该列的规则与列内全部取值（scale 归一分母取当前渲染数据）。
+      // 着色挂在 onCell 上（整格背景），与 render 的文本格式化互不干扰。
+      const cfRule = conditionalFormat?.find((r) => r.metric === key);
+      const cfColumnValues = cfRule ? (data || []).map((row) => row?.[key]) : [];
+      // 维度列合并（#156 AC3）：该列每行的 rowSpan（未开启合并 / 非维度列为 undefined）。
+      const spans = rowSpansByKey.get(key);
       // 占比列：值渲染成 value/全集合计，`%` 作为独立文本节点拼接（不进格式化器，
       // 否则 `0,0.00%` 的后缀会被当成小数位数的一部分）。
       const asPercent = percentSet.has(key) && Boolean(format);
@@ -155,6 +239,29 @@ const TableChart: React.FC<TableChartProps> = ({
         ellipsis: !wordWrap,
         // 冻结时把维度列固定在左侧（指标列不固定，避免全表锁死无法横向看指标）。
         ...(freeze && dimensionSet.has(key) ? { fixed: 'left' as const } : {}),
+        // 条件格式（#156 AC1）与维度列合并（#156 AC3）共用 onCell：前者按行取值解析背景色
+        // （resolveCellBackground 自带 metric 匹配守卫），后者把预计算的 rowSpan 挂上去。
+        ...(cfRule || spans
+          ? {
+              onCell: (record: Record<string, unknown>, rowIndex?: number) => {
+                const cell: { style?: { backgroundColor: string }; rowSpan?: number } = {};
+                if (cfRule) {
+                  const bg = resolveCellBackground(cfRule, record?.[key], cfColumnValues, key);
+                  if (bg) {
+                    cell.style = { backgroundColor: bg };
+                  }
+                }
+                if (spans) {
+                  const span = spans[rowIndex ?? 0];
+                  // rowSpan=0 表示被上一格吞并（antd 不再渲染本格）；1 表示独占一行。
+                  if (typeof span === 'number') {
+                    cell.rowSpan = span;
+                  }
+                }
+                return cell;
+              },
+            }
+          : {}),
         // 展示层渲染：空值按 nullDisplay 占位，指标列套格式（'raw' 且无格式时不进入这里）。
         ...(needsRender
           ? {
@@ -177,8 +284,30 @@ const TableChart: React.FC<TableChartProps> = ({
       };
     });
 
+    // 迷你图列（#156 AC4）：追加在数据列之后；该行的组序列画不出线（点被剔除光）
+    // 时保留空单元格，不画假象。
+    const sparkColumn = sparklineData
+      ? {
+          title: '趋势',
+          dataIndex: SPARKLINE_COLUMN_KEY,
+          key: SPARKLINE_COLUMN_KEY,
+          width: 96,
+          ellipsis: false,
+          render: (_v: unknown, record: Record<string, unknown>) => {
+            const values = sparklineData.series.get(rowGroupKey(record, sparklineData.groupDims));
+            const points = values ? sparklinePoints(values, 80, 24) : '';
+            if (!points) return null;
+            return (
+              <svg width="80" height="24" viewBox="0 0 80 24" aria-hidden="true">
+                <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            );
+          },
+        }
+      : null;
+
     if (!showIndex) {
-      return dataColumns;
+      return sparkColumn ? [...dataColumns, sparkColumn] : dataColumns;
     }
     // 序号列：跨服务端分页连续编号（当前页行下标 + 页偏移），冻结时随维度列固定在左。
     const pageIndex = pagination ? (pagination.page - 1) * pagination.pageSize : 0;
@@ -192,7 +321,7 @@ const TableChart: React.FC<TableChartProps> = ({
       ...(freeze ? { fixed: 'left' as const } : {}),
       render: (_value: unknown, _record: unknown, index: number) => pageIndex + index + 1,
     };
-    return [indexColumn, ...dataColumns];
+    return sparkColumn ? [indexColumn, ...dataColumns, sparkColumn] : [indexColumn, ...dataColumns];
   }, [
     columnLabels,
     data,
@@ -206,6 +335,9 @@ const TableChart: React.FC<TableChartProps> = ({
     wordWrap,
     nullDisplay,
     freezeDimensions,
+    conditionalFormat,
+    mergeCells,
+    sparklineData,
     pagination,
     onSortChange,
     sortField,
@@ -317,6 +449,54 @@ const TableChart: React.FC<TableChartProps> = ({
         description="暂无数据"
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         style={{ padding: '100px 0' }}
+      />
+    );
+  }
+
+  // 行列转置（#156 AC2）：换位后的独立渲染臂。列语义已互换（一行 = 一个指标），
+  // 序号列/冻结/合并/条件格式/排序/服务端分页/合计行/行点击都不参与（props 注释已声明）。
+  // 值格沿用「空值显示 + 指标格式」的展示层口径（按行 metricKey 查格式）。
+  if (transposed) {
+    const transposeRows = transposed.rows.map((row) => ({
+      key: row.metricKey,
+      metric: row.metricLabel,
+      metricKey: row.metricKey,
+      ...row.values,
+    }));
+    const transposeColumns: TableProps<any>['columns'] = [
+      {
+        title: transposed.columns[0].title,
+        dataIndex: 'metric',
+        key: 'metric',
+        fixed: 'left' as const,
+        ellipsis: !wordWrap,
+        render: (value: unknown) => (value === null || value === undefined ? '' : String(value)),
+      },
+      ...transposed.columns.slice(1).map((col) => ({
+        title: col.title,
+        dataIndex: col.key,
+        key: col.key,
+        ellipsis: !wordWrap,
+        render: (value: unknown, record: Record<string, unknown>) => {
+          if (value === null || value === undefined || value === '') {
+            return nullPlaceholder(nullDisplay) ?? '';
+          }
+          const format = metricFormats?.[String(record.metricKey)];
+          if (format) {
+            return formatMetricValue(value, splitPercentFormat(format).base);
+          }
+          return String(value);
+        },
+      })),
+    ];
+    return (
+      <Table
+        dataSource={transposeRows}
+        columns={transposeColumns}
+        pagination={false}
+        bordered
+        size={rowSize}
+        scroll={{ x: 'max-content' }}
       />
     );
   }
