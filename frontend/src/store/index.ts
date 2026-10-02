@@ -307,6 +307,11 @@ export interface ChartStyleConfig {
   orientation?: 'vertical' | 'horizontal';
   /** 环形图开关（仅 pie）；undefined 等价于 false（实心饼图）。 */
   donut?: boolean;
+  /**
+   * 饼图标签显示模式（仅 pie，issue #27）；undefined 等价于 'percent'（既有行为：
+   * 名称 + ECharts 自动占比）。'value' 显示名称 + 原始数值。
+   */
+  pieLabelDisplay?: 'value' | 'percent';
   /** 表格序号列（仅 table）；undefined 等价于 false。 */
   tableShowIndex?: boolean;
   /** 表格自动换行（仅 table）；undefined 等价于 false（沿用省略号）。 */

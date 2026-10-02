@@ -92,6 +92,10 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
     // orientation/donut 同例：非法/缺失不带键，分别等价于 'vertical'/false。
     ...(orientation === 'vertical' || orientation === 'horizontal' ? { orientation } : {}),
     ...(raw.donut === true ? { donut: true } : {}),
+    // 饼图标签显示模式（issue #27，仅 pie 消费）：非法/缺失不带键，等价于 'percent'。
+    ...(raw.pieLabelDisplay === 'value' || raw.pieLabelDisplay === 'percent'
+      ? { pieLabelDisplay: raw.pieLabelDisplay }
+      : {}),
     // 表格展示开关（仅 table 消费）：只认 true，缺失/非法一律不带键，等价于 false/原样。
     ...(raw.tableShowIndex === true ? { tableShowIndex: true } : {}),
     ...(raw.tableWordWrap === true ? { tableWordWrap: true } : {}),
@@ -135,6 +139,26 @@ export interface ChartOptionContext {
    * 缺省/未配的指标原样输出数值，与 TableChart 对无格式列的行为一致。
    */
   metricFormats?: Record<string, string>;
+  /**
+   * 饼图长尾合并阈值（issue #27，仅 pie 消费）：占比（百分比数值，如 5 = 5%）低于该值
+   * 的切片合并为「其他」。调用方传入前须经 normalizePieMergeRatio 净化
+   * （持久化文档的 queryOptions 是 unknown）。undefined = 不合并（既有行为）。
+   */
+  pieMergeOtherBelowRatio?: number;
+}
+
+/** 长尾合并产出的兜底切片名 */
+export const PIE_OTHER_SLICE_NAME = '其他';
+
+/**
+ * 把持久化 queryOptions.pieMergeOtherBelowRatio（schema 上是 unknown）净化为合法阈值。
+ * 仅接受 (0, 100) 内的有限数值；其他输入（含 0/负数/非数值）返回 undefined（不合并）。
+ */
+export function normalizePieMergeRatio(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0 || raw >= 100) {
+    return undefined;
+  }
+  return raw;
 }
 
 /** 参考线缺省展示名（用户未填 name 时） */
@@ -565,6 +589,42 @@ export function buildChartOption(
           return null;
         }
         const pie = data as PieResponse;
+        // 长尾合并（issue #27）：占比低于阈值的切片合并为单个「其他」切片。
+        // 分母为正数值切片之和；无可合并切片（阈值未配/全部高于阈值/全非正数）时原样输出。
+        const ratio = context.pieMergeOtherBelowRatio;
+        const positiveTotal = pie.data.reduce(
+          (sum, item) =>
+            typeof item.value === 'number' && item.value > 0 ? sum + item.value : sum,
+          0
+        );
+        // 小切片判定：正数值且占比低于阈值。已有的「其他」切片（如后端 TopN 的其余合并
+        // 产物）无论大小一律折进合并桶，保证输出里「其他」永远只有一个。
+        const isSmall = (item: { name: unknown; value: unknown }): boolean =>
+          ratio !== undefined &&
+          positiveTotal > 0 &&
+          typeof item.value === 'number' &&
+          item.value > 0 &&
+          (item.value / positiveTotal) * 100 < ratio;
+        const foldOther = (item: { name: unknown; value: unknown }): boolean =>
+          isSmall(item) || item.name === PIE_OTHER_SLICE_NAME;
+        const mergeOther = ratio !== undefined && pie.data.some(foldOther);
+        const otherTotal = mergeOther
+          ? pie.data.reduce(
+              (sum, item) =>
+                foldOther(item) && typeof item.value === 'number' ? sum + item.value : sum,
+              0
+            )
+          : 0;
+        const pieData = mergeOther
+          ? [
+              ...pie.data
+                .filter((item) => !foldOther(item))
+                .map((item) => ({ name: item.name, value: item.value })),
+              { name: PIE_OTHER_SLICE_NAME, value: otherTotal },
+            ]
+          : pie.data.map((item) => ({ name: item.name, value: item.value }));
+        // 标签显示模式（issue #27）：'value' 显示原始数值，缺省 'percent' 显示 ECharts 占比
+        const labelFormatter = style.pieLabelDisplay === 'value' ? '{b}: {c}' : '{b}: {d}%';
         return {
           ...commonOptions,
           tooltip: pieTooltip,
@@ -574,9 +634,9 @@ export function buildChartOption(
               name: labelOf(valueField),
               type: 'pie' as const,
               radius: pieRadius,
-              data: pie.data.map((item) => ({ name: item.name, value: item.value })),
+              data: pieData,
               emphasis: pieEmphasis,
-              label: { formatter: '{b}: {d}%' },
+              label: { formatter: labelFormatter },
             },
           ],
           ...colorOf(),

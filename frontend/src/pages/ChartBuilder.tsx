@@ -93,7 +93,12 @@ import {
   type ChartType,
   migrateChartConfig,
 } from '../lib/chartConfigSchema';
-import { buildChartOption, isEmptyPayload, normalizeReferenceLines } from '../lib/chartOptions';
+import {
+  buildChartOption,
+  isEmptyPayload,
+  normalizePieMergeRatio,
+  normalizeReferenceLines,
+} from '../lib/chartOptions';
 import { classifyFieldKind, normalizeDataType } from '../lib/dataTypes';
 import {
   type DateFilterIntent,
@@ -871,6 +876,8 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         // 参考线（R-63）：store 里是 camelCase 持久化模型，进 option 前净化一次
         // （防御恢复自旧文档/手改 config 的脏数据）。
         referenceLines: normalizeReferenceLines(queryOptions.referenceLines),
+        // 长尾合并阈值（issue #27，仅 pie 消费）：store 里是 camelCase 持久化模型，进 option 前净化一次
+        pieMergeOtherBelowRatio: normalizePieMergeRatio(queryOptions.pieMergeOtherBelowRatio),
         metricFormats: formats,
       },
       resolvedTheme,
@@ -1143,6 +1150,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
     showStyleControl('stack') ||
     showStyleControl('orientation') ||
     showStyleControl('donut') ||
+    showStyleControl('pieLabelDisplay') ||
     showStyleControl('dataLabel') ||
     showStyleControl('tableRowSize') ||
     config.chartType === 'histogram' ||
@@ -1288,6 +1296,26 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               </SettingRow>
             )}
 
+            {config.chartType === 'pie' && (
+              <SettingRow label="长尾合并">
+                <Select
+                  style={{ width: 120 }}
+                  value={queryOptions.pieMergeOtherBelowRatio ?? undefined}
+                  allowClear
+                  placeholder="不合并"
+                  onChange={(value) =>
+                    onQueryOptionsChange({ pieMergeOtherBelowRatio: value ?? undefined })
+                  }
+                  options={[
+                    { value: 1, label: '占比<1%' },
+                    { value: 2, label: '占比<2%' },
+                    { value: 5, label: '占比<5%' },
+                    { value: 10, label: '占比<10%' },
+                  ]}
+                />
+              </SettingRow>
+            )}
+
             {showStyleControl('stack') && (
               <SettingRow label="堆叠模式">
                 <Select
@@ -1322,6 +1350,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 <Switch
                   checked={chartStyle.donut ?? false}
                   onChange={(checked) => onChartStyleChange({ donut: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('pieLabelDisplay') && (
+              <SettingRow label="标签显示">
+                <Select
+                  style={{ width: 120 }}
+                  value={chartStyle.pieLabelDisplay ?? 'percent'}
+                  onChange={(value) => onChartStyleChange({ pieLabelDisplay: value })}
+                  options={[
+                    { value: 'percent', label: '百分比' },
+                    { value: 'value', label: '数值' },
+                  ]}
                 />
               </SettingRow>
             )}
