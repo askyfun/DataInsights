@@ -31,7 +31,7 @@ func (op AlertOperator) Message() string {
 	return string(op)
 }
 
-// AlertRule 是预警规则的出口实体（bi_alert_rule，migration 00009）。
+// AlertRule 是预警规则的出口实体（bi_alert_rule，migration 00011）。
 // LastTriggeredDate 是「最近触发的 UTC 日期」（YYYY-MM-DD，空串 = 从未触发）：
 // 它同时承担评估器的去重标记与前端「最近触发日」展示，出口为展示格式。
 type AlertRule struct {
