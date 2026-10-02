@@ -164,8 +164,28 @@ function prime(layout: string) {
   mockQueryDistinct.mockResolvedValue(envelope([{ region: '华东' }, { region: '华南' }]));
 }
 
-/** 最近一次 /query 收到的筛选器载荷。 */
+/**
+ * 最近一次 /query 收到的筛选器载荷（只取 widgetId + value）。
+ *
+ * 载荷现在还随值带上 binding/operator（issue #172：未落库的筛选器后端据此认领），
+ * 但这批用例只关心「取值形状」，故在这里剥掉那两个字段；绑定是否下发另有用例断言。
+ */
 const lastFilters = (): { widgetId: string; value?: unknown[] }[] => {
+  const calls = mockQuery.mock.calls;
+  if (calls.length === 0) {
+    return [];
+  }
+  const raw = calls[calls.length - 1][1].filters ?? [];
+  return raw.map(({ widgetId, value }) => ({ widgetId, value }));
+};
+
+/** 最近一次 /query 收到的**原始**筛选器载荷（含 binding/operator）。 */
+const lastFiltersRaw = (): {
+  widgetId: string;
+  value?: unknown[];
+  binding?: { datasetId: number; column: string };
+  operator?: string;
+}[] => {
   const calls = mockQuery.mock.calls;
   return calls.length === 0 ? [] : (calls[calls.length - 1][1].filters ?? []);
 };
@@ -240,7 +260,7 @@ describe('仪表盘盘级日期筛选器', () => {
     expect(screen.getByText('有未保存的改动')).toBeInTheDocument();
   });
 
-  it('新增筛选器：选数据集 + 日期字段 → 出块，未保存前不下发并提示保存后生效', async () => {
+  it('新增筛选器：选数据集 + 日期字段 → 出块；仅配置（还没给取值）不触发取数', async () => {
     prime(layoutChartOnly());
 
     renderEditor();
@@ -264,10 +284,63 @@ describe('仪表盘盘级日期筛选器', () => {
     await waitFor(() =>
       expect(screen.getByTestId('dashboard-filter-configure')).toBeInTheDocument()
     );
-    expect(screen.getByText(/保存仪表盘后/)).toBeInTheDocument();
-    // 未落库的筛选器后端读不到：新增块之后不该白发一次取数
+    // 只加块、还没给取值：没有可下发的激活条件，不该白发一次取数
     expect(mockQuery).toHaveBeenCalledTimes(1);
     expect(lastFilters()).toEqual([]);
+  });
+
+  it('新增筛选器给取值后立即生效：未落库的块也带上 binding + operator 下发（issue #172）', async () => {
+    prime(layoutChartOnly());
+
+    renderEditor();
+    await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(1));
+
+    // 新增一个字符串族筛选器（默认多选 → in），绑定 region 列
+    fireEvent.click(screen.getByTestId('dashboard-add-filter'));
+    const dialog = await screen.findByRole('dialog');
+    const combos = within(dialog).getAllByRole('combobox');
+    fireEvent.mouseDown(combos[0]);
+    fireEvent.click(
+      await screen.findByText('天气数据', { selector: '.ant-select-item-option-content' })
+    );
+    fireEvent.mouseDown(combos[1]);
+    fireEvent.click(
+      await screen.findByText('region', { selector: '.ant-select-item-option-content' })
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: /确\s*定/ }));
+
+    // 选一个候选值 → 这个**还没保存**的筛选器也立刻重取，且载荷自带绑定（后端据此认领）
+    const valuesSelect = await screen.findByTestId('dashboard-filter-values');
+    fireEvent.mouseDown(valuesSelect);
+    fireEvent.click(
+      await screen.findByText('华东', { selector: '.ant-select-item-option-content' })
+    );
+
+    await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(2));
+    expect(lastFiltersRaw()).toEqual([
+      {
+        widgetId: expect.any(String),
+        value: ['华东'],
+        binding: { datasetId: 3, column: '0000i52a' },
+        operator: 'in',
+      },
+    ]);
+  });
+
+  it('已落库的筛选器下发时也带上等价绑定与算子（幂等，不改既有行为）', async () => {
+    prime(layoutWithFilter({ kind: 'fixed', start: '2026-08-01', end: '2026-08-31' }));
+
+    renderEditor();
+
+    await waitFor(() => expect(mockQuery).toHaveBeenCalled());
+    expect(lastFiltersRaw()).toEqual([
+      {
+        widgetId: 'w-f',
+        value: ['2026-08-01', '2026-08-31'],
+        binding: { datasetId: 3, column: '0000i529' },
+        operator: 'between',
+      },
+    ]);
   });
 
   it('「配置」进完整日期筛选弹窗，确定后落库并重取', async () => {
@@ -286,7 +359,7 @@ describe('仪表盘盘级日期筛选器', () => {
     expect(lastFilters()).toEqual([{ widgetId: 'w-f', value: ['2026-08-01', '2026-08-31'] }]);
   });
 
-  it('保存把筛选器取值写进布局，落库后清除「保存后生效」提示', async () => {
+  it('保存把筛选器配置写进布局（落库后由 /query 接管取数）', async () => {
     prime(layoutChartOnly());
     vi.mocked(dashboardsApi.update).mockResolvedValue(envelope(dashboard('')));
 
@@ -306,7 +379,9 @@ describe('仪表盘盘级日期筛选器', () => {
     );
     fireEvent.click(within(dialog).getByRole('button', { name: /确\s*定/ }));
 
-    await waitFor(() => expect(screen.getByText(/保存仪表盘后/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId('dashboard-filter-configure')).toBeInTheDocument()
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }));
 

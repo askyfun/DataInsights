@@ -121,6 +121,8 @@ func (s *datasourceService) Create(ctx context.Context, ds *entity.Datasource) (
 	// 此前 Create 两个时间戳都为空。对齐 dataset.Create：插入时显式打戳。
 	m.CreatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	// R-22 归属（#171）：L0 无账号，一律打系统占位 id；#183 落地后换成上下文里的真实用户。
+	m.OwnerID = sql.NullInt32{Int32: model.SystemOwnerID, Valid: true}
 	if _, err := s.db.NewInsert().Model(m).Returning("*").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create datasource: %w", err)
 	}
@@ -146,7 +148,9 @@ func (s *datasourceService) Update(ctx context.Context, ds *entity.Datasource) (
 	// 整行 WherePK 更新此前不刷新 updated_at（DB 无触发器兜底）。显式打当前时间，
 	// 让 bun 的整行更新写入新值，与 dataset 服务 Update 保持一致。
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
-	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
+	// owner_id 由创建时决定、更新不改归属（#171 验收 2）：整行更新必须排除它，
+	// 否则 toModel 带进来的零值会把已归属的行重置回占位。
+	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at", "owner_id").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update datasource: %w", err)
 	}
 	updated := &model.Datasource{ID: ds.ID}

@@ -18,7 +18,12 @@
  *   代价是 `widgetId` 的唯一域是**整盘**而非单页（与 v1 的 D1 不变量一致）。
  * - 每个 widget 持有**盘内唯一**的 `widgetId`。同一 chartId 允许在同一盘出现多次，
  *   各自独立 x/y/w/h——这是"同图复用"能力的实现基础，故 widgetId 绝不等于 chartId。
- * - 三种 widget：`chart`（引用）/ `text`（Markdown）/ `filter`（绑定数据集字段）。
+ * - 三类**内容** widget：`chart`（引用）/ `text`（Markdown）/ `filter`（绑定数据集字段）；
+ *   另有一类**分组** widget：`container`（查询容器，issue #154）——它本身是一块栅格，
+ *   只做「把若干筛选器归拢到一处并支持置顶」的**视觉分组**，不参与取数：它没有 binding /
+ *   chartId，后端 `projectLayout` 的 switch 天然跳过它，容器里的筛选器仍靠自身的
+ *   `pageId` / `scope` 走原路下发。被归拢的筛选器带一个可选 `containerId`（指向所属容器的
+ *   widgetId，与 `pageId` 同为**扁平跨块引用**，不嵌套数组，以免破坏 `$.widgets[*]` 的读路径）。
  *   筛选器绑定的是 `(datasetId, column)` 二元组而非纯列名：因允许跨数据集混搭，
  *   纯列名会让不同数据集里的同名列互相误伤。
  * - 筛选器另有 `scope`：缺省 `'page'` 只作用于**所在页**；`'all'` 作用于**所有页**
@@ -54,9 +59,11 @@ export const DASHBOARD_DEFAULT_SIZE: Record<DashboardWidgetType, { w: number; h:
   chart: { w: 6, h: 8 },
   text: { w: 6, h: 4 },
   filter: { w: 3, h: 3 },
+  // 查询容器默认横贯整行、只占两行高——它是控件条，不是内容块。
+  container: { w: 12, h: 2 },
 };
 
-export type DashboardWidgetType = 'chart' | 'text' | 'filter';
+export type DashboardWidgetType = 'chart' | 'text' | 'filter' | 'container';
 
 /** 栅格位置与尺寸（react-grid-layout 的四轴）。 */
 export interface DashboardPlacement {
@@ -148,9 +155,31 @@ export interface DashboardFilterWidget extends DashboardWidgetBase {
    * 其余类型的筛选器带上它会被忽略，不影响行为。
    */
   date?: { granularity: DateGranularity; weekStart: WeekStart };
+  /**
+   * 所属查询容器的 widgetId（issue #154）。缺省 = 这块筛选器是独立栅格块；非空 = 它被归拢进
+   * 那个容器、只在容器里渲染，**不再占据顶层栅格**。与 `pageId` 同为扁平跨块引用：迁移时若
+   * 指向不存在的容器会被剥掉（退回独立块），以免筛选器凭空消失。
+   */
+  containerId?: string;
 }
 
-export type DashboardWidget = DashboardChartWidget | DashboardTextWidget | DashboardFilterWidget;
+/**
+ * 查询容器（issue #154）：一块栅格，做筛选器的**视觉分组 + 置顶**，不参与取数（无 binding /
+ * chartId，后端投影跳过）。容器成员靠筛选器身上的 `containerId` 反向指过来，而不是把子块嵌进
+ * 容器对象里——保持 `widgets[]` 扁平，`$.widgets[*] ? (@.chartId == …)` 与 `projectLayout` 不破。
+ */
+export interface DashboardContainerWidget extends DashboardWidgetBase {
+  type: 'container';
+  label: string;
+  /** 置顶：渲染时吸附到栅格顶行（y=0）。缺省不置顶。 */
+  pinned?: boolean;
+}
+
+export type DashboardWidget =
+  | DashboardChartWidget
+  | DashboardTextWidget
+  | DashboardFilterWidget
+  | DashboardContainerWidget;
 
 /** 一个页面（独立画布）。顺序即标签顺序。 */
 export interface DashboardPage {
@@ -173,7 +202,10 @@ export const DASHBOARD_DEFAULT_PAGE_NAME = '页面 1';
 /** 页面名为空/非法时的兜底名（数据层取值，见文件头）。 */
 export const DASHBOARD_UNTITLED_PAGE_NAME = '未命名页面';
 
-const WIDGET_TYPES: readonly DashboardWidgetType[] = ['chart', 'text', 'filter'];
+/** 查询容器名为空/非法时的兜底名（数据层取值，与页面默认名同一性质）。 */
+export const DASHBOARD_DEFAULT_CONTAINER_LABEL = '查询容器';
+
+const WIDGET_TYPES: readonly DashboardWidgetType[] = ['chart', 'text', 'filter', 'container'];
 
 const OPERATORS: readonly FilterOperator[] = [
   'eq',
@@ -288,6 +320,41 @@ export function reorderPages(
 /** 挑出布局里的筛选器块（类型守卫版本，多处复用）。 */
 export function filterWidgetsOf(widgets: readonly DashboardWidget[]): DashboardFilterWidget[] {
   return widgets.filter((widget): widget is DashboardFilterWidget => widget.type === 'filter');
+}
+
+/** 挑出布局里的查询容器块（issue #154）。 */
+export function containerWidgetsOf(
+  widgets: readonly DashboardWidget[]
+): DashboardContainerWidget[] {
+  return widgets.filter(
+    (widget): widget is DashboardContainerWidget => widget.type === 'container'
+  );
+}
+
+/**
+ * 某一页**渲染在顶层栅格**上的块：该页的 chart / text / container，加上**尚未被归拢**的筛选器
+ * （`containerId` 为空者）。被归拢进容器的筛选器由容器自行渲染，不占顶层栅格，故在此排除。
+ */
+export function gridWidgetsOfPage(
+  widgets: readonly DashboardWidget[],
+  pageId: string
+): DashboardWidget[] {
+  return widgetsOfPage(widgets, pageId).filter(
+    (widget) => !(widget.type === 'filter' && widget.containerId)
+  );
+}
+
+/**
+ * 某容器的成员筛选器（`containerId` 命中且归属同一页，保持文档内顺序）。
+ * 只取该容器所在页的筛选器——容器与成员本就同页（成员 `containerId` 由编辑器在同页内设置）。
+ */
+export function childrenOfContainer(
+  widgets: readonly DashboardWidget[],
+  container: DashboardContainerWidget
+): DashboardFilterWidget[] {
+  return filterWidgetsOf(widgets).filter(
+    (widget) => widget.containerId === container.widgetId && widget.pageId === container.pageId
+  );
 }
 
 /** 挑出某一页的全部块（保持文档内顺序）。 */
@@ -449,6 +516,21 @@ function normalizeWidget(
     return { widgetId, pageId, type: 'text', markdown: raw.markdown, ...placement };
   }
 
+  if (widgetType === 'container') {
+    // 容器只承载 label / pinned，缺 label 兜底为默认名（可修复，不丢弃）。
+    const widget: DashboardContainerWidget = {
+      widgetId,
+      pageId,
+      type: 'container',
+      label: isNonEmptyString(raw.label) ? raw.label : DASHBOARD_DEFAULT_CONTAINER_LABEL,
+      ...placement,
+    };
+    if (raw.pinned === true) {
+      widget.pinned = true;
+    }
+    return widget;
+  }
+
   // filter
   const binding = raw.binding;
   if (
@@ -490,6 +572,11 @@ function normalizeWidget(
   ) {
     widget.date = { granularity: dateConfig.granularity, weekStart: dateConfig.weekStart };
   }
+  // containerId 的悬空校验（指向不存在的容器就退回独立块）在 migrateDashboardLayout
+  // 建完全盘容器索引后做后置剥离——这里只做类型层面的采纳。
+  if (isNonEmptyString(raw.containerId)) {
+    widget.containerId = raw.containerId;
+  }
   return widget;
 }
 
@@ -526,6 +613,20 @@ export function migrateDashboardLayout(raw: string): DashboardLayoutDocument {
       widgets.push(widget);
     }
   });
+
+  // 后置剥离悬空 containerId：全盘容器索引建好后才能判定成员指向是否存在。指向不存在
+  // 容器的筛选器退回独立栅格块（与悬空 pageId 归首页同理——宁可回到可见状态，也不要让
+  // 筛选器凭空消失）。
+  const containerIds = new Set(
+    widgets
+      .filter((w): w is DashboardContainerWidget => w.type === 'container')
+      .map((w) => w.widgetId)
+  );
+  for (const widget of widgets) {
+    if (widget.type === 'filter' && widget.containerId && !containerIds.has(widget.containerId)) {
+      delete widget.containerId;
+    }
+  }
 
   return { version: 2, grid: { cols }, pages, widgets };
 }

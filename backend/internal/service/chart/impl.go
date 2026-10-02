@@ -117,6 +117,8 @@ func (s *chartService) GetByID(ctx context.Context, id int) (*entity.Chart, erro
 // Create creates a new chart
 func (s *chartService) Create(ctx context.Context, chart *entity.Chart) (*entity.Chart, error) {
 	m := toChartModel(chart)
+	// R-22 归属（#171）：L0 无账号，打系统占位 id；#183 落地后换成上下文真实用户。
+	m.OwnerID = sql.NullInt32{Int32: model.SystemOwnerID, Valid: true}
 	if _, err := s.db.NewInsert().Model(m).Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create chart: %w", err)
 	}
@@ -126,7 +128,8 @@ func (s *chartService) Create(ctx context.Context, chart *entity.Chart) (*entity
 // Update updates an existing chart
 func (s *chartService) Update(ctx context.Context, chart *entity.Chart) (*entity.Chart, error) {
 	m := toChartModel(chart)
-	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
+	// 归属由创建决定、Update 不改（#171 验收 2）：整行更新排除 owner_id。
+	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at", "owner_id").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update chart: %w", err)
 	}
 	updated := &model.Chart{ID: chart.ID}
