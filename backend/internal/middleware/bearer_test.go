@@ -27,6 +27,11 @@ func (f *fakeAuth) Login(context.Context, string, string, string, string) (*enti
 }
 func (f *fakeAuth) CurrentUser(context.Context, int) (*entity.User, error) { return nil, nil }
 func (f *fakeAuth) Revoke(context.Context, string) error                   { return nil }
+func (f *fakeAuth) CreatePAT(context.Context, int, string, bool) (*entity.PATCreateResult, error) {
+	return nil, nil
+}
+func (f *fakeAuth) ListPATs(context.Context, int) ([]entity.TokenInfo, error) { return nil, nil }
+func (f *fakeAuth) RevokeByID(context.Context, int, int) error                { return nil }
 func (f *fakeAuth) Verify(_ context.Context, raw, _, _ string) (*auth.Principal, error) {
 	if f.reject || raw == "" || strings.Contains(raw, "invalid") {
 		return nil, router.NewBusinessError(response.CodeUnauthorized, "invalid or expired token")

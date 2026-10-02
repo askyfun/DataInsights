@@ -1023,8 +1023,286 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QueryRecordResponse'
+  /api/auth/register:
+    post:
+      tags:
+        - auth
+      summary: 注册首个管理员（引导式）
+      description: >-
+        仅当无存活用户时成功，该用户 role=admin；否则 20200。成功即签发 24h 会话
+        token（明文仅此一次回显）。R-82 #183。
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthCredentialsRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为 AuthResult
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResultResponse'
+  /api/auth/login:
+    post:
+      tags:
+        - auth
+      summary: 登录并签发会话 token
+      description: 校验 bcrypt 口令；成功签发 24h 会话 token，失败 20200（不区分用户名/口令）。
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthCredentialsRequest'
+      responses:
+        '200':
+          description: 成功 data 为 AuthResult
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResultResponse'
+  /api/auth/me:
+    get:
+      tags:
+        - auth
+      summary: 当前登录用户
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功 data 为 AuthUser；无/失效 token 20200
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserResponse'
+  /api/auth/logout:
+    delete:
+      tags:
+        - auth
+      summary: 撤销当前会话 token（即时生效）
+      description: 用 DELETE 而非 POST：登出无请求体，泛型路由对 POST 必绑 body 会 EOF。
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: "成功 data 为 {status: ok}"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /api/tokens:
+    post:
+      tags:
+        - tokens
+      summary: 创建 PAT（明文仅回显一次）
+      description: >-
+        需人类会话（PAT 不得调用管理端点，#184 验收 3）。默认 90 天；never=true 则不过期。
+        库内只存 sha256 + 可识别前缀。
+      operationId: createPAT
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PATCreateRequest'
+      responses:
+        '200':
+          description: 成功 data 为 PATCreateResult
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PATCreateResponse'
+    get:
+      tags:
+        - tokens
+      summary: 列出本人 PAT（不含密钥）
+      operationId: listPATs
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功 data 为 TokenInfo 数组
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenInfoListResponse'
+  /api/tokens/{id}:
+    delete:
+      tags:
+        - tokens
+      summary: 撤销本人某个 PAT
+      operationId: revokePAT
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: "成功 data 为 {status: ok}"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
 components:
   schemas:
+    AuthCredentialsRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    AuthUser:
+      type: object
+      description: 用户对外投影（entity.User）；绝不含口令或哈希。
+      required:
+        - id
+        - username
+        - role
+        - created_at
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        role:
+          type: string
+          enum:
+            - admin
+            - user
+        created_at:
+          type: string
+    AuthResult:
+      type: object
+      description: 登录/注册签发结果；token 为会话明文，仅这一次回显。
+      required:
+        - token
+        - kind
+        - expires_at
+        - user
+      properties:
+        token:
+          type: string
+        kind:
+          type: string
+          enum:
+            - session
+        expires_at:
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+    TokenInfo:
+      type: object
+      description: PAT 列表项；只有可识别前缀与元数据，绝不含 token_hash 或明文。
+      required:
+        - id
+        - name
+        - prefix
+        - created_at
+        - last_used_at
+        - last_used_ip
+        - last_used_ua
+        - expires_at
+        - revoked
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        prefix:
+          type: string
+        created_at:
+          type: string
+        last_used_at:
+          type: string
+        last_used_ip:
+          type: string
+        last_used_ua:
+          type: string
+        expires_at:
+          type: string
+          description: 空串 = 不过期（never PAT）。
+        revoked:
+          type: boolean
+    PATCreateRequest:
+      type: object
+      required:
+        - name
+        - never
+      properties:
+        name:
+          type: string
+        never:
+          type: boolean
+          description: true = 长期不过期；false = 默认 90 天。
+    PATCreateResult:
+      type: object
+      required:
+        - token
+        - info
+      properties:
+        token:
+          type: string
+          description: PAT 明文，仅创建响应回显一次。
+        info:
+          $ref: '#/components/schemas/TokenInfo'
+    AuthResultResponse:
+      description: 登录/注册响应：data 为 AuthResult。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/AuthResult'
+    AuthUserResponse:
+      description: GET /api/auth/me 响应：data 为 AuthUser。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/AuthUser'
+    TokenInfoListResponse:
+      description: GET /api/tokens 响应：data 为 TokenInfo 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TokenInfo'
+    PATCreateResponse:
+      description: POST /api/tokens 响应：data 为 PATCreateResult。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/PATCreateResult'
     ResponseCode:
       type: integer
       description: |
@@ -3410,3 +3688,12 @@ components:
       schema:
         type: string
 
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: >-
+        人类会话 token（di_session_…）或机器 PAT（di_pat_…）。两者走同一校验中间件；
+        管理端点（/api/tokens、用户管理）拒绝 PAT，仅接受会话（#184 验收 3）。
