@@ -109,6 +109,8 @@ func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entit
 	// bun 对零值 sql.NullTime 发显式 NULL（绕过列 DEFAULT CURRENT_TIMESTAMP），
 	// 故 updated_at 需与 created_at 一样在插入时显式打戳，否则新建行 updated_at 为空。
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	// R-22 归属（#171）：L0 无账号，打系统占位 id；#183 落地后换成上下文真实用户。
+	m.OwnerID = sql.NullInt32{Int32: model.SystemOwnerID, Valid: true}
 	if _, err := s.db.NewInsert().Model(m).Returning("*").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create dataset: %w", err)
 	}
@@ -126,7 +128,8 @@ func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entit
 	// 不前进（DB 无触发器兜底）。显式打当前时间，让 bun 的整行更新写入新值；
 	// created_at 仍走 toDatasetModel 的透传（merge 负责保留）。
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
-	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
+	// 归属由创建决定、Update 不改（#171 验收 2）：整行更新排除 owner_id。
+	if _, err := s.db.NewUpdate().Model(m).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at", "owner_id").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update dataset: %w", err)
 	}
 	updated := &model.Dataset{ID: ds.ID}
@@ -326,7 +329,8 @@ func (s *datasetService) UpdateColumns(ctx context.Context, id int, columns []en
 	}
 	ds.Columns = string(columnsJSON)
 
-	if _, err := s.db.NewUpdate().Model(ds).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at").Exec(ctx); err != nil {
+	// 归属由创建决定、写列不改（#171 验收 2）：整行更新排除 owner_id。
+	if _, err := s.db.NewUpdate().Model(ds).WherePK().Where("deleted_at IS NULL").ExcludeColumn("deleted_at", "owner_id").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update columns: %w", err)
 	}
 
