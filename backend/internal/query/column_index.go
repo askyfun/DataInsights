@@ -1,5 +1,11 @@
 package query
 
+import (
+	"fmt"
+
+	"data-insights/internal/expr"
+)
+
 // 列索引：把 bi_dataset.columns（JSON 文档）编译成查询期需要的三张表。
 //
 // 为什么要三张表：
@@ -54,6 +60,11 @@ func buildColumnIndex(columns string) (columnIndex, error) {
 	for _, col := range cols {
 		if col.Expr == "" {
 			continue
+		}
+		// 查询期兜底闸（issue #170）：写入口（datasetService.UpdateColumns）已校验，
+		// 这里覆盖绕过写入口落库的历史脏数据 / 恶意数据，fail-closed 返回错误。
+		if err := expr.Validate(col.Expr); err != nil {
+			return idx, fmt.Errorf("column %q: %w", col.Name, err)
 		}
 		if col.ID != "" {
 			idx.byID[col.ID] = col.Expr

@@ -5,6 +5,15 @@ import type { components } from '../../idls/gen_types';
 // 业务成功码（后端 response 信封约定）。其余非 2xx/业务码由拦截器统一按"非此即错"处理。
 const API_SUCCESS_CODE = 20000;
 
+// 会话 token 只存内存（#184 存储规则：人类会话 token 不得 localStorage 长期明文驻留）。
+let bearerToken = '';
+export function setBearerToken(token: string): void {
+  bearerToken = token;
+}
+export function getBearerToken(): string {
+  return bearerToken;
+}
+
 // Envelope from the OpenAPI schema with data re-tightened per call site.
 // G['Envelope']['code'] (ResponseCode) is the same 7-literal union as ApiCode.
 export type ApiResponse<T = unknown> = Omit<components['schemas']['Envelope'], 'data'> & {
@@ -52,6 +61,12 @@ function createApiClient(baseURL: string): AxiosInstance {
   client.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
       config.headers.set('X-Request-ID', generateRequestId());
+      // Session token (#183/#184) is held in-memory only — never localStorage
+      // long-term plaintext (that is the documented storage rule for the human
+      // token). setBearerToken wires it in after login/register.
+      if (bearerToken) {
+        config.headers.set('Authorization', `Bearer ${bearerToken}`);
+      }
       return config;
     },
     (error) => {

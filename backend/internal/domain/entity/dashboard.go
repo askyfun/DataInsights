@@ -95,9 +95,23 @@ const (
 // DashboardQueryFilter 是单个盘级筛选器的当前取值（POST /api/dashboards/{id}/query
 // 请求体的一项）。value 空数组或该项缺失 = **未激活**：未激活的筛选器不参与合并、
 // 不触发覆盖（PRD §8.3 步骤 2）。
+//
+// Binding / Operator **只为「未落库」的筛选器携带**（本次会话新拖入、或改了配置还没保存，
+// issue #172）：后端没有它的 layout 记录，只能从请求读绑定。已落库的筛选器省略这两个字段，
+// 后端从 layout_json 读（既有行为不变）；一旦携带，则**以请求为准**——改了算子/绑定但没保存
+// 的筛选器也能立刻生效。
 type DashboardQueryFilter struct {
-	WidgetID string `json:"widgetId"`
-	Value    []any  `json:"value"`
+	WidgetID string                       `json:"widgetId"`
+	Value    []any                        `json:"value"`
+	Binding  *DashboardQueryFilterBinding `json:"binding,omitempty"`
+	Operator string                       `json:"operator,omitempty"`
+}
+
+// DashboardQueryFilterBinding 是未落库筛选器的绑定字段（(datasetId, column) 二元组，
+// column 是列的稳定 id）。与布局里的 binding 同口径，只是来源改成了请求。
+type DashboardQueryFilterBinding struct {
+	DatasetID int    `json:"datasetId"`
+	Column    string `json:"column"`
 }
 
 // DashboardQueryLinkage 是一块图表被点击后产出的联动取值（POST /api/dashboards/{id}/query

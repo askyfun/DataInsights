@@ -1,19 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   applicableFilterWidgets,
+  childrenOfContainer,
   collectChartIds,
+  containerWidgetsOf,
   createPageId,
   createWidgetId,
+  DASHBOARD_DEFAULT_CONTAINER_LABEL,
   DASHBOARD_DEFAULT_PAGE_NAME,
   DASHBOARD_GRID_COLS,
   DASHBOARD_MIN_H,
   DASHBOARD_MIN_W,
   DASHBOARD_UNTITLED_PAGE_NAME,
   type DashboardChartWidget,
+  type DashboardContainerWidget,
   type DashboardFilterWidget,
   type DashboardPage,
   emptyDashboardLayout,
   findFreePlacement,
+  gridWidgetsOfPage,
   isFilterActive,
   migrateDashboardLayout,
   normalizePages,
@@ -757,5 +762,79 @@ describe('图表块的 linkage 配置（issue #143）', () => {
 
   it('一个去向都不剩时不落盘空壳', () => {
     expect(chartOf({ targets: [] })).not.toHaveProperty('linkage');
+  });
+});
+
+describe('查询容器（issue #154）', () => {
+  const docJson = JSON.stringify({
+    version: 2,
+    pages: [{ id: 'p1', name: '页面 1' }],
+    widgets: [
+      { widgetId: 'c1', pageId: 'p1', type: 'container', label: '顶部控件' },
+      {
+        widgetId: 'f1',
+        pageId: 'p1',
+        type: 'filter',
+        binding: { datasetId: 7, column: 'col1' },
+        containerId: 'c1',
+      },
+      // containerId 指向不存在的容器：迁移应剥掉它，退回独立块。
+      {
+        widgetId: 'f2',
+        pageId: 'p1',
+        type: 'filter',
+        binding: { datasetId: 7, column: 'col2' },
+        containerId: 'ghost',
+      },
+      { widgetId: 'f3', pageId: 'p1', type: 'filter', binding: { datasetId: 7, column: 'col3' } },
+      { widgetId: 'ch1', pageId: 'p1', type: 'chart', chartId: 5 },
+    ],
+  });
+
+  it('容器块采纳 label / pinned，缺 label 兜底默认名', () => {
+    const named = migrateDashboardLayout(
+      '{"version":2,"pages":[{"id":"p1","name":"P"}],"widgets":[{"widgetId":"c","pageId":"p1","type":"container","label":"控件条","pinned":true}]}'
+    ).widgets[0] as DashboardContainerWidget;
+    expect(named.type).toBe('container');
+    expect(named.label).toBe('控件条');
+    expect(named.pinned).toBe(true);
+
+    const bare = migrateDashboardLayout(
+      '{"version":2,"pages":[{"id":"p1","name":"P"}],"widgets":[{"widgetId":"c","pageId":"p1","type":"container"}]}'
+    ).widgets[0] as DashboardContainerWidget;
+    expect(bare.label).toBe(DASHBOARD_DEFAULT_CONTAINER_LABEL);
+    expect(bare.pinned).toBeUndefined();
+    // 控件条默认横贯整行、两行高。
+    expect(bare).toMatchObject({ x: 0, y: 0, w: DASHBOARD_GRID_COLS, h: 2 });
+  });
+
+  it('迁移是全覆盖的：含容器与成员的文档不抛异常、逐块保留', () => {
+    const doc = migrateDashboardLayout(docJson);
+    expect(doc.widgets).toHaveLength(5);
+  });
+
+  it('悬空 containerId 被剥掉，合法成员与独立筛选器各归其位', () => {
+    const byId = new Map(migrateDashboardLayout(docJson).widgets.map((w) => [w.widgetId, w]));
+    expect((byId.get('f1') as DashboardFilterWidget).containerId).toBe('c1');
+    expect((byId.get('f2') as DashboardFilterWidget).containerId).toBeUndefined();
+    expect((byId.get('f3') as DashboardFilterWidget).containerId).toBeUndefined();
+  });
+
+  it('containerWidgetsOf / childrenOfContainer 按引用聚合成员', () => {
+    const doc = migrateDashboardLayout(docJson);
+    const containers = containerWidgetsOf(doc.widgets);
+    expect(containers.map((c) => c.widgetId)).toEqual(['c1']);
+    const kids = childrenOfContainer(doc.widgets, containers[0]);
+    expect(kids.map((f) => f.widgetId)).toEqual(['f1']);
+  });
+
+  it('gridWidgetsOfPage 排除被归拢的筛选器，但保留容器 / 独立筛选器 / 图表', () => {
+    const doc = migrateDashboardLayout(docJson);
+    const ids = gridWidgetsOfPage(doc.widgets, 'p1').map((w) => w.widgetId);
+    expect(ids).toContain('c1');
+    expect(ids).toContain('f2'); // 悬空成员退回独立块 → 进顶层栅格
+    expect(ids).toContain('f3');
+    expect(ids).toContain('ch1');
+    expect(ids).not.toContain('f1'); // 真成员由容器渲染，不占顶层栅格
   });
 });

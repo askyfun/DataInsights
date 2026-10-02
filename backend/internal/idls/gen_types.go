@@ -66,6 +66,39 @@ func (e AlertRuleUpdateOperator) Valid() bool {
 	}
 }
 
+// Defines values for AuthResultKind.
+const (
+	Session AuthResultKind = "session"
+)
+
+// Valid indicates whether the value is a known member of the AuthResultKind enum.
+func (e AuthResultKind) Valid() bool {
+	switch e {
+	case Session:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthUserRole.
+const (
+	Admin AuthUserRole = "admin"
+	User  AuthUserRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuthUserRole enum.
+func (e AuthUserRole) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DatasetColumnType.
 const (
 	Array    DatasetColumnType = "array"
@@ -274,6 +307,66 @@ type AlertTriggerListResponse struct {
 	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
 	Code ResponseCode   `json:"code"`
 	Data []AlertTrigger `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// AuthCredentialsRequest defines model for AuthCredentialsRequest.
+type AuthCredentialsRequest struct {
+	Password string `json:"password"`
+	Username string `json:"username"`
+}
+
+// AuthResult 登录/注册签发结果；token 为会话明文，仅这一次回显。
+type AuthResult struct {
+	ExpiresAt string         `json:"expires_at"`
+	Kind      AuthResultKind `json:"kind"`
+	Token     string         `json:"token"`
+
+	// User 用户对外投影（entity.User）；绝不含口令或哈希。
+	User AuthUser `json:"user"`
+}
+
+// AuthResultKind defines model for AuthResult.Kind.
+type AuthResultKind string
+
+// AuthResultResponse 登录/注册响应：data 为 AuthResult。
+type AuthResultResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data 登录/注册签发结果；token 为会话明文，仅这一次回显。
+	Data AuthResult `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// AuthUser 用户对外投影（entity.User）；绝不含口令或哈希。
+type AuthUser struct {
+	CreatedAt string       `json:"created_at"`
+	Id        int          `json:"id"`
+	Role      AuthUserRole `json:"role"`
+	Username  string       `json:"username"`
+}
+
+// AuthUserRole defines model for AuthUser.Role.
+type AuthUserRole string
+
+// AuthUserResponse GET /api/auth/me 响应：data 为 AuthUser。
+type AuthUserResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+
+	// Data 用户对外投影（entity.User）；绝不含口令或哈希。
+	Data AuthUser `json:"data"`
 
 	// Msg 提示消息；成功为 "success"，错误为可读错误描述
 	Msg string `json:"msg"`
@@ -664,8 +757,18 @@ type DashboardListResponse struct {
 	Trace string `json:"trace"`
 }
 
-// DashboardQueryFilter POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。
+// DashboardQueryFilter POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。 已落库的筛选器只带 widgetId + value，绑定与算子由后端从 layout_json 读； **未落库**的筛选器（本次会话新拖入、或改了配置还没保存，issue #172）额外带上 binding + operator —— 后端没有它的 layout 记录，只能从请求读绑定，否则会 「配好取值却没反应」。一旦携带 binding，即以请求为准（覆盖 layout 里的同 widgetId 记录）。
 type DashboardQueryFilter struct {
+	// Binding 仅未落库的筛选器需要：绑定字段 (datasetId, column)。已落库时省略，后端从 layout 读。
+	Binding *struct {
+		// Column 列的稳定 id（DatasetColumn.id），与布局里 binding.column 同口径。
+		Column    *string `json:"column,omitempty"`
+		DatasetId *int    `json:"datasetId,omitempty"`
+	} `json:"binding,omitempty"`
+
+	// Operator 仅未落库的筛选器需要：算子（与图表过滤算子同一词表）。与 binding 配套下发。
+	Operator *string `json:"operator,omitempty"`
+
 	// Value 当前选中值；空数组等同于未激活。
 	Value *[]interface{} `json:"value,omitempty"`
 
@@ -1183,6 +1286,36 @@ type OkResponse struct {
 	Trace string `json:"trace"`
 }
 
+// PATCreateRequest defines model for PATCreateRequest.
+type PATCreateRequest struct {
+	Name string `json:"name"`
+
+	// Never true = 长期不过期；false = 默认 90 天。
+	Never bool `json:"never"`
+}
+
+// PATCreateResponse POST /api/tokens 响应：data 为 PATCreateResult。
+type PATCreateResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode    `json:"code"`
+	Data PATCreateResult `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
+// PATCreateResult defines model for PATCreateResult.
+type PATCreateResult struct {
+	// Info PAT 列表项；只有可识别前缀与元数据，绝不含 token_hash 或明文。
+	Info TokenInfo `json:"info"`
+
+	// Token PAT 明文，仅创建响应回显一次。
+	Token string `json:"token"`
+}
+
 // PreviewResult 预览结果（entity.PreviewResult）；两字段经 response 归一化， 恒为数组（不会为 null）。
 type PreviewResult struct {
 	Columns []string  `json:"columns"`
@@ -1354,6 +1487,34 @@ type TableListResponse struct {
 	Trace string `json:"trace"`
 }
 
+// TokenInfo PAT 列表项；只有可识别前缀与元数据，绝不含 token_hash 或明文。
+type TokenInfo struct {
+	CreatedAt string `json:"created_at"`
+
+	// ExpiresAt 空串 = 不过期（never PAT）。
+	ExpiresAt  string `json:"expires_at"`
+	Id         int    `json:"id"`
+	LastUsedAt string `json:"last_used_at"`
+	LastUsedIp string `json:"last_used_ip"`
+	LastUsedUa string `json:"last_used_ua"`
+	Name       string `json:"name"`
+	Prefix     string `json:"prefix"`
+	Revoked    bool   `json:"revoked"`
+}
+
+// TokenInfoListResponse GET /api/tokens 响应：data 为 TokenInfo 数组。
+type TokenInfoListResponse struct {
+	// Code 业务状态码，与 backend/internal/response/response.go 常量一一对应。
+	Code ResponseCode `json:"code"`
+	Data []TokenInfo  `json:"data"`
+
+	// Msg 提示消息；成功为 "success"，错误为可读错误描述
+	Msg string `json:"msg"`
+
+	// Trace 请求追踪 ID（X-Request-ID）
+	Trace string `json:"trace"`
+}
+
 // TypeConfig 类型相关配置（entity.TypeConfig）。
 type TypeConfig struct {
 	Precision int `json:"precision"`
@@ -1445,6 +1606,12 @@ type CreateAlertJSONRequestBody = AlertRuleCreate
 // UpdateAlertJSONRequestBody defines body for UpdateAlert for application/json ContentType.
 type UpdateAlertJSONRequestBody = AlertRuleUpdate
 
+// LoginUserJSONRequestBody defines body for LoginUser for application/json ContentType.
+type LoginUserJSONRequestBody = AuthCredentialsRequest
+
+// RegisterUserJSONRequestBody defines body for RegisterUser for application/json ContentType.
+type RegisterUserJSONRequestBody = AuthCredentialsRequest
+
 // CreateChartJSONRequestBody defines body for CreateChart for application/json ContentType.
 type CreateChartJSONRequestBody = ChartCreateRequest
 
@@ -1498,3 +1665,6 @@ type PreviewDatasourceJSONRequestBody = DatasourcePreviewRequest
 
 // SaveQueryRecordJSONRequestBody defines body for SaveQueryRecord for application/json ContentType.
 type SaveQueryRecordJSONRequestBody = QueryRecordSaveRequest
+
+// CreatePATJSONRequestBody defines body for CreatePAT for application/json ContentType.
+type CreatePATJSONRequestBody = PATCreateRequest
