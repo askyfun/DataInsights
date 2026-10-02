@@ -7,6 +7,7 @@ import ReactDOM from 'react-dom/client';
 import { createIntl, IntlProvider } from 'react-intl';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import ErrorBoundary from './components/ErrorBoundary';
 import { cache, messages, useLocale } from './i18n/useLocale';
 import { initTheme, useTheme } from './lib/theme';
 import './styles/index.css';
@@ -123,7 +124,10 @@ if (!rootEl) throw new Error('Root element not found');
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
     <LocaleProvider>
-      <App />
+      {/* 根级错误边界：放在 IntlProvider 内（fallback 需要 intl），包住整棵路由树 */}
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </LocaleProvider>
   </React.StrictMode>
 );
