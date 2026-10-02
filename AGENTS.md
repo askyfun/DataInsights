@@ -126,6 +126,16 @@ frontend/src/
   块上会提示「保存仪表盘后生效」；② 盘级筛选每个筛选器每次查询最多产生**一条**合并条件，
   所以「包含空日期」（区间 OR IS NULL）在仪表盘侧表达不出来。
 
+### 查询容器（第一期，issue #154）
+
+`type:"container"` 是一块**只做视觉分组 + 置顶**的栅格 widget（对标火山「查询容器」），把本页若干盘级筛选器收进一个带标题的控件条：
+
+- **成员用扁平 `containerId` 反向指向容器**（与 `pageId` 同一性质），**绝不把子块嵌进容器对象**——
+  后端 `projectLayout` 的 switch 与图表引用计数 jsonpath（`$.widgets[*] ? (@.chartId == …)`）都建立在扁平 `widgets[]` 上，嵌套会让这两个读路径失效。
+- **后端零改动**：容器块没有 `binding`/`chartId`，`projectLayout` 天然跳过它；容器里的筛选器仍靠自身 `pageId`/`scope` 走原取数链路。`containerId` 后端不读，纯前端渲染分流（`gridWidgetsOfPage` 排除被归拢的筛选器）。
+- **悬空 `containerId` 迁移时剥掉**（`migrateDashboardLayout` 建完全盘容器索引后做后置 pass），指向已删容器的筛选器退回独立块而非凭空消失；会话内删容器由 `handleRemoveWidget` 就地清成员 `containerId`。
+- **置顶是渲染分流**：`pinned` 容器移到盘顶控件条、脱离栅格，四轴保留不变，取消置顶即回原位。文档版本仍是 `2`（新增 widget 类型是**纯增量**，旧前端读到会丢弃容器块、成员退化为独立块，优雅降级）。
+
 ### 仪表盘归档文件夹（第一期）
 
 `components/DashboardFolderTree/`（树 UI）+ `lib/dashboardFolderTree.ts`（组树与落点判定的**纯逻辑**，

@@ -2965,9 +2965,11 @@ components:
     DashboardWidget:
       type: object
       description: >-
-        盘内一块 widget，按 type 判别（chart | text | filter）：本 schema 是三者的
-        扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用
-        markdown，filter 用 binding/label/dataType/operator/multi/defaultValue/scope。
+        盘内一块 widget，按 type 判别（chart | text | filter | container）：本 schema 是
+        四者的扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用
+        markdown，filter 用 binding/label/dataType/operator/multi/defaultValue/scope/
+        containerId，container 用 label/pinned。container（查询容器，issue #154）是一块只做
+        视觉分组 + 置顶的栅格，不参与取数；被归拢的筛选器用 containerId 反向指向它。
 
         契约上这是 oneOf-with-discriminator 语义，但生成物刻意不落成 union 类型：
         Go 侧为不引入 oapi-codegen/runtime 依赖（与 ChartDataResult.data 同款取舍），
@@ -3001,6 +3003,7 @@ components:
             - chart
             - text
             - filter
+            - container
         x:
           type: integer
           description: react-grid-layout 左上角列坐标（0 起）。
@@ -3027,7 +3030,7 @@ components:
           $ref: '#/components/schemas/DashboardFilterBinding'
         label:
           type: string
-          description: type=filter 的显示名。
+          description: type=filter 的显示名；type=container 的容器标题（缺省时前端迁移兜底为「查询容器」）。
         dataType:
           type: string
           description: type=filter 绑定字段的数据类型（如 string / number / date）。
@@ -3066,6 +3069,16 @@ components:
             type=filter 的默认选中值。**空数组 = 未激活**：未激活的筛选器不参与合并、
             不触发覆盖（PRD §8.3 步骤 2），否则拖入一个筛选器会莫名抹掉图表默认条件。
           items: {}
+        containerId:
+          type: string
+          description: >-
+            type=filter 可选：所属查询容器（type=container）的 widgetId。缺省 = 该筛选器是独立栅格块；
+            非空 = 被归拢进该容器、只在容器内渲染、不占顶层栅格。指向不存在容器的值由前端迁移剥掉
+            （退回独立块），与 pageId 同为扁平跨块引用。后端不读此键。
+        pinned:
+          type: boolean
+          description: >-
+            type=container 可选：是否置顶（渲染时吸附到栅格顶行）。缺省不置顶。
     DashboardFilterBinding:
       type: object
       description: >-
