@@ -284,9 +284,6 @@ func (s *chartService) Query(ctx context.Context, req *entity.ChartQueryRequest)
 	if err != nil {
 		return entity.ChartDataResult{}, err
 	}
-	if err := s.dispatchExtractDataset(dataset); err != nil {
-		return entity.ChartDataResult{}, err
-	}
 
 	dsModel, err := s.getDatasourceModelFn(ctx, dataset.DatasourceID)
 	if err != nil {
@@ -824,20 +821,6 @@ func (s *chartService) SetSecurityKey(key []byte) {
 // SetExtractDatasourceID 注入抽取存储数据源（issue #118 预留，0=未启用）。
 func (s *chartService) SetExtractDatasourceID(id int) {
 	s.extract = extract.Guard{DatasourceID: id}
-}
-
-// dispatchExtractDataset 是抽取数据集的查询分派位（issue #118 预留，灌数在后续期实现）：
-// mode=extract 的数据集将来在此改连抽取存储数据源（s.extract.DatasourceID）并按
-// extract.TableName(dataset.ID) 取数；本期该路径未实现，显式报错而非静默按直连执行
-// （直连路径零回归是本期验收线）。
-func (s *chartService) dispatchExtractDataset(dataset *model.Dataset) error {
-	if dataset.Mode != "extract" {
-		return nil
-	}
-	return router.NewBusinessError(
-		response.CodeBadRequest,
-		fmt.Sprintf("extract-mode dataset %d is reserved (issue #118): ingestion is not implemented yet", dataset.ID),
-	)
 }
 
 func (s *chartService) dial(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {
