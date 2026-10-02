@@ -132,6 +132,29 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   减少动态效果（无障碍，issue #67）
+
+   系统开启 `prefers-reduced-motion: reduce` 时，压平所有走 CSS 的过渡/动画：
+   antd 弹窗与抽屉的 rc-motion 过渡、dnd-kit 排序项的 transform 过渡、本仓自定义
+   过渡都由此一条规则收口（!important 可覆盖 dnd-kit 写在内联 style 上的 transition）；
+   时长留 0.01ms 而非 0，是为了让依赖 transitionend/animationend 收尾的库（rc-motion）
+   仍能派发事件、不会卡在中间态。
+
+   例外（CSS 够不着的动效，改在 JS 关闭，见 lib/reducedMotion.ts）：
+   ECharts 的 canvas 动画、dnd-kit DragOverlay 的 WAAPI 回落动画。
+   ───────────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    页面骨架
 
    所有页面统一为这个结构 —— 页头在**画布上**，卡片只承载内容：

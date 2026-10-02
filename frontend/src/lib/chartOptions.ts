@@ -140,6 +140,12 @@ export interface ChartOptionContext {
    */
   metricFormats?: Record<string, string>;
   /**
+   * 减少动态效果（无障碍，issue #67）：为 true 时在 option 顶层关闭 ECharts 动画
+   * （初始化与更新都不再位移）。缺省/false 不带 animation 键，走 ECharts 默认。
+   * 由调用方用 usePrefersReducedMotion() 提供。
+   */
+  reducedMotion?: boolean;
+  /**
    * 饼图长尾合并阈值（issue #27，仅 pie 消费）：占比（百分比数值，如 5 = 5%）低于该值
    * 的切片合并为「其他」。调用方传入前须经 normalizePieMergeRatio 净化
    * （持久化文档的 queryOptions 是 unknown）。undefined = 不合并（既有行为）。
@@ -548,6 +554,9 @@ export function buildChartOption(
   const dense = maxPointCount(data) >= DENSE_POINT_THRESHOLD;
 
   const commonOptions = {
+    // 无障碍（issue #67）：系统要求减少动态效果时关掉 ECharts 动画。其余情况**不带**
+    // animation 键——显式 animation:true 虽与默认等价，但会把 ECharts 的默认值钉死。
+    ...(context.reducedMotion ? { animation: false } : {}),
     textStyle: { color: chartColors.text },
     title: {
       text: context.title,

@@ -113,6 +113,7 @@ import {
   buildQuerySpecDocument,
   parseQuerySpecDocument,
 } from '../lib/querySpec';
+import { usePrefersReducedMotion } from '../lib/reducedMotion';
 import type { ConditionalFormat } from '../lib/tableConditionalFormat';
 import { useResolvedTheme } from '../lib/theme';
 import {
@@ -792,6 +793,8 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   // 主题宿主探针（与 ChartView 同一机制）：canvas 取不到 CSS 变量，须在构造 option 时
   // 把当前主题的颜色算成字面值。resolvedTheme 入依赖 → 切主题即重建 option 实时重绘。
   const resolvedTheme = useResolvedTheme();
+  // 无障碍（issue #67）：系统要求减少动态效果时关掉 ECharts 动画（canvas 动效取不到 CSS）。
+  const reducedMotion = usePrefersReducedMotion();
   const hostRef = useRef<HTMLDivElement>(null);
   const [hostEl, setHostEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -879,6 +882,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         // 长尾合并阈值（issue #27，仅 pie 消费）：store 里是 camelCase 持久化模型，进 option 前净化一次
         pieMergeOtherBelowRatio: normalizePieMergeRatio(queryOptions.pieMergeOtherBelowRatio),
         metricFormats: formats,
+        reducedMotion,
       },
       resolvedTheme,
       hostEl
@@ -894,6 +898,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     queryOptions,
     hostEl,
     resolvedTheme,
+    reducedMotion,
   ]);
 
   if (loading) {
@@ -1936,6 +1941,9 @@ const QueryStatusBadge: React.FC<{
  * 主要逻辑：同步 store 状态、处理字段拖放、并在拖拽期间渲染 overlay 预览。
  */
 const ChartBuilder: React.FC = () => {
+  // 无障碍（issue #67）：dnd-kit 的 DragOverlay 回落动画走 Web Animations API，
+  // CSS 的 !important 压不住它，只能按系统开关显式关闭（见下方 DragOverlay 的 dropAnimation）。
+  const reducedMotion = usePrefersReducedMotion();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedDatasetId, setSelectedDatasetId] = useState<number | null>(null);
   const [editingChartId, setEditingChartId] = useState<number | null>(null);
@@ -4017,7 +4025,8 @@ const ChartBuilder: React.FC = () => {
           />
         </Drawer>
       </Layout>
-      <DragOverlay>
+      {/* 减少动态效果下关闭回落位移动画（WAAPI，不受 CSS 约束）；拖拽本身照常可用。 */}
+      <DragOverlay dropAnimation={reducedMotion ? null : undefined}>
         {activeDragField ? (
           <FieldDragPreview label={activeDragField.name} color={fieldTagColor(activeDragField)} />
         ) : activeDragBinding ? (
