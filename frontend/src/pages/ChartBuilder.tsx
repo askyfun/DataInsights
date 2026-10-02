@@ -2749,13 +2749,16 @@ const ChartBuilder: React.FC = () => {
     const editId = searchParams.get('edit');
     const datasetIdParam = searchParams.get('datasetId');
 
-    if (editId && datasetIdParam) {
-      const chartId = parseInt(editId, 10);
+    if (datasetIdParam) {
       const dsId = parseInt(datasetIdParam, 10);
-
-      if (!Number.isNaN(chartId) && !Number.isNaN(dsId)) {
+      const chartId = editId ? parseInt(editId, 10) : Number.NaN;
+      if (!Number.isNaN(dsId)) {
+        // 只带 datasetId（无 edit）也是合法入口：上传成功后直达图表编辑（#138），
+        // 期望直接选中该数据集进入空白查询，而不是停在「请先选择数据集」。
         setSelectedDatasetId(dsId);
-        setEditingChartId(chartId);
+        if (!Number.isNaN(chartId)) {
+          setEditingChartId(chartId);
+        }
       }
     }
   }, [searchParams]);

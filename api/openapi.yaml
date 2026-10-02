@@ -504,6 +504,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DatasetQueryResponse'
+  /api/datasets/import:
+    post:
+      tags:
+        - datasets
+      summary: 本地文件上传建数据集（issue #138）
+      description: |
+        multipart/form-data 上传 .csv/.xlsx（≤50MB），解析、列类型推断后落
+        EXTRACT_DATASOURCE_ID 指定的抽取存储（表 di_extract_<id>），并注册
+        mode=extract 数据集。data 为新建的数据集实体。未配置抽取存储时
+        Envelope.code=20100 并提示管理员配置。
+      operationId: importDatasetFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 上传的 .csv 或 .xlsx 文件（≤50MB）
+                name:
+                  type: string
+                  description: 数据集名；缺省回落文件名（不含扩展名）
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetResponse'
+  /api/datasets/{id}/replace:
+    post:
+      tags:
+        - datasets
+      summary: 覆盖已上传数据集的文件（issue #138）
+      description: |
+        对 mode=extract 数据集重新上传文件：重建抽取表并灌数；展示名未变的列
+        保留原列 id（图表不断链）。非 extract 模式数据集拒绝（20100）。
+      operationId: replaceDatasetFile
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 替换用的 .csv 或 .xlsx 文件（≤50MB）
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetResponse'
   /api/charts:
     get:
       tags:

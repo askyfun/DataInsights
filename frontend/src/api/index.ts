@@ -461,6 +461,30 @@ export const datasetsApi = {
       limit: 1000,
     });
   },
+
+  // 本地文件上传建数据集（issue #138）：multipart/form-data，.csv/.xlsx ≤50MB。
+  // 后端解析 + 列类型推断后落抽取存储并注册 mode=extract 数据集。
+  // ⚠️ 上传端点是手工路由（multipart 不走泛型路由），openapi.yaml 已同步，
+  // 但 make api-gen 前端半步当前必失败（见根 AGENTS.md），故此处手写契约。
+  importFile: (file: File, name?: string): Promise<AxiosResponse<ApiResponse<Dataset>>> => {
+    const form = new FormData();
+    form.append('file', file);
+    if (name) {
+      form.append('name', name);
+    }
+    return apiClient.post<ApiResponse<Dataset>>('/api/datasets/import', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // 覆盖已上传数据集的文件：展示名未变的列保留原列 id（图表不断链）。
+  replaceFile: (id: number, file: File): Promise<AxiosResponse<ApiResponse<Dataset>>> => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiClient.post<ApiResponse<Dataset>>(`/api/datasets/${id}/replace`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 // Charts API

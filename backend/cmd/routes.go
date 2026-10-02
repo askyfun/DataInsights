@@ -86,6 +86,10 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	router.RegisterPostRoute(datasets, "/:id/columns", datasetHandler.UpdateColumns)
 	router.RegisterGetRoute(datasets, "/:id/preview", datasetHandler.Preview)
 	router.RegisterPostRoute(datasets, "/:id/query", datasetHandler.Query)
+	// 本地文件上传（issue #138）：multipart 绑定走不了泛型路由的 ShouldBindJSON，
+	// 循 /health 与 share View 的手工路由先例单独注册。
+	datasets.POST("/import", datasetHandler.ImportFile)
+	datasets.POST("/:id/replace", datasetHandler.ReplaceFile)
 
 	// Chart routes (generic router)
 	charts := api.Group("/charts")
