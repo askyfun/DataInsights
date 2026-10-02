@@ -75,6 +75,7 @@ handler → service → domain/entity
 `query/` 包包含完整的查询管道（手写字符串 SQL builder 已删除，`bun_builder.go` 是图表 SQL 的唯一出口）：
 
 - **参数化红线**：值参数一律通过 `Connection.Execute(ctx, sql string, args ...any)` 的 args 传递；标识符使用白名单校验（裸名 `datasource.IsValidIdentifier`，query 包 `safeIdentifier` 额外允许成对引号包裹的标识符）；聚合表达式 `aggExprPattern` 收紧为显式函数白名单（`count|sum|avg|min|max`），杜绝 `pg_sleep(1)` 之类经列 `FieldExpr` 注入任意函数名。
+- **表达式围栏（G1，issue #170）**：`internal/expr` 包是用户可控 SQL 表达式的唯一白名单出口——递归下降解析单个标量表达式，函数词表与 `aggExprPattern` 同一份（`count|sum|avg|min|max`，不另立），保留字拒绝、嵌套深度 ≤32、注释/分号/子查询语法层即不可达。双闸接线：① 写入口 `datasetService.UpdateColumns` 校验前移（恶意表达式落库前拒绝）；② 查询期 `query.buildColumnIndex` 兜底（覆盖历史脏数据，fail-closed 返回错误）。覆盖范围：虚拟字段 expr、`?q=` 还原后经正常查询链的执行（执行即过列索引闸）、SQL 型数据集**派生列**表达式；自定义 SQL 本体保持「作者自负」（non-goal）。新增白名单函数必须同步 `expr.funcWhitelist` 与 `query.aggExprPattern` 两处。
 - `types.go` — 类型定义（ChartType, MetricConfig, FilterConfig 等）
 - `ast.go` — QueryAST 节点定义
 - `planner.go` — QuerySpec → PlannedAST 的查询规划
