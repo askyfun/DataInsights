@@ -32,6 +32,11 @@ import (
 // sessionTokenTTL is the 24h lifetime of a human session token (#183/#184).
 const sessionTokenTTL = 24 * time.Hour
 
+// defaultPATTTL is the default lifetime of a machine PAT. "Never expires" is an
+// explicit opt-in (never=true), matching #184 acceptance ("默认 90 天；支持长期/不过期
+// 但需显式勾选并给出风险提示").
+const defaultPATTTL = 90 * 24 * time.Hour
+
 // ErrInvalidCredentials collapses "unknown user" and "wrong password" into one
 // message so login does not leak which usernames exist.
 var errInvalidCredentials = router.NewBusinessError(response.CodeUnauthorized, "invalid username or password")
@@ -53,6 +58,9 @@ type Service interface {
 	Verify(ctx context.Context, rawToken, ip, ua string) (*Principal, error)
 	Revoke(ctx context.Context, rawToken string) error
 	CurrentUser(ctx context.Context, userID int) (*entity.User, error)
+	CreatePAT(ctx context.Context, userID int, name string, never bool) (*entity.PATCreateResult, error)
+	ListPATs(ctx context.Context, userID int) ([]entity.TokenInfo, error)
+	RevokeByID(ctx context.Context, userID, id int) error
 }
 
 type authService struct {
@@ -310,4 +318,84 @@ func (s *authService) CurrentUser(ctx context.Context, userID int) (*entity.User
 		return nil, fmt.Errorf("load user: %w", err)
 	}
 	return toUserEntity(u), nil
+}
+
+// --- PAT management (issue #184) ---
+
+// tokenInfoOf projects a stored token to its API shape. It deliberately drops
+// token_hash: only the short prefix and metadata leave the service.
+func tokenInfoOf(t *model.Token) entity.TokenInfo {
+	info := entity.TokenInfo{
+		ID:        t.ID,
+		Name:      t.Name.String,
+		Prefix:    t.Prefix,
+		CreatedAt: t.CreatedAt.Format(time.RFC3339),
+		Revoked:   t.RevokedAt.Valid,
+	}
+	if t.ExpiresAt.Valid {
+		info.ExpiresAt = t.ExpiresAt.Time.Format(time.RFC3339)
+	}
+	if t.LastUsedAt.Valid {
+		info.LastUsedAt = t.LastUsedAt.Time.Format(time.RFC3339)
+	}
+	info.LastUsedIP = t.LastUsedIP.String
+	info.LastUsedUA = t.LastUsedUA.String
+	return info
+}
+
+// CreatePAT mints a long-lived machine token. The plaintext is returned once;
+// only its sha256 + prefix are stored (#184 acceptance 2).
+func (s *authService) CreatePAT(ctx context.Context, userID int, name string, never bool) (*entity.PATCreateResult, error) {
+	raw, err := newRawToken(model.TokenKindPAT)
+	if err != nil {
+		return nil, err
+	}
+	tok := &model.Token{
+		UserID:    userID,
+		Kind:      model.TokenKindPAT,
+		Name:      sql.NullString{String: name, Valid: name != ""},
+		TokenHash: hashToken(raw),
+		Prefix:    tokenPrefix(raw),
+		CreatedAt: time.Now(),
+	}
+	if !never {
+		tok.ExpiresAt = sql.NullTime{Time: time.Now().Add(defaultPATTTL), Valid: true}
+	}
+	if _, err := s.db.NewInsert().Model(tok).Exec(ctx); err != nil {
+		return nil, fmt.Errorf("create PAT: %w", err)
+	}
+	return &entity.PATCreateResult{Token: raw, Info: tokenInfoOf(tok)}, nil
+}
+
+// ListPATs returns the user's PATs (revoked ones included, flagged) newest-first.
+func (s *authService) ListPATs(ctx context.Context, userID int) ([]entity.TokenInfo, error) {
+	var toks []model.Token
+	err := s.db.NewSelect().Model(&toks).
+		Where("user_id = ?", userID).
+		Where("kind = ?", model.TokenKindPAT).
+		OrderExpr("created_at DESC, id DESC").
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list PATs: %w", err)
+	}
+	out := make([]entity.TokenInfo, 0, len(toks))
+	for i := range toks {
+		out = append(out, tokenInfoOf(&toks[i]))
+	}
+	return out, nil
+}
+
+// RevokeByID stamps revoked_at on the user's own PAT (idempotent). It is scoped
+// by user_id so one user can never revoke another's token.
+func (s *authService) RevokeByID(ctx context.Context, userID, id int) error {
+	if _, err := s.db.NewUpdate().Model((*model.Token)(nil)).
+		Set("revoked_at = ?", time.Now()).
+		Where("id = ?", id).
+		Where("user_id = ?", userID).
+		Where("kind = ?", model.TokenKindPAT).
+		Where("revoked_at IS NULL").
+		Exec(ctx); err != nil {
+		return fmt.Errorf("revoke PAT: %w", err)
+	}
+	return nil
 }
