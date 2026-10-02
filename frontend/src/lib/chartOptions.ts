@@ -92,6 +92,10 @@ export function normalizeChartStyle(style: unknown): ChartStyleConfig {
     // orientation/donut 同例：非法/缺失不带键，分别等价于 'vertical'/false。
     ...(orientation === 'vertical' || orientation === 'horizontal' ? { orientation } : {}),
     ...(raw.donut === true ? { donut: true } : {}),
+    // 饼图标签显示模式（issue #27，仅 pie 消费）：非法/缺失不带键，等价于 'percent'。
+    ...(raw.pieLabelDisplay === 'value' || raw.pieLabelDisplay === 'percent'
+      ? { pieLabelDisplay: raw.pieLabelDisplay }
+      : {}),
     // 表格展示开关（仅 table 消费）：只认 true，缺失/非法一律不带键，等价于 false/原样。
     ...(raw.tableShowIndex === true ? { tableShowIndex: true } : {}),
     ...(raw.tableWordWrap === true ? { tableWordWrap: true } : {}),
@@ -141,6 +145,26 @@ export interface ChartOptionContext {
    * 由调用方用 usePrefersReducedMotion() 提供。
    */
   reducedMotion?: boolean;
+  /**
+   * 饼图长尾合并阈值（issue #27，仅 pie 消费）：占比（百分比数值，如 5 = 5%）低于该值
+   * 的切片合并为「其他」。调用方传入前须经 normalizePieMergeRatio 净化
+   * （持久化文档的 queryOptions 是 unknown）。undefined = 不合并（既有行为）。
+   */
+  pieMergeOtherBelowRatio?: number;
+}
+
+/** 长尾合并产出的兜底切片名 */
+export const PIE_OTHER_SLICE_NAME = '其他';
+
+/**
+ * 把持久化 queryOptions.pieMergeOtherBelowRatio（schema 上是 unknown）净化为合法阈值。
+ * 仅接受 (0, 100) 内的有限数值；其他输入（含 0/负数/非数值）返回 undefined（不合并）。
+ */
+export function normalizePieMergeRatio(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0 || raw >= 100) {
+    return undefined;
+  }
+  return raw;
 }
 
 /** 参考线缺省展示名（用户未填 name 时） */
@@ -448,6 +472,43 @@ function applyStack<T extends StackableSeries>(
 }
 
 /**
+ * 「大数据」阈值（issue #76）：单图数据点数达到该值即启用抽稀/大图渲染并关闭动画。
+ * 与默认查询上限对齐（store.queryConfig.limit 默认 1000、后端钳位 ≤10000）——普通图表
+ * 顶到默认上限时就是最坏情况，数千点逐帧补间 + 逐点元素实例化是卡顿主因。
+ */
+const DENSE_POINT_THRESHOLD = 1000;
+
+/** 渲染前的最大数据点数：结构化联合响应与 legacy 裸行两种形状取其一。 */
+function maxPointCount(data: ChartDataResponse): number {
+  if (Array.isArray(data)) {
+    return data.length;
+  }
+  if ('x_axis' in data) {
+    return data.x_axis.length;
+  }
+  if ('data' in data) {
+    return data.data.length;
+  }
+  return 0;
+}
+
+/**
+ * 单条 series 的密集渲染片段：
+ * - 'line'（折线/面积）：LTTB 抽稀——点数未超像素宽度时 ECharts 内部自动跳过，属安全默认；
+ * - 'large'（柱/散点）：大图模式——绕过逐点元素实例化（本模块的柱/散点不带逐项 itemStyle，
+ *   故不损失可视化语义；tooltip 走 axis/item 触发，仍可用）。
+ * 非密集（小数据）返回 {}，保证 option 与本改动前字节等价。
+ */
+function denseSeriesFragment(kind: 'line' | 'large', dense: boolean): Record<string, unknown> {
+  if (!dense) {
+    return {};
+  }
+  return kind === 'large'
+    ? { large: true, largeThreshold: DENSE_POINT_THRESHOLD }
+    : { sampling: 'lttb' as const };
+}
+
+/**
  * 唯一的 ECharts option 构造出口。
  * 空数据 / 维度指标不足 / table・pivot（走 TableChart）时返回 null，
  * 调用方据此渲染空状态。
@@ -489,6 +550,8 @@ export function buildChartOption(
   const colorOf = (): { color?: string[] } => (palette ? { color: palette } : {});
   // 主题取色（标题/轴/网格/tooltip 底色）：canvas 拿不到 CSS 变量，须在构造时算成字面值。
   const chartColors = chartPalette(host ?? null, theme ?? 'light');
+  // 大数据档（issue #76）：点数顶到阈值即关动画，并给每条 series 挂抽稀/大图片段。
+  const dense = maxPointCount(data) >= DENSE_POINT_THRESHOLD;
 
   const commonOptions = {
     // 无障碍（issue #67）：系统要求减少动态效果时关掉 ECharts 动画。其余情况**不带**
@@ -510,6 +573,7 @@ export function buildChartOption(
       bottom: '3%',
       containLabel: true,
     },
+    ...(dense ? { animation: false } : {}),
   };
 
   const pieTooltip = {
@@ -564,7 +628,13 @@ export function buildChartOption(
           ...commonOptions,
           xAxis: { ...themedValueAxis(), name: labelOf(xField) },
           yAxis: { ...themedValueAxis(), name: labelOf(yField) },
-          series: [{ type: 'scatter' as const, data: scatter.data }],
+          series: [
+            {
+              type: 'scatter' as const,
+              data: scatter.data,
+              ...denseSeriesFragment('large', dense),
+            },
+          ],
         };
       }
 
@@ -574,6 +644,42 @@ export function buildChartOption(
           return null;
         }
         const pie = data as PieResponse;
+        // 长尾合并（issue #27）：占比低于阈值的切片合并为单个「其他」切片。
+        // 分母为正数值切片之和；无可合并切片（阈值未配/全部高于阈值/全非正数）时原样输出。
+        const ratio = context.pieMergeOtherBelowRatio;
+        const positiveTotal = pie.data.reduce(
+          (sum, item) =>
+            typeof item.value === 'number' && item.value > 0 ? sum + item.value : sum,
+          0
+        );
+        // 小切片判定：正数值且占比低于阈值。已有的「其他」切片（如后端 TopN 的其余合并
+        // 产物）无论大小一律折进合并桶，保证输出里「其他」永远只有一个。
+        const isSmall = (item: { name: unknown; value: unknown }): boolean =>
+          ratio !== undefined &&
+          positiveTotal > 0 &&
+          typeof item.value === 'number' &&
+          item.value > 0 &&
+          (item.value / positiveTotal) * 100 < ratio;
+        const foldOther = (item: { name: unknown; value: unknown }): boolean =>
+          isSmall(item) || item.name === PIE_OTHER_SLICE_NAME;
+        const mergeOther = ratio !== undefined && pie.data.some(foldOther);
+        const otherTotal = mergeOther
+          ? pie.data.reduce(
+              (sum, item) =>
+                foldOther(item) && typeof item.value === 'number' ? sum + item.value : sum,
+              0
+            )
+          : 0;
+        const pieData = mergeOther
+          ? [
+              ...pie.data
+                .filter((item) => !foldOther(item))
+                .map((item) => ({ name: item.name, value: item.value })),
+              { name: PIE_OTHER_SLICE_NAME, value: otherTotal },
+            ]
+          : pie.data.map((item) => ({ name: item.name, value: item.value }));
+        // 标签显示模式（issue #27）：'value' 显示原始数值，缺省 'percent' 显示 ECharts 占比
+        const labelFormatter = style.pieLabelDisplay === 'value' ? '{b}: {c}' : '{b}: {d}%';
         return {
           ...commonOptions,
           tooltip: pieTooltip,
@@ -583,9 +689,9 @@ export function buildChartOption(
               name: labelOf(valueField),
               type: 'pie' as const,
               radius: pieRadius,
-              data: pie.data.map((item) => ({ name: item.name, value: item.value })),
+              data: pieData,
               emphasis: pieEmphasis,
-              label: { formatter: '{b}: {d}%' },
+              label: { formatter: labelFormatter },
             },
           ],
           ...colorOf(),
@@ -651,6 +757,7 @@ export function buildChartOption(
                 type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
                 ...(chartType === 'area' ? { areaStyle: {} } : {}),
                 ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
+                ...denseSeriesFragment(chartType === 'bar' ? 'large' : 'line', dense),
                 ...referenceLineMarkLine(name, context.referenceLines, horizontalBar),
                 ...dataLabelFragment(style, context.metricFormats?.[name]),
                 data: s.data.map(toOptionValue),
@@ -816,6 +923,7 @@ export function buildChartOption(
               type: yAxisIndex === 1 ? ('line' as const) : ('bar' as const),
               yAxisIndex,
               ...(yAxisIndex === 1 ? { connectNulls: true } : {}),
+              ...denseSeriesFragment(yAxisIndex === 1 ? 'line' : 'large', dense),
               data: s.data.map(toOptionValue),
             };
           }),
@@ -845,6 +953,7 @@ export function buildChartOption(
         {
           type: 'scatter' as const,
           data: rows.map((item) => [toOptionValue(item[xField]), toOptionValue(item[yField])]),
+          ...denseSeriesFragment('large', dense),
         },
       ],
     };
@@ -880,6 +989,7 @@ export function buildChartOption(
               type: chartType === 'bar' ? ('bar' as const) : ('line' as const),
               ...(chartType === 'area' ? { areaStyle: {} } : {}),
               ...(chartType === 'bar' ? {} : { smooth: style.smooth, connectNulls: true }),
+              ...denseSeriesFragment(chartType === 'bar' ? 'large' : 'line', dense),
               ...referenceLineMarkLine(name, context.referenceLines, horizontalBar),
               ...dataLabelFragment(style, context.metricFormats?.[name]),
               data: rows.map((item) => toOptionValue(item[yField])),

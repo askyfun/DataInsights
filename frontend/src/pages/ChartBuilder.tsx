@@ -93,7 +93,12 @@ import {
   type ChartType,
   migrateChartConfig,
 } from '../lib/chartConfigSchema';
-import { buildChartOption, isEmptyPayload, normalizeReferenceLines } from '../lib/chartOptions';
+import {
+  buildChartOption,
+  isEmptyPayload,
+  normalizePieMergeRatio,
+  normalizeReferenceLines,
+} from '../lib/chartOptions';
 import { classifyFieldKind, normalizeDataType } from '../lib/dataTypes';
 import {
   type DateFilterIntent,
@@ -109,6 +114,7 @@ import {
   parseQuerySpecDocument,
 } from '../lib/querySpec';
 import { usePrefersReducedMotion } from '../lib/reducedMotion';
+import type { ConditionalFormat } from '../lib/tableConditionalFormat';
 import { useResolvedTheme } from '../lib/theme';
 import {
   BindingInstance,
@@ -873,6 +879,8 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         // 参考线（R-63）：store 里是 camelCase 持久化模型，进 option 前净化一次
         // （防御恢复自旧文档/手改 config 的脏数据）。
         referenceLines: normalizeReferenceLines(queryOptions.referenceLines),
+        // 长尾合并阈值（issue #27，仅 pie 消费）：store 里是 camelCase 持久化模型，进 option 前净化一次
+        pieMergeOtherBelowRatio: normalizePieMergeRatio(queryOptions.pieMergeOtherBelowRatio),
         metricFormats: formats,
         reducedMotion,
       },
@@ -1147,6 +1155,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
     showStyleControl('stack') ||
     showStyleControl('orientation') ||
     showStyleControl('donut') ||
+    showStyleControl('pieLabelDisplay') ||
     showStyleControl('dataLabel') ||
     showStyleControl('tableRowSize') ||
     config.chartType === 'histogram' ||
@@ -1292,6 +1301,26 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               </SettingRow>
             )}
 
+            {config.chartType === 'pie' && (
+              <SettingRow label="长尾合并">
+                <Select
+                  style={{ width: 120 }}
+                  value={queryOptions.pieMergeOtherBelowRatio ?? undefined}
+                  allowClear
+                  placeholder="不合并"
+                  onChange={(value) =>
+                    onQueryOptionsChange({ pieMergeOtherBelowRatio: value ?? undefined })
+                  }
+                  options={[
+                    { value: 1, label: '占比<1%' },
+                    { value: 2, label: '占比<2%' },
+                    { value: 5, label: '占比<5%' },
+                    { value: 10, label: '占比<10%' },
+                  ]}
+                />
+              </SettingRow>
+            )}
+
             {showStyleControl('stack') && (
               <SettingRow label="堆叠模式">
                 <Select
@@ -1326,6 +1355,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 <Switch
                   checked={chartStyle.donut ?? false}
                   onChange={(checked) => onChartStyleChange({ donut: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('pieLabelDisplay') && (
+              <SettingRow label="标签显示">
+                <Select
+                  style={{ width: 120 }}
+                  value={chartStyle.pieLabelDisplay ?? 'percent'}
+                  onChange={(value) => onChartStyleChange({ pieLabelDisplay: value })}
+                  options={[
+                    { value: 'percent', label: '百分比' },
+                    { value: 'value', label: '数值' },
+                  ]}
                 />
               </SettingRow>
             )}
@@ -1392,6 +1435,35 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 <Switch
                   checked={chartStyle.tableFreezeDimensions ?? false}
                   onChange={(checked) => onChartStyleChange({ tableFreezeDimensions: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {showStyleControl('tableMergeCells') && (
+              <SettingRow label="合并维度单元格">
+                <Switch
+                  checked={chartStyle.tableMergeCells ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableMergeCells: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {/* 行列转置（#156 AC2）：维度取值变列标题、指标变行。 */}
+            {showStyleControl('tableTranspose') && (
+              <SettingRow label="行列转置">
+                <Switch
+                  checked={chartStyle.tableTranspose ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableTranspose: checked })}
+                />
+              </SettingRow>
+            )}
+
+            {/* 迷你图列（#156 AC4）：行尾趋势列；需存在日期形状的维度列才出现。 */}
+            {showStyleControl('tableSparkline') && (
+              <SettingRow label="迷你图列">
+                <Switch
+                  checked={chartStyle.tableSparkline ?? false}
+                  onChange={(checked) => onChartStyleChange({ tableSparkline: checked })}
                 />
               </SettingRow>
             )}
@@ -1522,6 +1594,177 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               }}
             >
               添加参考线
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* 条件格式（issue #156 AC1，仅表格）：按指标列的值给单元格着色。
+          规则存 chartStyle.tableConditionalFormat，语义在 lib/tableConditionalFormat.ts，
+          TableChart 通过 onCell 上背景色消费。 */}
+      {showStyleControl('tableConditionalFormat') && (
+        <Card
+          title="条件格式"
+          size="small"
+          style={{ marginBottom: 6 }}
+          styles={{ body: { padding: '4px 6px' } }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {(chartStyle.tableConditionalFormat ?? []).length === 0 && (
+              <span style={{ fontSize: 12, color: 'var(--dr-text-3)' }}>
+                暂无规则，点击下方按钮添加
+              </span>
+            )}
+            {(chartStyle.tableConditionalFormat ?? []).map((rule, index) => {
+              const updateRule = (patch: Partial<ConditionalFormat>) => {
+                const next = (chartStyle.tableConditionalFormat ?? []).map((r, i) =>
+                  i === index ? { ...r, ...patch } : r
+                );
+                onChartStyleChange({ tableConditionalFormat: next });
+              };
+              return (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 规则列表按序整体重写，无重排交互
+                  key={index}
+                  data-testid="conditional-format-row"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                    padding: '4px 6px',
+                    borderRadius: 6,
+                    background: 'var(--dr-sunken)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Select
+                      size="small"
+                      style={{ minWidth: 0, flex: 1 }}
+                      value={rule.metric}
+                      placeholder="指标"
+                      onChange={(value) => updateRule({ metric: value })}
+                      options={referenceMetricOptions.map((opt) => ({
+                        value: opt.name,
+                        label: opt.label,
+                      }))}
+                    />
+                    <Select
+                      size="small"
+                      style={{ width: 88, flexShrink: 0 }}
+                      value={rule.kind}
+                      onChange={(value) => updateRule({ kind: value })}
+                      options={[
+                        { value: 'threshold', label: '阈值' },
+                        { value: 'scale', label: '色阶' },
+                        { value: 'diff', label: '涨跌色' },
+                      ]}
+                    />
+                    <Button
+                      size="small"
+                      type="text"
+                      aria-label="删除条件格式规则"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() =>
+                        onChartStyleChange({
+                          tableConditionalFormat: (chartStyle.tableConditionalFormat ?? []).filter(
+                            (_, i) => i !== index
+                          ),
+                        })
+                      }
+                    />
+                  </div>
+                  {rule.kind === 'threshold' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Select
+                        size="small"
+                        style={{ width: 64, flexShrink: 0 }}
+                        aria-label="阈值算子"
+                        value={rule.op ?? '>'}
+                        onChange={(value) => updateRule({ op: value })}
+                        options={['>', '>=', '<', '<=', '='].map((op) => ({
+                          value: op,
+                          label: op,
+                        }))}
+                      />
+                      <InputNumber
+                        size="small"
+                        style={{ minWidth: 0, flex: 1 }}
+                        aria-label="阈值"
+                        value={rule.value}
+                        placeholder="阈值"
+                        onChange={(value) => updateRule({ value: value ?? undefined })}
+                      />
+                      <ColorPicker
+                        size="small"
+                        value={rule.color ?? '#fa8c16'}
+                        onChange={(color) => updateRule({ color: color.toHexString() })}
+                      />
+                    </div>
+                  )}
+                  {rule.kind === 'scale' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: 12, color: 'var(--dr-text-3)', flexShrink: 0 }}>
+                        低
+                      </span>
+                      <ColorPicker
+                        size="small"
+                        value={rule.minColor ?? '#ffffff'}
+                        onChange={(color) => updateRule({ minColor: color.toHexString() })}
+                      />
+                      <span style={{ fontSize: 12, color: 'var(--dr-text-3)', flexShrink: 0 }}>
+                        高
+                      </span>
+                      <ColorPicker
+                        size="small"
+                        value={rule.maxColor ?? '#1677ff'}
+                        onChange={(color) => updateRule({ maxColor: color.toHexString() })}
+                      />
+                    </div>
+                  )}
+                  {rule.kind === 'diff' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: 12, color: 'var(--dr-text-3)', flexShrink: 0 }}>
+                        涨
+                      </span>
+                      <ColorPicker
+                        size="small"
+                        value={rule.upColor ?? '#cf1322'}
+                        onChange={(color) => updateRule({ upColor: color.toHexString() })}
+                      />
+                      <span style={{ fontSize: 12, color: 'var(--dr-text-3)', flexShrink: 0 }}>
+                        跌
+                      </span>
+                      <ColorPicker
+                        size="small"
+                        value={rule.downColor ?? '#389e0d'}
+                        onChange={(color) => updateRule({ downColor: color.toHexString() })}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <Button
+              size="small"
+              type="dashed"
+              block
+              icon={<PlusOutlined />}
+              aria-label="添加条件格式规则"
+              disabled={referenceMetricOptions.length === 0}
+              onClick={() => {
+                const first = referenceMetricOptions[0];
+                if (first) {
+                  onChartStyleChange({
+                    tableConditionalFormat: [
+                      ...(chartStyle.tableConditionalFormat ?? []),
+                      { metric: first.name, kind: 'threshold', op: '>', value: 0 },
+                    ],
+                  });
+                }
+              }}
+            >
+              添加条件格式规则
             </Button>
           </div>
         </Card>
@@ -2757,13 +3000,16 @@ const ChartBuilder: React.FC = () => {
     const editId = searchParams.get('edit');
     const datasetIdParam = searchParams.get('datasetId');
 
-    if (editId && datasetIdParam) {
-      const chartId = parseInt(editId, 10);
+    if (datasetIdParam) {
       const dsId = parseInt(datasetIdParam, 10);
-
-      if (!Number.isNaN(chartId) && !Number.isNaN(dsId)) {
+      const chartId = editId ? parseInt(editId, 10) : Number.NaN;
+      if (!Number.isNaN(dsId)) {
+        // 只带 datasetId（无 edit）也是合法入口：上传成功后直达图表编辑（#138），
+        // 期望直接选中该数据集进入空白查询，而不是停在「请先选择数据集」。
         setSelectedDatasetId(dsId);
-        setEditingChartId(chartId);
+        if (!Number.isNaN(chartId)) {
+          setEditingChartId(chartId);
+        }
       }
     }
   }, [searchParams]);
@@ -3176,6 +3422,10 @@ const ChartBuilder: React.FC = () => {
           wordWrap={chartStyle.tableWordWrap}
           nullDisplay={chartStyle.tableNullDisplay}
           freezeDimensions={chartStyle.tableFreezeDimensions}
+          mergeCells={chartStyle.tableMergeCells}
+          transpose={chartStyle.tableTranspose}
+          sparkline={chartStyle.tableSparkline}
+          conditionalFormat={chartStyle.tableConditionalFormat}
           pagination={chartBuilderConfig.chartType === 'table' ? tablePagination : undefined}
           // 排序状态受控：单一事实源是 queryConfig.sort（bindingId 引用），
           // 表头箭头只反映它，避免"看起来排了、数据没排"的不一致。

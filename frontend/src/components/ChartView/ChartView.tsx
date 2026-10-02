@@ -7,6 +7,7 @@ import {
   buildChartOption,
   isEmptyPayload,
   normalizeChartStyle,
+  normalizePieMergeRatio,
   normalizeReferenceLines,
 } from '../../lib/chartOptions';
 import { isPercentOfTotalFormat } from '../../lib/format';
@@ -190,6 +191,11 @@ const ChartView: React.FC<ChartViewProps> = ({
         referenceLines: normalizeReferenceLines(
           (chartDoc.queryOptions as { referenceLines?: unknown }).referenceLines
         ),
+        // 长尾合并阈值（issue #27，仅 pie 消费）：持久化文档 queryOptions 小节是 unknown，
+        // 与参考线同款窄化后透传。
+        pieMergeOtherBelowRatio: normalizePieMergeRatio(
+          (chartDoc.queryOptions as { pieMergeOtherBelowRatio?: unknown }).pieMergeOtherBelowRatio
+        ),
         // 指标显示格式（数据标注用）：与 displayLabels 同一键空间（输出列名）。
         metricFormats: metricFormatByOutputName,
         reducedMotion,
@@ -309,6 +315,10 @@ const ChartView: React.FC<ChartViewProps> = ({
         wordWrap={chartStyle.tableWordWrap}
         nullDisplay={chartStyle.tableNullDisplay}
         freezeDimensions={chartStyle.tableFreezeDimensions}
+        mergeCells={chartStyle.tableMergeCells}
+        transpose={chartStyle.tableTranspose}
+        sparkline={chartStyle.tableSparkline}
+        conditionalFormat={chartStyle.tableConditionalFormat}
         // 联动（issue #143）：行点击上报该行在唯一维度列上的取值。没有可点击维度列时
         // 不挂 onRow——否则表行会出现「能点但点了没反应」的手型光标。
         onRowClick={

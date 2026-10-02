@@ -8,7 +8,9 @@ import {
   FunctionOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SwapOutlined,
   TableOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import {
   Button,
@@ -44,6 +46,7 @@ import {
   TableInfo,
 } from '../api';
 import { toStandardType } from '../api/datatypes';
+import DatasetUploadModal, { DatasetReplaceModal, FileDropZone } from '../components/DatasetUpload';
 import { ListSearch, makeTimeSorter } from '../components/listPage';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
@@ -76,6 +79,12 @@ const DatasetPage: React.FC = () => {
   const [virtualFieldModalVisible, setVirtualFieldModalVisible] = useState(false);
   const [editingVirtualField, setEditingVirtualField] = useState<DatasetColumn | null>(null);
   const [virtualFieldForm] = Form.useForm<DatasetColumn>();
+
+  // 本地文件上传（#138）：uploadModal 建新数据集，replaceModal 覆盖已有抽取数据集。
+  const [uploadModalVisible, setUploadModalVisible] = useState(false);
+  const [initialUploadFile, setInitialUploadFile] = useState<File | null>(null);
+  const [replaceModalVisible, setReplaceModalVisible] = useState(false);
+  const [replacingDataset, setReplacingDataset] = useState<Dataset | null>(null);
 
   // 字段分布状态
   const [selectedField, setSelectedField] = useState<string>('');
@@ -520,6 +529,26 @@ const DatasetPage: React.FC = () => {
     }
   };
 
+  // 上传成功即直达图表编辑（验收：上传到出第一张图 ≤2 分钟）。
+  const handleUploaded = (dataset: Dataset) => {
+    setUploadModalVisible(false);
+    setInitialUploadFile(null);
+    message.success(intl.formatMessage({ id: 'common.success' }));
+    fetchDatasets();
+    navigate(`/chart-builder?datasetId=${dataset.id}`);
+  };
+
+  const handleReplaceCancel = () => {
+    setReplaceModalVisible(false);
+    setReplacingDataset(null);
+  };
+
+  const handleReplaced = () => {
+    setReplaceModalVisible(false);
+    setReplacingDataset(null);
+    fetchDatasets();
+  };
+
   // Handle edit dataset
   const handleEdit = (record: any) => {
     setEditingDataset(record);
@@ -678,7 +707,7 @@ const DatasetPage: React.FC = () => {
     {
       title: intl.formatMessage({ id: 'dataset.actions' }),
       key: 'actions',
-      width: 140,
+      width: 220,
       render: (_: any, record: any) => (
         <Space>
           <Button
@@ -690,6 +719,20 @@ const DatasetPage: React.FC = () => {
           >
             {intl.formatMessage({ id: 'common.edit' })}
           </Button>
+          {record.mode === 'extract' && (
+            <Button
+              type="link"
+              size="small"
+              icon={<SwapOutlined />}
+              aria-label="Replace dataset file"
+              onClick={() => {
+                setReplacingDataset(record);
+                setReplaceModalVisible(true);
+              }}
+            >
+              {intl.formatMessage({ id: 'dataset.replace.button' })}
+            </Button>
+          )}
           <Popconfirm
             title={intl.formatMessage({ id: 'dataset.deleteConfirm' })}
             onConfirm={() => handleDelete(record.id)}
@@ -719,6 +762,15 @@ const DatasetPage: React.FC = () => {
         description={intl.formatMessage({ id: 'dataset.manageDatasets' })}
         extra={
           <>
+            <Button
+              icon={<UploadOutlined />}
+              onClick={() => {
+                setInitialUploadFile(null);
+                setUploadModalVisible(true);
+              }}
+            >
+              {intl.formatMessage({ id: 'dataset.upload.button' })}
+            </Button>
             <Button
               icon={<ReloadOutlined />}
               onClick={() => fetchDatasets()}
@@ -791,7 +843,20 @@ const DatasetPage: React.FC = () => {
             showTotal: (total) => `Total ${total} items`,
           }}
           locale={{
-            emptyText: intl.formatMessage({ id: 'common.noData' }),
+            emptyText:
+              Array.isArray(datasets) && datasets.length === 0 ? (
+                <div style={{ padding: '24px 0' }}>
+                  <FileDropZone
+                    titleId="dataset.upload.emptyTitle"
+                    onFile={(file) => {
+                      setInitialUploadFile(file);
+                      setUploadModalVisible(true);
+                    }}
+                  />
+                </div>
+              ) : (
+                intl.formatMessage({ id: 'common.noData' })
+              ),
           }}
           size="small"
         />
@@ -1503,6 +1568,23 @@ const DatasetPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      <DatasetUploadModal
+        open={uploadModalVisible}
+        initialFile={initialUploadFile}
+        onCancel={() => {
+          setUploadModalVisible(false);
+          setInitialUploadFile(null);
+        }}
+        onCreated={handleUploaded}
+      />
+
+      <DatasetReplaceModal
+        open={replaceModalVisible}
+        dataset={replacingDataset}
+        onCancel={handleReplaceCancel}
+        onReplaced={handleReplaced}
+      />
     </div>
   );
 };

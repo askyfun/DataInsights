@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"data-insights/internal/keystore"
 	"data-insights/internal/migration/columnids"
 	"data-insights/internal/response"
+	"data-insights/internal/service/alert"
 	"data-insights/internal/webui"
 
 	"github.com/getsentry/sentry-go"
@@ -135,8 +137,13 @@ func main() {
 
 	registerHealthRoute(r)
 
-	// Setup routes
-	SetupRoutes(r, db, securityKey, c.ExtractDatasourceID)
+	// 预警邮件通知：SMTP_HOST 未配置传 nil（评估照常跑，触发记录说明未通知）。
+	alertSvc := SetupRoutes(r, db, securityKey, c.ExtractDatasourceID, newEmailNotifier(c.Alert))
+
+	// 预警评估器：后台 goroutine 定时轮询，随主进程退出（evalCancel）而结束。
+	evalCtx, evalCancel := context.WithCancel(context.Background())
+	defer evalCancel()
+	go alertSvc.RunEvaluator(evalCtx, time.Duration(c.Alert.EvalIntervalSeconds)*time.Second)
 
 	// 前端静态产物与 API 同进程同端口。配了目录就托管页面，没配就是纯 API 服务
 	// （本地开发页面由 Vite dev server 提供，后端无须重复托管一份构建产物）。
@@ -174,6 +181,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	slog.Info("Shutting down server...")
+	evalCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -183,6 +191,29 @@ func main() {
 	}
 
 	slog.Info("Server exited")
+}
+
+// newEmailNotifier builds the alert email notifier from config. An empty
+// SMTP_HOST returns nil (the "not configured" state the evaluator understands:
+// triggers are still recorded, notify_error explains why nothing was sent).
+func newEmailNotifier(cfg config.AlertConfig) alert.Notifier {
+	if cfg.SMTPHost == "" {
+		return nil
+	}
+	var to []string
+	for _, addr := range strings.Split(cfg.NotifyEmails, ",") {
+		if addr = strings.TrimSpace(addr); addr != "" {
+			to = append(to, addr)
+		}
+	}
+	return alert.NewEmailNotifier(alert.SMTPConfig{
+		Host:     cfg.SMTPHost,
+		Port:     cfg.SMTPPort,
+		Username: cfg.SMTPUsername,
+		Password: cfg.SMTPPassword,
+		From:     cfg.SMTPFrom,
+		To:       to,
+	})
 }
 
 // registerHealthRoute registers the health check endpoint through the unified response wrapper so
