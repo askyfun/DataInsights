@@ -5,7 +5,9 @@ import (
 	"github.com/uptrace/bun"
 
 	"data-insights/internal/handler"
+	"data-insights/internal/middleware"
 	"data-insights/internal/router"
+	"data-insights/internal/service/auth"
 	"data-insights/internal/service/chart"
 	"data-insights/internal/service/dashboard"
 	"data-insights/internal/service/dataset"
@@ -115,4 +117,24 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	router.RegisterGetRoute(dashboardFolders, "/:id", dashboardFolderHandler.Get)
 	router.RegisterPutRoute(dashboardFolders, "/:id", dashboardFolderHandler.Update)
 	router.RegisterDeleteRoute(dashboardFolders, "/:id", dashboardFolderHandler.Delete)
+
+	// Auth routes (R-82 / issue #183). Progressive enforcement: only these
+	// endpoints are behind the bearer middleware for now — the 40 existing
+	// resource endpoints stay open at L0 and opt in as Phase C rolls out.
+	// register/login are public (bootstrap + sign-in); me/logout require a
+	// token. allowPAT=true here because both are self-service identity
+	// operations, not user-management; the PAT-forbidden guard lives on the
+	// token-management endpoints (#184).
+	authSvc := auth.NewService(db)
+	authHandler := handler.NewAuthHandler(authSvc)
+	authPublic := api.Group("/auth")
+	router.RegisterPostRoute(authPublic, "/register", authHandler.Register)
+	router.RegisterPostRoute(authPublic, "/login", authHandler.Login)
+	authProtected := api.Group("/auth")
+	authProtected.Use(middleware.Bearer(authSvc, true))
+	router.RegisterGetRoute(authProtected, "/me", authHandler.Me)
+	// DELETE, not POST: the generic router binds a JSON body for every POST,
+	// and logout carries none — a POST would fail on "EOF" before the handler
+	// runs. DELETE never binds a body, so revocation actually executes.
+	router.RegisterDeleteRoute(authProtected, "/logout", authHandler.Logout)
 }
