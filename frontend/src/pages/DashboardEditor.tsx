@@ -1233,7 +1233,6 @@ const DashboardEditor: React.FC = () => {
                 <DashboardFilterBlock
                   widget={child}
                   value={filterValues[child.widgetId]}
-                  unsaved={!persistedIdsRef.current.has(child.widgetId)}
                   onChange={(next) => applyFilterState(child.widgetId, next)}
                   onOperatorChange={(operator) =>
                     handleFilterOperatorChange(child.widgetId, operator)
