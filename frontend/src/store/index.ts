@@ -3,6 +3,7 @@ import { message } from 'antd';
 import { create } from 'zustand';
 import { isNumericType, normalizeDataType } from '@/lib/dataTypes';
 import type { DateFilterIntent } from '@/lib/dateFilter';
+import type { ConditionalFormat } from '@/lib/tableConditionalFormat';
 import {
   Chart,
   ChartDataResponse,
@@ -324,6 +325,28 @@ export interface ChartStyleConfig {
    * 词表取轴图通用位置，不逐图型再分叉（饼图/漏斗自带标签，不走本项）。
    */
   dataLabelPosition?: 'top' | 'inside' | 'center';
+  /**
+   * 表格条件格式（仅 table，issue #156 AC1）：按指标列的值着色（阈值/色阶/涨跌色）。
+   * 规则的 metric 存输出列名（与 TableChart 的 dataIndex 同一命名空间）；
+   * undefined 等价于空数组（无着色）。语义实现在 lib/tableConditionalFormat.ts。
+   */
+  tableConditionalFormat?: ConditionalFormat[];
+  /**
+   * 表格维度列纵向合并（仅 table，issue #156 AC3）：把「同值相邻」的维度单元格并成一个
+   * 跨多行的单元格。undefined 等价于 false。语义实现在 lib/tableCellMerge.ts。
+   */
+  tableMergeCells?: boolean;
+  /**
+   * 行列转置（仅 table，issue #156 AC2）：维度取值变列标题、指标变行，纯渲染层换位。
+   * undefined 等价于 false。语义实现在 lib/tableTranspose.ts；没有维度列时回落普通渲染。
+   */
+  tableTranspose?: boolean;
+  /**
+   * 迷你图列（仅 table，issue #156 AC4）：行尾「趋势」列画该行维度组合的指标序列
+   * （需存在日期形状的维度列才启用，列由数据形状探测）。undefined 等价于 false。
+   * 语义实现在 lib/tableSparkline.ts；服务端分页下序列只含当前页的行。
+   */
+  tableSparkline?: boolean;
 }
 
 /**
