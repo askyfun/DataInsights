@@ -1023,8 +1023,286 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QueryRecordResponse'
+  /api/auth/register:
+    post:
+      tags:
+        - auth
+      summary: 注册首个管理员（引导式）
+      description: >-
+        仅当无存活用户时成功，该用户 role=admin；否则 20200。成功即签发 24h 会话
+        token（明文仅此一次回显）。R-82 #183。
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthCredentialsRequest'
+      responses:
+        '200':
+          description: HTTP 恒 200；成功 data 为 AuthResult
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResultResponse'
+  /api/auth/login:
+    post:
+      tags:
+        - auth
+      summary: 登录并签发会话 token
+      description: 校验 bcrypt 口令；成功签发 24h 会话 token，失败 20200（不区分用户名/口令）。
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthCredentialsRequest'
+      responses:
+        '200':
+          description: 成功 data 为 AuthResult
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResultResponse'
+  /api/auth/me:
+    get:
+      tags:
+        - auth
+      summary: 当前登录用户
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功 data 为 AuthUser；无/失效 token 20200
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserResponse'
+  /api/auth/logout:
+    delete:
+      tags:
+        - auth
+      summary: 撤销当前会话 token（即时生效）
+      description: 用 DELETE 而非 POST：登出无请求体，泛型路由对 POST 必绑 body 会 EOF。
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: "成功 data 为 {status: ok}"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /api/tokens:
+    post:
+      tags:
+        - tokens
+      summary: 创建 PAT（明文仅回显一次）
+      description: >-
+        需人类会话（PAT 不得调用管理端点，#184 验收 3）。默认 90 天；never=true 则不过期。
+        库内只存 sha256 + 可识别前缀。
+      operationId: createPAT
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PATCreateRequest'
+      responses:
+        '200':
+          description: 成功 data 为 PATCreateResult
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PATCreateResponse'
+    get:
+      tags:
+        - tokens
+      summary: 列出本人 PAT（不含密钥）
+      operationId: listPATs
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功 data 为 TokenInfo 数组
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenInfoListResponse'
+  /api/tokens/{id}:
+    delete:
+      tags:
+        - tokens
+      summary: 撤销本人某个 PAT
+      operationId: revokePAT
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: "成功 data 为 {status: ok}"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
 components:
   schemas:
+    AuthCredentialsRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    AuthUser:
+      type: object
+      description: 用户对外投影（entity.User）；绝不含口令或哈希。
+      required:
+        - id
+        - username
+        - role
+        - created_at
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        role:
+          type: string
+          enum:
+            - admin
+            - user
+        created_at:
+          type: string
+    AuthResult:
+      type: object
+      description: 登录/注册签发结果；token 为会话明文，仅这一次回显。
+      required:
+        - token
+        - kind
+        - expires_at
+        - user
+      properties:
+        token:
+          type: string
+        kind:
+          type: string
+          enum:
+            - session
+        expires_at:
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+    TokenInfo:
+      type: object
+      description: PAT 列表项；只有可识别前缀与元数据，绝不含 token_hash 或明文。
+      required:
+        - id
+        - name
+        - prefix
+        - created_at
+        - last_used_at
+        - last_used_ip
+        - last_used_ua
+        - expires_at
+        - revoked
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        prefix:
+          type: string
+        created_at:
+          type: string
+        last_used_at:
+          type: string
+        last_used_ip:
+          type: string
+        last_used_ua:
+          type: string
+        expires_at:
+          type: string
+          description: 空串 = 不过期（never PAT）。
+        revoked:
+          type: boolean
+    PATCreateRequest:
+      type: object
+      required:
+        - name
+        - never
+      properties:
+        name:
+          type: string
+        never:
+          type: boolean
+          description: true = 长期不过期；false = 默认 90 天。
+    PATCreateResult:
+      type: object
+      required:
+        - token
+        - info
+      properties:
+        token:
+          type: string
+          description: PAT 明文，仅创建响应回显一次。
+        info:
+          $ref: '#/components/schemas/TokenInfo'
+    AuthResultResponse:
+      description: 登录/注册响应：data 为 AuthResult。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/AuthResult'
+    AuthUserResponse:
+      description: GET /api/auth/me 响应：data 为 AuthUser。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/AuthUser'
+    TokenInfoListResponse:
+      description: GET /api/tokens 响应：data 为 TokenInfo 数组。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TokenInfo'
+    PATCreateResponse:
+      description: POST /api/tokens 响应：data 为 PATCreateResult。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/PATCreateResult'
     ResponseCode:
       type: integer
       description: |
@@ -2965,9 +3243,11 @@ components:
     DashboardWidget:
       type: object
       description: >-
-        盘内一块 widget，按 type 判别（chart | text | filter）：本 schema 是三者的
-        扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用
-        markdown，filter 用 binding/label/dataType/operator/multi/defaultValue/scope。
+        盘内一块 widget，按 type 判别（chart | text | filter | container）：本 schema 是
+        四者的扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用
+        markdown，filter 用 binding/label/dataType/operator/multi/defaultValue/scope/
+        containerId，container 用 label/pinned。container（查询容器，issue #154）是一块只做
+        视觉分组 + 置顶的栅格，不参与取数；被归拢的筛选器用 containerId 反向指向它。
 
         契约上这是 oneOf-with-discriminator 语义，但生成物刻意不落成 union 类型：
         Go 侧为不引入 oapi-codegen/runtime 依赖（与 ChartDataResult.data 同款取舍），
@@ -3001,6 +3281,7 @@ components:
             - chart
             - text
             - filter
+            - container
         x:
           type: integer
           description: react-grid-layout 左上角列坐标（0 起）。
@@ -3027,7 +3308,7 @@ components:
           $ref: '#/components/schemas/DashboardFilterBinding'
         label:
           type: string
-          description: type=filter 的显示名。
+          description: type=filter 的显示名；type=container 的容器标题（缺省时前端迁移兜底为「查询容器」）。
         dataType:
           type: string
           description: type=filter 绑定字段的数据类型（如 string / number / date）。
@@ -3066,6 +3347,16 @@ components:
             type=filter 的默认选中值。**空数组 = 未激活**：未激活的筛选器不参与合并、
             不触发覆盖（PRD §8.3 步骤 2），否则拖入一个筛选器会莫名抹掉图表默认条件。
           items: {}
+        containerId:
+          type: string
+          description: >-
+            type=filter 可选：所属查询容器（type=container）的 widgetId。缺省 = 该筛选器是独立栅格块；
+            非空 = 被归拢进该容器、只在容器内渲染、不占顶层栅格。指向不存在容器的值由前端迁移剥掉
+            （退回独立块），与 pageId 同为扁平跨块引用。后端不读此键。
+        pinned:
+          type: boolean
+          description: >-
+            type=container 可选：是否置顶（渲染时吸附到栅格顶行）。缺省不置顶。
     DashboardFilterBinding:
       type: object
       description: >-
@@ -3085,7 +3376,12 @@ components:
             条件里的列 id 求交集得出的 —— 存列名会让这个可见标识永远匹配不上。列名可变，只用于展示。
     DashboardQueryFilter:
       type: object
-      description: POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。
+      description: >-
+        POST /api/dashboards/{id}/query 的单个筛选器当前取值（按下发顺序应用）。
+        已落库的筛选器只带 widgetId + value，绑定与算子由后端从 layout_json 读；
+        **未落库**的筛选器（本次会话新拖入、或改了配置还没保存，issue #172）额外带上
+        binding + operator —— 后端没有它的 layout 记录，只能从请求读绑定，否则会
+        「配好取值却没反应」。一旦携带 binding，即以请求为准（覆盖 layout 里的同 widgetId 记录）。
       required:
         - widgetId
       properties:
@@ -3096,6 +3392,20 @@ components:
           type: array
           description: 当前选中值；空数组等同于未激活。
           items: {}
+        binding:
+          type: object
+          description: >-
+            仅未落库的筛选器需要：绑定字段 (datasetId, column)。已落库时省略，后端从 layout 读。
+          properties:
+            datasetId:
+              type: integer
+            column:
+              type: string
+              description: 列的稳定 id（DatasetColumn.id），与布局里 binding.column 同口径。
+        operator:
+          type: string
+          description: >-
+            仅未落库的筛选器需要：算子（与图表过滤算子同一词表）。与 binding 配套下发。
     DashboardQueryLinkage:
       type: object
       description: >-
@@ -3410,3 +3720,12 @@ components:
       schema:
         type: string
 
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: >-
+        人类会话 token（di_session_…）或机器 PAT（di_pat_…）。两者走同一校验中间件；
+        管理端点（/api/tokens、用户管理）拒绝 PAT，仅接受会话（#184 验收 3）。

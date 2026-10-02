@@ -600,4 +600,62 @@ export const queriesApi = {
   },
 };
 
+// --- Auth (R-82 #183) + PAT 管理 (#184) ---
+// 这些类型是**薄手写层**：后端 handler-local 镜像 + openapi 为事实源，但前端
+// `make api-gen` 那半步当前已知崩溃（openapi-typescript ↔ typescript@7），
+// 故 auth/token 的 wire 类型在此按 snake_case 契约手书写死（字段名与后端逐一对应）。
+
+export interface ApiUser {
+  id: number;
+  username: string;
+  role: string;
+  created_at: string;
+}
+
+// 登录/注册响应：会话 token 明文（仅这一次回显）+ 归属用户。
+export interface AuthResult {
+  token: string;
+  kind: string;
+  expires_at: string;
+  user: ApiUser;
+}
+
+// PAT 列表项：绝不含 token_hash 或明文；只有可识别前缀 + 元数据。
+export interface TokenInfo {
+  id: number;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string;
+  last_used_ip: string;
+  last_used_ua: string;
+  expires_at: string; // "" = 不过期
+  revoked: boolean;
+}
+
+export interface PATCreateInput {
+  name: string;
+  never: boolean;
+}
+
+export interface PATCreateResult {
+  token: string; // 明文，仅创建响应回显一次
+  info: TokenInfo;
+}
+
+export const authApi = {
+  register: (d: { username: string; password: string }) =>
+    apiClient.post<ApiResponse<AuthResult>>('/api/auth/register', d),
+  login: (d: { username: string; password: string }) =>
+    apiClient.post<ApiResponse<AuthResult>>('/api/auth/login', d),
+  me: () => apiClient.get<ApiResponse<ApiUser>>('/api/auth/me'),
+  logout: () => apiClient.delete<ApiResponse<{ status: string }>>('/api/auth/logout'),
+};
+
+export const tokensApi = {
+  create: (d: PATCreateInput) => apiClient.post<ApiResponse<PATCreateResult>>('/api/tokens', d),
+  list: () => apiClient.get<ApiResponse<TokenInfo[]>>('/api/tokens'),
+  revoke: (id: number) => apiClient.delete<ApiResponse<{ status: string }>>(`/api/tokens/${id}`),
+};
+
 export default apiClient;

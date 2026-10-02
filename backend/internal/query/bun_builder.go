@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 
+	internalExpr "data-insights/internal/expr"
+
 	bundialect "github.com/uptrace/bun/dialect"
 )
 
@@ -250,7 +252,7 @@ func (qb *BunQueryBuilder) renderMetricSelect(metric MetricExpr) string {
 	if metric.Agg == AggCountDistinct {
 		// COUNT(DISTINCT field) 无法套用通用 "%s(%s)" 模板（会拼出括号不配对的
 		// "COUNT(DISTINCT(field)" 畸形 SQL），单独生成。
-		return fmt.Sprintf("COUNT(DISTINCT %s) AS %s", safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
+		return fmt.Sprintf("COUNT(DISTINCT %s) AS %s", safeAggArg(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 	}
 	if metric.Agg == AggMedian {
 		// AggMedian 是有序集聚合形态 percentile_cont(0.5) WITHIN GROUP (ORDER BY field)，
@@ -262,10 +264,10 @@ func (qb *BunQueryBuilder) renderMetricSelect(metric MetricExpr) string {
 		// FieldExpr 走 safeIdentifier（与 count_distinct 分支同口径，防注入），
 		// 别名走 quoteResultAlias（引号规则与其他 metric 一致）。
 		return fmt.Sprintf("percentile_cont(0.5) WITHIN GROUP (ORDER BY %s) AS %s",
-			safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
+			safeAggArg(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 	}
 	aggFunc := metric.Agg.GetAggFunc()
-	return fmt.Sprintf("%s(%s) AS %s", aggFunc, safeIdentifier(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
+	return fmt.Sprintf("%s(%s) AS %s", aggFunc, safeAggArg(metric.FieldExpr), qb.quoteResultAlias(metric.Alias))
 }
 
 // buildGroupByParts 构建 GROUP BY 字段列表。
@@ -454,6 +456,19 @@ func safeExpr(expr string) string {
 		return expr
 	}
 	return safeIdentifier(expr)
+}
+
+// safeAggArg 渲染聚合函数的实参。列索引命中的虚拟字段可能是复合标量表达式
+// （如 daily_range → "temp_max - temp_min"），此前 safeIdentifier 会把这类表达式
+// 退化成 _invalid_identifier，导致合法虚拟字段在指标位不可用。现改由表达式围栏
+// （internal/expr）判定：过闸表达式原样进聚合括号（列索引已在写入口/查询期双闸
+// 校验过），未过闸仍退化 _invalid_identifier，防注入语义不变。
+func safeAggArg(expr string) string {
+	expr = strings.TrimSpace(expr)
+	if internalExpr.ValidateArg(expr) == nil {
+		return expr
+	}
+	return "_invalid_identifier"
 }
 
 // quoteResultAlias 把用户提供的结果别名渲染为方言正确的带引号标识符。
