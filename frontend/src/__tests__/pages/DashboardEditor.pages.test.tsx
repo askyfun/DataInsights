@@ -188,7 +188,14 @@ describe('仪表盘多页面：按页取数与页面切换', () => {
     // 活跃页是首页；全局筛选器虽然挂在 p-2 上，但作用于所有页 → 首页取数要带上它。
     expect(mockQuery).toHaveBeenCalledWith('d-1', {
       page_id: 'p-1',
-      filters: [{ widgetId: 'f-global', value: ['华东'] }],
+      filters: [
+        {
+          widgetId: 'f-global',
+          value: ['华东'],
+          binding: { datasetId: 3, column: 'region' },
+          operator: 'in',
+        },
+      ],
       // #143 起 /query 契约恒带 linkages（无联动为空数组）
       linkages: [],
     });
@@ -210,7 +217,14 @@ describe('仪表盘多页面：按页取数与页面切换', () => {
     await waitFor(() =>
       expect(mockQuery).toHaveBeenCalledWith('d-1', {
         page_id: 'p-2',
-        filters: [{ widgetId: 'f-global', value: ['华东'] }],
+        filters: [
+          {
+            widgetId: 'f-global',
+            value: ['华东'],
+            binding: { datasetId: 3, column: 'region' },
+            operator: 'in',
+          },
+        ],
         linkages: [],
       })
     );
@@ -338,7 +352,14 @@ describe('仪表盘多页面：页面增删改复制', () => {
     await waitFor(() =>
       expect(mockQuery).toHaveBeenLastCalledWith('d-1', {
         page_id: 'p-2',
-        filters: [{ widgetId: 'f-global', value: ['华东'] }],
+        filters: [
+          {
+            widgetId: 'f-global',
+            value: ['华东'],
+            binding: { datasetId: 3, column: 'region' },
+            operator: 'in',
+          },
+        ],
         linkages: [],
       })
     );

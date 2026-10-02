@@ -186,6 +186,24 @@ describe('dashboardFiltersPayload：批量下发', () => {
     expect(dashboardFiltersPayload(widgets, {}, NOW)).toEqual([]);
   });
 
+  it('带 binding 的块把 binding + operator 一并下发（未落库筛选器靠它被后端认领）', () => {
+    const widget = textWidget('in', { binding: { datasetId: 3, column: '0000i52a' } });
+    expect(dashboardFiltersPayload([widget], { 'w-text': ['华东'] }, NOW)).toEqual([
+      {
+        widgetId: 'w-text',
+        value: ['华东'],
+        binding: { datasetId: 3, column: '0000i52a' },
+        operator: 'in',
+      },
+    ]);
+  });
+
+  it('不带 binding 的块仍只下发 widgetId + value（老形状不变）', () => {
+    expect(dashboardFiltersPayload([textWidget('in')], { 'w-text': ['华东'] }, NOW)).toEqual([
+      { widgetId: 'w-text', value: ['华东'] },
+    ]);
+  });
+
   it('三族可以同盘共存，顺序与 widgets 顺序一致', () => {
     const payload = dashboardFiltersPayload(
       [numberWidget('gt'), dateWidget(), textWidget('eq')],

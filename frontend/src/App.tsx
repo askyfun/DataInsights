@@ -7,6 +7,7 @@ import {
   DatabaseOutlined,
   GlobalOutlined,
   MenuOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
 import { useEffect, useState } from 'react';
@@ -14,6 +15,7 @@ import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { useLocale } from './i18n/useLocale';
 import { type ThemeMode, useTheme } from './lib/theme';
+import AccountPage from './pages/Account';
 import ChartBuilder from './pages/ChartBuilder';
 import ChartsPage from './pages/Charts';
 import DashboardEditor from './pages/DashboardEditor';
@@ -82,6 +84,11 @@ const App: React.FC = () => {
       key: '/datasources',
       icon: <DatabaseOutlined />,
       label: <Link to="/datasources">{intl.formatMessage({ id: 'nav.datasources' })}</Link>,
+    },
+    {
+      key: '/account',
+      icon: <UserOutlined />,
+      label: <Link to="/account">{intl.formatMessage({ id: 'nav.account' })}</Link>,
     },
   ];
 
@@ -224,6 +231,7 @@ const App: React.FC = () => {
               <Route path="/datasets/:id/edit" element={<DatasetEdit />} />
               <Route path="/chart-builder" element={<ChartBuilder />} />
               <Route path="/charts" element={<ChartsPage />} />
+              <Route path="/account" element={<AccountPage />} />
             </Routes>
           </Content>
         </Layout>
