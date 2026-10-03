@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { ChartConfig, QueryConfig } from './index';
+import type { ChartConfig, QueryConfig } from './types';
 
 /**
  * 图表构建页的撤销/重做（undo/redo）中间件——零依赖手写时间线。
