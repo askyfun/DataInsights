@@ -1537,7 +1537,7 @@ export interface components {
             name: string;
         };
         /**
-         * @description 盘内一块 widget，按 type 判别（chart | text | filter）：本 schema 是三者的 扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用 markdown，filter 用 binding/label/dataType/operator/multi/defaultValue/scope。
+         * @description 盘内一块 widget，按 type 判别（chart | text | filter | container）：本 schema 是 四者的扁平超集，字段适用性由 type 决定——chart 用 chartId/titleOverride，text 用 markdown，filter 用 binding/label/dataType/operator/multi/defaultValue/scope/ containerId，container 用 label/pinned。container（查询容器，issue #154）是一块只做 视觉分组 + 置顶的栅格，不参与取数；被归拢的筛选器用 containerId 反向指向它。
          *     契约上这是 oneOf-with-discriminator 语义，但生成物刻意不落成 union 类型： Go 侧为不引入 oapi-codegen/runtime 依赖（与 ChartDataResult.data 同款取舍）， TS 侧消费方按 type 手动收窄。
          *     硬约束：widgetId **整盘**唯一（唯一域是整盘而非单页）且**绝不等于 chartId** （PRD D1，同一 chartId 可以在同一盘里出现多次，各自独立 x/y/w/h）；chart 块 只存引用不存快照。
          */
@@ -1553,7 +1553,7 @@ export interface components {
              */
             pageId: string;
             /** @enum {string} */
-            type: "chart" | "text" | "filter";
+            type: "chart" | "text" | "filter" | "container";
             /** @description react-grid-layout 左上角列坐标（0 起）。 */
             x: number;
             /** @description react-grid-layout 左上角行坐标（0 起）。 */
@@ -1569,7 +1569,7 @@ export interface components {
             /** @description type=text 的 Markdown 内容；渲染前必须 sanitize（raw HTML 一律剔除）。 */
             markdown?: string;
             binding?: components["schemas"]["DashboardFilterBinding"];
-            /** @description type=filter 的显示名。 */
+            /** @description type=filter 的显示名；type=container 的容器标题（缺省时前端迁移兜底为「查询容器」）。 */
             label?: string;
             /** @description type=filter 绑定字段的数据类型（如 string / number / date）。 */
             dataType?: string;
@@ -1594,6 +1594,10 @@ export interface components {
             };
             /** @description type=filter 的默认选中值。**空数组 = 未激活**：未激活的筛选器不参与合并、 不触发覆盖（PRD §8.3 步骤 2），否则拖入一个筛选器会莫名抹掉图表默认条件。 */
             defaultValue?: unknown[];
+            /** @description type=filter 可选：所属查询容器（type=container）的 widgetId。缺省 = 该筛选器是独立栅格块； 非空 = 被归拢进该容器、只在容器内渲染、不占顶层栅格。指向不存在容器的值由前端迁移剥掉 （退回独立块），与 pageId 同为扁平跨块引用。后端不读此键。 */
+            containerId?: string;
+            /** @description type=container 可选：是否置顶（渲染时吸附到栅格顶行）。缺省不置顶。 */
+            pinned?: boolean;
         };
         /** @description 盘级筛选器的绑定粒度：数据集字段。按 (datasetId, column) 二元组命中同数据集的 图表（PRD §11-2 的推荐口径，避免跨数据集同名字段静默误伤）。 */
         DashboardFilterBinding: {
@@ -1696,6 +1700,54 @@ export interface components {
         /** @description GET /api/charts/{id}/references 响应：Envelope 特化 data 为 ChartReference。 */
         ChartReferenceResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["ChartReference"];
+        };
+        /** @description 预警规则实体（entity.AlertRule）。metric 为图表查询结果数据行的列键（指标的输出别名：字段 meta alias 优先，否则指标字段的 bindingId）。触发 = 任一数据行越线；同日同规则去重。 */
+        AlertRule: {
+            /** @description UUID，由后端生成。 */
+            id: string;
+            name: string;
+            chart_id: number;
+            metric: string;
+            /** @description 比较算子：gt（大于）/ lt（小于）/ eq（等于）。 */
+            operator: "gt" | "lt" | "eq";
+            threshold: number;
+            enabled: boolean;
+            /** @description 最近触发日（YYYY-MM-DD）；从未触发为 null。 */
+            last_triggered_date: string | null;
+            created_at: string;
+            updated_at: string;
+        };
+        /** @description POST /api/alerts 请求体（entity.AlertRuleCreate）。不含 id：主键由后端生成。 */
+        AlertRuleCreate: {
+            name: string;
+            chart_id: number;
+            metric: string;
+            operator: "gt" | "lt" | "eq";
+            threshold: number;
+        };
+        /** @description PUT /api/alerts/{id} 请求体（entity.AlertRuleUpdate）。字段全部可选，遵循「未提供则保留」。 */
+        AlertRuleUpdate: {
+            name?: string;
+            chart_id?: number;
+            metric?: string;
+            operator?: "gt" | "lt" | "eq";
+            threshold?: number;
+            enabled?: boolean;
+        };
+        /** @description 预警触发记录（entity.AlertTrigger）。倒序返回，最多 50 条。 */
+        AlertTrigger: {
+            id: string;
+            rule_id: string;
+            /** @description 触发时的指标值。 */
+            metric_value: number;
+            threshold: number;
+            /** @description 人读的触发消息。 */
+            message: string;
+            /** @description 通知是否发送成功。 */
+            notified: boolean;
+            /** @description 通知失败原因；未失败为 null。 */
+            notify_error: string | null;
+            created_at: string;
         };
     };
     responses: never;

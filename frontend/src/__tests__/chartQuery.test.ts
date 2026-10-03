@@ -4,8 +4,13 @@ import type { ChartQueryResponse } from '@/api';
 import { chartsApi } from '@/api';
 import type { ApiResponse } from '@/lib/api/client';
 import type { ChartType } from '@/lib/chartConfigSchema';
-import { buildChartOption } from '@/lib/chartOptions';
+import {
+  buildChartOption,
+  type ChartOptionContext,
+  normalizePieMergeRatio,
+} from '@/lib/chartOptions';
 import { composeChartQueryRequest } from '@/pages/ChartBuilder';
+import type { ChartStyleConfig } from '@/store';
 import { useStore } from '@/store';
 
 /**
@@ -647,5 +652,107 @@ describe('composeChartQueryRequest：占比列强制携带全集合计（issue #
       metricFormats: { 'b-1': '0,0.00%' },
     });
     expect(request).not.toHaveProperty('query_options');
+  });
+});
+
+describe('pie 长尾合并与标签模式（issue #27）', () => {
+  const rawPieData = [
+    { name: 'A', value: 70 },
+    { name: 'B', value: 20 },
+    { name: 'C', value: 6 },
+    { name: 'D', value: 4 },
+  ];
+  const piePayload = { data: rawPieData } as unknown as Parameters<typeof buildChartOption>[1];
+  const build = (ctx: Partial<ChartOptionContext> = {}, style: Partial<ChartStyleConfig> = {}) =>
+    buildChartOption(
+      'pie',
+      piePayload,
+      { colors: [], smooth: false, tableRowSize: 'small', ...style },
+      {},
+      { title: 'P', dimensions: ['cat'], metrics: ['v'], ...ctx }
+    );
+  const seriesData = (opt: ReturnType<typeof buildChartOption>) =>
+    (opt as unknown as { series: { data: { name: string; value: number }[] }[] }).series[0].data;
+
+  it('未配阈值：切片原样输出', () => {
+    expect(seriesData(build())).toEqual(rawPieData);
+  });
+
+  it('占比低于阈值的切片合并为单个「其他」切片', () => {
+    expect(seriesData(build({ pieMergeOtherBelowRatio: normalizePieMergeRatio(10) }))).toEqual([
+      { name: 'A', value: 70 },
+      { name: 'B', value: 20 },
+      { name: '其他', value: 10 },
+    ]);
+  });
+
+  it('无切片低于阈值：不合并', () => {
+    expect(seriesData(build({ pieMergeOtherBelowRatio: normalizePieMergeRatio(3) }))).toEqual(
+      rawPieData
+    );
+  });
+
+  it('已有「其他」切片（如后端 TopN 产物）折进合并桶，输出只有一个「其他」', () => {
+    const withOther = {
+      data: [
+        { name: 'A', value: 70 },
+        { name: 'B', value: 26 },
+        { name: '其他', value: 4 },
+      ],
+    } as unknown as Parameters<typeof buildChartOption>[1];
+    const opt = buildChartOption(
+      'pie',
+      withOther,
+      { colors: [], smooth: false, tableRowSize: 'small' },
+      {},
+      { title: 'P', dimensions: ['cat'], metrics: ['v'], pieMergeOtherBelowRatio: 10 }
+    );
+    const data = (opt as unknown as { series: { data: { name: string; value: number }[] }[] })
+      .series[0].data;
+    expect(data).toEqual([
+      { name: 'A', value: 70 },
+      { name: 'B', value: 26 },
+      { name: '其他', value: 4 },
+    ]);
+  });
+
+  it('未配阈值时已有「其他」切片原样保留', () => {
+    const withOther = {
+      data: [
+        { name: 'A', value: 70 },
+        { name: '其他', value: 30 },
+      ],
+    } as unknown as Parameters<typeof buildChartOption>[1];
+    const opt = buildChartOption(
+      'pie',
+      withOther,
+      { colors: [], smooth: false, tableRowSize: 'small' },
+      {},
+      { title: 'P', dimensions: ['cat'], metrics: ['v'] }
+    );
+    const data = (opt as unknown as { series: { data: { name: string; value: number }[] }[] })
+      .series[0].data;
+    expect(data).toEqual([
+      { name: 'A', value: 70 },
+      { name: '其他', value: 30 },
+    ]);
+  });
+
+  it('normalizePieMergeRatio：非法输入返回 undefined', () => {
+    expect(normalizePieMergeRatio(0)).toBeUndefined();
+    expect(normalizePieMergeRatio(100)).toBeUndefined();
+    expect(normalizePieMergeRatio(-1)).toBeUndefined();
+    expect(normalizePieMergeRatio('5')).toBeUndefined();
+    expect(normalizePieMergeRatio(Number.POSITIVE_INFINITY)).toBeUndefined();
+    expect(normalizePieMergeRatio(5)).toBe(5);
+  });
+
+  it('pieLabelDisplay=value：标签显示原始数值；缺省显示占比', () => {
+    const valueOpt = build({}, { pieLabelDisplay: 'value' }) as unknown as {
+      series: { label: { formatter: string } }[];
+    };
+    expect(valueOpt.series[0].label.formatter).toBe('{b}: {c}');
+    const percentOpt = build() as unknown as { series: { label: { formatter: string } }[] };
+    expect(percentOpt.series[0].label.formatter).toBe('{b}: {d}%');
   });
 });

@@ -1833,6 +1833,17 @@ describe('ChartBuilder', () => {
       });
     });
   });
+
+  it('仅带 datasetId（无 edit）也选中该数据集，进入空白的新图表', async () => {
+    renderNewChartBuilder();
+
+    // 数据集选择器回显数据集名，而不是停留在占位（#138 上传后直达）
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('Sales');
+    });
+    // 无 edit 参数 → 不是编辑既有图表
+    expect(mockGetChartById).not.toHaveBeenCalled();
+  });
 });
 
 /**

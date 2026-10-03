@@ -1,10 +1,12 @@
 import {
   ArrowLeftOutlined,
   ClearOutlined,
+  CloseOutlined,
   DashboardOutlined,
   DeleteOutlined,
   MoreOutlined,
   PlusOutlined,
+  PushpinOutlined,
   ReloadOutlined,
   SaveOutlined,
 } from '@ant-design/icons';
@@ -21,6 +23,7 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -64,6 +67,8 @@ import {
 } from '../lib/dashboardFilterValue';
 import {
   applicableFilterWidgets,
+  childrenOfContainer,
+  containerWidgetsOf,
   createPageId,
   createWidgetId,
   DASHBOARD_DEFAULT_SIZE,
@@ -71,6 +76,7 @@ import {
   DASHBOARD_MIN_H,
   DASHBOARD_MIN_W,
   type DashboardChartWidget,
+  type DashboardContainerWidget,
   type DashboardFilterWidget,
   type DashboardLayoutDocument,
   type DashboardLinkageTarget,
@@ -78,6 +84,7 @@ import {
   type DashboardWidget,
   filterWidgetsOf,
   findFreePlacement,
+  gridWidgetsOfPage,
   migrateDashboardLayout,
   normalizePlacement,
   reorderPages,
@@ -255,10 +262,15 @@ const DashboardEditor: React.FC = () => {
   /**
    * 按给定的筛选器 / 联动状态重取**当前页**。
    *
-   * 只把**已落库**的筛选器 / 联动来源下发出去：后端是按已落库的 layout 逐块取数、并按同一份
-   * layout 建筛选器与联动去向索引的，未保存的块它根本认不出来 —— 发了也只是白跑一趟。
-   * 下发的筛选器集合是**本页的 + 任意页 `scope: 'all'` 的**（`applicableFilterWidgets`），
-   * 与后端 `projectLayout` 的按页收窄是同一口径。
+   * 筛选器**不再按落库过滤**：未落库的（新拖入 / 改了配置没保存）也照常下发，载荷里带上
+   * 它的 binding + operator，后端据此认领（issue #172）——这才是「配好取值立刻生效」。
+   * 已落库的筛选器同样带上（与 layout 等价的绑定，结果不变）。下发的筛选器集合是
+   * **本页的 + 任意页 `scope: 'all'` 的**（`applicableFilterWidgets`），与后端 `projectLayout`
+   * 的按页收窄是同一口径。
+   *
+   * 联动**来源仍必须已落库**：后端按已落库 layout 逐块取数、并从同一份 layout 读「这块图
+   * 打到哪些目标」，未保存的联动配置它认不出来，发了只是白跑一趟。
+   *
    * 调用方传显式的 widgets/values/pageId/linkages 而不是读组件状态：改筛选取值、改粒度
    * 这些场景下新状态还没落进 state，读旧值会算出上一轮的载荷。
    */
@@ -270,9 +282,7 @@ const DashboardEditor: React.FC = () => {
       pageId: string,
       linkages: ActiveLinkageMap
     ) => {
-      const active = applicableFilterWidgets(widgets, pageId).filter((widget) =>
-        persistedIdsRef.current.has(widget.widgetId)
-      );
+      const active = applicableFilterWidgets(widgets, pageId);
       // 来源也必须已落库：后端从 layout 读「这块图打到哪些目标」，未保存的配置读不到。
       const persistedLinkages = linkageQueryPayload(
         Object.fromEntries(
@@ -411,6 +421,24 @@ const DashboardEditor: React.FC = () => {
   );
 
   /**
+   * 顶层栅格真正渲染的块：本页里「非被归拢筛选器」且「非置顶容器」的部分。
+   * 被归拢的筛选器（有 containerId）由其容器渲染；置顶容器渲染到盘顶控件条——两者都不占栅格，
+   * 故从 layout / children 里都排除，取数口径不变（分组与置顶都只是渲染分流）。
+   */
+  const gridWidgets = useMemo(
+    () =>
+      gridWidgetsOfPage(doc.widgets, activePageId).filter(
+        (widget) => !(widget.type === 'container' && widget.pinned)
+      ),
+    [doc.widgets, activePageId]
+  );
+
+  const pinnedContainers = useMemo(
+    () => containerWidgetsOf(pageWidgets).filter((widget) => widget.pinned),
+    [pageWidgets]
+  );
+
+  /**
    * 未持久化块的本地取数。
    *
    * 盘级 `/query` 是**后端按已落库的 layout 逐块取数**，所以刚拖进来、还没保存的块
@@ -517,7 +545,7 @@ const DashboardEditor: React.FC = () => {
 
   const layout = useMemo<Layout>(
     () =>
-      pageWidgets.map((widget) => ({
+      gridWidgets.map((widget) => ({
         i: widget.widgetId,
         x: widget.x,
         y: widget.y,
@@ -526,7 +554,7 @@ const DashboardEditor: React.FC = () => {
         minW: DASHBOARD_MIN_W,
         minH: DASHBOARD_MIN_H,
       })),
-    [pageWidgets]
+    [gridWidgets]
   );
 
   /**
@@ -588,10 +616,23 @@ const DashboardEditor: React.FC = () => {
   );
 
   const handleRemoveWidget = useCallback((widgetId: string) => {
-    setDoc((prev) => ({
-      ...prev,
-      widgets: prev.widgets.filter((widget) => widget.widgetId !== widgetId),
-    }));
+    setDoc((prev) => {
+      // 删容器时把它的成员退回独立块（清 containerId），否则这些筛选器在本轮会话里会
+      // 因为指向已消失的容器而从顶层栅格凭空消失（落库重载时由迁移兜底剥离）。
+      const removed = prev.widgets.find((widget) => widget.widgetId === widgetId);
+      const isContainer = removed?.type === 'container';
+      const widgets = prev.widgets
+        .filter((widget) => widget.widgetId !== widgetId)
+        .map((widget) => {
+          if (isContainer && widget.type === 'filter' && widget.containerId === widgetId) {
+            const copy = { ...widget };
+            delete copy.containerId;
+            return copy;
+          }
+          return widget;
+        });
+      return { ...prev, widgets };
+    });
     // 会话内的联动取值随块一起消失（布局里残留的「去向」由后端忽略、弹窗确定时自愈）。
     setActiveLinkages((prev) => {
       if (!(widgetId in prev)) {
@@ -892,6 +933,72 @@ const DashboardEditor: React.FC = () => {
     [activePageId]
   );
 
+  /** 新建查询容器块：同样落进当前页首个空位；成员靠筛选器的 containerId 反向指过来。 */
+  const handleAddContainer = useCallback(() => {
+    setDoc((prev) => {
+      const size = DASHBOARD_DEFAULT_SIZE.container;
+      const spot = findFreePlacement(widgetsOfPage(prev.widgets, activePageId), size);
+      const widget: DashboardContainerWidget = {
+        widgetId: createWidgetId(),
+        pageId: activePageId,
+        type: 'container',
+        label: intl.formatMessage({ id: 'dashboard.addContainer' }),
+        ...normalizePlacement({ x: spot.x, y: spot.y, w: size.w, h: size.h }, size),
+      };
+      return { ...prev, widgets: [...prev.widgets, widget] };
+    });
+  }, [activePageId, intl]);
+
+  const handleContainerLabelChange = useCallback((widgetId: string, label: string) => {
+    setDoc((prev) => ({
+      ...prev,
+      widgets: prev.widgets.map((widget) =>
+        widget.widgetId === widgetId && widget.type === 'container' ? { ...widget, label } : widget
+      ),
+    }));
+  }, []);
+
+  /** 置顶：块从顶层栅格移入盘顶控件条（渲染层分流，四轴保留不变，取消置顶即回到原位）。 */
+  const handleContainerPinChange = useCallback((widgetId: string, pinned: boolean) => {
+    setDoc((prev) => ({
+      ...prev,
+      widgets: prev.widgets.map((widget) => {
+        if (widget.widgetId !== widgetId || widget.type !== 'container') {
+          return widget;
+        }
+        const copy = { ...widget };
+        if (pinned) {
+          copy.pinned = true;
+        } else {
+          delete copy.pinned;
+        }
+        return copy;
+      }),
+    }));
+  }, []);
+
+  /**
+   * 把某筛选器归入 / 移出容器：只动 `containerId`（跨块引用），不碰它的 binding / pageId /
+   * scope——分组纯属视觉，取数口径不变。移入后它不再占顶层栅格，由容器渲染。
+   */
+  const handleGroupFilter = useCallback((filterId: string, containerId: string | null) => {
+    setDoc((prev) => ({
+      ...prev,
+      widgets: prev.widgets.map((widget) => {
+        if (widget.widgetId !== filterId || widget.type !== 'filter') {
+          return widget;
+        }
+        const copy = { ...widget };
+        if (containerId) {
+          copy.containerId = containerId;
+        } else {
+          delete copy.containerId;
+        }
+        return copy;
+      }),
+    }));
+  }, []);
+
   /**
    * 改筛选器状态的**唯一出口**：写 layout（`defaultValue` 就是「该筛选器的默认选中值」，
    * 重开盘时由它做初值）→ 立刻按新取值重取一次。筛选器的意义就是「切一下马上看结果」。
@@ -1060,6 +1167,110 @@ const DashboardEditor: React.FC = () => {
       );
     }
     return tags;
+  };
+
+  /**
+   * 查询容器（issue #154）：一块栅格 Card，把本页的若干筛选器归拢成控件条并支持置顶。
+   * 只做视觉分组——成员筛选器仍靠自身 pageId/scope 走原有取数链路；这里渲染它们的编辑体，
+   * 复用与顶层筛选器完全相同的 props 接线（取值/算子/范围/配置/移除）。
+   */
+  const renderContainerBlock = (widget: DashboardContainerWidget) => {
+    const children = childrenOfContainer(doc.widgets, widget);
+    // 候选 = 本页尚未归拢的筛选器（无 containerId）。移入后从候选里消失，移出后回到候选。
+    const candidates = filterWidgetsOf(widgetsOfPage(doc.widgets, widget.pageId)).filter(
+      (item) => !item.containerId
+    );
+    return (
+      <Card
+        size="small"
+        title={
+          <Input
+            size="small"
+            variant="borderless"
+            value={widget.label}
+            placeholder={intl.formatMessage({ id: 'dashboard.containerLabel' })}
+            aria-label={intl.formatMessage({ id: 'dashboard.containerLabel' })}
+            onChange={(event) => handleContainerLabelChange(widget.widgetId, event.target.value)}
+            style={{ width: 200 }}
+          />
+        }
+        extra={
+          <Space size={0}>
+            <Tooltip
+              title={intl.formatMessage({
+                id: widget.pinned ? 'dashboard.containerUnpin' : 'dashboard.containerPin',
+              })}
+            >
+              <Button
+                type={widget.pinned ? 'primary' : 'text'}
+                size="small"
+                icon={<PushpinOutlined />}
+                aria-label={intl.formatMessage({ id: 'dashboard.containerPin' })}
+                data-testid={`container-pin-${widget.widgetId}`}
+                onClick={() => handleContainerPinChange(widget.widgetId, !widget.pinned)}
+              />
+            </Tooltip>
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={intl.formatMessage({ id: 'dashboard.removeBlock' })}
+              data-testid={`container-remove-${widget.widgetId}`}
+              onClick={() => handleRemoveWidget(widget.widgetId)}
+            />
+          </Space>
+        }
+        style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+        styles={{ body: { flex: 1, minHeight: 0, padding: 8, overflow: 'auto' } }}
+      >
+        {children.length === 0 && candidates.length === 0 ? (
+          <Text type="secondary">{intl.formatMessage({ id: 'dashboard.containerEmpty' })}</Text>
+        ) : (
+          <Space size={8} wrap style={{ width: '100%' }} align="start">
+            {children.map((child) => (
+              <Space key={child.widgetId} size={2} align="center">
+                <DashboardFilterBlock
+                  widget={child}
+                  value={filterValues[child.widgetId]}
+                  onChange={(next) => applyFilterState(child.widgetId, next)}
+                  onOperatorChange={(operator) =>
+                    handleFilterOperatorChange(child.widgetId, operator)
+                  }
+                  onScopeChange={(scope) => handleFilterScopeChange(child.widgetId, scope)}
+                  onConfigure={() => setConfiguringFilterId(child.widgetId)}
+                  onRemove={() => handleRemoveWidget(child.widgetId)}
+                />
+                <Tooltip title={intl.formatMessage({ id: 'dashboard.containerUngroup' })}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CloseOutlined />}
+                    aria-label={intl.formatMessage({ id: 'dashboard.containerUngroup' })}
+                    data-testid={`container-ungroup-${child.widgetId}`}
+                    onClick={() => handleGroupFilter(child.widgetId, null)}
+                  />
+                </Tooltip>
+              </Space>
+            ))}
+            <Select
+              value={null}
+              placeholder={intl.formatMessage({ id: 'dashboard.containerAddFilter' })}
+              aria-label={intl.formatMessage({ id: 'dashboard.containerAddFilter' })}
+              data-testid={`container-add-${widget.widgetId}`}
+              disabled={candidates.length === 0}
+              notFoundContent={intl.formatMessage({ id: 'dashboard.containerNoFilter' })}
+              options={candidates.map((item) => ({
+                value: item.widgetId,
+                label: item.label || item.binding.column,
+              }))}
+              onChange={(filterId: string) => handleGroupFilter(filterId, widget.widgetId)}
+              style={{ minWidth: 160 }}
+            />
+          </Space>
+        )}
+      </Card>
+    );
   };
 
   const renderChartBlock = (widget: DashboardChartWidget) => {
@@ -1271,10 +1482,27 @@ const DashboardEditor: React.FC = () => {
             >
               {intl.formatMessage({ id: 'dashboard.addFilter' })}
             </Button>
+            <Button
+              icon={<PlusOutlined />}
+              data-testid="dashboard-add-container"
+              onClick={handleAddContainer}
+            >
+              {intl.formatMessage({ id: 'dashboard.addContainer' })}
+            </Button>
           </Space>
         </div>
 
         <div ref={containerRef}>
+          {/* 置顶容器渲染在盘顶控件条，脱离栅格；取消置顶即回到原四轴（见 gridWidgets 分流）。 */}
+          {pinnedContainers.map((widget) => (
+            <div
+              key={`pinned-${widget.widgetId}`}
+              data-testid={`container-strip-${widget.widgetId}`}
+              style={{ marginBottom: 16 }}
+            >
+              {renderContainerBlock(widget)}
+            </div>
+          ))}
           {loading ? (
             <div className="dr-state">
               <Spin size="large" />
@@ -1318,7 +1546,7 @@ const DashboardEditor: React.FC = () => {
               onDragStop={handleLayoutCommit}
               onResizeStop={handleLayoutCommit}
             >
-              {pageWidgets.map(
+              {gridWidgets.map(
                 (widget) =>
                   widget.type === 'chart' ? (
                     <div key={widget.widgetId}>
@@ -1393,8 +1621,6 @@ const DashboardEditor: React.FC = () => {
                       <DashboardFilterBlock
                         widget={widget}
                         value={filterValues[widget.widgetId]}
-                        // 未落库的筛选器后端读不到（盘级取数按已落库 layout 建索引）。
-                        unsaved={!persistedIdsRef.current.has(widget.widgetId)}
                         onChange={(next) => applyFilterState(widget.widgetId, next)}
                         onOperatorChange={(operator) =>
                           handleFilterOperatorChange(widget.widgetId, operator)
@@ -1403,6 +1629,10 @@ const DashboardEditor: React.FC = () => {
                         onConfigure={() => setConfiguringFilterId(widget.widgetId)}
                         onRemove={() => handleRemoveWidget(widget.widgetId)}
                       />
+                    </div>
+                  ) : widget.type === 'container' ? (
+                    <div key={widget.widgetId} data-testid={`container-${widget.widgetId}`}>
+                      {renderContainerBlock(widget)}
                     </div>
                   ) : null
                 // 说明：text 块保持现状——占用宫格但不画内容。

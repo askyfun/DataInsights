@@ -29,6 +29,8 @@ type mockDatasetService struct {
 	updateColumnsFunc func(ctx context.Context, id int, columns []entity.DatasetColumn) (*entity.Dataset, error)
 	previewFunc       func(ctx context.Context, id int) (*entity.PreviewResult, error)
 	queryFunc         func(ctx context.Context, id int, config entity.QueryConfig) ([]map[string]any, error)
+	importFunc        func(ctx context.Context, req dataset.ImportRequest) (*entity.Dataset, error)
+	replaceFunc       func(ctx context.Context, id int, req dataset.ImportRequest) (*entity.Dataset, error)
 }
 
 func (m *mockDatasetService) List(ctx context.Context, limit, offset int) ([]entity.Dataset, error) {
@@ -94,6 +96,20 @@ func (m *mockDatasetService) Query(ctx context.Context, id int, config entity.Qu
 	return nil, nil
 }
 
+func (m *mockDatasetService) ImportFile(ctx context.Context, req dataset.ImportRequest) (*entity.Dataset, error) {
+	if m.importFunc != nil {
+		return m.importFunc(ctx, req)
+	}
+	return nil, nil
+}
+
+func (m *mockDatasetService) ReplaceFile(ctx context.Context, id int, req dataset.ImportRequest) (*entity.Dataset, error) {
+	if m.replaceFunc != nil {
+		return m.replaceFunc(ctx, id, req)
+	}
+	return nil, nil
+}
+
 // newDatasetTestRouter mirrors the dataset section of cmd/routes.go.
 // During the Batch 2 migration only this wiring helper changes; every
 // response-body assertion below must keep passing byte-for-byte before and
@@ -112,6 +128,9 @@ func newDatasetTestRouter(h *DatasetHandler) *gin.Engine {
 	router.RegisterPostRoute(datasets, "/:id/columns", h.UpdateColumns)
 	router.RegisterGetRoute(datasets, "/:id/preview", h.Preview)
 	router.RegisterPostRoute(datasets, "/:id/query", h.Query)
+	// 上传端点与 cmd/routes.go 同步：手工 gin handler（multipart 不走泛型路由）。
+	datasets.POST("/import", h.ImportFile)
+	datasets.POST("/:id/replace", h.ReplaceFile)
 	return r
 }
 

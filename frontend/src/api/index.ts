@@ -461,6 +461,30 @@ export const datasetsApi = {
       limit: 1000,
     });
   },
+
+  // 本地文件上传建数据集（issue #138）：multipart/form-data，.csv/.xlsx ≤50MB。
+  // 后端解析 + 列类型推断后落抽取存储并注册 mode=extract 数据集。
+  // ⚠️ 上传端点是手工路由（multipart 不走泛型路由），openapi.yaml 已同步，
+  // 但 make api-gen 前端半步当前必失败（见根 AGENTS.md），故此处手写契约。
+  importFile: (file: File, name?: string): Promise<AxiosResponse<ApiResponse<Dataset>>> => {
+    const form = new FormData();
+    form.append('file', file);
+    if (name) {
+      form.append('name', name);
+    }
+    return apiClient.post<ApiResponse<Dataset>>('/api/datasets/import', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // 覆盖已上传数据集的文件：展示名未变的列保留原列 id（图表不断链）。
+  replaceFile: (id: number, file: File): Promise<AxiosResponse<ApiResponse<Dataset>>> => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiClient.post<ApiResponse<Dataset>>(`/api/datasets/${id}/replace`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 // Charts API
@@ -586,6 +610,46 @@ export const dashboardFoldersApi = {
   },
 };
 
+// Alerts API types（指标预警，issue #155）
+export type AlertRule = G['AlertRule'];
+export type AlertRuleCreate = G['AlertRuleCreate'];
+export type AlertRuleUpdate = G['AlertRuleUpdate'];
+export type AlertTrigger = G['AlertTrigger'];
+
+// Alerts API（指标预警）。metric 是图表查询结果数据行的列键（指标输出别名），
+// 由前端从图表 config 里解析后写入；PUT 遵循「未提供则保留」（行内启用开关只发 enabled）。
+export const alertsApi = {
+  // Get all alert rules（升序）
+  getAll: (): Promise<AxiosResponse<ApiResponse<AlertRule[]>>> => {
+    return apiClient.get<ApiResponse<AlertRule[]>>('/api/alerts');
+  },
+
+  // Get single alert rule
+  getById: (id: string): Promise<AxiosResponse<ApiResponse<AlertRule>>> => {
+    return apiClient.get<ApiResponse<AlertRule>>(`/api/alerts/${id}`);
+  },
+
+  // Create alert rule
+  create: (data: AlertRuleCreate): Promise<AxiosResponse<ApiResponse<AlertRule>>> => {
+    return apiClient.post<ApiResponse<AlertRule>>('/api/alerts', data);
+  },
+
+  // Update alert rule（未提供的字段保留存量）
+  update: (id: string, data: AlertRuleUpdate): Promise<AxiosResponse<ApiResponse<AlertRule>>> => {
+    return apiClient.put<ApiResponse<AlertRule>>(`/api/alerts/${id}`, data);
+  },
+
+  // Delete alert rule
+  delete: (id: string): Promise<AxiosResponse<ApiResponse<{ status: string }>>> => {
+    return apiClient.delete<ApiResponse<{ status: string }>>(`/api/alerts/${id}`);
+  },
+
+  // Get trigger records of one rule（倒序，最多 50 条）
+  getTriggers: (id: string): Promise<AxiosResponse<ApiResponse<AlertTrigger[]>>> => {
+    return apiClient.get<ApiResponse<AlertTrigger[]>>(`/api/alerts/${id}/triggers`);
+  },
+};
+
 // Query records API（地址栏即分享）
 export const queriesApi = {
   // Persist one query configuration; the response carries the address-bar short
@@ -598,6 +662,64 @@ export const queriesApi = {
   getByShortId: (shortId: string): Promise<AxiosResponse<ApiResponse<QueryRecord>>> => {
     return apiClient.get<ApiResponse<QueryRecord>>(`/api/queries/${shortId}`);
   },
+};
+
+// --- Auth (R-82 #183) + PAT 管理 (#184) ---
+// 这些类型是**薄手写层**：后端 handler-local 镜像 + openapi 为事实源，但前端
+// `make api-gen` 那半步当前已知崩溃（openapi-typescript ↔ typescript@7），
+// 故 auth/token 的 wire 类型在此按 snake_case 契约手书写死（字段名与后端逐一对应）。
+
+export interface ApiUser {
+  id: number;
+  username: string;
+  role: string;
+  created_at: string;
+}
+
+// 登录/注册响应：会话 token 明文（仅这一次回显）+ 归属用户。
+export interface AuthResult {
+  token: string;
+  kind: string;
+  expires_at: string;
+  user: ApiUser;
+}
+
+// PAT 列表项：绝不含 token_hash 或明文；只有可识别前缀 + 元数据。
+export interface TokenInfo {
+  id: number;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string;
+  last_used_ip: string;
+  last_used_ua: string;
+  expires_at: string; // "" = 不过期
+  revoked: boolean;
+}
+
+export interface PATCreateInput {
+  name: string;
+  never: boolean;
+}
+
+export interface PATCreateResult {
+  token: string; // 明文，仅创建响应回显一次
+  info: TokenInfo;
+}
+
+export const authApi = {
+  register: (d: { username: string; password: string }) =>
+    apiClient.post<ApiResponse<AuthResult>>('/api/auth/register', d),
+  login: (d: { username: string; password: string }) =>
+    apiClient.post<ApiResponse<AuthResult>>('/api/auth/login', d),
+  me: () => apiClient.get<ApiResponse<ApiUser>>('/api/auth/me'),
+  logout: () => apiClient.delete<ApiResponse<{ status: string }>>('/api/auth/logout'),
+};
+
+export const tokensApi = {
+  create: (d: PATCreateInput) => apiClient.post<ApiResponse<PATCreateResult>>('/api/tokens', d),
+  list: () => apiClient.get<ApiResponse<TokenInfo[]>>('/api/tokens'),
+  revoke: (id: number) => apiClient.delete<ApiResponse<{ status: string }>>(`/api/tokens/${id}`),
 };
 
 export default apiClient;
