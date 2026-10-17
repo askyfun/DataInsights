@@ -24,8 +24,9 @@ export const createDatasourcesSlice: StateCreator<AppState, [], [], DatasourcesS
   fetchDatasources: async () => {
     set({ datasourcesLoading: true, datasourcesError: null });
     try {
-      const response = await datasourcesApi.getAll();
-      set({ datasources: response.data.data, datasourcesLoading: false });
+      // 选择器 / 引用名解析需要完整集合：按上限页一次性取回（服务端分页上限 1000）。
+      const response = await datasourcesApi.getAll({ limit: 1000 });
+      set({ datasources: response.data.data.items, datasourcesLoading: false });
     } catch (error: any) {
       set({
         datasourcesError: error.message || 'Failed to fetch',

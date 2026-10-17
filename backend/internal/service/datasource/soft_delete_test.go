@@ -10,6 +10,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 )
 
 // containsStmt 报告记录到的语句中是否有一条包含 sub（用于断言级联 UPDATE 的作用域）。
@@ -103,11 +104,13 @@ func TestDatasourceListFiltersDeletedAt(t *testing.T) {
 	db := bun.NewDB(sqlDB, pgdialect.New())
 	s := &datasourceService{db: db}
 
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_datasource"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`SELECT .* FROM "bi_datasource"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "type", "host", "port", "database_name", "username", "password", "created_at", "updated_at"}).
 			AddRow(1, "ds", "postgresql", "h", 5432, "db", "u", "", nil, nil))
 
-	if _, err := s.List(context.Background(), 0, 0); err != nil {
+	if _, err := s.List(context.Background(), listpage.Params{}); err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

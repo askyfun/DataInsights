@@ -84,6 +84,11 @@ function envelope<T>(data: T): AxiosResponse<ApiResponse<T>> {
   return { data: { code: 20000, msg: 'success', trace: '', data }, status: 200 } as never;
 }
 
+/** 四类实体列表的 data 是 {items,total}（issue #205 服务端分页）。 */
+function listEnvelope<T>(items: T[]): AxiosResponse<ApiResponse<{ items: T[]; total: number }>> {
+  return envelope({ items, total: items.length });
+}
+
 /** v2 文档：唯一维度是 month（列 id），故这块图可作联动来源。 */
 const chartConfig = (dimensions: string[]): string =>
   JSON.stringify({
@@ -168,7 +173,7 @@ const renderEditor = () =>
 
 function prime(layout: string) {
   mockGetById.mockResolvedValue(envelope(dashboard(layout)));
-  mockChartsGetAll.mockResolvedValue(envelope([sourceChart, targetChart]));
+  mockChartsGetAll.mockResolvedValue(listEnvelope([sourceChart, targetChart]));
   mockGetChartData.mockResolvedValue(envelope(AXIS_PAYLOAD as never));
   mockUpdate.mockResolvedValue(envelope(dashboard(layout)) as never);
   mockQuery.mockResolvedValue(
@@ -179,7 +184,7 @@ function prime(layout: string) {
       ],
     })
   );
-  mockDatasetsGetAll.mockResolvedValue(envelope([{ id: 3, name: '天气数据' }] as never));
+  mockDatasetsGetAll.mockResolvedValue(listEnvelope([{ id: 3, name: '天气数据' }] as never));
   mockGetColumns.mockResolvedValue(
     envelope([
       { id: 'month', name: 'month', type: 'string', role: 'dimension', expr: 'month' },
@@ -261,7 +266,9 @@ describe('仪表盘图表联动', () => {
   it('多维度图（点不出唯一维度）不挂点击，点了不下发联动', async () => {
     prime(layoutDoc([{ widgetId: 'w-a', type: 'chart', chartId: 7, x: 0, y: 0, w: 6, h: 8 }]));
     // prime 会灌一份图表清单，这里再覆盖成「来源图有两个维度」的那份。
-    mockChartsGetAll.mockResolvedValue(envelope([chart(7, 'Monthly Sales', ['month', 'region'])]));
+    mockChartsGetAll.mockResolvedValue(
+      listEnvelope([chart(7, 'Monthly Sales', ['month', 'region'])])
+    );
     renderEditor();
 
     await waitFor(() => expect(mockGetById).toHaveBeenCalled());

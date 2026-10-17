@@ -53,8 +53,8 @@ const DatasetEditPage: React.FC = () => {
   useEffect(() => {
     const fetchDatasources = async () => {
       try {
-        const response = await datasourcesApi.getAll();
-        setDatasources(response.data.data || []);
+        const response = await datasourcesApi.getAll({ limit: 1000 });
+        setDatasources(response.data.data.items || []);
       } catch (error: any) {
         message.error(error.message || 'Failed to fetch datasources');
       }

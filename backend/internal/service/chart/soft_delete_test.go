@@ -10,6 +10,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 )
 
 // chartCaptureMatcher 记录实际执行的 SQL，同时保留默认 regexp 匹配语义。
@@ -99,11 +100,13 @@ func TestChartListFiltersDeletedAt(t *testing.T) {
 	db := bun.NewDB(sqlDB, pgdialect.New())
 	s := &chartService{db: db}
 
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_chart"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`SELECT .* FROM "bi_chart"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "dataset_id", "chart_type", "config", "created_at", "updated_at"}).
 			AddRow(1, "c", 1, "bar", "{}", nil, nil))
 
-	if _, err := s.List(context.Background(), 0, 0); err != nil {
+	if _, err := s.List(context.Background(), listpage.Params{}); err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -118,7 +121,7 @@ func TestChartListFiltersDeletedAt(t *testing.T) {
 // firstStmtChart 返回记录到的第一条以 prefix 开头的语句。
 func firstStmtChart(executed []string, prefix string) string {
 	for _, q := range executed {
-		if strings.HasPrefix(q, prefix) {
+		if strings.HasPrefix(q, prefix) && !strings.Contains(strings.ToLower(q), "count(") {
 			return q
 		}
 	}

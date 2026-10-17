@@ -12,6 +12,24 @@ type G = components['schemas'];
 // Types
 export type DatasourceType = 'postgresql' | 'clickhouse' | 'mysql' | 'starrocks';
 
+// 四类实体列表的服务端分页契约（issue #205）：响应 data 为 {items,total}，
+// total 是过滤后全量集合的 COUNT，不是当前页条数。
+export type ListOrder = 'asc' | 'desc';
+export interface ListQuery {
+  limit?: number;
+  offset?: number;
+  sort?: string;
+  order?: ListOrder;
+  keyword?: string;
+  datasource_id?: number;
+  query_type?: string;
+  folder_id?: string;
+}
+export interface ListPage<T> {
+  items: T[];
+  total: number;
+}
+
 // Backend masks password (json:"-"), so the generated schema has no password
 // key; id/created_at/updated_at are required on the wire (no typed-literal
 // construction sites exist frontend-side).
@@ -293,9 +311,9 @@ export type ChartReference = G['ChartReference'];
 
 // Datasources API
 export const datasourcesApi = {
-  // Get all datasources
-  getAll: (): Promise<AxiosResponse<ApiResponse<Datasource[]>>> => {
-    return apiClient.get<ApiResponse<Datasource[]>>('/api/datasources');
+  // Get one page of datasources (server-side page/sort/keyword, issue #205).
+  getAll: (params?: ListQuery): Promise<AxiosResponse<ApiResponse<ListPage<Datasource>>>> => {
+    return apiClient.get<ApiResponse<ListPage<Datasource>>>('/api/datasources', { params });
   },
 
   // Get single datasource
@@ -398,9 +416,9 @@ export const datasourcesApi = {
 
 // Datasets API
 export const datasetsApi = {
-  // Get all datasets
-  getAll: (): Promise<AxiosResponse<ApiResponse<Dataset[]>>> => {
-    return apiClient.get<ApiResponse<Dataset[]>>('/api/datasets');
+  // Get one page of datasets (server-side page/sort/keyword + toolbar filters).
+  getAll: (params?: ListQuery): Promise<AxiosResponse<ApiResponse<ListPage<Dataset>>>> => {
+    return apiClient.get<ApiResponse<ListPage<Dataset>>>('/api/datasets', { params });
   },
 
   // Get single dataset
@@ -489,9 +507,9 @@ export const datasetsApi = {
 
 // Charts API
 export const chartsApi = {
-  // Get all charts
-  getAll: (): Promise<AxiosResponse<ApiResponse<Chart[]>>> => {
-    return apiClient.get<ApiResponse<Chart[]>>('/api/charts');
+  // Get one page of charts (server-side page/sort/keyword).
+  getAll: (params?: ListQuery): Promise<AxiosResponse<ApiResponse<ListPage<Chart>>>> => {
+    return apiClient.get<ApiResponse<ListPage<Chart>>>('/api/charts', { params });
   },
 
   // Get single chart
@@ -540,9 +558,9 @@ export const chartsApi = {
 
 // Dashboards API（PRD §6.3）：仪表盘只**引用**图表（存 chartId），不存快照。
 export const dashboardsApi = {
-  // Get all dashboards
-  getAll: (): Promise<AxiosResponse<ApiResponse<Dashboard[]>>> => {
-    return apiClient.get<ApiResponse<Dashboard[]>>('/api/dashboards');
+  // Get one page of dashboards (server-side page/sort/keyword + folder filter).
+  getAll: (params?: ListQuery): Promise<AxiosResponse<ApiResponse<ListPage<Dashboard>>>> => {
+    return apiClient.get<ApiResponse<ListPage<Dashboard>>>('/api/dashboards', { params });
   },
 
   // Get single dashboard

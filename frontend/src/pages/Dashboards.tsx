@@ -8,13 +8,20 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { App, Button, Card, Layout, Popconfirm, Space, Table, Tag, Typography } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
-import { type Dashboard, type DashboardFolder, dashboardFoldersApi, dashboardsApi } from '../api';
+import {
+  type Dashboard,
+  type DashboardFolder,
+  dashboardFoldersApi,
+  dashboardsApi,
+  type ListQuery,
+} from '../api';
 import DashboardFolderTree from '../components/DashboardFolderTree';
+import { sortOrderOf, useServerList } from '../components/listPage';
 import PageHeader from '../components/PageHeader';
-import { type FolderSelection, filterDashboardsBySelection } from '../lib/dashboardFolderTree';
+import type { FolderSelection } from '../lib/dashboardFolderTree';
 import { migrateDashboardLayout } from '../lib/dashboardLayoutSchema';
 import { formatDateTime } from '../lib/format';
 
@@ -37,6 +44,7 @@ const DashboardsPage: React.FC = () => {
   // 主题上下文）。依赖根部的 <App> 包裹，见 main.tsx。该实例跨渲染稳定（antd 内部
   // 以 useMemo([], …) 产出），故放进下方依赖数组不会引起 effect 循环。
   const { message } = App.useApp();
+  // 树需要完整集合（直属子项计数/拖拽落点），表格则走服务端分页——两次 GET。
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [folders, setFolders] = useState<DashboardFolder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,15 +54,21 @@ const DashboardsPage: React.FC = () => {
   // 归档树默认展开（占位整列），可向左折叠。
   const [collapsed, setCollapsed] = useState(false);
 
-  const fetchDashboards = useCallback(async () => {
+  const fetchPage = useCallback(
+    (query: ListQuery) => dashboardsApi.getAll(query).then((res) => res.data.data),
+    []
+  );
+  const list = useServerList<Dashboard>(fetchPage, { sort: 'created_at', order: 'desc' });
+
+  const fetchTree = useCallback(async () => {
     setLoading(true);
     try {
-      // 两件事一起取：树要夹列表、列表要盘，缺一个树就长不全。
+      // 树要夹列表与全部盘，缺一个就长不全；上限页（1000）与列表页的分页互不影响。
       const [dashboardsResponse, foldersResponse] = await Promise.all([
-        dashboardsApi.getAll(),
+        dashboardsApi.getAll({ limit: 1000 }),
         dashboardFoldersApi.getAll(),
       ]);
-      setDashboards(dashboardsResponse.data.data ?? []);
+      setDashboards(dashboardsResponse.data.data.items ?? []);
       setFolders(foldersResponse.data.data ?? []);
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
@@ -63,9 +77,27 @@ const DashboardsPage: React.FC = () => {
     }
   }, [intl, message]);
 
+  const refreshAll = useCallback(() => {
+    fetchTree();
+    list.reload();
+  }, [fetchTree, list.reload]);
+
   useEffect(() => {
-    fetchDashboards();
-  }, [fetchDashboards]);
+    fetchTree();
+  }, [fetchTree]);
+
+  useEffect(() => {
+    if (list.error) {
+      message.error(list.error);
+    }
+  }, [list.error, message]);
+
+  // 选夹 = 服务端 folder_id 过滤；根视图不过滤（与第一阶段「根显示全部」口径一致）。
+  useEffect(() => {
+    const folderId = selection.kind === 'folder' ? selection.id : undefined;
+    if ((folderId ?? '') === (list.query.folder_id ?? '')) return;
+    list.setParam({ folder_id: folderId });
+  }, [selection, list.query.folder_id, list.setParam]);
 
   // 新建即进入画布页：空盘在列表里没有任何可操作的信息，多一次点击没有意义。
   // 选中了某个文件夹时，新盘直接归档到它下面（否则用户建完还要再拖一次）。
@@ -85,7 +117,7 @@ const DashboardsPage: React.FC = () => {
     try {
       await dashboardsApi.remove(id);
       message.success(intl.formatMessage({ id: 'common.success' }));
-      await fetchDashboards();
+      refreshAll();
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     }
@@ -98,14 +130,14 @@ const DashboardsPage: React.FC = () => {
       try {
         await dashboardFoldersApi.create({ name, parent_id: parentId ?? undefined });
         message.success(intl.formatMessage({ id: 'common.success' }));
-        await fetchDashboards();
+        refreshAll();
         return true;
       } catch (error: any) {
         message.error(error.message || intl.formatMessage({ id: 'common.error' }));
         return false;
       }
     },
-    [fetchDashboards, intl, message]
+    [refreshAll, intl, message]
   );
 
   const handleRenameFolder = useCallback(
@@ -114,14 +146,14 @@ const DashboardsPage: React.FC = () => {
         // 只发改名：parent_id 缺省 = 「保留存量」（PUT 的未提供则保留约定）。
         await dashboardFoldersApi.update(id, { name });
         message.success(intl.formatMessage({ id: 'common.success' }));
-        await fetchDashboards();
+        refreshAll();
         return true;
       } catch (error: any) {
         message.error(error.message || intl.formatMessage({ id: 'common.error' }));
         return false;
       }
     },
-    [fetchDashboards, intl, message]
+    [refreshAll, intl, message]
   );
 
   const handleDeleteFolder = useCallback(
@@ -134,13 +166,13 @@ const DashboardsPage: React.FC = () => {
         if (selection.kind === 'folder' && selection.id === id) {
           setSelection({ kind: 'root' });
         }
-        await fetchDashboards();
+        refreshAll();
       } catch (error: any) {
         // 「非空不可删」是后端 20400，消息里带着还剩几项，直接念给用户。
         message.error(error.message || intl.formatMessage({ id: 'common.error' }));
       }
     },
-    [fetchDashboards, intl, message, selection]
+    [refreshAll, intl, message, selection]
   );
 
   const handleMoveDashboard = useCallback(
@@ -153,13 +185,13 @@ const DashboardsPage: React.FC = () => {
       try {
         await dashboardsApi.update(dashboardId, { folder_id: folderId ?? '' });
         message.success(intl.formatMessage({ id: 'dashboard.folderMoved' }));
-        await fetchDashboards();
+        refreshAll();
       } catch (error: any) {
         setDashboards(previous); // 失败就把拖过去的那一格还原，别留下假象
         message.error(error.message || intl.formatMessage({ id: 'common.error' }));
       }
     },
-    [dashboards, fetchDashboards, intl, message]
+    [dashboards, refreshAll, intl, message]
   );
 
   // 移动文件夹 = 改 parent_id。null 走空串哨兵（「移到根级」的唯一表达）。
@@ -170,18 +202,13 @@ const DashboardsPage: React.FC = () => {
       try {
         await dashboardFoldersApi.update(folderId, { parent_id: parentId ?? '' });
         message.success(intl.formatMessage({ id: 'dashboard.folderMoved' }));
-        await fetchDashboards();
+        refreshAll();
       } catch (error: any) {
         setFolders(previous);
         message.error(error.message || intl.formatMessage({ id: 'common.error' }));
       }
     },
-    [fetchDashboards, folders, intl, message]
-  );
-
-  const visibleDashboards = useMemo(
-    () => filterDashboardsBySelection(dashboards, selection),
-    [dashboards, selection]
+    [refreshAll, folders, intl, message]
   );
 
   const columns = [
@@ -189,6 +216,8 @@ const DashboardsPage: React.FC = () => {
       title: intl.formatMessage({ id: 'dashboard.name' }),
       dataIndex: 'name',
       key: 'name',
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'name'),
       render: (text: string, record: Dashboard) => (
         <Space>
           <DashboardOutlined />
@@ -222,6 +251,8 @@ const DashboardsPage: React.FC = () => {
       dataIndex: 'updated_at',
       key: 'updated_at',
       width: 180,
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'updated_at'),
       render: (text: string) => formatDateTime(text),
     },
     {
@@ -261,7 +292,11 @@ const DashboardsPage: React.FC = () => {
         description={intl.formatMessage({ id: 'dashboard.manage' })}
         extra={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => fetchDashboards()} loading={loading}>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => refreshAll()}
+              loading={loading || list.loading}
+            >
               {intl.formatMessage({ id: 'common.refresh' })}
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
@@ -325,14 +360,11 @@ const DashboardsPage: React.FC = () => {
           <Card>
             <Table
               columns={columns}
-              dataSource={Array.isArray(visibleDashboards) ? visibleDashboards : []}
+              dataSource={list.items}
               rowKey="id"
-              loading={loading}
-              pagination={{
-                pageSize: 10,
-                showSizeChanger: true,
-                showTotal: (total) => intl.formatMessage({ id: 'common.totalItems' }, { total }),
-              }}
+              loading={list.loading}
+              pagination={list.pagination}
+              onChange={list.onTableChange}
               locale={{ emptyText: intl.formatMessage({ id: 'common.noData' }) }}
               size="small"
             />

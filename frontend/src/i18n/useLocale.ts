@@ -330,7 +330,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'chart.add': '创建图表',
     'chart.charts': '图表',
     'chart.manageCharts': '管理图表',
-    'chart.searchPlaceholder': '搜索名称、图型或数据集',
+    'chart.searchPlaceholder': '搜索名称或图型',
     'chart.deleteConfirm': '确定要删除此图表吗？该图表的分享链接将一并删除。',
     'chart.chartName': '图表名称',
     'chart.chartType': '图表类型',
@@ -889,7 +889,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'chart.add': 'Create Chart',
     'chart.charts': 'Charts',
     'chart.manageCharts': 'Manage your charts',
-    'chart.searchPlaceholder': 'Search name, type or dataset',
+    'chart.searchPlaceholder': 'Search name or type',
     'chart.deleteConfirm':
       'Are you sure you want to delete this chart? Its share links will be deleted too.',
     'chart.chartName': 'Chart Name',

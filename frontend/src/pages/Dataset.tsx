@@ -43,11 +43,12 @@ import {
   DatasetPreview,
   datasetsApi,
   datasourcesApi,
+  ListQuery,
   TableInfo,
 } from '../api';
 import { toStandardType } from '../api/datatypes';
 import DatasetUploadModal, { DatasetReplaceModal, FileDropZone } from '../components/DatasetUpload';
-import { ListSearch, makeTimeSorter } from '../components/listPage';
+import { ListSearch, sortOrderOf, useDebouncedValue, useServerList } from '../components/listPage';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { isNumericType, normalizeDataType } from '../lib/dataTypes';
@@ -299,23 +300,43 @@ const DatasetPage: React.FC = () => {
     }
   };
 
-  const {
-    datasets,
-    datasetsLoading,
-    fetchDatasets,
-    addDataset,
-    updateDataset,
-    deleteDataset,
-    datasources,
-    fetchDatasources,
-    datasetsError,
-  } = useStore();
+  const { addDataset, updateDataset, deleteDataset, datasources, fetchDatasources } = useStore();
 
-  // Fetch datasets and datasources on mount
+  // 数据集列表走服务端分页/排序/关键字与工具栏筛选（issue #205）。
+  const fetchPage = useCallback(
+    (query: ListQuery) => datasetsApi.getAll(query).then((res) => res.data.data),
+    []
+  );
+  const list = useServerList<Dataset>(fetchPage, { sort: 'id', order: 'desc' });
+  const keyword = useDebouncedValue(searchText).trim();
+
   useEffect(() => {
-    fetchDatasets();
     fetchDatasources();
-  }, [fetchDatasets, fetchDatasources]);
+  }, [fetchDatasources]);
+
+  useEffect(() => {
+    if (keyword === (list.query.keyword ?? '')) return;
+    list.setParam({ keyword: keyword || undefined });
+  }, [keyword, list.query.keyword, list.setParam]);
+
+  useEffect(() => {
+    const sameDatasource = filterDatasourceId === list.query.datasource_id;
+    const sameType = (filterQueryType ?? '') === (list.query.query_type ?? '');
+    if (sameDatasource && sameType) return;
+    list.setParam({ datasource_id: filterDatasourceId, query_type: filterQueryType });
+  }, [
+    filterDatasourceId,
+    filterQueryType,
+    list.query.datasource_id,
+    list.query.query_type,
+    list.setParam,
+  ]);
+
+  useEffect(() => {
+    if (list.error) {
+      message.error(list.error);
+    }
+  }, [list.error]);
 
   // 渲染字段分布图表
   useEffect(() => {
@@ -371,13 +392,6 @@ const DatasetPage: React.FC = () => {
       }
     };
   }, [fieldDistribution]);
-
-  // Show error message
-  useEffect(() => {
-    if (datasetsError) {
-      message.error(datasetsError);
-    }
-  }, [datasetsError]);
 
   // Fetch tables from datasource
   const fetchTables = useCallback(
@@ -523,6 +537,7 @@ const DatasetPage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await deleteDataset(id);
+      list.reload();
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
@@ -534,7 +549,7 @@ const DatasetPage: React.FC = () => {
     setUploadModalVisible(false);
     setInitialUploadFile(null);
     message.success(intl.formatMessage({ id: 'common.success' }));
-    fetchDatasets();
+    list.reload();
     navigate(`/chart-builder?datasetId=${dataset.id}`);
   };
 
@@ -546,7 +561,7 @@ const DatasetPage: React.FC = () => {
   const handleReplaced = () => {
     setReplaceModalVisible(false);
     setReplacingDataset(null);
-    fetchDatasets();
+    list.reload();
   };
 
   // Handle edit dataset
@@ -593,7 +608,7 @@ const DatasetPage: React.FC = () => {
       setEditingDataset(null);
       setSelectedDatasourceId(null);
       setQueryType('table');
-      fetchDatasets();
+      list.reload();
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
@@ -624,24 +639,6 @@ const DatasetPage: React.FC = () => {
     return ds ? ds.type : 'starrocks';
   };
 
-  // 工具栏筛选：关键字（名称/表名）+ 数据源 + 查询类型，全部在客户端完成
-  // （列表一次性拉取，见 datasetsApi.getAll）。
-  const keyword = searchText.trim().toLowerCase();
-  const filteredDatasets = (Array.isArray(datasets) ? datasets : []).filter((ds) => {
-    if (filterDatasourceId !== undefined && ds.datasource_id !== filterDatasourceId) return false;
-    if (filterQueryType !== undefined && ds.query_type !== filterQueryType) return false;
-    if (!keyword) return true;
-    return (
-      ds.name.toLowerCase().includes(keyword) ||
-      (ds.table_name ?? '').toLowerCase().includes(keyword)
-    );
-  });
-
-  // 时间列排序：复用列表页统一比较器 makeTimeSorter（空值/非法日期沉底 + 同键按 id
-  // 兜底）——本机曾有 21 条数据集 created_at 完全相同（批量导入），只按时间排会同键抖动。
-  const compareTimeRows = makeTimeSorter((row: Dataset) => row.created_at);
-  const compareUpdatedRows = makeTimeSorter((row: Dataset) => row.updated_at);
-
   // Table columns configuration
   const columns = [
     {
@@ -649,15 +646,16 @@ const DatasetPage: React.FC = () => {
       dataIndex: 'id',
       key: 'id',
       width: 60,
-      // 默认视图与后端 List 的 ORDER BY id DESC 对齐：新建/导入的排最前。
-      sorter: (a: Dataset, b: Dataset) => a.id - b.id,
-      defaultSortOrder: 'descend' as const,
+      // 服务端排序：默认与后端 ORDER BY id DESC 对齐，新建/导入的排最前。
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'id'),
     },
     {
       title: intl.formatMessage({ id: 'dataset.name' }),
       dataIndex: 'name',
       key: 'name',
-      sorter: (a: Dataset, b: Dataset) => a.name.localeCompare(b.name) || b.id - a.id,
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'name'),
       render: (text: string, record: any) => (
         <Link
           to={`/datasets/${record.id}`}
@@ -694,14 +692,16 @@ const DatasetPage: React.FC = () => {
       title: intl.formatMessage({ id: 'dataset.createdAt' }),
       dataIndex: 'created_at',
       key: 'created_at',
-      sorter: (a: Dataset, b: Dataset) => compareTimeRows(a, b) || b.id - a.id,
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'created_at'),
       render: (text: string) => formatDateTime(text),
     },
     {
       title: intl.formatMessage({ id: 'dataset.updatedAt' }),
       dataIndex: 'updated_at',
       key: 'updated_at',
-      sorter: (a: Dataset, b: Dataset) => compareUpdatedRows(a, b) || b.id - a.id,
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'updated_at'),
       render: (text: string) => formatDateTime(text),
     },
     {
@@ -771,11 +771,7 @@ const DatasetPage: React.FC = () => {
             >
               {intl.formatMessage({ id: 'dataset.upload.button' })}
             </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => fetchDatasets()}
-              loading={datasetsLoading}
-            >
+            <Button icon={<ReloadOutlined />} onClick={() => list.reload()} loading={list.loading}>
               {intl.formatMessage({ id: 'common.refresh' })}
             </Button>
             <Button
@@ -834,17 +830,17 @@ const DatasetPage: React.FC = () => {
 
         <Table
           columns={columns}
-          dataSource={filteredDatasets}
+          dataSource={list.items}
           rowKey="id"
-          loading={datasetsLoading}
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showTotal: (total) => `Total ${total} items`,
-          }}
+          loading={list.loading}
+          pagination={list.pagination}
+          onChange={list.onTableChange}
           locale={{
             emptyText:
-              Array.isArray(datasets) && datasets.length === 0 ? (
+              list.total === 0 &&
+              !searchText &&
+              filterDatasourceId === undefined &&
+              filterQueryType === undefined ? (
                 <div style={{ padding: '24px 0' }}>
                   <FileDropZone
                     titleId="dataset.upload.emptyTitle"

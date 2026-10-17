@@ -37,9 +37,11 @@ const envelope = (data: unknown) => ({ data: { code: 20000, msg: 'success', trac
 beforeEach(() => {
   vi.clearAllMocks();
   instance.get.mockImplementation((url: string) => {
-    if (url === '/api/datasets') return Promise.resolve(envelope([]));
+    if (url === '/api/datasets') return Promise.resolve(envelope({ items: [], total: 0 }));
     if (url === '/api/datasources')
-      return Promise.resolve(envelope([{ id: 1, name: 'PG-1', type: 'postgresql' }]));
+      return Promise.resolve(
+        envelope({ items: [{ id: 1, name: 'PG-1', type: 'postgresql' }], total: 1 })
+      );
     return Promise.reject(new Error(`unexpected GET ${url}`));
   });
   instance.post.mockImplementation((url: string) => {

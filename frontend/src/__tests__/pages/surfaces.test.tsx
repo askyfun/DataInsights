@@ -41,12 +41,13 @@ const envelope = (data: unknown) => ({ data: { code: 20000, msg: 'success', trac
 beforeEach(() => {
   vi.clearAllMocks();
   instance.get.mockImplementation((url: string) => {
-    if (url === '/api/datasources') return Promise.resolve(envelope([{ id: 2, name: 'pg' }]));
+    if (url === '/api/datasources')
+      return Promise.resolve(envelope({ items: [{ id: 2, name: 'pg' }], total: 1 }));
     if (url.endsWith('/columns')) return Promise.resolve(envelope([]));
     if (url.endsWith('/preview')) return Promise.resolve(envelope({ columns: [], data: [] }));
     if (url.startsWith('/api/datasources/'))
       return Promise.resolve(envelope({ id: 2, name: 'pg' }));
-    if (url === '/api/datasets') return Promise.resolve(envelope([]));
+    if (url === '/api/datasets') return Promise.resolve(envelope({ items: [], total: 0 }));
     if (url.startsWith('/api/datasets/'))
       return Promise.resolve(
         envelope({

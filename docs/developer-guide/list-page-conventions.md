@@ -1,27 +1,30 @@
 # 列表页设计规范
 
-> 适用范围：所有"实体列表"页面（数据集、数据源、图表、仪表盘、分享……）。
+> 最后更新：2026-10-17
+> 适用范围：所有"实体列表"页面（数据集、数据源、图表、仪表盘……）。
 > 目标：用户在任何一个列表页学会的交互，在别的列表页不必重新学。
-> 复用件：`frontend/src/components/listPage.tsx`（`ListSearch` / `makeTimeSorter` / `standardListPagination`）；表格内联编辑用 `frontend/src/components/ClickToEdit.tsx`。
+> 复用件：`frontend/src/components/listPage.tsx`（`ListSearch` / `useServerList` / `useDebouncedValue` / `sortOrderOf` / `standardListPagination`）；表格内联编辑用 `frontend/src/components/ClickToEdit.tsx`。
 
 ## 必备交互清单
 
 每个列表页必须具备以下五项，缺一即视为未完成：
 
-1. **关键字搜索**（客户端过滤）
+1. **关键字搜索**（服务端过滤，issue #205）
    - 用 `ListSearch` 放在卡片顶部工具栏（`.dr-card-toolbar`）；
-   - 过滤范围至少覆盖名称与用户可读的关键列（类型、主机、所属实体名等）；
-   - 搜索是客户端过滤：列表数据一次性拉取（`xxxApi.getAll`），不做服务端搜索。
-2. **可排序**
-   - ID 列：数值排序，默认 `descend`（与后端 `ORDER BY id DESC` 对齐，新建的排最前）；
-   - 名称列：`localeCompare`，同键按 `b.id - a.id` 兜底防抖动；
-   - 时间列：用 `makeTimeSorter((row) => row.created_at)`——空值/非法日期沉底，同键按 id 降序兜底（批量导入会产生大量同秒时间戳，只按时间排会同键抖动）。
+   - 关键字经 `useDebouncedValue` 防抖后进 `keyword` 查询参数，由后端做大小写不敏感的包含匹配（ILIKE）；
+   - 过滤范围是后端白名单列（数据源：名称/类型/主机/库名；数据集：名称/表名；图表：名称/图型；仪表盘：名称/描述）。**跨实体名搜索**（如图表按所属数据集名）不再在客户端做。
+   - 改筛选条件时 offset 必须回到 0。
+2. **可排序**（服务端排序）
+   - 列头 `sorter: true`，`sortOrder` 由 `sortOrderOf(query, field)` 派生（受控箭头，翻页后不漂）；
+   - Table 的 `onChange` 直接把 `sort` / `order` 写进查询参数；第三次点击清空排序时回到实体默认排序；
+   - 后端只接受字段白名单（`id` / `name` / `created_at` / `updated_at`，仪表盘无 `id`），未知值回落实体默认排序——前端本地比较器（`makeTimeSorter`）已随客户端排序一起移除。
 3. **标题即详情入口**
    - 列表第一列（名称）必须可点击跳转到详情页/编辑页，渲染为 `Link` + 加粗文本；
    - 行内"编辑/查看"按钮保留，但标题链接是主要入口；
    - 引用其他实体的列（如"所属数据集"）同样用 `Link` 跳到那个实体的详情页。
-4. **标准分页**
-   - 一律用 `standardListPagination`（一页 10 条 + 可换页大小 + 显示总数）。
+4. **标准分页**（服务端分页）
+   - 用 `useServerList` 的 `pagination` / `onTableChange`（一页 10 条 + 可换页大小 + 显示总数）；
+   - 响应 `{items, total}` 的 total 是后端 COUNT，前端**不得**用当前页条数冒充总数；
    - 例外：图表查询页的表格/透视表结果默认一页 100 条（分析场景要看更多行）。
 5. **标准操作列**
    - 行尾操作列：编辑（弹窗或跳转）+ 删除（必须 `Popconfirm` 二次确认）；
@@ -48,6 +51,6 @@
 | 数据集 `/datasets` | ✅ | ✅ | ✅ | ✅ |
 | 数据源 `/datasources` | ✅ | ✅ | ✅ | ✅ |
 | 图表 `/charts` | ✅ | ✅ | ✅（标题→图表构建页） | ✅ |
-| 仪表盘 `/` | — | — | — | — |
+| 仪表盘 `/` | — | ✅（名称/更新时间） | — | ✅ |
 
 新增列表页时按本清单逐项核对，复用件优先，不要复制粘贴旧实现。

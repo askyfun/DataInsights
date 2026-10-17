@@ -32,9 +32,9 @@ vi.mock('../../api', () => ({
     }),
   },
   datasetsApi: {
-    getAll: vi
-      .fn()
-      .mockResolvedValue({ data: { code: 20000, msg: 'success', trace: '', data: [] } }),
+    getAll: vi.fn().mockResolvedValue({
+      data: { code: 20000, msg: 'success', trace: '', data: { items: [], total: 0 } },
+    }),
     getColumns: vi
       .fn()
       .mockResolvedValue({ data: { code: 20000, msg: 'success', trace: '', data: [] } }),
@@ -74,6 +74,11 @@ function mockAxiosResponse<T>(data: ApiResponse<T>): AxiosResponse<ApiResponse<T
 
 const envelope = <T,>(data: T) =>
   mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data });
+
+/** 四类实体列表的 data 是 {items,total}（issue #205 服务端分页）。 */
+function listEnvelope<T>(items: T[]): AxiosResponse<ApiResponse<{ items: T[]; total: number }>> {
+  return envelope({ items, total: items.length });
+}
 
 const chart = (id: number, name: string): Chart => ({
   id,
@@ -151,7 +156,7 @@ const renderEditor = () =>
 /** 按 page_id 回不同页的结果：这样「取错页」会立刻表现为渲染错块。 */
 function primeByPage() {
   mockGetById.mockResolvedValue(envelope(dashboard));
-  mockChartsGetAll.mockResolvedValue(envelope([chart(7, '首屏图'), chart(99, '明细图')]));
+  mockChartsGetAll.mockResolvedValue(listEnvelope([chart(7, '首屏图'), chart(99, '明细图')]));
   mockQuery.mockImplementation((async (_id: string, body: { page_id?: string }) =>
     envelope({
       results:
