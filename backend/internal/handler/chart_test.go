@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/router"
 	"data-insights/internal/service/chart"
 
@@ -20,7 +21,7 @@ import (
 type mockChartService struct {
 	chart.Service
 
-	listFunc    func(ctx context.Context, limit, offset int) ([]entity.Chart, error)
+	listFunc    func(ctx context.Context, opts listpage.Params) (listpage.Result[entity.Chart], error)
 	getByIDFunc func(ctx context.Context, id int) (*entity.Chart, error)
 	createFunc  func(ctx context.Context, c *entity.Chart) (*entity.Chart, error)
 	updateFunc  func(ctx context.Context, c *entity.Chart) (*entity.Chart, error)
@@ -29,11 +30,11 @@ type mockChartService struct {
 	queryFunc   func(ctx context.Context, req *entity.ChartQueryRequest) (entity.ChartDataResult, error)
 }
 
-func (m *mockChartService) List(ctx context.Context, limit, offset int) ([]entity.Chart, error) {
+func (m *mockChartService) List(ctx context.Context, opts listpage.Params) (listpage.Result[entity.Chart], error) {
 	if m.listFunc != nil {
-		return m.listFunc(ctx, limit, offset)
+		return m.listFunc(ctx, opts)
 	}
-	return nil, nil
+	return listpage.Result[entity.Chart]{}, nil
 }
 
 func (m *mockChartService) GetByID(ctx context.Context, id int) (*entity.Chart, error) {
@@ -106,32 +107,50 @@ const (
 // ---------------------------------------------------------------- List
 
 func TestChartList_Defaults(t *testing.T) {
-	var gotLimit, gotOffset int
+	var got listpage.Params
 	h := NewChartHandler(&mockChartService{
-		listFunc: func(_ context.Context, limit, offset int) ([]entity.Chart, error) {
-			gotLimit, gotOffset = limit, offset
-			return nil, nil
+		listFunc: func(_ context.Context, opts listpage.Params) (listpage.Result[entity.Chart], error) {
+			got = opts
+			return listpage.Result[entity.Chart]{}, nil
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodGet, "/api/charts", "")
-	assertBody(t, w, okEnvelopeEmptyArray)
-	if gotLimit != 100 || gotOffset != 0 {
-		t.Errorf("expected defaults limit=100 offset=0, got limit=%d offset=%d", gotLimit, gotOffset)
+	assertBody(t, w, okEnvelopeEmptyList)
+	if got.Limit != 100 || got.Offset != 0 {
+		t.Errorf("expected defaults limit=100 offset=0, got limit=%d offset=%d", got.Limit, got.Offset)
 	}
 }
 
 func TestChartList_ExplicitPaging(t *testing.T) {
-	var gotLimit, gotOffset int
+	var got listpage.Params
 	h := NewChartHandler(&mockChartService{
-		listFunc: func(_ context.Context, limit, offset int) ([]entity.Chart, error) {
-			gotLimit, gotOffset = limit, offset
-			return []entity.Chart{{ID: 1, Name: "c1", DatasetID: 2, ChartType: "bar", Config: "{}"}}, nil
+		listFunc: func(_ context.Context, opts listpage.Params) (listpage.Result[entity.Chart], error) {
+			got = opts
+			return listpage.Result[entity.Chart]{
+				Items: []entity.Chart{{ID: 1, Name: "c1", DatasetID: 2, ChartType: "bar", Config: "{}"}},
+				Total: 9,
+			}, nil
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodGet, "/api/charts?limit=2&offset=3", "")
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":[{"id":1,"name":"c1","dataset_id":2,"chart_type":"bar","config":"{}","created_at":"","updated_at":""}]}`)
-	if gotLimit != 2 || gotOffset != 3 {
-		t.Errorf("expected limit=2 offset=3, got limit=%d offset=%d", gotLimit, gotOffset)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"items":[{"id":1,"name":"c1","dataset_id":2,"chart_type":"bar","config":"{}","created_at":"","updated_at":""}],"total":9}}`)
+	if got.Limit != 2 || got.Offset != 3 {
+		t.Errorf("expected limit=2 offset=3, got limit=%d offset=%d", got.Limit, got.Offset)
+	}
+}
+
+func TestChartList_PassesSortAndKeyword(t *testing.T) {
+	var got listpage.Params
+	h := NewChartHandler(&mockChartService{
+		listFunc: func(_ context.Context, opts listpage.Params) (listpage.Result[entity.Chart], error) {
+			got = opts
+			return listpage.Result[entity.Chart]{}, nil
+		},
+	})
+	w := serve(newChartTestRouter(h), http.MethodGet, "/api/charts?sort=name&order=asc&keyword=%20line%20", "")
+	assertBody(t, w, okEnvelopeEmptyList)
+	if got.Sort != "name" || got.Order != "asc" || got.Keyword != "line" {
+		t.Errorf("expected sort=name order=asc keyword=line, got %+v", got)
 	}
 }
 
@@ -151,26 +170,26 @@ func TestChartList_InvalidAndClampedPaging(t *testing.T) {
 		{"?limit=1000", 1000, 0},
 	}
 	for _, tc := range cases {
-		var gotLimit, gotOffset int
+		var got listpage.Params
 		h := NewChartHandler(&mockChartService{
-			listFunc: func(_ context.Context, limit, offset int) ([]entity.Chart, error) {
-				gotLimit, gotOffset = limit, offset
-				return nil, nil
+			listFunc: func(_ context.Context, opts listpage.Params) (listpage.Result[entity.Chart], error) {
+				got = opts
+				return listpage.Result[entity.Chart]{}, nil
 			},
 		})
 		w := serve(newChartTestRouter(h), http.MethodGet, "/api/charts"+tc.query, "")
-		assertBody(t, w, okEnvelopeEmptyArray)
-		if gotLimit != tc.wantLimit || gotOffset != tc.wantOff {
+		assertBody(t, w, okEnvelopeEmptyList)
+		if got.Limit != tc.wantLimit || got.Offset != tc.wantOff {
 			t.Errorf("query %q: expected limit=%d offset=%d, got limit=%d offset=%d",
-				tc.query, tc.wantLimit, tc.wantOff, gotLimit, gotOffset)
+				tc.query, tc.wantLimit, tc.wantOff, got.Limit, got.Offset)
 		}
 	}
 }
 
 func TestChartList_ServiceError(t *testing.T) {
 	h := NewChartHandler(&mockChartService{
-		listFunc: func(_ context.Context, _, _ int) ([]entity.Chart, error) {
-			return nil, errBoom()
+		listFunc: func(_ context.Context, _ listpage.Params) (listpage.Result[entity.Chart], error) {
+			return listpage.Result[entity.Chart]{}, errBoom()
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodGet, "/api/charts", "")

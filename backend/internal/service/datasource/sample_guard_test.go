@@ -8,6 +8,8 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
+
+	"data-insights/internal/listpage"
 )
 
 // TestListHidesSampleDatasource 钉死内置示例数据源（R-79）的隐藏口径：
@@ -21,9 +23,11 @@ func TestListHidesSampleDatasource(t *testing.T) {
 	defer sqlDB.Close()
 	s := &datasourceService{db: bun.NewDB(sqlDB, pgdialect.New())}
 	mock.ExpectQuery(`SELECT`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "type"}).AddRow(1, "ds", "postgresql"))
 
-	if _, err := s.List(context.Background(), 0, 0); err != nil {
+	if _, err := s.List(context.Background(), listpage.Params{}); err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	for _, stmt := range executed {

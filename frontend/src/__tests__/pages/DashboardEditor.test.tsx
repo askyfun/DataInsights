@@ -87,6 +87,11 @@ function mockAxiosResponse<T>(data: ApiResponse<T>): AxiosResponse<ApiResponse<T
 const envelope = <T,>(data: T) =>
   mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data });
 
+/** 四类实体列表的 data 是 {items,total}（issue #205 服务端分页）。 */
+function listEnvelope<T>(items: T[]): AxiosResponse<ApiResponse<{ items: T[]; total: number }>> {
+  return envelope({ items, total: items.length });
+}
+
 const barChart: Chart = {
   id: 7,
   name: 'Monthly Sales',
@@ -147,7 +152,7 @@ const renderEditor = () =>
 /** 默认装载：一块能出图、一块被软删。 */
 function primeHappyPath() {
   mockGetById.mockResolvedValue(envelope(dashboard));
-  mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+  mockChartsGetAll.mockResolvedValue(listEnvelope([barChart]));
   mockQuery.mockResolvedValue(
     envelope({
       results: [
@@ -184,7 +189,7 @@ describe('仪表盘画布页', () => {
 
   it('单块取数失败不整盘失败：其余块照渲染，错误块带出后端原因', async () => {
     mockGetById.mockResolvedValue(envelope(dashboard));
-    mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+    mockChartsGetAll.mockResolvedValue(listEnvelope([barChart]));
     mockQuery.mockResolvedValue(
       envelope({
         results: [
@@ -203,7 +208,7 @@ describe('仪表盘画布页', () => {
 
   it('损坏的 layout_json 收敛为空盘，不抛异常', async () => {
     mockGetById.mockResolvedValue(envelope({ ...dashboard, layout_json: '{broken' }));
-    mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+    mockChartsGetAll.mockResolvedValue(listEnvelope([barChart]));
     mockQuery.mockResolvedValue(envelope({ results: [] }));
 
     renderEditor();
@@ -214,7 +219,7 @@ describe('仪表盘画布页', () => {
 
   it('新增图表块：未保存的块走图表自身取数端点即时出图', async () => {
     mockGetById.mockResolvedValue(envelope({ ...dashboard, layout_json: '' }));
-    mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+    mockChartsGetAll.mockResolvedValue(listEnvelope([barChart]));
     mockQuery.mockResolvedValue(envelope({ results: [] }));
     mockGetChartData.mockResolvedValue(envelope(axisPayload));
 
@@ -307,7 +312,7 @@ describe('仪表盘画布页', () => {
   // 真实网络下已落库的每块都会多发一次 /api/charts/{id}/data。
   it('盘级取数未返回前不得抢先触发图表自身取数', async () => {
     mockGetById.mockResolvedValue(envelope(dashboard));
-    mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+    mockChartsGetAll.mockResolvedValue(listEnvelope([barChart]));
     let release!: (value: Awaited<ReturnType<typeof dashboardsApi.query>>) => void;
     mockQuery.mockReturnValue(
       new Promise<Awaited<ReturnType<typeof dashboardsApi.query>>>((resolve) => {
@@ -371,7 +376,7 @@ describe('仪表盘画布页', () => {
 
   it('容错：未知 status 按失败块渲染，results 里多余的 widgetId 被忽略', async () => {
     mockGetById.mockResolvedValue(envelope(dashboard));
-    mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+    mockChartsGetAll.mockResolvedValue(listEnvelope([barChart]));
     mockQuery.mockResolvedValue(
       envelope({
         results: [
@@ -417,7 +422,7 @@ describe('仪表盘画布页', () => {
   it('装载态即渲染栅格容器节点，保证 useContainerWidth 能测到真实宽度', async () => {
     // 悬挂的 getById：页面停在装载态，容器节点必须已经存在。
     mockGetById.mockReturnValue(new Promise<never>(() => {}));
-    mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+    mockChartsGetAll.mockResolvedValue(listEnvelope([barChart]));
 
     renderEditor();
 

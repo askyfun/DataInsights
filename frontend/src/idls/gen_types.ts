@@ -983,7 +983,10 @@ export interface components {
         };
         /** @description GET /api/datasources 响应：data 为 Datasource 数组。 */
         DatasourceListResponse: components["schemas"]["Envelope"] & {
-            data: components["schemas"]["Datasource"][];
+            data: {
+                items: components["schemas"]["Datasource"][];
+                total: number;
+            };
         };
         /** @description 数据源 CRUD 响应：data 为单个 Datasource。 */
         DatasourceResponse: components["schemas"]["Envelope"] & {
@@ -1011,7 +1014,10 @@ export interface components {
         };
         /** @description GET /api/datasets 响应：data 为 Dataset 数组。 */
         DatasetListResponse: components["schemas"]["Envelope"] & {
-            data: components["schemas"]["Dataset"][];
+            data: {
+                items: components["schemas"]["Dataset"][];
+                total: number;
+            };
         };
         /** @description 数据集 CRUD / 列更新响应：data 为单个 Dataset。 */
         DatasetResponse: components["schemas"]["Envelope"] & {
@@ -1282,7 +1288,10 @@ export interface components {
         };
         /** @description GET /api/charts 响应：data 为 Chart 数组。 */
         ChartListResponse: components["schemas"]["Envelope"] & {
-            data: components["schemas"]["Chart"][];
+            data: {
+                items: components["schemas"]["Chart"][];
+                total: number;
+            };
         };
         /** @description 图表 CRUD 响应：data 为单个 Chart。 */
         ChartResponse: components["schemas"]["Envelope"] & {
@@ -1637,7 +1646,10 @@ export interface components {
         };
         /** @description GET /api/dashboards 响应：data 为 Dashboard 数组。 */
         DashboardListResponse: components["schemas"]["Envelope"] & {
-            data: components["schemas"]["Dashboard"][];
+            data: {
+                items: components["schemas"]["Dashboard"][];
+                total: number;
+            };
         };
         /** @description 仪表盘 CRUD 响应：data 为单个 Dashboard。 */
         DashboardResponse: components["schemas"]["Envelope"] & {

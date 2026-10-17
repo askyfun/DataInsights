@@ -24,8 +24,9 @@ export const createDatasetsSlice: StateCreator<AppState, [], [], DatasetsSlice> 
   fetchDatasets: async () => {
     set({ datasetsLoading: true, datasetsError: null });
     try {
-      const response = await datasetsApi.getAll();
-      set({ datasets: response.data.data, datasetsLoading: false });
+      // 选择器 / 引用名解析需要完整集合：按上限页一次性取回（服务端分页上限 1000）。
+      const response = await datasetsApi.getAll({ limit: 1000 });
+      set({ datasets: response.data.data.items, datasetsLoading: false });
     } catch (error: any) {
       set({
         datasetsError: error.message || 'Failed to fetch',

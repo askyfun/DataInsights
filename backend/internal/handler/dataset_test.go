@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/router"
 	"data-insights/internal/service/dataset"
 
@@ -20,7 +21,7 @@ import (
 type mockDatasetService struct {
 	dataset.Service
 
-	listFunc          func(ctx context.Context, limit, offset int) ([]entity.Dataset, error)
+	listFunc          func(ctx context.Context, opts dataset.ListOptions) (listpage.Result[entity.Dataset], error)
 	getByIDFunc       func(ctx context.Context, id int) (*entity.Dataset, error)
 	createFunc        func(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error)
 	updateFunc        func(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error)
@@ -33,11 +34,11 @@ type mockDatasetService struct {
 	replaceFunc       func(ctx context.Context, id int, req dataset.ImportRequest) (*entity.Dataset, error)
 }
 
-func (m *mockDatasetService) List(ctx context.Context, limit, offset int) ([]entity.Dataset, error) {
+func (m *mockDatasetService) List(ctx context.Context, opts dataset.ListOptions) (listpage.Result[entity.Dataset], error) {
 	if m.listFunc != nil {
-		return m.listFunc(ctx, limit, offset)
+		return m.listFunc(ctx, opts)
 	}
-	return nil, nil
+	return listpage.Result[entity.Dataset]{}, nil
 }
 
 func (m *mockDatasetService) GetByID(ctx context.Context, id int) (*entity.Dataset, error) {
@@ -185,33 +186,35 @@ func storedDataset() *entity.Dataset {
 // ---------------------------------------------------------------- List
 
 func TestDatasetList_Defaults(t *testing.T) {
-	var gotLimit, gotOffset int
+	var got dataset.ListOptions
 	h := NewDatasetHandler(&mockDatasetService{
-		listFunc: func(_ context.Context, limit, offset int) ([]entity.Dataset, error) {
-			gotLimit, gotOffset = limit, offset
-			return nil, nil
+		listFunc: func(_ context.Context, opts dataset.ListOptions) (listpage.Result[entity.Dataset], error) {
+			got = opts
+			return listpage.Result[entity.Dataset]{}, nil
 		},
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodGet, "/api/datasets", "")
-	assertBody(t, w, okEnvelopeEmptyArray)
-	if gotLimit != 100 || gotOffset != 0 {
-		t.Errorf("expected defaults limit=100 offset=0, got limit=%d offset=%d", gotLimit, gotOffset)
+	assertBody(t, w, okEnvelopeEmptyList)
+	if got.Limit != 100 || got.Offset != 0 {
+		t.Errorf("expected defaults limit=100 offset=0, got limit=%d offset=%d", got.Limit, got.Offset)
 	}
 }
 
-func TestDatasetList_ExplicitPaging(t *testing.T) {
-	var gotLimit, gotOffset int
+func TestDatasetList_ExplicitPagingAndFilters(t *testing.T) {
+	var got dataset.ListOptions
 	h := NewDatasetHandler(&mockDatasetService{
-		listFunc: func(_ context.Context, limit, offset int) ([]entity.Dataset, error) {
-			gotLimit, gotOffset = limit, offset
+		listFunc: func(_ context.Context, opts dataset.ListOptions) (listpage.Result[entity.Dataset], error) {
+			got = opts
 			d := *testDataset()
-			return []entity.Dataset{d}, nil
+			return listpage.Result[entity.Dataset]{Items: []entity.Dataset{d}, Total: 7}, nil
 		},
 	})
-	w := serve(newDatasetTestRouter(h), http.MethodGet, "/api/datasets?limit=2&offset=3", "")
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":[`+datasetGetJSON+`]}`)
-	if gotLimit != 2 || gotOffset != 3 {
-		t.Errorf("expected limit=2 offset=3, got limit=%d offset=%d", gotLimit, gotOffset)
+	w := serve(newDatasetTestRouter(h), http.MethodGet,
+		"/api/datasets?limit=2&offset=3&sort=name&order=asc&keyword=sales&datasource_id=2&query_type=table", "")
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"items":[`+datasetGetJSON+`],"total":7}}`)
+	if got.Limit != 2 || got.Offset != 3 || got.Sort != "name" || got.Order != "asc" ||
+		got.Keyword != "sales" || got.DatasourceID != 2 || got.QueryType != "table" {
+		t.Errorf("unexpected list options: %+v", got)
 	}
 }
 
@@ -231,26 +234,26 @@ func TestDatasetList_InvalidAndClampedPaging(t *testing.T) {
 		{"?limit=1000", 1000, 0},
 	}
 	for _, tc := range cases {
-		var gotLimit, gotOffset int
+		var got dataset.ListOptions
 		h := NewDatasetHandler(&mockDatasetService{
-			listFunc: func(_ context.Context, limit, offset int) ([]entity.Dataset, error) {
-				gotLimit, gotOffset = limit, offset
-				return nil, nil
+			listFunc: func(_ context.Context, opts dataset.ListOptions) (listpage.Result[entity.Dataset], error) {
+				got = opts
+				return listpage.Result[entity.Dataset]{}, nil
 			},
 		})
 		w := serve(newDatasetTestRouter(h), http.MethodGet, "/api/datasets"+tc.query, "")
-		assertBody(t, w, okEnvelopeEmptyArray)
-		if gotLimit != tc.wantLimit || gotOffset != tc.wantOff {
+		assertBody(t, w, okEnvelopeEmptyList)
+		if got.Limit != tc.wantLimit || got.Offset != tc.wantOff {
 			t.Errorf("query %q: expected limit=%d offset=%d, got limit=%d offset=%d",
-				tc.query, tc.wantLimit, tc.wantOff, gotLimit, gotOffset)
+				tc.query, tc.wantLimit, tc.wantOff, got.Limit, got.Offset)
 		}
 	}
 }
 
 func TestDatasetList_ServiceError(t *testing.T) {
 	h := NewDatasetHandler(&mockDatasetService{
-		listFunc: func(_ context.Context, _, _ int) ([]entity.Dataset, error) {
-			return nil, errBoom()
+		listFunc: func(_ context.Context, _ dataset.ListOptions) (listpage.Result[entity.Dataset], error) {
+			return listpage.Result[entity.Dataset]{}, errBoom()
 		},
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodGet, "/api/datasets", "")

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/model"
 	"data-insights/internal/response"
 	"data-insights/internal/router"
@@ -29,17 +30,22 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// defaultListLimit 是 List 的缺省页大小：调用方给不出正数时兜底，避免无界扫描。
-const defaultListLimit = 100
-
 // referencingChartPath 是「某盘是否嵌入了图表 N」的 jsonpath。图表 id 以 %d 注入
 // （整型，无注入面），整个路径再作为绑定参数交给 PG 的 @? 存在性运算符。
 const referencingChartPath = `$.widgets[*] ? (@.chartId == %d)`
 
+// ListOptions carries the dashboard list's pagination plus the folder filter.
+type ListOptions struct {
+	listpage.Params
+	// FolderID narrows the list to the folder's direct children (the tree's
+	// first-phase counting semantics). Empty = no filter (root view).
+	FolderID string
+}
+
 // Service defines the interface for dashboard operations
 type Service interface {
 	// CRUD operations
-	List(ctx context.Context, limit, offset int) ([]entity.Dashboard, error)
+	List(ctx context.Context, opts ListOptions) (listpage.Result[entity.Dashboard], error)
 	Get(ctx context.Context, id string) (*entity.Dashboard, error)
 	Create(ctx context.Context, in entity.DashboardCreateRequest) (*entity.Dashboard, error)
 	Update(ctx context.Context, id string, in entity.DashboardUpdateRequest) (*entity.Dashboard, error)
@@ -89,23 +95,49 @@ func NewService(db *bun.DB) Service {
 // The ordering (created_at DESC, id DESC) matches the partial index
 // idx_dashboard_not_deleted defined in migration 00005; id is the tiebreaker so
 // the page stays stable when several rows share a timestamp.
-func (s *dashboardService) List(ctx context.Context, limit, offset int) ([]entity.Dashboard, error) {
-	if limit <= 0 {
-		limit = defaultListLimit
+// dashboardSortFields is the ORDER BY allow-list reachable from the client;
+// unknown values fall back to created_at DESC, id DESC inside OrderExpr.
+var dashboardSortFields = map[string]string{
+	"name":       "name",
+	"created_at": "created_at",
+	"updated_at": "updated_at",
+}
+
+func (s *dashboardService) List(ctx context.Context, opts ListOptions) (listpage.Result[entity.Dashboard], error) {
+	var out listpage.Result[entity.Dashboard]
+
+	newQuery := func() *bun.SelectQuery {
+		q := s.db.NewSelect().Model((*model.Dashboard)(nil)).Where("deleted_at IS NULL")
+		if opts.FolderID != "" {
+			q = q.Where("folder_id = ?", opts.FolderID)
+		}
+		if opts.Keyword != "" {
+			pattern := listpage.Contains(opts.Keyword)
+			q = q.Where("(name ILIKE ? OR description ILIKE ?)", pattern, pattern)
+		}
+		return q
+	}
+
+	total, err := newQuery().Count(ctx)
+	if err != nil {
+		return out, fmt.Errorf("failed to count dashboards: %w", err)
+	}
+
+	q := newQuery().OrderExpr(listpage.OrderExpr(opts.Sort, opts.Order, dashboardSortFields, "created_at DESC, id DESC"))
+	if opts.Limit > 0 {
+		q = q.Limit(opts.Limit)
+	}
+	if opts.Offset > 0 {
+		q = q.Offset(opts.Offset)
 	}
 
 	var rows []model.Dashboard
-	q := s.db.NewSelect().Model(&rows).
-		Where("deleted_at IS NULL").
-		OrderExpr("created_at DESC, id DESC").
-		Limit(limit)
-	if offset > 0 {
-		q = q.Offset(offset)
+	if err := q.Scan(ctx, &rows); err != nil {
+		return out, fmt.Errorf("failed to list dashboards: %w", err)
 	}
-	if err := q.Scan(ctx); err != nil {
-		return nil, fmt.Errorf("failed to list dashboards: %w", err)
-	}
-	return toDashboardEntityList(rows), nil
+	out.Items = toDashboardEntityList(rows)
+	out.Total = total
+	return out, nil
 }
 
 // Get returns a dashboard by its UUID.

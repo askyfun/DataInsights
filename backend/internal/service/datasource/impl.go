@@ -12,6 +12,7 @@ import (
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/extract"
+	"data-insights/internal/listpage"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
 	"data-insights/internal/response"
@@ -23,7 +24,7 @@ import (
 // Service defines the interface for datasource operations
 type Service interface {
 	// CRUD operations
-	List(ctx context.Context, limit, offset int) ([]entity.Datasource, error)
+	List(ctx context.Context, opts listpage.Params) (listpage.Result[entity.Datasource], error)
 	GetByID(ctx context.Context, id int) (*entity.Datasource, error)
 	Create(ctx context.Context, ds *entity.Datasource) (*entity.Datasource, error)
 	Update(ctx context.Context, ds *entity.Datasource) (*entity.Datasource, error)
@@ -83,28 +84,59 @@ func (s *datasourceService) SetExtractDatasourceID(id int) {
 }
 
 // List returns all datasources with pagination
-func (s *datasourceService) List(ctx context.Context, limit, offset int) ([]entity.Datasource, error) {
+// datasourceSortFields is the ORDER BY allow-list reachable from the client;
+// unknown values fall back to id DESC inside listpage.OrderExpr.
+var datasourceSortFields = map[string]string{
+	"id":         "id",
+	"name":       "name",
+	"created_at": "created_at",
+	"updated_at": "updated_at",
+}
+
+func (s *datasourceService) List(ctx context.Context, opts listpage.Params) (listpage.Result[entity.Datasource], error) {
+	var out listpage.Result[entity.Datasource]
+
+	newQuery := func() *bun.SelectQuery {
+		q := s.db.NewSelect().Model((*model.Datasource)(nil)).Where("deleted_at IS NULL").
+			// 内置示例数据源（R-79）永远是隐藏的：它是示例数据集的内部载体，
+			// 用户不该在数据源管理里看到或选中它。
+			Where("is_sample = FALSE")
+		// 抽取存储数据源不进常规列表（issue #118 预留）：它是统一存储基础设施，
+		// 用户在数据集/数据源管理里不应看到、也不该选中它。SQL 级排除保证
+		// limit/offset 语义仍对「可见集合」成立。
+		if s.extract.Enabled() {
+			q = q.Where("id <> ?", s.extract.DatasourceID)
+		}
+		if opts.Keyword != "" {
+			pattern := listpage.Contains(opts.Keyword)
+			q = q.Where(
+				"(name ILIKE ? OR type ILIKE ? OR host ILIKE ? OR database_name ILIKE ?)",
+				pattern, pattern, pattern, pattern,
+			)
+		}
+		return q
+	}
+
+	total, err := newQuery().Count(ctx)
+	if err != nil {
+		return out, fmt.Errorf("failed to count datasources: %w", err)
+	}
+
+	q := newQuery().OrderExpr(listpage.OrderExpr(opts.Sort, opts.Order, datasourceSortFields, "id DESC"))
+	if opts.Limit > 0 {
+		q = q.Limit(opts.Limit)
+	}
+	if opts.Offset > 0 {
+		q = q.Offset(opts.Offset)
+	}
+
 	var datasources []model.Datasource
-	q := s.db.NewSelect().Model(&datasources).Where("deleted_at IS NULL").
-		// 内置示例数据源（R-79）永远是隐藏的：它是示例数据集的内部载体，
-		// 用户不该在数据源管理里看到或选中它。
-		Where("is_sample = FALSE")
-	// 抽取存储数据源不进常规列表（issue #118 预留）：它是统一存储基础设施，
-	// 用户在数据集/数据源管理里不应看到、也不该选中它。SQL 级排除保证
-	// limit/offset 语义仍对「可见集合」成立。
-	if s.extract.Enabled() {
-		q = q.Where("id <> ?", s.extract.DatasourceID)
+	if err := q.Scan(ctx, &datasources); err != nil {
+		return out, fmt.Errorf("failed to list datasources: %w", err)
 	}
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
-	if offset > 0 {
-		q = q.Offset(offset)
-	}
-	if err := q.Scan(ctx); err != nil {
-		return nil, fmt.Errorf("failed to list datasources: %w", err)
-	}
-	return toEntityList(datasources), nil
+	out.Items = toEntityList(datasources)
+	out.Total = total
+	return out, nil
 }
 
 // GetByID returns a datasource by ID

@@ -50,6 +50,19 @@ function mockAxiosResponse<T>(data: ApiResponse<T>): AxiosResponse<ApiResponse<T
 const envelope = <T,>(data: T) =>
   mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data });
 
+/** 四类实体列表的 data 是 {items,total}（issue #205 服务端分页）。 */
+function listEnvelope<T>(items: T[]): AxiosResponse<ApiResponse<{ items: T[]; total: number }>> {
+  return envelope({ items, total: items.length });
+}
+
+/** 服务端筛选模拟：树请求（limit=1000）与表格请求共用，folder_id 只影响表格结果。 */
+const mockList = (rows: Dashboard[] = dashboards) =>
+  mockGetAll.mockImplementation((params?: { folder_id?: string }) =>
+    Promise.resolve(
+      listEnvelope(params?.folder_id ? rows.filter((d) => d.folder_id === params.folder_id) : rows)
+    )
+  );
+
 /** 构造 layout_json：widgets 里 chart 块的数量即列表页要显示的「图表块」。 */
 const layoutWithCharts = (chartIds: number[]): string =>
   JSON.stringify({
@@ -124,7 +137,7 @@ beforeEach(() => {
 
 describe('仪表盘列表页', () => {
   it('列出名称与图表块数，且损坏的 layout_json 收敛为 0 块而不抛异常', async () => {
-    mockGetAll.mockResolvedValue(envelope(dashboards));
+    mockList();
 
     const { container } = renderPage();
     // 归档树也会渲染仪表盘叶子，所以按名称查必须限定在表格里。
@@ -139,7 +152,7 @@ describe('仪表盘列表页', () => {
   });
 
   it('删除经确认后调用 remove 并重新拉取列表', async () => {
-    mockGetAll.mockResolvedValue(envelope(dashboards));
+    mockList();
     mockRemove.mockResolvedValue(envelope({ status: 'deleted' }));
 
     const { container } = renderPage();
@@ -152,11 +165,12 @@ describe('仪表盘列表页', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^是$/ }));
 
     await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('d-1'));
-    await waitFor(() => expect(mockGetAll).toHaveBeenCalledTimes(2));
+    // 首屏 tree+table，删除后 refreshAll 再各一次。
+    await waitFor(() => expect(mockGetAll).toHaveBeenCalledTimes(4));
   }, 20_000);
 
   it('新建成功后直接进入该盘的画布页', async () => {
-    mockGetAll.mockResolvedValue(envelope([]));
+    mockGetAll.mockResolvedValue(listEnvelope([]));
     mockCreate.mockResolvedValue(
       envelope({
         id: 'd-new',
@@ -180,7 +194,7 @@ describe('仪表盘列表页', () => {
   });
 
   it('选中文件夹只显示该夹的盘；回根后新建不带 folder_id', async () => {
-    mockGetAll.mockResolvedValue(envelope(dashboards));
+    mockList();
     mockFolderGetAll.mockResolvedValue(envelope(folders));
     mockCreate.mockResolvedValue(
       envelope({
@@ -216,7 +230,7 @@ describe('仪表盘列表页', () => {
   });
 
   it('选中文件夹后新建自动归档进该夹', async () => {
-    mockGetAll.mockResolvedValue(envelope(dashboards));
+    mockList();
     mockFolderGetAll.mockResolvedValue(envelope(folders));
     mockCreate.mockResolvedValue(
       envelope({
@@ -242,7 +256,7 @@ describe('仪表盘列表页', () => {
   });
 
   it('右键文件夹可新建子文件夹，请求带 parent_id', async () => {
-    mockGetAll.mockResolvedValue(envelope(dashboards));
+    mockList();
     mockFolderGetAll.mockResolvedValue(envelope(folders));
     mockFolderCreate.mockResolvedValue(
       envelope({
@@ -270,7 +284,7 @@ describe('仪表盘列表页', () => {
   });
 
   it('删除非空文件夹：后端 20400 的文案原样念给用户', async () => {
-    mockGetAll.mockResolvedValue(envelope(dashboards));
+    mockList();
     mockFolderGetAll.mockResolvedValue(envelope(folders));
     // 后端消息里带着「还剩几项」，前端不做转译，直接进 message.error。
     mockFolderRemove.mockRejectedValue(new Error('文件夹下还有 1 个仪表盘，请先移动或删除它们'));

@@ -306,10 +306,10 @@ const DashboardEditor: React.FC = () => {
       try {
         const [detail, chartList] = await Promise.all([
           dashboardsApi.getById(dashboardId),
-          chartsApi.getAll(),
+          chartsApi.getAll({ limit: 1000 }),
         ]);
         const dashboard: Dashboard = detail.data.data;
-        const allCharts = chartList.data.data ?? [];
+        const allCharts = chartList.data.data.items ?? [];
         const byId: Record<number, Chart> = {};
         for (const chart of allCharts) {
           byId[chart.id] = chart;

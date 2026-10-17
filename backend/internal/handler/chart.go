@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/response"
 	"data-insights/internal/router"
 	"data-insights/internal/service/chart"
@@ -30,41 +31,27 @@ type chartStatusOut struct {
 	Status string `json:"status"`
 }
 
-// chartListIn carries the pagination query params for List. Values are
-// bound as strings so non-numeric input keeps the pre-migration
-// fall-back-to-default behaviour instead of turning into a 400 bind error.
+// chartListIn carries the list query params. Values are bound as strings so
+// non-numeric input keeps the pre-migration fall-back-to-default behaviour
+// instead of turning into a 400 bind error.
 type chartListIn struct {
-	Limit  string `form:"limit"`
-	Offset string `form:"offset"`
-}
-
-// pagination is the List binding post-processing step: it reproduces the
-// old getPaginationParams defaults and clamps exactly (limit=100 when
-// missing/garbage/out of range, offset>=0).
-func (in chartListIn) pagination() (limit, offset int) {
-	limit, _ = strconv.Atoi(orDefault(in.Limit, "100"))
-	offset, _ = strconv.Atoi(orDefault(in.Offset, "0"))
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return
+	Limit   string `form:"limit"`
+	Offset  string `form:"offset"`
+	Sort    string `form:"sort"`
+	Order   string `form:"order"`
+	Keyword string `form:"keyword"`
 }
 
 // List handles GET /api/charts
-func (h *ChartHandler) List(req router.Request[chartListIn], res *router.Response[[]entity.Chart]) error {
-	limit, offset := req.In.pagination()
-
-	charts, err := h.svc.List(req.Ctx.Request.Context(), limit, offset)
+func (h *ChartHandler) List(req router.Request[chartListIn], res *router.Response[listpage.Result[entity.Chart]]) error {
+	result, err := h.svc.List(req.Ctx.Request.Context(), listParams(req.In.Limit, req.In.Offset, req.In.Sort, req.In.Order, req.In.Keyword))
 	if err != nil {
 		return err
 	}
-	if charts == nil {
-		charts = []entity.Chart{}
+	if result.Items == nil {
+		result.Items = []entity.Chart{}
 	}
-	res.Out = charts
+	res.Out = result
 	return nil
 }
 

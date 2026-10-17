@@ -21,8 +21,9 @@ export const createChartsSlice: StateCreator<AppState, [], [], ChartsSlice> = (s
   fetchCharts: async () => {
     set({ chartsLoading: true, chartsError: null });
     try {
-      const response = await chartsApi.getAll();
-      set({ charts: response.data.data, chartsLoading: false });
+      // 选择器 / 引用名解析需要完整集合：按上限页一次性取回（服务端分页上限 1000）。
+      const response = await chartsApi.getAll({ limit: 1000 });
+      set({ charts: response.data.data.items, chartsLoading: false });
     } catch (error: any) {
       set({
         chartsError: error.message || 'Failed to fetch',

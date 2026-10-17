@@ -57,7 +57,8 @@ const dataset = {
 beforeEach(() => {
   vi.clearAllMocks();
   instance.get.mockImplementation((url: string) => {
-    if (url === '/api/datasources') return Promise.resolve(envelope([{ id: 2, name: 'pg' }]));
+    if (url === '/api/datasources')
+      return Promise.resolve(envelope({ items: [{ id: 2, name: 'pg' }], total: 1 }));
     if (url === '/api/datasets/4') return Promise.resolve(envelope(dataset));
     if (url === '/api/datasets/4/columns') {
       return Promise.resolve(
