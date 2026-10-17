@@ -43,6 +43,8 @@ import {
   DatasetPreview,
   datasetsApi,
   datasourcesApi,
+  type SampleDatasetStatus,
+  sampleDatasetApi,
   TableInfo,
 } from '../api';
 import { toStandardType } from '../api/datatypes';
@@ -50,11 +52,21 @@ import DatasetUploadModal, { DatasetReplaceModal, FileDropZone } from '../compon
 import { ListSearch, makeTimeSorter } from '../components/listPage';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
+import SampleDatasetCard from '../components/SampleDatasetCard';
 import { isNumericType, normalizeDataType } from '../lib/dataTypes';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
 const { Title, Text } = Typography;
+
+// 示例数据集在 wire 上以 tags JSON 字符串标记（"sample"）；列表据此打「示例」标。
+const isSampleDataset = (dataset: Dataset): boolean => {
+  try {
+    return (JSON.parse(dataset.tags || '[]') as string[]).includes('sample');
+  } catch {
+    return false;
+  }
+};
 
 const DatasetPage: React.FC = () => {
   const intl = useIntl();
@@ -71,6 +83,9 @@ const DatasetPage: React.FC = () => {
   const [editingDataset, setEditingDataset] = useState<any>(null);
   const [datasetColumns, setDatasetColumns] = useState<DatasetColumn[]>([]);
   const [searchText, setSearchText] = useState('');
+  // 内置示例数据集（R-79）：引导卡片状态 + 动作进行中标记。
+  const [sampleStatus, setSampleStatus] = useState<SampleDatasetStatus | null>(null);
+  const [sampleLoading, setSampleLoading] = useState(false);
   const [filterDatasourceId, setFilterDatasourceId] = useState<number | undefined>(undefined);
   const [filterQueryType, setFilterQueryType] = useState<string | undefined>(undefined);
   const [modalPreviewLoading, setModalPreviewLoading] = useState(false);
@@ -315,6 +330,10 @@ const DatasetPage: React.FC = () => {
   useEffect(() => {
     fetchDatasets();
     fetchDatasources();
+    sampleDatasetApi
+      .getStatus()
+      .then((response) => setSampleStatus(response.data.data))
+      .catch(() => setSampleStatus(null));
   }, [fetchDatasets, fetchDatasources]);
 
   // 渲染字段分布图表
@@ -549,6 +568,58 @@ const DatasetPage: React.FC = () => {
     fetchDatasets();
   };
 
+  const refreshSampleStatus = async () => {
+    const response = await sampleDatasetApi.getStatus();
+    setSampleStatus(response.data.data);
+  };
+
+  // 加载示例数据集：幂等，成功后直接进入订单数据集的图表页（首图零配置）。
+  const handleLoadSample = async () => {
+    setSampleLoading(true);
+    try {
+      const response = await sampleDatasetApi.load();
+      setSampleStatus(response.data.data);
+      await fetchDatasets();
+      const all = await datasetsApi.getAll();
+      const orders = all.data.data.find((item) => item.table_name === 'di_sample_orders');
+      message.success(intl.formatMessage({ id: 'sample.loadedSuccess' }));
+      if (orders) {
+        navigate(`/chart-builder?datasetId=${orders.id}`);
+      }
+    } catch (error: any) {
+      message.error(error.message || intl.formatMessage({ id: 'sample.error' }));
+    } finally {
+      setSampleLoading(false);
+    }
+  };
+
+  // 忽略引导：持久化到后端，刷新后不再出现。
+  const handleDismissSample = async () => {
+    setSampleLoading(true);
+    try {
+      const response = await sampleDatasetApi.dismiss();
+      setSampleStatus(response.data.data);
+    } catch (error: any) {
+      message.error(error.message || intl.formatMessage({ id: 'sample.error' }));
+    } finally {
+      setSampleLoading(false);
+    }
+  };
+
+  // 一键移除：软删示例数据集（连带图表）与隐藏数据源，列表立即刷新。
+  const handleRemoveSample = async () => {
+    setSampleLoading(true);
+    try {
+      await sampleDatasetApi.remove();
+      await Promise.all([refreshSampleStatus(), fetchDatasets()]);
+      message.success(intl.formatMessage({ id: 'sample.removed' }));
+    } catch (error: any) {
+      message.error(error.message || intl.formatMessage({ id: 'sample.error' }));
+    } finally {
+      setSampleLoading(false);
+    }
+  };
+
   // Handle edit dataset
   const handleEdit = (record: any) => {
     setEditingDataset(record);
@@ -658,14 +729,19 @@ const DatasetPage: React.FC = () => {
       dataIndex: 'name',
       key: 'name',
       sorter: (a: Dataset, b: Dataset) => a.name.localeCompare(b.name) || b.id - a.id,
-      render: (text: string, record: any) => (
-        <Link
-          to={`/datasets/${record.id}`}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-        >
-          <DatabaseOutlined />
-          <Text strong>{text}</Text>
-        </Link>
+      render: (text: string, record: Dataset) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Link
+            to={`/datasets/${record.id}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <DatabaseOutlined />
+            <Text strong>{text}</Text>
+          </Link>
+          {isSampleDataset(record) && (
+            <Tag color="blue">{intl.formatMessage({ id: 'sample.tag' })}</Tag>
+          )}
+        </span>
       ),
     },
     {
@@ -792,6 +868,15 @@ const DatasetPage: React.FC = () => {
             </Button>
           </>
         }
+      />
+
+      <SampleDatasetCard
+        status={sampleStatus}
+        empty={!datasetsLoading && datasets.length === 0}
+        loading={sampleLoading}
+        onLoad={handleLoadSample}
+        onDismiss={handleDismissSample}
+        onRemove={handleRemoveSample}
       />
 
       <Card>
