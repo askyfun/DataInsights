@@ -83,8 +83,8 @@ const AlertsPage: React.FC = () => {
 
   const fetchCharts = useCallback(async () => {
     try {
-      const res = await chartsApi.getAll();
-      setCharts(res.data.data);
+      const res = await chartsApi.getAll({ limit: 1000 });
+      setCharts(res.data.data.items);
     } catch (error) {
       message.error(
         error instanceof Error ? error.message : intl.formatMessage({ id: 'common.error' })

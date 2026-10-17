@@ -86,10 +86,11 @@ func Run(ctx context.Context, db *bun.DB, securityKey []byte, apply bool) (*Repo
 	svc := dataset.NewService(db)
 	svc.SetSecurityKey(securityKey)
 
-	datasets, err := svc.List(ctx, 0, 0)
+	result, err := svc.List(ctx, dataset.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list datasets: %w", err)
 	}
+	datasets := result.Items
 	report.Datasets = len(datasets)
 
 	// 每个数据集的列引用映射：列名 → 列 ID，以及已知列 ID 集合（用于识别「已迁移」）

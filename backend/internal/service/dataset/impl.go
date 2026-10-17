@@ -11,9 +11,10 @@ import (
 	"data-insights/internal/database"
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
-	"data-insights/internal/extract"
 	"data-insights/internal/expr"
+	"data-insights/internal/extract"
 	"data-insights/internal/idgen"
+	"data-insights/internal/listpage"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
 	"data-insights/internal/response"
@@ -23,10 +24,18 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// ListOptions carries the dataset list's pagination plus its toolbar filters.
+type ListOptions struct {
+	listpage.Params
+	// DatasourceID / QueryType are exact-match filters (0 / "" = no filter).
+	DatasourceID int
+	QueryType    string
+}
+
 // Service defines the interface for dataset operations
 type Service interface {
 	// CRUD operations
-	List(ctx context.Context, limit, offset int) ([]entity.Dataset, error)
+	List(ctx context.Context, opts ListOptions) (listpage.Result[entity.Dataset], error)
 	GetByID(ctx context.Context, id int) (*entity.Dataset, error)
 	Create(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error)
 	Update(ctx context.Context, ds *entity.Dataset) (*entity.Dataset, error)
@@ -85,23 +94,58 @@ func NewService(db *bun.DB) Service {
 	return service
 }
 
-// List returns all datasets with pagination
-func (s *datasetService) List(ctx context.Context, limit, offset int) ([]entity.Dataset, error) {
-	var datasets []model.Dataset
-	// 显式 id 倒序：不写 ORDER BY 时 PostgreSQL 返回的是堆物理序，UPDATE 会写新行
+// datasetSortFields is the allow-list of ORDER BY expressions reachable from
+// the client. Anything else falls back to the default (id DESC) in
+// listpage.OrderExpr, so no request value is ever interpolated into SQL.
+var datasetSortFields = map[string]string{
+	"id":         "id",
+	"name":       "name",
+	"created_at": "created_at",
+	"updated_at": "updated_at",
+}
+
+// List returns one page of datasets plus the total count of the filtered set.
+func (s *datasetService) List(ctx context.Context, opts ListOptions) (listpage.Result[entity.Dataset], error) {
+	var out listpage.Result[entity.Dataset]
+
+	newQuery := func() *bun.SelectQuery {
+		q := s.db.NewSelect().Model((*model.Dataset)(nil)).Where("deleted_at IS NULL")
+		if opts.DatasourceID > 0 {
+			q = q.Where("datasource_id = ?", opts.DatasourceID)
+		}
+		if opts.QueryType != "" {
+			q = q.Where("query_type = ?", opts.QueryType)
+		}
+		if opts.Keyword != "" {
+			pattern := listpage.Contains(opts.Keyword)
+			q = q.Where("(name ILIKE ? OR table_name ILIKE ?)", pattern, pattern)
+		}
+		return q
+	}
+
+	total, err := newQuery().Count(ctx)
+	if err != nil {
+		return out, fmt.Errorf("failed to count datasets: %w", err)
+	}
+
+	// 显式默认排序：不写 ORDER BY 时 PostgreSQL 返回的是堆物理序，UPDATE 会写新行
 	// 版本追加到堆尾，编辑过的数据集会漂到列表后面（表现为顺序"随机"）。id 倒序让
 	// 新建/导入的靠前，且天然稳定。对齐 dashboard 服务的显式排序决策。
-	q := s.db.NewSelect().Model(&datasets).Where("deleted_at IS NULL").OrderExpr("id DESC")
-	if limit > 0 {
-		q = q.Limit(limit)
+	q := newQuery().OrderExpr(listpage.OrderExpr(opts.Sort, opts.Order, datasetSortFields, "id DESC"))
+	if opts.Limit > 0 {
+		q = q.Limit(opts.Limit)
 	}
-	if offset > 0 {
-		q = q.Offset(offset)
+	if opts.Offset > 0 {
+		q = q.Offset(opts.Offset)
 	}
-	if err := q.Scan(ctx); err != nil {
-		return nil, fmt.Errorf("failed to list datasets: %w", err)
+
+	var datasets []model.Dataset
+	if err := q.Scan(ctx, &datasets); err != nil {
+		return out, fmt.Errorf("failed to list datasets: %w", err)
 	}
-	return toDatasetEntityList(datasets), nil
+	out.Items = toDatasetEntityList(datasets)
+	out.Total = total
+	return out, nil
 }
 
 // GetByID returns a dataset by ID
@@ -119,6 +163,9 @@ func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entit
 	// 在其上建数据集会让「统一存储」与用户数据混在一处。
 	if err := s.extract.CheckDatasource(ds.DatasourceID); err != nil {
 		return nil, router.NewBusinessError(response.CodeBadRequest, err.Error())
+	}
+	if err := s.rejectSampleDatasource(ctx, ds.DatasourceID); err != nil {
+		return nil, err
 	}
 	m := toDatasetModel(ds)
 	m.CreatedAt = sql.NullTime{Time: time.Now(), Valid: true}
@@ -138,6 +185,9 @@ func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entit
 	// 同 Create：禁止把数据集改指到抽取存储数据源上（issue #118 预留守卫）。
 	if err := s.extract.CheckDatasource(ds.DatasourceID); err != nil {
 		return nil, router.NewBusinessError(response.CodeBadRequest, err.Error())
+	}
+	if err := s.rejectSampleDatasource(ctx, ds.DatasourceID); err != nil {
+		return nil, err
 	}
 	m := toDatasetModel(ds)
 	// 整行 WherePK 更新会把合并基带入的旧 updated_at 原样写回，导致更新后时间戳
@@ -192,6 +242,26 @@ func (s *datasetService) Delete(ctx context.Context, id int) error {
 		}
 		return nil
 	})
+}
+
+// rejectSampleDatasource blocks user-created datasets on the built-in sample
+// datasource (R-79). The sample datasource points at the application database
+// itself; a dataset with arbitrary SQL on it would expose bi_* tables. The
+// sample service inserts its own datasets directly, so only user write paths
+// are gated here.
+func (s *datasetService) rejectSampleDatasource(ctx context.Context, datasourceID int) error {
+	if s.getDatasourceModelFn == nil {
+		return nil
+	}
+	ds, err := s.getDatasourceModelFn(ctx, datasourceID)
+	if err != nil {
+		return nil // 存在性由外键兜底，这里只做示例守卫
+	}
+	if ds.IsSample {
+		return router.NewBusinessError(response.CodeBadRequest,
+			"内置示例数据源仅供示例数据集使用")
+	}
+	return nil
 }
 
 // GetColumns returns columns for a dataset

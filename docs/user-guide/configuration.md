@@ -36,6 +36,13 @@ cp .env.example .env    # 然后按需修改
 | `CORS_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔白名单；**留空 = 放开所有来源**（平台 API 无登录态，CORS 不构成安全边界）。填非空白名单则只回显名单内来源，供将来引入认证后收紧。 |
 | `STATIC_DIR` | 否 | 空 | 前端构建产物目录。设置后本进程一并托管页面（未命中回落 `index.html`）；**留空 = 只提供 API**（本地开发默认形态，页面走 Vite dev server）。目录配错即启动失败。 |
 | `EXTRACT_DATASOURCE_ID` | 否 | 自举 | 本地文件上传（CSV/XLSX）的落库位置。**留空即可用**——平台会自动复用 `DATABASE_URL` 指向的应用自身 PostgreSQL 作为上传存储（见下方「上传存储怎么定的」）。填一个数据源 id 则改用它作为存储。无论哪种，该数据源都不再是普通数据源：列表隐藏、不能被常规数据集引用；上传表以 `di_extract_<datasetId>` 命名。 |
+| `ALERT_EVAL_INTERVAL` | 否 | `300` | 指标预警评估的轮询间隔（秒）。非法值（非整数 / 小于 1）**不 fail-fast**：回退 300 并打 warning。评估器是进程内常驻 goroutine，随主进程退出。 |
+| `SMTP_HOST` | 否 | 空 | 预警邮件 SMTP 主机。**留空 = 未配置通知**：评估照常运行、触发记录照常落库，`notify_error` 标注未配置。 |
+| `SMTP_PORT` | 否 | `587` | SMTP 提交端口。连接后**若服务器声明 STARTTLS 就升级**，声明 AUTH 才做 PlainAuth；本期不做 465 隐式 TLS（直连 TLS）。 |
+| `SMTP_USERNAME` | 否 | 空 | SMTP 认证用户名（服务器声明 AUTH 时使用 PlainAuth）。 |
+| `SMTP_PASSWORD` | 否 | 空 | SMTP 认证密码。 |
+| `SMTP_FROM` | 否 | 空 | 发件人地址。配了 `SMTP_HOST` 但此项或收件人为空时，通知失败并在 `notify_error` 留档（不会静默）。 |
+| `ALERT_NOTIFY_EMAIL` | 否 | 空 | 预警邮件收件人，逗号分隔多个。与 `SMTP_FROM` 同时非空才会真正发送。 |
 | `VITE_API_BASE_URL` | 否 | 空 | 前端 API 基础地址。未配置时：生产构建自动同源、开发回退 `http://<当前访问主机名>:23352`。**仅前后端分开部署时**才需配成非空绝对地址。 |
 | `VITE_SENTRY_DSN` | 否 | 空 | 前端 Sentry DSN。留空 = 完全跳过 `Sentry.init`，不打点也不上报。 |
 

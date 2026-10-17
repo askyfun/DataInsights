@@ -59,6 +59,11 @@ function envelope<T>(data: T): AxiosResponse<ApiResponse<T>> {
   return { data: { code: 20000, msg: 'success', trace: '', data }, status: 200 } as never;
 }
 
+/** 四类实体列表的 data 是 {items,total}（issue #205 服务端分页）。 */
+function listEnvelope<T>(items: T[]): AxiosResponse<ApiResponse<{ items: T[]; total: number }>> {
+  return envelope({ items, total: items.length });
+}
+
 const barChart: Chart = {
   id: 7,
   name: 'Monthly Sales',
@@ -135,10 +140,10 @@ const renderEditor = () =>
 
 function prime(layout: string) {
   mockGetById.mockResolvedValue(envelope(dashboard(layout)));
-  mockChartsGetAll.mockResolvedValue(envelope([barChart]));
+  mockChartsGetAll.mockResolvedValue(listEnvelope([barChart]));
   mockGetChartData.mockResolvedValue(envelope({ x_axis: [], series: [] } as never));
   mockQuery.mockResolvedValue(envelope({ results: [] }));
-  mockDatasetsGetAll.mockResolvedValue(envelope([{ id: 3, name: '天气数据' }] as never));
+  mockDatasetsGetAll.mockResolvedValue(listEnvelope([{ id: 3, name: '天气数据' }] as never));
   mockGetColumns.mockResolvedValue(envelope(COLUMNS as never));
   mockQueryDistinct.mockResolvedValue(envelope([{ region: '华东' }, { region: '华南' }]));
 }

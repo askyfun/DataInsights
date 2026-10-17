@@ -1,6 +1,6 @@
 # Data Insights API 接口文档
 
-> 最后更新：2026-09-27
+> 最后更新：2026-10-17
 
 > **契约事实源是 [`api/openapi.yaml`](../../api/openapi.yaml)**（OpenAPI 3.0.3）。本文是它的叙述性视图：
 > 端点清单、通用约定与易踩的契约细节。两者不一致时**以 yaml 为准**，并应回头修正本文。
@@ -79,7 +79,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 
 | 场景 | 参数 | 规则 |
 |------|------|------|
-| 列表端点（datasource / dataset / chart / dashboard 的 GET 集合） | `limit` / `offset` | limit 缺省 100，≤0 或 >1000 回落 100；offset 缺省 0，负数归一为 0。**响应 data 直接是数组**，无 items/total 包装 |
+| 列表端点（datasource / dataset / chart / dashboard 的 GET 集合） | `limit` / `offset` + `sort` / `order` / `keyword` | limit 缺省 100，≤0 或 >1000 回落 100；offset 缺省 0，负数归一为 0，越界返回空页。**响应 data 是 `{items, total}`**（issue #205）：total 是过滤后全量集合的 COUNT；sort 走字段白名单（未知值回落实体默认排序）。dataset 另收 `datasource_id` / `query_type`，dashboard 另收 `folder_id` |
 | 表数据分页（`GET /api/datasources/{id}/tables/{table}/data`） | `page` / `page_size` | page 从 1 起，≤0 归一为 1；page_size 缺省 20，上限 100 |
 | 图表查询分页（`pagination` 对象） | `page` / `page_size` | 仅 `chart_type=table` 分支消费；契约上已声明向 limit/offset 收敛（Batch 3），当前实现仍以 page/page_size 为准 |
 
@@ -123,7 +123,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 
 | # | 方法与路径 | 说明 |
 |---|-----------|------|
-| 1 | `GET /api/datasources` | 列表（limit/offset 分页，见 1.5） |
+| 1 | `GET /api/datasources` | 列表（`{items,total}`；limit/offset/sort/order/keyword，见 1.5） |
 | 2 | `POST /api/datasources` | 创建。请求体必填 name/type/host/port/database_name/username/password |
 | 3 | `POST /api/datasources/test` | 用未落库参数试连；失败/驱动不支持 → 20100。成功 `data = {status: "ok"}` |
 | 4 | `GET /api/datasources/{id}` | 详情；id 非法 → 20100，不存在 → 20300 |
@@ -157,7 +157,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 
 | # | 方法与路径 | 说明 |
 |---|-----------|------|
-| 1 | `GET /api/datasets` | 列表（limit/offset） |
+| 1 | `GET /api/datasets` | 列表（`{items,total}`；另收 `datasource_id` / `query_type`） |
 | 2 | `POST /api/datasets` | 创建。必填 name/datasource_id/query_type；空串可选字段落库为 null |
 | 3 | `GET /api/datasets/{id}` | 详情 |
 | 4 | `PUT /api/datasets/{id}` | 更新（Batch 3 补齐，修复前端编辑保存 404 的 ghost route）。请求体与创建同构；**取回并保留**：name/datasource_id/query_type 恒覆盖，未传/空串的 tags/columns/shard_keys/table_name/query_sql/description 保留存量（显式 `"[]"` 仍可清空），quality_rules/preview_data/时间戳恒保留。未知 id → 20300 |
@@ -177,7 +177,7 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 
 | # | 方法与路径 | 说明 |
 |---|-----------|------|
-| 1 | `GET /api/charts` | 列表（limit/offset） |
+| 1 | `GET /api/charts` | 列表（`{items,total}`；limit/offset/sort/order/keyword） |
 | 2 | `POST /api/charts` | 创建（name/dataset_id/chart_type 必填；无效 dataset_id 要到取数时才暴露） |
 | 3 | `GET /api/charts/{id}` | 详情 |
 | 4 | `PUT /api/charts/{id}` | 更新，**全量覆盖**：未提供字段以零值写库（与 dataset/datasource 的"未提供则保留"不同！） |
@@ -240,7 +240,7 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 
 | # | 方法与路径 | 说明 |
 |---|-----------|------|
-| 1 | `GET /api/dashboards` | 列表：未软删，`created_at DESC, id DESC` |
+| 1 | `GET /api/dashboards` | 列表：未软删，默认 `created_at DESC, id DESC`；`{items,total}`，另收 `folder_id`（直属子项） |
 | 2 | `POST /api/dashboards` | 创建（请求体无 id）；name 必填（仅列宽约束），layout_json 非空但非法 JSON → 20100 |
 | 3 | `GET /api/dashboards/{id}` | 详情 |
 | 4 | `PUT /api/dashboards/{id}` | 更新：五字段**全部可选且"未提供则保留"**；description 空串清空为 NULL；`folder_id` 三态（缺省/null 保留、`""` 移出文件夹、UUID 归档进该夹）；updated_at 后端显式前进 |

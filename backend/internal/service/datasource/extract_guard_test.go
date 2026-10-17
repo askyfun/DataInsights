@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"data-insights/internal/extract"
+	"data-insights/internal/listpage"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/uptrace/bun"
@@ -27,9 +28,11 @@ func TestListHidesExtractDatasource(t *testing.T) {
 			db:      bun.NewDB(sqlDB, pgdialect.New()),
 			extract: extract.Guard{DatasourceID: extractID},
 		}
+		mock.ExpectQuery(`SELECT count\(\*\)`).
+			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 		mock.ExpectQuery(`SELECT`).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "type"}).AddRow(1, "ds", "postgresql"))
-		if _, err := s.List(context.Background(), 0, 0); err != nil {
+		if _, err := s.List(context.Background(), listpage.Params{}); err != nil {
 			t.Fatalf("List: %v", err)
 		}
 		for _, stmt := range executed {

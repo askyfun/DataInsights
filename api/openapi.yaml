@@ -26,6 +26,10 @@ tags:
     description: 数据源管理（CRUD、连接测试、库表元数据、预览与字段分布）
   - name: datasets
     description: 数据集管理（CRUD、列定义、预览、查询）
+  - name: sample-dataset
+    description: >-
+      内置示例数据集（R-79）：状态查询、一键加载、忽略（持久化）与一键移除。
+      加载后示例数据源在数据源列表中隐藏，示例数据集带 sample 标签。
   - name: charts
     description: 图表管理（CRUD、数据集取数预览、图表语义查询）
   - name: queries
@@ -57,26 +61,43 @@ paths:
       tags:
         - datasources
       summary: 数据源列表
-      description: |
-        分页返回数据源数组；无结果时 data 为空数组（handler 将 nil 归一化为 []）。
       operationId: listDatasources
+      description: |
+        分页返回 `{items, total}`：total 来自对过滤后全量集合的 COUNT（不是 len(items)）。
+        无结果时 items 为空数组。分页参数的宽松口径见下：非法值一律回落，不返回 400。
       parameters:
         - name: limit
           in: query
           required: false
-          description: |
-            每页条数。后端 getPaginationParams（handler/helpers.go）：缺省 100；
-            值 ≤0 或 >1000 时回落为 100（实际硬上限是 1000）。
+          description: 每页条数（上限 1000）。缺省 100；≤0 或 >1000 回落为 100。
           schema:
             type: integer
             default: 100
         - name: offset
           in: query
           required: false
-          description: 偏移量；缺省 0，负数被后端归一化为 0。
+          description: 偏移量；缺省 0，负数归一化为 0；越界返回空 items 而非错误。
           schema:
             type: integer
             default: 0
+        - name: sort
+          in: query
+          required: false
+          description: 排序字段白名单 `id` / `name` / `created_at` / `updated_at`；其他值回落默认 `id DESC`。
+          schema:
+            type: string
+        - name: order
+          in: query
+          required: false
+          description: 排序方向 `asc` / `desc`；缺省或非法时沿用该字段的默认方向。
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          required: false
+          description: 关键字，对名称 / 类型 / 主机 / 数据库名做大小写不敏感的包含匹配（ILIKE）。
+          schema:
+            type: string
       responses:
         '200':
           description: HTTP 恒 200；业务结果由 Envelope.code 表达
@@ -316,8 +337,8 @@ paths:
         - datasets
       summary: 数据集列表
       description: |
-        分页返回数据集数组；无结果时 data 为空数组。分页参数与数据源列表一致
-        （limit 缺省 100、offset 缺省 0，helpers.go 对 ≤0 或 >1000 回落 100）。
+        分页返回 `{items, total}`：total 来自对过滤后全量集合的 COUNT。
+        分页参数的宽松口径与数据源列表一致（非法值回落、越界返回空页）。
       operationId: listDatasets
       parameters:
         - name: limit
@@ -334,6 +355,36 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: sort
+          in: query
+          required: false
+          description: 排序字段白名单 `id` / `name` / `created_at` / `updated_at`；其他值回落默认 `id DESC`。
+          schema:
+            type: string
+        - name: order
+          in: query
+          required: false
+          description: 排序方向 `asc` / `desc`；缺省或非法时沿用默认方向。
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          required: false
+          description: 关键字，对数据集名称 / 表名做大小写不敏感的包含匹配（ILIKE）。
+          schema:
+            type: string
+        - name: datasource_id
+          in: query
+          required: false
+          description: 精确匹配数据源 id；缺失或非数字时不加该条件。
+          schema:
+            type: integer
+        - name: query_type
+          in: query
+          required: false
+          description: 精确匹配查询类型（`table` / `sql`）；缺失时不加该条件。
+          schema:
+            type: string
       responses:
         '200':
           description: HTTP 恒 200；业务结果由 Envelope.code 表达
@@ -581,9 +632,8 @@ paths:
         - charts
       summary: 图表列表
       description: |
-        分页返回图表数组；无结果时 data 为空数组（handler 将 nil 归一化为 []）。
-        分页参数与数据源/数据集列表一致（helpers.go getPaginationParams：
-        limit 缺省 100、≤0 或 >1000 回落 100；offset 缺省 0、负数归一为 0）。
+        分页返回 `{items, total}`：total 来自对过滤后全量集合的 COUNT。
+        分页参数的宽松口径与数据源/数据集列表一致。
       operationId: listCharts
       parameters:
         - name: limit
@@ -600,6 +650,24 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: sort
+          in: query
+          required: false
+          description: 排序字段白名单 `id` / `name` / `created_at` / `updated_at`；其他值回落默认 `id DESC`。
+          schema:
+            type: string
+        - name: order
+          in: query
+          required: false
+          description: 排序方向 `asc` / `desc`；缺省或非法时沿用默认方向。
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          required: false
+          description: 关键字，对图表名称 / 图型做大小写不敏感的包含匹配（ILIKE）。
+          schema:
+            type: string
       responses:
         '200':
           description: HTTP 恒 200；业务结果由 Envelope.code 表达
@@ -769,12 +837,11 @@ paths:
         - dashboards
       summary: 仪表盘列表
       description: |
-        分页返回未软删仪表盘（`deleted_at IS NULL`），按 `created_at DESC, id DESC`
-        排序（与迁移 00005 的 partial 索引 idx_dashboard_not_deleted 同口径）。
-        无结果时 data 为空数组。
+        分页返回未软删仪表盘（`deleted_at IS NULL`）的 `{items, total}`，
+        默认按 `created_at DESC, id DESC` 排序（与迁移 00005 的 partial 索引
+        idx_dashboard_not_deleted 同口径）。
 
-        分页参数与数据源/数据集/图表列表一致（limit 缺省 100、≤0 或 >1000 回落 100；
-        offset 缺省 0、负数归一为 0）。
+        分页参数的宽松口径与其余三类列表一致（非法值回落、越界返回空页）。
       operationId: listDashboards
       parameters:
         - name: limit
@@ -791,6 +858,30 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: sort
+          in: query
+          required: false
+          description: 排序字段白名单 `name` / `created_at` / `updated_at`；其他值回落默认 `created_at DESC, id DESC`。
+          schema:
+            type: string
+        - name: order
+          in: query
+          required: false
+          description: 排序方向 `asc` / `desc`；缺省或非法时沿用默认方向。
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          required: false
+          description: 关键字，对仪表盘名称 / 描述做大小写不敏感的包含匹配（ILIKE）。
+          schema:
+            type: string
+        - name: folder_id
+          in: query
+          required: false
+          description: 只返回该文件夹的直属仪表盘（与文件夹树「只算直属子项」口径一致）；缺失 = 不过滤。
+          schema:
+            type: string
       responses:
         '200':
           description: HTTP 恒 200；业务结果由 Envelope.code 表达
@@ -1341,8 +1432,104 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OkResponse'
+  /api/sample-dataset/status:
+    get:
+      tags:
+        - sample-dataset
+      summary: 内置示例数据集引导状态
+      description: |
+        「加载」创建一张隐藏的示例数据源（is_sample，数据源列表不返回）与两个
+        预置列定义的数据集；「忽略」把选择持久化到 bi_setting，重启后仍生效。
+      operationId: getSampleDatasetStatus
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleDatasetStatusResponse'
+  /api/sample-dataset/load:
+    post:
+      tags:
+        - sample-dataset
+      summary: 一键加载内置示例数据集（幂等）
+      description: |
+        创建示例数据源与「示例：电商订单」「示例：商品目录」两个数据集，列类型
+        与维度/指标角色已预置；重复调用返回当前状态，不会重复建行。
+      operationId: loadSampleDataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleDatasetStatusResponse'
+  /api/sample-dataset/dismiss:
+    post:
+      tags:
+        - sample-dataset
+      summary: 忽略示例数据集引导（持久化）
+      operationId: dismissSampleDataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleDatasetStatusResponse'
+  /api/sample-dataset:
+    delete:
+      tags:
+        - sample-dataset
+      summary: 一键移除示例数据集
+      description: |
+        软删示例数据集（连带其图表）与隐藏的示例数据源；种子表保留，再次加载
+        可直接复用。
+      operationId: removeSampleDataset
+      responses:
+        '200':
+          description: "成功 data 为 {status: ok}"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
 components:
   schemas:
+    SampleDatasetStatus:
+      type: object
+      description: 内置示例数据集的引导态；两个字段相互独立。
+      required:
+        - loaded
+        - dismissed
+      properties:
+        loaded:
+          type: boolean
+          description: 示例数据源与数据集是否已加载。
+        dismissed:
+          type: boolean
+          description: 用户是否曾选择「忽略」；忽略持久化在 bi_setting，不再出现引导卡片。
+    SampleDatasetStatusResponse:
+      description: 示例数据集状态 / 加载 / 忽略响应：data 为 SampleDatasetStatus。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/SampleDatasetStatus'
     AuthCredentialsRequest:
       type: object
       required:
@@ -2097,6 +2284,26 @@ components:
           type: string
         operator:
           type: string
+          enum:
+            - eq
+            - neq
+            - gt
+            - gte
+            - lt
+            - lte
+            - like
+            - in
+            - notIn
+            - between
+            - isNull
+            - isNotNull
+            - startsWith
+            - endsWith
+            - isEmptyString
+            - isNotEmptyString
+          description: >-
+            规范算子，与 FilterConfig.op 同一词表与同一归一化表；别名先归一化再校验，
+            无法识别返回 20100（含字段、收到的算子、允许集合）。
         value: {}
         value_end: {}
           # 后端为 interface{}（带 omitempty）：区间过滤上界，任意 JSON 值
@@ -2115,7 +2322,7 @@ components:
           type: string
           description: '"asc" 或 "desc"。'
     DatasourceListResponse:
-      description: GET /api/datasources 响应：data 为 Datasource 数组。
+      description: GET /api/datasources 响应：data 为 `{items,total}`，total 是过滤后的全量行数。
       allOf:
         - $ref: '#/components/schemas/Envelope'
         - type: object
@@ -2123,9 +2330,17 @@ components:
             - data
           properties:
             data:
-              type: array
-              items:
-                $ref: '#/components/schemas/Datasource'
+              type: object
+              required:
+                - items
+                - total
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Datasource'
+                total:
+                  type: integer
     DatasourceResponse:
       description: 数据源 CRUD 响应：data 为单个 Datasource。
       allOf:
@@ -2191,7 +2406,7 @@ components:
             data:
               $ref: '#/components/schemas/FieldDistribution'
     DatasetListResponse:
-      description: GET /api/datasets 响应：data 为 Dataset 数组。
+      description: GET /api/datasets 响应：data 为 `{items,total}`，total 是过滤后的全量行数。
       allOf:
         - $ref: '#/components/schemas/Envelope'
         - type: object
@@ -2199,9 +2414,17 @@ components:
             - data
           properties:
             data:
-              type: array
-              items:
-                $ref: '#/components/schemas/Dataset'
+              type: object
+              required:
+                - items
+                - total
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Dataset'
+                total:
+                  type: integer
     DatasetResponse:
       description: 数据集 CRUD / 列更新响应：data 为单个 Dataset。
       allOf:
@@ -2890,7 +3113,7 @@ components:
         format:
           type: string
     ChartListResponse:
-      description: GET /api/charts 响应：data 为 Chart 数组。
+      description: GET /api/charts 响应：data 为 `{items,total}`，total 是过滤后的全量行数。
       allOf:
         - $ref: '#/components/schemas/Envelope'
         - type: object
@@ -2898,9 +3121,17 @@ components:
             - data
           properties:
             data:
-              type: array
-              items:
-                $ref: '#/components/schemas/Chart'
+              type: object
+              required:
+                - items
+                - total
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Chart'
+                total:
+                  type: integer
     ChartResponse:
       description: 图表 CRUD 响应：data 为单个 Chart。
       allOf:
@@ -3135,10 +3366,30 @@ components:
           type: string
         op:
           type: string
+          enum:
+            - eq
+            - neq
+            - gt
+            - gte
+            - lt
+            - lte
+            - like
+            - in
+            - notIn
+            - between
+            - isNull
+            - isNotNull
+            - startsWith
+            - endsWith
+            - isEmptyString
+            - isNotEmptyString
           description: >-
-            eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull /
-            startsWith / endsWith / isEmptyString / isNotEmptyString；
-            未知算子后端 fail-closed 渲染恒假谓词（1 = 0），不静默退化为等值。
+            规范算子。输入先按归一化表处理（大小写不敏感、忽略内部空白；`=`/`==`→eq，
+            `!=`/`<>`/`ne`/`notequal`→neq，`>`→gt，`ge`/`>=`→gte，`<`→lt，`le`/`<=`→lte，
+            `not in`→notIn，`is null`→isNull 等），再对白名单校验；无法归一化的算子返回
+            20100，错误信息含字段、收到的算子与允许集合，绝不静默回退等值比较。
+            归一化表是双端唯一事实源（Go `query.filterOperatorAliases` ↔ TS
+            `normalizeFilterOperator`），由 `frontend/src/lib/__fixtures__/filterOperators.json` 共读钉住。
         value: {}
         value_end: {}
           # query.FilterConfig.ValueEnd interface{} omitempty：between 上界，任意 JSON 值
@@ -3674,7 +3925,7 @@ components:
             仅 status=error 时出现，携带该块取数失败的原因。单块失败不让整盘失败，
             因此原因只在这里暴露，不占用全局错误码。
     DashboardListResponse:
-      description: GET /api/dashboards 响应：data 为 Dashboard 数组。
+      description: GET /api/dashboards 响应：data 为 `{items,total}`，total 是过滤后的全量行数。
       allOf:
         - $ref: '#/components/schemas/Envelope'
         - type: object
@@ -3682,9 +3933,17 @@ components:
             - data
           properties:
             data:
-              type: array
-              items:
-                $ref: '#/components/schemas/Dashboard'
+              type: object
+              required:
+                - items
+                - total
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Dashboard'
+                total:
+                  type: integer
     DashboardResponse:
       description: 仪表盘 CRUD 响应：data 为单个 Dashboard。
       allOf:

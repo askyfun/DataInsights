@@ -375,7 +375,7 @@ func datasetCaptureMatcher(record *[]string) sqlmock.QueryMatcherFunc {
 // findStmt 返回记录到的第一条以 prefix 开头的语句。
 func findStmt(executed []string, prefix string) string {
 	for _, q := range executed {
-		if strings.HasPrefix(q, prefix) {
+		if strings.HasPrefix(q, prefix) && !strings.Contains(strings.ToLower(q), "count(") {
 			return q
 		}
 	}

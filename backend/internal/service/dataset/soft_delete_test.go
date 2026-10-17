@@ -99,11 +99,13 @@ func TestDatasetListFiltersDeletedAt(t *testing.T) {
 	db := bun.NewDB(sqlDB, pgdialect.New())
 	s := &datasetService{db: db}
 
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_dataset"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`SELECT .* FROM "bi_dataset"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "datasource_id", "query_type", "created_at", "updated_at"}).
 			AddRow(1, "n", 1, "table", nil, nil))
 
-	if _, err := s.List(context.Background(), 0, 0); err != nil {
+	if _, err := s.List(context.Background(), ListOptions{}); err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -129,11 +131,13 @@ func TestDatasetListOrdersByIDDesc(t *testing.T) {
 	db := bun.NewDB(sqlDB, pgdialect.New())
 	s := &datasetService{db: db}
 
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_dataset"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`SELECT .* FROM "bi_dataset"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "datasource_id", "query_type", "created_at", "updated_at"}).
 			AddRow(2, "b", 1, "table", nil, nil))
 
-	if _, err := s.List(context.Background(), 0, 0); err != nil {
+	if _, err := s.List(context.Background(), ListOptions{}); err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

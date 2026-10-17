@@ -1,8 +1,7 @@
-// Package extract holds the shared semantics of the "extract dataset"
-// reservation (issue #118): one designated StarRocks datasource acts as the
-// unified storage for extracted data, and local file upload is a special case
-// of it. This phase reserves the architecture only — no data ingestion is
-// implemented yet.
+// Package extract holds the shared semantics of the "extract dataset" feature
+// (issue #118): one designated datasource acts as the unified storage for
+// extracted data, and local file upload is a special case of it. Ingestion
+// (DDL + batched inserts) lives in service/dataset/import.go.
 //
 // The package is the single source of truth for:
 //   - the guard that keeps the extract storage datasource out of regular use

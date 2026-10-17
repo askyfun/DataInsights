@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/response"
 	"data-insights/internal/router"
 	"data-insights/internal/service/dataset"
@@ -36,41 +37,36 @@ type datasetStatusOut struct {
 	Status string `json:"status"`
 }
 
-// datasetListIn carries the pagination query params for List. Values are
-// bound as strings so non-numeric input keeps the pre-migration
-// fall-back-to-default behaviour instead of turning into a 400 bind error.
+// datasetListIn carries the list query params. Values are bound as strings so
+// non-numeric input keeps the pre-migration fall-back-to-default behaviour
+// instead of turning into a 400 bind error.
 type datasetListIn struct {
-	Limit  string `form:"limit"`
-	Offset string `form:"offset"`
-}
-
-// pagination is the List binding post-processing step: it reproduces the
-// old getPaginationParams defaults and clamps exactly (limit=100 when
-// missing/garbage/out of range, offset>=0).
-func (in datasetListIn) pagination() (limit, offset int) {
-	limit, _ = strconv.Atoi(orDefault(in.Limit, "100"))
-	offset, _ = strconv.Atoi(orDefault(in.Offset, "0"))
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return
+	Limit        string `form:"limit"`
+	Offset       string `form:"offset"`
+	Sort         string `form:"sort"`
+	Order        string `form:"order"`
+	Keyword      string `form:"keyword"`
+	DatasourceID string `form:"datasource_id"`
+	QueryType    string `form:"query_type"`
 }
 
 // List handles GET /api/datasets
-func (h *DatasetHandler) List(req router.Request[datasetListIn], res *router.Response[[]entity.Dataset]) error {
-	limit, offset := req.In.pagination()
+func (h *DatasetHandler) List(req router.Request[datasetListIn], res *router.Response[listpage.Result[entity.Dataset]]) error {
+	opts := dataset.ListOptions{
+		Params:    listParams(req.In.Limit, req.In.Offset, req.In.Sort, req.In.Order, req.In.Keyword),
+		QueryType: req.In.QueryType,
+	}
+	// 非数字 datasource_id 与旧的宽松口径一致：忽略该筛选，而不是 400。
+	opts.DatasourceID, _ = strconv.Atoi(req.In.DatasourceID)
 
-	datasets, err := h.svc.List(req.Ctx.Request.Context(), limit, offset)
+	result, err := h.svc.List(req.Ctx.Request.Context(), opts)
 	if err != nil {
 		return err
 	}
-	if datasets == nil {
-		datasets = []entity.Dataset{}
+	if result.Items == nil {
+		result.Items = []entity.Dataset{}
 	}
-	res.Out = datasets
+	res.Out = result
 	return nil
 }
 

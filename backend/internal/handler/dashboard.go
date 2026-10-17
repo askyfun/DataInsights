@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/response"
 	"data-insights/internal/router"
 	"data-insights/internal/service/dashboard"
@@ -34,26 +35,16 @@ type dashboardStatusOut struct {
 	Status string `json:"status"`
 }
 
-// dashboardListIn carries the pagination query params for List. Values bind as
-// strings so non-numeric input keeps the fall-back-to-default behaviour instead
-// of turning into a 400 bind error (same contract as chartListIn/datasourceListIn).
+// dashboardListIn carries the list query params. Values bind as strings so
+// non-numeric input keeps the fall-back-to-default behaviour instead of
+// turning into a 400 bind error (same contract as chartListIn).
 type dashboardListIn struct {
-	Limit  string `form:"limit"`
-	Offset string `form:"offset"`
-}
-
-// pagination is the List binding post-processing step: limit=100 when
-// missing/garbage/out of range, offset>=0.
-func (in dashboardListIn) pagination() (limit, offset int) {
-	limit, _ = strconv.Atoi(orDefault(in.Limit, "100"))
-	offset, _ = strconv.Atoi(orDefault(in.Offset, "0"))
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return
+	Limit    string `form:"limit"`
+	Offset   string `form:"offset"`
+	Sort     string `form:"sort"`
+	Order    string `form:"order"`
+	Keyword  string `form:"keyword"`
+	FolderID string `form:"folder_id"`
 }
 
 // parseDashboardID validates the {id} path param.
@@ -69,17 +60,19 @@ func parseDashboardID(raw string) (string, error) {
 }
 
 // List handles GET /api/dashboards
-func (h *DashboardHandler) List(req router.Request[dashboardListIn], res *router.Response[[]entity.Dashboard]) error {
-	limit, offset := req.In.pagination()
-
-	dashboards, err := h.svc.List(req.Ctx.Request.Context(), limit, offset)
+func (h *DashboardHandler) List(req router.Request[dashboardListIn], res *router.Response[listpage.Result[entity.Dashboard]]) error {
+	opts := dashboard.ListOptions{
+		Params:   listParams(req.In.Limit, req.In.Offset, req.In.Sort, req.In.Order, req.In.Keyword),
+		FolderID: req.In.FolderID,
+	}
+	result, err := h.svc.List(req.Ctx.Request.Context(), opts)
 	if err != nil {
 		return err
 	}
-	if dashboards == nil {
-		dashboards = []entity.Dashboard{}
+	if result.Items == nil {
+		result.Items = []entity.Dashboard{}
 	}
-	res.Out = dashboards
+	res.Out = result
 	return nil
 }
 

@@ -1,11 +1,11 @@
 # Data Insights 架构文档
 
-> 最后更新：2026-09-26
+> 最后更新：2026-10-17
 > 图表查询链路的完整设计（契约模型、SQL 生成、处理器分派台账）见同目录的 `chart-query-design.md`。
 
 ## 项目概述
 
-Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能：数据源管理、数据集管理、拖拽式图表构建、分享功能。
+Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能：数据源管理、数据集管理、拖拽式图表构建、仪表盘、查询记录短码分享。
 
 ## 技术栈
 
@@ -252,18 +252,32 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 - **取舍**：不做破坏性 schema 变更 → 靠迁移函数兼容旧结构；代价是迁移层需长期维护，且迁移必须无损。
 - **现状**：已实现（当前 `version: 2`）。证据：`frontend/src/lib/chartConfigSchema.ts`；字段组演变详见 `chart-query-design.md`。
 
-### D11 抽取数据集：统一 StarRocks 存储 + 架构预留（issue #118）
+### D11 抽取数据集：统一抽取存储 + 本地文件上传（issue #118 / #138）
 
 - **决策**：抽取数据集（extract）与直连数据集（direct）双模式，对齐火山引擎心智。指定**一个**
-  StarRocks 数据源为统一抽取存储（`EXTRACT_DATASOURCE_ID`）；该数据源被指定后不再是普通数据源
-  ——列表隐藏、不能被常规数据集引用；抽取表在其内以 `di_extract_<datasetId>` 命名，与用户表隔离。
-  本地文件即席查询不做独立链路，而是抽取数据集的特例（上传 → 灌入 → 自动生成数据集）。
-- **背景**：当前纯直连、无缓存；外部数据源（如客户生产库）不宜承载高频分析查询，而 StarRocks
-  本身就是分析型存储，直接当抽取库用，省掉自研缓存层。
-- **取舍**：本期**只预留不实现**灌数——模型/契约（`mode: direct|extract`）、守卫（dataset
-  Create/Update 拒绝抽取数据源、datasource List 隐藏）、查询分派位（chart service
-  `dispatchExtractDataset` 对 extract 显式报错）与命名约定全部落位，直连路径零回归；
-  代价是 extract 模式短期是"看得见跑不了"的预留态。
-- **现状**：预留已实现，灌数与 extract 查询在后续期。证据：`backend/internal/extract/`、
-  `internal/config`（`EXTRACT_DATASOURCE_ID`）、`service/chart/impl.go`（分派位）、
-  `api/openapi.yaml`（mode 语义）。
+  数据源为统一抽取存储（`EXTRACT_DATASOURCE_ID`，支持 starrocks / mysql / postgresql）；该数据源
+  被指定后不再是普通数据源——列表隐藏、不能被常规数据集引用；抽取表在其内以
+  `di_extract_<datasetId>` 命名，与用户表隔离。本地文件即席查询不做独立链路，而是抽取数据集的
+  特例（上传 `.csv` / `.xlsx`（≤50MB）→ 灌入 → 自动生成数据集）。
+- **背景**：当前纯直连、无缓存；外部数据源（如客户生产库）不宜承载高频分析查询，而分析型存储
+  （如 StarRocks）直接当抽取库用，省掉自研缓存层。
+- **取舍**：抽取存储方言按 `extract.ParseDialect` 分派，建表 / 写入 SQL 按方言生成；上传只接受
+  文本表格格式，解析后所有单元格统一按文本推断类型，避免把源文件格式泄漏到查询层。
+- **现状**：已实现（灌数 + extract 查询 + 本地文件上传）。证据：`backend/internal/extract/`、
+  `backend/internal/service/dataset/import.go`、`internal/config`（`EXTRACT_DATASOURCE_ID`）、
+  `api/openapi.yaml`（mode 语义与上传端点）。
+
+### D12 预警评估轮询 worker：对「不引入后台定时任务」的例外豁免（issue #155 / #206）
+
+- **背景**：既有红线「不引入后台定时任务」（路线图 v5.0 的 Non-goal N4「调度订阅」，见本地工作笔记）
+  的处置口径是「先推翻红线并单独立项」。#155（PR #195）落地了进程内常驻轮询，需要把这件事实写成裁定，
+  避免下一条同类需求（导出、缓存、订阅）沿用一套没人认领的默认结论。
+- **裁定**：**例外豁免，不推翻红线本身**。边界是只做「指标阈值预警」：按 `ALERT_EVAL_INTERVAL`
+  评估已启用的预警规则、落触发记录、可选发一封邮件。**不做**报表订阅、**不做** ETL / 数据同步调度、
+  **不做**通用任务编排。后续若再出现后台调度需求，仍按原红线「先推翻并单独立项」处理。
+- **新引入的常驻成本**：
+  - 一个随主进程启动 / 退出的 goroutine（`cmd/main.go` 的 `go alertSvc.RunEvaluator`，ctx 取消即退出）；
+  - 每轮一次 PG 查询拉取 enabled 规则，并对每条规则走一次图表取数管道（DB 轮询负载随规则数线性增长）；
+  - 配置 SMTP 后新增对**出站 587/TCP（STARTTLS）**的依赖；未配置时仅降级为「不发信、照常落记录」。
+- **现状**：已实现（migration `00011`）。证据：`backend/internal/service/alert/evaluator.go`、
+  `backend/internal/service/alert/notifier.go`、`backend/cmd/main.go`、`config.AlertConfig`。

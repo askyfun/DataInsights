@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/response"
 	"data-insights/internal/router"
 )
@@ -221,9 +222,11 @@ func TestCreateRejectsMalformedLayoutJSON(t *testing.T) {
 
 func TestListFiltersDeletedAtAndOrdersNewestFirst(t *testing.T) {
 	svc, mock, capture := newTestService(t)
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_dashboard"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`SELECT .* FROM "bi_dashboard"`).WillReturnRows(storedRow())
 
-	got, err := svc.List(context.Background(), 0, 0)
+	got, err := svc.List(context.Background(), ListOptions{Params: listpage.Params{Limit: 100}})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -231,7 +234,7 @@ func TestListFiltersDeletedAtAndOrdersNewestFirst(t *testing.T) {
 		t.Fatalf("expectations: %v", err)
 	}
 
-	sel := capture.find(t, `FROM "bi_dashboard"`)
+	sel := capture.find(t, "ORDER BY")
 	if !strings.Contains(sel, "deleted_at IS NULL") {
 		t.Errorf("List 必须过滤软删行: %s", sel)
 	}
@@ -242,17 +245,18 @@ func TestListFiltersDeletedAtAndOrdersNewestFirst(t *testing.T) {
 		t.Errorf("limit<=0 时应回落缺省 100: %s", sel)
 	}
 
-	if len(got) != 1 {
-		t.Fatalf("期望 1 行，实际 %d", len(got))
+	if got.Total != 1 || len(got.Items) != 1 {
+		t.Fatalf("期望 total=1 rows=1，实际 total=%d rows=%d", got.Total, len(got.Items))
 	}
-	if got[0].ID != testID || got[0].Name != "月度经营总览" {
-		t.Errorf("实体映射错误: %+v", got[0])
+	row := got.Items[0]
+	if row.ID != testID || row.Name != "月度经营总览" {
+		t.Errorf("实体映射错误: %+v", row)
 	}
-	if got[0].Description == nil || *got[0].Description != "本盘口径：GMV 含退款" {
-		t.Errorf("description 映射错误: %+v", got[0].Description)
+	if row.Description == nil || *row.Description != "本盘口径：GMV 含退款" {
+		t.Errorf("description 映射错误: %+v", row.Description)
 	}
-	if got[0].Status != "draft" || got[0].LayoutJSON != testLayout {
-		t.Errorf("layout/status 映射错误: %+v", got[0])
+	if row.Status != "draft" || row.LayoutJSON != testLayout {
+		t.Errorf("layout/status 映射错误: %+v", row)
 	}
 }
 
@@ -434,7 +438,7 @@ func TestCountChartReferencesUsesJSONPath(t *testing.T) {
 		t.Fatalf("expectations: %v", err)
 	}
 
-	sel := capture.find(t, `FROM "bi_dashboard"`)
+	sel := capture.find(t, "ORDER BY")
 	if !strings.Contains(sel, "deleted_at IS NULL") {
 		t.Errorf("引用计数只应返回未软删的盘: %s", sel)
 	}
@@ -450,5 +454,35 @@ func TestCountChartReferencesUsesJSONPath(t *testing.T) {
 
 	if len(got) != 1 || got[0].ID != testID || got[0].Name != "月度经营总览" {
 		t.Fatalf("实体映射错误: %+v", got)
+	}
+}
+
+// TestListFiltersByFolderID 钉住归档树口径：选中某夹时只看直属子项
+// （folder_id 等值过滤），COUNT 与数据查询必须带同一个条件，否则总数会虚高。
+func TestListFiltersByFolderID(t *testing.T) {
+	svc, mock, capture := newTestService(t)
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_dashboard"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT .* FROM "bi_dashboard"`).
+		WillReturnRows(sqlmock.NewRows(dashboardColumns()))
+
+	got, err := svc.List(context.Background(), ListOptions{
+		Params:   listpage.Params{Limit: 10},
+		FolderID: "0198f2c3-4d5e-7a6b-8c9d-0e1f2a3b4c5f",
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got.Total != 0 || len(got.Items) != 0 {
+		t.Fatalf("got total=%d items=%d, want empty page", got.Total, len(got.Items))
+	}
+	sel := capture.find(t, "ORDER BY")
+	if !strings.Contains(sel, "folder_id = ") {
+		t.Errorf("folder filter missing from page query: %s", sel)
+	}
+	for _, stmt := range capture.stmts {
+		if strings.Contains(stmt, "bi_dashboard") && !strings.Contains(stmt, "folder_id = ") {
+			t.Errorf("folder filter missing from a dashboard query: %s", stmt)
+		}
 	}
 }

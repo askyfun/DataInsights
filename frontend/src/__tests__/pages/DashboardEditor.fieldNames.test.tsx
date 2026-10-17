@@ -74,6 +74,11 @@ function mockAxiosResponse<T>(data: ApiResponse<T>): AxiosResponse<ApiResponse<T
 const envelope = <T,>(data: T) =>
   mockAxiosResponse({ code: 20000, msg: 'success', trace: '', data });
 
+/** 四类实体列表的 data 是 {items,total}（issue #205 服务端分页）。 */
+function listEnvelope<T>(items: T[]): AxiosResponse<ApiResponse<{ items: T[]; total: number }>> {
+  return envelope({ items, total: items.length });
+}
+
 const comboChart: Chart = {
   id: 8,
   name: '组合图',
@@ -127,7 +132,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   mockGetById.mockResolvedValue(envelope(dashboard));
-  mockChartsGetAll.mockResolvedValue(envelope([comboChart]));
+  mockChartsGetAll.mockResolvedValue(listEnvelope([comboChart]));
   mockQuery.mockResolvedValue(
     envelope({
       results: [

@@ -148,7 +148,7 @@ func main() {
 	})
 
 	// 预警邮件通知：SMTP_HOST 未配置传 nil（评估照常跑，触发记录说明未通知）。
-	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, newEmailNotifier(c.Alert))
+	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, c.Database.Url, newEmailNotifier(c.Alert))
 
 	// 预警评估器：后台 goroutine 定时轮询，随主进程退出（evalCancel）而结束。
 	evalCtx, evalCancel := context.WithCancel(context.Background())

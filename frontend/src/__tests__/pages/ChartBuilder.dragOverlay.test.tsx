@@ -120,7 +120,7 @@ describe('ChartBuilder drag overlay', () => {
     resetChartBuilderState();
 
     mockGetDatasets.mockResolvedValue(
-      mockAxiosResponse({ code: 20000, msg: 'ok', trace: '', data: [] })
+      mockAxiosResponse({ code: 20000, msg: 'ok', trace: '', data: { items: [], total: 0 } })
     );
     mockGetColumns.mockResolvedValue(
       mockAxiosResponse({

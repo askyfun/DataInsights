@@ -22,11 +22,11 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, useNavigate } from 'react-router-dom';
-import { DatasourceFormData, DatasourceType } from '../api';
-import { ListSearch, makeTimeSorter, standardListPagination } from '../components/listPage';
+import { Datasource, DatasourceFormData, DatasourceType, datasourcesApi, ListQuery } from '../api';
+import { ListSearch, sortOrderOf, useDebouncedValue, useServerList } from '../components/listPage';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { formatDateTime } from '../lib/format';
@@ -43,27 +43,28 @@ const DatasourcePage: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [searchText, setSearchText] = useState('');
 
-  const {
-    datasources,
-    datasourcesLoading,
-    fetchDatasources,
-    addDatasource,
-    updateDatasource,
-    deleteDatasource,
-    datasourcesError,
-  } = useStore();
+  const { addDatasource, updateDatasource, deleteDatasource } = useStore();
 
   const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchDatasources();
-  }, [fetchDatasources]);
+  // 数据源列表走服务端分页/排序/关键字（issue #205）。
+  const fetchPage = useCallback(
+    (query: ListQuery) => datasourcesApi.getAll(query).then((res) => res.data.data),
+    []
+  );
+  const list = useServerList<Datasource>(fetchPage, { sort: 'id', order: 'desc' });
+  const keyword = useDebouncedValue(searchText).trim();
 
   useEffect(() => {
-    if (datasourcesError) {
-      message.error(datasourcesError);
+    if (keyword === (list.query.keyword ?? '')) return;
+    list.setParam({ keyword: keyword || undefined });
+  }, [keyword, list.query.keyword, list.setParam]);
+
+  useEffect(() => {
+    if (list.error) {
+      message.error(list.error);
     }
-  }, [datasourcesError]);
+  }, [list.error]);
 
   const handleSubmit = async (values: DatasourceFormData) => {
     setSubmitLoading(true);
@@ -78,7 +79,7 @@ const DatasourcePage: React.FC = () => {
       setModalVisible(false);
       form.resetFields();
       setEditingId(null);
-      fetchDatasources();
+      list.reload();
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
     } finally {
@@ -110,6 +111,7 @@ const DatasourcePage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await deleteDatasource(id);
+      list.reload();
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
       message.error(error.message || intl.formatMessage({ id: 'common.error' }));
@@ -140,33 +142,22 @@ const DatasourcePage: React.FC = () => {
     return typeMap[type] || { label: type, color: 'blue' };
   };
 
-  // 与数据集/图表列表同口径的客户端关键字过滤（名称 / 类型 / 主机 / 数据库名）。
-  const keyword = searchText.trim().toLowerCase();
-  const visibleDatasources = (Array.isArray(datasources) ? datasources : []).filter((ds) => {
-    if (!keyword) return true;
-    return (
-      ds.name.toLowerCase().includes(keyword) ||
-      (ds.type ?? '').toLowerCase().includes(keyword) ||
-      (ds.host ?? '').toLowerCase().includes(keyword) ||
-      (ds.database_name ?? '').toLowerCase().includes(keyword)
-    );
-  });
-
   const columns = [
     {
       title: 'ID',
       dataIndex: 'id',
       key: 'id',
       width: 60,
-      // 默认视图与数据集/图表列表对齐：id 降序，新建的排最前。
-      sorter: (a: any, b: any) => a.id - b.id,
-      defaultSortOrder: 'descend' as const,
+      // 服务端排序：默认 id 降序，新建的排最前。
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'id'),
     },
     {
       title: intl.formatMessage({ id: 'datasource.name' }),
       dataIndex: 'name',
       key: 'name',
-      sorter: (a: any, b: any) => a.name.localeCompare(b.name) || b.id - a.id,
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'name'),
       render: (text: string, record: any) => {
         const typeInfo = getTypeInfo(record.type);
         return (
@@ -207,7 +198,8 @@ const DatasourcePage: React.FC = () => {
       title: intl.formatMessage({ id: 'datasource.createdAt' }),
       dataIndex: 'created_at',
       key: 'created_at',
-      sorter: makeTimeSorter((row: any) => row.created_at),
+      sorter: true,
+      sortOrder: sortOrderOf(list.query, 'created_at'),
       render: (text: string) => formatDateTime(text),
     },
     {
@@ -263,11 +255,7 @@ const DatasourcePage: React.FC = () => {
         description={intl.formatMessage({ id: 'datasource.manageConnections' })}
         extra={
           <>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => fetchDatasources()}
-              loading={datasourcesLoading}
-            >
+            <Button icon={<ReloadOutlined />} onClick={() => list.reload()} loading={list.loading}>
               {intl.formatMessage({ id: 'common.refresh' })}
             </Button>
             <Button
@@ -295,10 +283,11 @@ const DatasourcePage: React.FC = () => {
         </div>
         <Table
           columns={columns}
-          dataSource={visibleDatasources}
+          dataSource={list.items}
           rowKey="id"
-          loading={datasourcesLoading}
-          pagination={standardListPagination}
+          loading={list.loading}
+          pagination={list.pagination}
+          onChange={list.onTableChange}
           locale={{
             emptyText: intl.formatMessage({ id: 'common.noData' }),
           }}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/router"
 	"data-insights/internal/service/datasource"
 
@@ -22,7 +23,7 @@ import (
 type mockDatasourceService struct {
 	datasource.Service
 
-	listFunc              func(ctx context.Context, limit, offset int) ([]entity.Datasource, error)
+	listFunc              func(ctx context.Context, opts listpage.Params) (listpage.Result[entity.Datasource], error)
 	getByIDFunc           func(ctx context.Context, id int) (*entity.Datasource, error)
 	createFunc            func(ctx context.Context, ds *entity.Datasource) (*entity.Datasource, error)
 	updateFunc            func(ctx context.Context, ds *entity.Datasource) (*entity.Datasource, error)
@@ -35,11 +36,11 @@ type mockDatasourceService struct {
 	tableDataFunc         func(ctx context.Context, id int, tableName string, page, pageSize int, sortField, sortOrder string) (*entity.TableDataResult, error)
 }
 
-func (m *mockDatasourceService) List(ctx context.Context, limit, offset int) ([]entity.Datasource, error) {
+func (m *mockDatasourceService) List(ctx context.Context, opts listpage.Params) (listpage.Result[entity.Datasource], error) {
 	if m.listFunc != nil {
-		return m.listFunc(ctx, limit, offset)
+		return m.listFunc(ctx, opts)
 	}
-	return nil, nil
+	return listpage.Result[entity.Datasource]{}, nil
 }
 
 func (m *mockDatasourceService) GetByID(ctx context.Context, id int) (*entity.Datasource, error) {
@@ -163,6 +164,7 @@ func assertBody(t *testing.T, w *httptest.ResponseRecorder, want string) {
 
 const (
 	okEnvelopeEmptyArray = `{"code":20000,"msg":"success","trace":"","data":[]}`
+	okEnvelopeEmptyList  = `{"code":20000,"msg":"success","trace":"","data":{"items":[],"total":0}}`
 	okEnvelopeStatus     = `{"code":20000,"msg":"success","trace":"","data":{"status":"ok"}}`
 	badRequestInvalidID  = `{"code":20100,"msg":"invalid id","trace":"","data":{}}`
 	badRequestEOF        = `{"code":20100,"msg":"EOF","trace":"","data":{}}`
@@ -176,32 +178,50 @@ func errBoom() error { return errors.New("boom") }
 // ---------------------------------------------------------------- List
 
 func TestDatasourceList_Defaults(t *testing.T) {
-	var gotLimit, gotOffset int
+	var got listpage.Params
 	h := NewDatasourceHandler(&mockDatasourceService{
-		listFunc: func(_ context.Context, limit, offset int) ([]entity.Datasource, error) {
-			gotLimit, gotOffset = limit, offset
-			return nil, nil
+		listFunc: func(_ context.Context, opts listpage.Params) (listpage.Result[entity.Datasource], error) {
+			got = opts
+			return listpage.Result[entity.Datasource]{}, nil
 		},
 	})
 	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources", "")
-	assertBody(t, w, okEnvelopeEmptyArray)
-	if gotLimit != 100 || gotOffset != 0 {
-		t.Errorf("expected defaults limit=100 offset=0, got limit=%d offset=%d", gotLimit, gotOffset)
+	assertBody(t, w, okEnvelopeEmptyList)
+	if got.Limit != 100 || got.Offset != 0 {
+		t.Errorf("expected defaults limit=100 offset=0, got limit=%d offset=%d", got.Limit, got.Offset)
 	}
 }
 
 func TestDatasourceList_ExplicitPaging(t *testing.T) {
-	var gotLimit, gotOffset int
+	var got listpage.Params
 	h := NewDatasourceHandler(&mockDatasourceService{
-		listFunc: func(_ context.Context, limit, offset int) ([]entity.Datasource, error) {
-			gotLimit, gotOffset = limit, offset
-			return []entity.Datasource{{ID: 1, Name: "a", Type: "postgresql"}}, nil
+		listFunc: func(_ context.Context, opts listpage.Params) (listpage.Result[entity.Datasource], error) {
+			got = opts
+			return listpage.Result[entity.Datasource]{
+				Items: []entity.Datasource{{ID: 1, Name: "a", Type: "postgresql"}},
+				Total: 12,
+			}, nil
 		},
 	})
 	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources?limit=2&offset=3", "")
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":[{"id":1,"name":"a","type":"postgresql","host":"","port":0,"database_name":"","username":"","created_at":"","updated_at":""}]}`)
-	if gotLimit != 2 || gotOffset != 3 {
-		t.Errorf("expected limit=2 offset=3, got limit=%d offset=%d", gotLimit, gotOffset)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"items":[{"id":1,"name":"a","type":"postgresql","host":"","port":0,"database_name":"","username":"","created_at":"","updated_at":""}],"total":12}}`)
+	if got.Limit != 2 || got.Offset != 3 {
+		t.Errorf("expected limit=2 offset=3, got limit=%d offset=%d", got.Limit, got.Offset)
+	}
+}
+
+func TestDatasourceList_PassesSortAndKeyword(t *testing.T) {
+	var got listpage.Params
+	h := NewDatasourceHandler(&mockDatasourceService{
+		listFunc: func(_ context.Context, opts listpage.Params) (listpage.Result[entity.Datasource], error) {
+			got = opts
+			return listpage.Result[entity.Datasource]{}, nil
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources?sort=name&order=desc&keyword=pg", "")
+	assertBody(t, w, okEnvelopeEmptyList)
+	if got.Sort != "name" || got.Order != "desc" || got.Keyword != "pg" {
+		t.Errorf("expected sort=name order=desc keyword=pg, got %+v", got)
 	}
 }
 
@@ -221,26 +241,26 @@ func TestDatasourceList_InvalidAndClampedPaging(t *testing.T) {
 		{"?limit=1000", 1000, 0},
 	}
 	for _, tc := range cases {
-		var gotLimit, gotOffset int
+		var got listpage.Params
 		h := NewDatasourceHandler(&mockDatasourceService{
-			listFunc: func(_ context.Context, limit, offset int) ([]entity.Datasource, error) {
-				gotLimit, gotOffset = limit, offset
-				return nil, nil
+			listFunc: func(_ context.Context, opts listpage.Params) (listpage.Result[entity.Datasource], error) {
+				got = opts
+				return listpage.Result[entity.Datasource]{}, nil
 			},
 		})
 		w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources"+tc.query, "")
-		assertBody(t, w, okEnvelopeEmptyArray)
-		if gotLimit != tc.wantLimit || gotOffset != tc.wantOff {
+		assertBody(t, w, okEnvelopeEmptyList)
+		if got.Limit != tc.wantLimit || got.Offset != tc.wantOff {
 			t.Errorf("query %q: expected limit=%d offset=%d, got limit=%d offset=%d",
-				tc.query, tc.wantLimit, tc.wantOff, gotLimit, gotOffset)
+				tc.query, tc.wantLimit, tc.wantOff, got.Limit, got.Offset)
 		}
 	}
 }
 
 func TestDatasourceList_ServiceError(t *testing.T) {
 	h := NewDatasourceHandler(&mockDatasourceService{
-		listFunc: func(_ context.Context, _, _ int) ([]entity.Datasource, error) {
-			return nil, errBoom()
+		listFunc: func(_ context.Context, _ listpage.Params) (listpage.Result[entity.Datasource], error) {
+			return listpage.Result[entity.Datasource]{}, errBoom()
 		},
 	})
 	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources", "")

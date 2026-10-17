@@ -61,8 +61,10 @@ const storedDataset = {
 beforeEach(() => {
   vi.clearAllMocks();
   instance.get.mockImplementation((url: string) => {
-    if (url === '/api/datasets') return Promise.resolve(envelope([storedDataset]));
-    if (url === '/api/datasources') return Promise.resolve(envelope([{ id: 2, name: 'sr' }]));
+    if (url === '/api/datasets')
+      return Promise.resolve(envelope({ items: [storedDataset], total: 1 }));
+    if (url === '/api/datasources')
+      return Promise.resolve(envelope({ items: [{ id: 2, name: 'sr' }], total: 1 }));
     if (url === '/api/datasources/2/tables') return Promise.resolve(envelope([{ name: 'orders' }]));
     return Promise.reject(new Error(`unexpected GET ${url}`));
   });

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/router"
 	"data-insights/internal/service/dashboard"
 
@@ -19,7 +20,7 @@ import (
 type mockDashboardService struct {
 	dashboard.Service
 
-	listFunc   func(ctx context.Context, limit, offset int) ([]entity.Dashboard, error)
+	listFunc   func(ctx context.Context, opts dashboard.ListOptions) (listpage.Result[entity.Dashboard], error)
 	getFunc    func(ctx context.Context, id string) (*entity.Dashboard, error)
 	createFunc func(ctx context.Context, in entity.DashboardCreateRequest) (*entity.Dashboard, error)
 	updateFunc func(ctx context.Context, id string, in entity.DashboardUpdateRequest) (*entity.Dashboard, error)
@@ -28,11 +29,11 @@ type mockDashboardService struct {
 	queryFunc  func(ctx context.Context, id string, in entity.DashboardQueryRequest) (*entity.DashboardQueryResult, error)
 }
 
-func (m *mockDashboardService) List(ctx context.Context, limit, offset int) ([]entity.Dashboard, error) {
+func (m *mockDashboardService) List(ctx context.Context, opts dashboard.ListOptions) (listpage.Result[entity.Dashboard], error) {
 	if m.listFunc != nil {
-		return m.listFunc(ctx, limit, offset)
+		return m.listFunc(ctx, opts)
 	}
-	return nil, nil
+	return listpage.Result[entity.Dashboard]{}, nil
 }
 
 func (m *mockDashboardService) Get(ctx context.Context, id string) (*entity.Dashboard, error) {
@@ -114,32 +115,37 @@ func strPtr(s string) *string { return &s }
 // ---------------------------------------------------------------- List
 
 func TestDashboardList_Defaults(t *testing.T) {
-	var gotLimit, gotOffset int
+	var got dashboard.ListOptions
 	h := NewDashboardHandler(&mockDashboardService{
-		listFunc: func(_ context.Context, limit, offset int) ([]entity.Dashboard, error) {
-			gotLimit, gotOffset = limit, offset
-			return nil, nil
+		listFunc: func(_ context.Context, opts dashboard.ListOptions) (listpage.Result[entity.Dashboard], error) {
+			got = opts
+			return listpage.Result[entity.Dashboard]{}, nil
 		},
 	})
 	w := serve(newDashboardTestRouter(h), http.MethodGet, "/api/dashboards", "")
-	assertBody(t, w, okEnvelopeEmptyArray)
-	if gotLimit != 100 || gotOffset != 0 {
-		t.Errorf("expected defaults limit=100 offset=0, got limit=%d offset=%d", gotLimit, gotOffset)
+	assertBody(t, w, okEnvelopeEmptyList)
+	if got.Limit != 100 || got.Offset != 0 {
+		t.Errorf("expected defaults limit=100 offset=0, got limit=%d offset=%d", got.Limit, got.Offset)
 	}
 }
 
-func TestDashboardList_ExplicitPaging(t *testing.T) {
-	var gotLimit, gotOffset int
+func TestDashboardList_ExplicitPagingAndFolder(t *testing.T) {
+	var got dashboard.ListOptions
 	h := NewDashboardHandler(&mockDashboardService{
-		listFunc: func(_ context.Context, limit, offset int) ([]entity.Dashboard, error) {
-			gotLimit, gotOffset = limit, offset
-			return []entity.Dashboard{{ID: dashID, Name: "月度经营总览", LayoutJSON: dashLayout, Status: "draft"}}, nil
+		listFunc: func(_ context.Context, opts dashboard.ListOptions) (listpage.Result[entity.Dashboard], error) {
+			got = opts
+			return listpage.Result[entity.Dashboard]{
+				Items: []entity.Dashboard{{ID: dashID, Name: "月度经营总览", LayoutJSON: dashLayout, Status: "draft"}},
+				Total: 4,
+			}, nil
 		},
 	})
-	w := serve(newDashboardTestRouter(h), http.MethodGet, "/api/dashboards?limit=2&offset=3", "")
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":[`+dashFoundJSON+`]}`)
-	if gotLimit != 2 || gotOffset != 3 {
-		t.Errorf("expected limit=2 offset=3, got limit=%d offset=%d", gotLimit, gotOffset)
+	w := serve(newDashboardTestRouter(h), http.MethodGet,
+		"/api/dashboards?limit=2&offset=3&sort=updated_at&order=desc&keyword=%E8%90%A5&folder_id="+folderID, "")
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"items":[`+dashFoundJSON+`],"total":4}}`)
+	if got.Limit != 2 || got.Offset != 3 || got.Sort != "updated_at" ||
+		got.Order != "desc" || got.Keyword != "营" || got.FolderID != folderID {
+		t.Errorf("unexpected list options: %+v", got)
 	}
 }
 
@@ -159,26 +165,26 @@ func TestDashboardList_InvalidAndClampedPaging(t *testing.T) {
 		{"?limit=1000", 1000, 0},
 	}
 	for _, tc := range cases {
-		var gotLimit, gotOffset int
+		var got dashboard.ListOptions
 		h := NewDashboardHandler(&mockDashboardService{
-			listFunc: func(_ context.Context, limit, offset int) ([]entity.Dashboard, error) {
-				gotLimit, gotOffset = limit, offset
-				return nil, nil
+			listFunc: func(_ context.Context, opts dashboard.ListOptions) (listpage.Result[entity.Dashboard], error) {
+				got = opts
+				return listpage.Result[entity.Dashboard]{}, nil
 			},
 		})
 		w := serve(newDashboardTestRouter(h), http.MethodGet, "/api/dashboards"+tc.query, "")
-		assertBody(t, w, okEnvelopeEmptyArray)
-		if gotLimit != tc.wantLimit || gotOffset != tc.wantOff {
+		assertBody(t, w, okEnvelopeEmptyList)
+		if got.Limit != tc.wantLimit || got.Offset != tc.wantOff {
 			t.Errorf("query %q: expected limit=%d offset=%d, got limit=%d offset=%d",
-				tc.query, tc.wantLimit, tc.wantOff, gotLimit, gotOffset)
+				tc.query, tc.wantLimit, tc.wantOff, got.Limit, got.Offset)
 		}
 	}
 }
 
 func TestDashboardList_ServiceError(t *testing.T) {
 	h := NewDashboardHandler(&mockDashboardService{
-		listFunc: func(_ context.Context, _, _ int) ([]entity.Dashboard, error) {
-			return nil, errBoom()
+		listFunc: func(_ context.Context, _ dashboard.ListOptions) (listpage.Result[entity.Dashboard], error) {
+			return listpage.Result[entity.Dashboard]{}, errBoom()
 		},
 	})
 	w := serve(newDashboardTestRouter(h), http.MethodGet, "/api/dashboards", "")

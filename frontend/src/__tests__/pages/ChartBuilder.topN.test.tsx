@@ -146,7 +146,7 @@ const chartDoc = (chartType: string, dimIds: string[], topN: unknown) =>
 
 const seedApis = (config: string) => {
   mockGetDatasets.mockResolvedValue(
-    mockAxiosResponse({ code: 20000, msg: 'ok', trace: '', data: [] })
+    mockAxiosResponse({ code: 20000, msg: 'ok', trace: '', data: { items: [], total: 0 } })
   );
   mockGetColumns.mockResolvedValue(
     mockAxiosResponse({
