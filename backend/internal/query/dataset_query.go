@@ -68,6 +68,12 @@ func BuildDatasetDistinctQuery(
 			Logic:    f.Logic,
 		})
 	}
+	// 与图表查询同一条算子纪律（issue #204）：别名归一化、未知算子显式拒绝。
+	normalizedFilters, err := NormalizeFilterConfigs(spec.Filters)
+	if err != nil {
+		return "", nil, err
+	}
+	spec.Filters = normalizedFilters
 	if config.Sort != nil {
 		spec.Sort = &SortConfig{Field: config.Sort.Field, Order: config.Sort.Order}
 	}

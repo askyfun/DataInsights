@@ -139,6 +139,66 @@ func (e DatasetColumnType) Valid() bool {
 	}
 }
 
+// Defines values for FilterOperator.
+const (
+	FilterOperatorBetween          FilterOperator = "between"
+	FilterOperatorEndsWith         FilterOperator = "endsWith"
+	FilterOperatorEq               FilterOperator = "eq"
+	FilterOperatorGt               FilterOperator = "gt"
+	FilterOperatorGte              FilterOperator = "gte"
+	FilterOperatorIn               FilterOperator = "in"
+	FilterOperatorIsEmptyString    FilterOperator = "isEmptyString"
+	FilterOperatorIsNotEmptyString FilterOperator = "isNotEmptyString"
+	FilterOperatorIsNotNull        FilterOperator = "isNotNull"
+	FilterOperatorIsNull           FilterOperator = "isNull"
+	FilterOperatorLike             FilterOperator = "like"
+	FilterOperatorLt               FilterOperator = "lt"
+	FilterOperatorLte              FilterOperator = "lte"
+	FilterOperatorNeq              FilterOperator = "neq"
+	FilterOperatorNotIn            FilterOperator = "notIn"
+	FilterOperatorStartsWith       FilterOperator = "startsWith"
+)
+
+// Valid indicates whether the value is a known member of the FilterOperator enum.
+func (e FilterOperator) Valid() bool {
+	switch e {
+	case FilterOperatorBetween:
+		return true
+	case FilterOperatorEndsWith:
+		return true
+	case FilterOperatorEq:
+		return true
+	case FilterOperatorGt:
+		return true
+	case FilterOperatorGte:
+		return true
+	case FilterOperatorIn:
+		return true
+	case FilterOperatorIsEmptyString:
+		return true
+	case FilterOperatorIsNotEmptyString:
+		return true
+	case FilterOperatorIsNotNull:
+		return true
+	case FilterOperatorIsNull:
+		return true
+	case FilterOperatorLike:
+		return true
+	case FilterOperatorLt:
+		return true
+	case FilterOperatorLte:
+		return true
+	case FilterOperatorNeq:
+		return true
+	case FilterOperatorNotIn:
+		return true
+	case FilterOperatorStartsWith:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OkDataStatus.
 const (
 	Ok OkDataStatus = "ok"
@@ -1254,11 +1314,16 @@ type Filter struct {
 	Id    string `json:"id"`
 
 	// Logic 与其他条件的连接逻辑（如 "and" / "or"）。
-	Logic    string      `json:"logic"`
-	Operator string      `json:"operator"`
-	Value    interface{} `json:"value"`
-	ValueEnd interface{} `json:"value_end,omitempty"`
+	Logic string `json:"logic"`
+
+	// Operator 规范算子，与 FilterConfig.op 同一词表与同一归一化表；别名先归一化再校验， 无法识别返回 20100（含字段、收到的算子、允许集合）。
+	Operator FilterOperator `json:"operator"`
+	Value    interface{}    `json:"value"`
+	ValueEnd interface{}    `json:"value_end,omitempty"`
 }
+
+// FilterOperator 规范算子，与 FilterConfig.op 同一词表与同一归一化表；别名先归一化再校验， 无法识别返回 20100（含字段、收到的算子、允许集合）。
+type FilterOperator string
 
 // HealthData defines model for HealthData.
 type HealthData struct {

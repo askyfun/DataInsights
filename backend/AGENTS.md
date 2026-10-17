@@ -129,7 +129,12 @@ go test -race ./...                        # 带竞态检测运行测试
 | `bi_share` | 分享链接 |
 | `bi_dashboard` | 仪表盘配置（layout_json 12 列栅格） |
 | `bi_query` | 查询记录（queryrecord 领域） |
-| `bi_setting` | 运行期设置（keystore 持久化 SECURITY_KEY） |
+| `bi_setting` | 运行期设置（keystore 持久化 SECURITY_KEY、示例数据集「忽略」标记） |
+
+> 内置示例数据集（R-79 / issue #174）：种子数据落在应用库的 `di_sample_orders` /
+> `di_sample_products`（迁移 00012），「加载」创建一条 `bi_datasource.is_sample = TRUE`
+> 的隐藏数据源与两个预置列定义的数据集。示例数据源不出现在列表、也不能用于用户新建
+> 数据集的取数（datasource 的预览 / 元数据端点与 dataset 的 Create/Update 均有守卫）。
 
 ## API 路由
 
