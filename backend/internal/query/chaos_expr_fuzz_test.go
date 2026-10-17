@@ -6,12 +6,16 @@ package query
 // 文本」，而表达式文本由 query 包渲染（column_index.expr → bun_builder）。放这边才能
 // 端到端断言。种子语料刻意不包含已知的绕过形态，绕过由 fuzz 自己挖。
 //
-// 两条不变式（第一条来自 expr 包文档承诺，第二条是 metamorphic 性质）：
+// 三条不变式（第一条来自 expr 包文档承诺，第二条是 metamorphic 性质，第三条钉住方言盲区）：
 //  1. 放行的表达式在「字面量之外」不得出现 SQL 注释序列 `--` / `/*` —— 包文档写的是
 //     「注释在语法层即不可达，天然拒绝」，这条断言就是那句文档的可执行版本。
 //     注意判据只看字面量之外：`'a--b'` 里的 -- 在 SQL 里是数据，不是注释，
 //     拿整段文本去查会被 fuzz 打成假阳性；
 //  2. ValidateArg 是 Validate 的子集：实参位放行 ⇒ 整体表达式也必须放行。
+//  3. 放行的表达式不得含反斜杠。这条**不能靠第 1 条代替**：本文件的涂白按 Go 的
+//     字面量语义做，而 MySQL 系对 `\'` 的理解不同——`'a\' + ' OR 1=1 -- '` 里的注释
+//     序列在 Go 语义下正好落在被涂白的字面量内，第 1 条永远看不到它（结构性失明）。
+//     所以方言盲区必须由「禁止反斜杠」这条独立不变式守住。
 
 import (
 	"strings"
@@ -73,6 +77,11 @@ func FuzzZZExprNoCommentSequence(f *testing.F) {
 	f.Add("'a--b'")
 	f.Add("'000\"'")
 	f.Add("-''-''")
+	// 反斜杠形态（方言盲区，不变式 3）：Go 侧读成三个合法字面量，MySQL 侧以 `'a\' + '`
+	// 闭合、其后的 OR 与 -- 落进代码位。围栏一律拒绝，种子负责钉住这条契约。
+	f.Add(`'a\' + ' OR 1=1 -- '+'b'`)
+	f.Add(`'a\'`)
+	f.Add(`'it\'s'`)
 	// 敌意形态（历史用例，均已拒绝）
 	f.Add("price; DROP TABLE users")
 	f.Add("pg_sleep(10)")
@@ -86,6 +95,14 @@ func FuzzZZExprNoCommentSequence(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in string) {
 		if err := expr.Validate(in); err != nil {
 			return // 拒绝即安全
+		}
+		// 不变式 3：放行的表达式不得含反斜杠。这条必须独立存在——下面的涂白判据按
+		// Go 的字面量语义做，反斜杠移位进来的注释序列恰好落在被涂白的区域内，
+		// 单靠那条判据对这一类绕过完全失明（回滚围栏守卫时本步也不会红）。
+		if strings.ContainsRune(in, '\\') {
+			t.Fatalf("expr.Validate(%q) 放行，但表达式含反斜杠：MySQL / StarRocks / ClickHouse "+
+				"把「反斜杠+引号」当转义引号，字符串边界与本解析器不一致，"+
+				"字面量内的注释序列因此在这些方言上落到 SQL 代码位", in)
 		}
 		outside := zzBlankLiterals(zzTrimmedText(in))
 		for _, bad := range []string{"--", "/*"} {

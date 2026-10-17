@@ -168,3 +168,54 @@ func TestValidateAcceptsLegitimateWithUnaryMinus(t *testing.T) {
 		}
 	}
 }
+
+// 字面量内反斜杠造成的方言盲区（安全回归测试）。
+//
+// stringLit 只认标准 SQL 的「两个连续单引号」转义，原先把反斜杠当普通字符跳过。PostgreSQL（标准
+// 模式，反斜杠不转义）里 `'a\'` 是未闭合字符串，但 MySQL / StarRocks / ClickHouse 默认
+// 把 `\'` 当转义引号，字符串边界整体右移一个引号——本包认作「数据」的那段字面量内容
+// （含 OR 与 --）于是落到 SQL 代码位上。包文档承诺注释「在语法层即不可达」，这条不变式
+// 不该只在一种方言上成立，所以含反斜杠的字面量一律拒绝：虚拟字段表达式里没有正当用途，
+// 而两侧解析器对它的理解并不一致。
+func TestValidateRejectsBackslashInStringLiteral(t *testing.T) {
+	rejected := []struct {
+		name string
+		expr string
+	}{
+		// 核心绕过：本包解析成「三个字面量 + 两次加法」，MySQL 系解析成
+		// 字面量 'a\' + ' 之后紧跟代码位的 OR 1=1 -- 。
+		{name: "反斜杠移位使注释逃逸", expr: `'a\' + ' OR 1=1 -- '+'b'`},
+		{name: "反斜杠紧贴闭合引号", expr: `'a\'`},
+		{name: "用反斜杠转义单引号", expr: `'it\'s'`},
+		{name: "反斜杠开头", expr: `'\abc'`},
+		{name: "括号内一元位反斜杠", expr: `(-'a\' )`},
+	}
+	for _, c := range rejected {
+		t.Run(c.name, func(t *testing.T) {
+			err := Validate(c.expr)
+			if err == nil {
+				t.Fatalf("Validate(%q) = nil, 含反斜杠的字面量必须被拒绝", c.expr)
+			}
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Validate(%q) = %v, want errors.Is(err, ErrInvalid)", c.expr, err)
+			}
+		})
+	}
+}
+
+// 防回归（改过头）：标准 SQL 的字面量写法必须继续放行，
+// 尤其「两个连续单引号」这种本项目唯一的引号转义写法，不能被反斜杠守卫误伤。
+func TestValidateAcceptsLegitimateStringLiterals(t *testing.T) {
+	accepted := []string{
+		`'abc'`,
+		`'2026-01-01'`,
+		`'it''s'`,
+		`''`,
+		`'--'`,
+	}
+	for _, expr := range accepted {
+		if err := Validate(expr); err != nil {
+			t.Errorf("Validate(%q) = %v, want nil", expr, err)
+		}
+	}
+}

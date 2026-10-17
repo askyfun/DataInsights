@@ -229,6 +229,15 @@ func (p *parser) stringLit() error {
 			return p.fail("unterminated string literal")
 		}
 		r := p.src[p.pos]
+		if r == '\\' {
+			// 反斜杠必须在这里拒绝，而不是当普通字符跳过：本解析器只认标准 SQL 的
+			// '' 转义，而 MySQL / StarRocks / ClickHouse 默认把 `\'` 当转义引号。
+			// 同一串文本在两种方言下的字符串边界不同——`'a\' + ' OR 1=1 -- '` 在
+			// Go 侧是三个合法字面量，在 MySQL 侧却以 `'a\' + '` 闭合，其后的
+			// `OR 1=1 --` 便从「数据」翻成「代码」，注释红线随之失效。
+			// 字面量内容没有任何正当用途需要反斜杠，故一律拒绝，不与方言赌一致性。
+			return p.fail("backslash is not allowed in string literal")
+		}
 		if r == '\'' {
 			if p.pos+1 < len(p.src) && p.src[p.pos+1] == '\'' {
 				p.pos += 2
