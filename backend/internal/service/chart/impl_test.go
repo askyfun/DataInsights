@@ -340,6 +340,91 @@ func TestChartServiceQuery_EmptyFilterFieldRejected(t *testing.T) {
 	}
 }
 
+// TestChartServiceQuery_NormalizesFilterOperatorAliases 验证别名在进入查询链路前
+// 已收成规范算子（issue #204）：`>=` / `GT` / `NOT IN` 不得原样下传。
+func TestChartServiceQuery_NormalizesFilterOperatorAliases(t *testing.T) {
+	service, _, executor := newQueryTestService()
+
+	_, err := service.Query(context.Background(), &entity.ChartQueryRequest{
+		DatasetID: 1,
+		ChartType: "table",
+		Dims:      []string{"region"},
+		Metrics:   []entity.MetricConfig{{Field: "amount", Agg: "sum", Alias: "amount"}},
+		Filters: []entity.Filter{
+			{Field: "amount", Operator: ">=", Value: 10},
+			{Field: "status", Operator: "NOT IN", Value: []any{"void"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if executor.lastReq == nil {
+		t.Fatal("expected executor to run")
+	}
+	got := executor.lastReq.Filters
+	if got[0].Op != query.FilterGte || got[1].Op != query.FilterNotIn {
+		t.Fatalf("normalized ops = %q, %q; want gte, notIn", got[0].Op, got[1].Op)
+	}
+}
+
+// TestChartServiceQuery_UnknownFilterOperatorRejected 钉住「未知算子显式拒绝」：
+// 20100 业务错误、错误里能定位字段与收到的算子、执行器不得被调用。
+func TestChartServiceQuery_UnknownFilterOperatorRejected(t *testing.T) {
+	service, _, executor := newQueryTestService()
+
+	_, err := service.Query(context.Background(), &entity.ChartQueryRequest{
+		DatasetID: 1,
+		ChartType: "table",
+		Dims:      []string{"region"},
+		Metrics:   []entity.MetricConfig{{Field: "amount", Agg: "sum", Alias: "amount"}},
+		Filters:   []entity.Filter{{Field: "amount", Operator: "gteee", Value: 10}},
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown filter operator")
+	}
+	bizErr, ok := err.(router.BusinessError)
+	if !ok {
+		t.Fatalf("expected router.BusinessError, got %T: %v", err, err)
+	}
+	if bizErr.Code != response.CodeBadRequest {
+		t.Fatalf("expected CodeBadRequest %d, got %d", response.CodeBadRequest, bizErr.Code)
+	}
+	for _, want := range []string{`"gteee"`, `"amount"`, "allowed operators are"} {
+		if !strings.Contains(bizErr.Message, want) {
+			t.Fatalf("error message %q missing %q", bizErr.Message, want)
+		}
+	}
+	if executor.lastReq != nil {
+		t.Fatal("executor must not run for a rejected request")
+	}
+}
+
+// TestChartServiceGetData_StoredUnknownOperatorRejected 钉住存量数据的迁移期策略：
+// 已落库图表 config 里的非法算子走错误信封（20100 + 可定位原因），既不静默放宽，
+// 也不在 builder 里退化成 0 行。仪表盘侧由 queryBlock 收敛成块级错误。
+func TestChartServiceGetData_StoredUnknownOperatorRejected(t *testing.T) {
+	config := `{"version":1,"chartType":"bar","query":{"dimensionGroups":[{"id":"dim-1","fields":["region"]}],"metricGroups":[{"id":"met-1","fields":["amount"]}],"filters":[{"fieldId":"region","operator":"gteee","value":"华北","logic":"and"}]},"fieldMeta":{"amount":{"aggregation":"sum","alias":"Revenue"}}}`
+	service, _, executor := newGetDataTestService(config)
+
+	_, err := service.GetData(context.Background(), 7)
+	if err == nil {
+		t.Fatal("expected stored unknown operator to be rejected")
+	}
+	bizErr, ok := err.(router.BusinessError)
+	if !ok {
+		t.Fatalf("expected router.BusinessError, got %T: %v", err, err)
+	}
+	if bizErr.Code != response.CodeBadRequest {
+		t.Fatalf("expected CodeBadRequest %d, got %d", response.CodeBadRequest, bizErr.Code)
+	}
+	if !strings.Contains(bizErr.Message, `"gteee"`) || !strings.Contains(bizErr.Message, `"region"`) {
+		t.Fatalf("error message lacks locatable details: %q", bizErr.Message)
+	}
+	if executor.called {
+		t.Fatal("executor must not run for a rejected stored config")
+	}
+}
+
 // TestBuildQuerySpecFromEntityRequest 验证 service 层已统一先进入 QuerySpec，再下沉回兼容请求。
 func TestBuildQuerySpecFromEntityRequest(t *testing.T) {
 	spec := buildQuerySpecFromEntityRequest(&entity.ChartQueryRequest{

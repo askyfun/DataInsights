@@ -312,6 +312,11 @@ func (s *chartService) executeQueryOnConn(
 	if err := validateFilterFields(req.Filters); err != nil {
 		return entity.ChartDataResult{}, err
 	}
+	// 算子先归一化再进查询链路（issue #204）：`>=`/`GT`/`is null` 一类别名收成
+	// 规范算子；无法识别的写法显式 400，绝不静默退化成等值比较。
+	if err := normalizeFilterOperators(req.Filters); err != nil {
+		return entity.ChartDataResult{}, router.NewBusinessError(response.CodeBadRequest, err.Error())
+	}
 
 	executor := s.executorFactory(conn, dataset, dsModel)
 	// v2 协议（spec_version=2）走槽位保留路径：ChartSpecFromRequestV2 →
@@ -909,6 +914,25 @@ func validateFilterFields(filters []entity.Filter) error {
 		if strings.TrimSpace(f.Field) == "" {
 			return router.NewBusinessError(response.CodeBadRequest, "filter field is required")
 		}
+	}
+	return nil
+}
+
+// normalizeFilterOperators 就地归一化请求里的过滤算子。无法识别时返回
+// *query.FilterOperatorError（含字段、收到的算子、允许集合），由调用方转成 400。
+// 存量图表 config 读到非法算子也走这里：显式报错 + 可定位原因，既不静默放宽，
+// 也不让同一盘里的其他块陪葬（仪表盘按块收敛成块级错误）。
+func normalizeFilterOperators(filters []entity.Filter) error {
+	for i := range filters {
+		op, ok := query.NormalizeFilterOperator(filters[i].Operator)
+		if !ok {
+			return &query.FilterOperatorError{
+				Index:    i,
+				Field:    filters[i].Field,
+				Operator: filters[i].Operator,
+			}
+		}
+		filters[i].Operator = string(op)
 	}
 	return nil
 }

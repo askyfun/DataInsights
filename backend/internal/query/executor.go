@@ -68,6 +68,12 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		ast.SourceType = sourceType
 	}
 
+	// 算子归一化 + 白名单校验（issue #204）：service 层已归一化请求，这里兜住
+	// 直接构造 AST 的调用方——未知算子显式报错，而不是落到 builder 的恒假谓词。
+	if err := ast.NormalizeFilterOperators(); err != nil {
+		return ExecutorResult{}, err
+	}
+
 	// 负载层统一用列名（展示语义）。wire 上维度/指标/过滤引用的是**列 ID**（稳定，
 	// 改名不断链），而 SQL 输出别名与响应键都是列名；这里把请求携带的平铺参数就地
 	// 翻译一次，下游处理器与分页表格无需感知列 ID。未命中列 ID 的条目原样保留
@@ -265,8 +271,8 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 
 		return ExecutorResult{
 			Data: &TableResponse{
-				Columns:    columns,
-				Data:       orderedRows,
+				Columns: columns,
+				Data:    orderedRows,
 				Pagination: TablePagination{
 					Page:       page,
 					PageSize:   pageSize,
