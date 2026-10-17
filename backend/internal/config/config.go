@@ -49,8 +49,12 @@ type Config struct {
 	// StaticDir 是前端构建产物的目录。留空表示本进程只提供 API，
 	// 页面由别的进程提供（本地开发时的 Vite dev server）。
 	StaticDir string
-	// ExtractDatasourceID 指定作为「抽取数据集统一存储」的数据源 id（issue #118 预留）。
-	// 0 = 未启用：抽取存储数据源不存在，所有抽取守卫退化为放行。
+	// ExtractDatasourceID 指定作为「本地文件上传统一存储」的数据源 id。
+	//
+	// 0 = 未显式指定。这是默认形态，**不是「功能关闭」**：装配期由
+	// extract.Resolve 自举出一条复用应用自身 PostgreSQL 的隐藏存储（issue #201），
+	// 所以本地文件上传开箱可用。只有自举失败才会真正没有存储——那时上传入口置灰，
+	// 而平台其余部分照常（抽取存储是旁路能力，不该让整个进程起不来）。
 	ExtractDatasourceID int
 	// Alert 是指标预警（issue #155）的运行期配置：评估间隔 + SMTP 通知。
 	Alert AlertConfig

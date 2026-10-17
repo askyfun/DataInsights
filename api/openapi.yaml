@@ -559,12 +559,18 @@ paths:
     post:
       tags:
         - datasets
-      summary: 本地文件上传建数据集（issue #138）
+      summary: 本地文件上传建数据集（issue #138 / R-85）
       description: |
-        multipart/form-data 上传 .csv/.xlsx（≤50MB），解析、列类型推断后落
-        EXTRACT_DATASOURCE_ID 指定的抽取存储（表 di_extract_<id>），并注册
-        mode=extract 数据集。data 为新建的数据集实体。未配置抽取存储时
-        Envelope.code=20100 并提示管理员配置。
+        multipart/form-data 上传 .csv/.xlsx（≤50MB / ≤1000000 行 / ≤1000 列），
+        解析、列类型推断后落抽取存储（表 di_extract_<id>），并注册 mode=extract
+        数据集。data 为新建的数据集实体。
+
+        抽取存储零配置（R-85）：未设置 EXTRACT_DATASOURCE_ID 时，平台自举出复用
+        应用自身 PostgreSQL 的隐藏存储，本接口开箱可用。仅当自举失败（应用数据库
+        不可达）才返回 Envelope.code=20100。
+
+        列类型推断只认同形态：某一列出现千分位、百分号、货币符号等脏值即整列退回
+        字符串，不做「尽力解析」——把 "1,234" 猜成 1234 是在替用户编数据。
       operationId: importDatasetFile
       requestBody:
         required: true
@@ -577,7 +583,9 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: 上传的 .csv 或 .xlsx 文件（≤50MB）
+                  description: |
+                    上传的 .csv 或 .xlsx 文件。≤50MB、≤1000000 行、≤1000 列。
+                    超限时返回 20100，且错误信息指明是哪一项超了。
                 name:
                   type: string
                   description: 数据集名；缺省回落文件名（不含扩展名）
@@ -610,7 +618,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: 替换用的 .csv 或 .xlsx 文件（≤50MB）
+                  description: 替换用的 .csv 或 .xlsx 文件（≤50MB、≤1000000 行、≤1000 列）
       responses:
         '200':
           description: HTTP 恒 200；业务结果由 Envelope.code 表达

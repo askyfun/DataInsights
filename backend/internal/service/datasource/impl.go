@@ -53,6 +53,12 @@ type Service interface {
 	// List hides that datasource from the regular list (it is infrastructure,
 	// not a user-facing connection); GetByID still resolves it.
 	SetExtractDatasourceID(id int)
+
+	// SetExtractGuard injects the whole extract guard (R-85). Prefer it over
+	// SetExtractDatasourceID: it also carries whether the storage was
+	// self-provisioned, which the guard's own error messages need in order to
+	// tell the user where the storage came from.
+	SetExtractGuard(g extract.Guard)
 }
 
 // datasourceService implements the Service interface
@@ -81,6 +87,11 @@ func (s *datasourceService) SetSecurityKey(key []byte) {
 // SetExtractDatasourceID 注入抽取存储数据源（issue #118 预留，0=未启用）。
 func (s *datasourceService) SetExtractDatasourceID(id int) {
 	s.extract = extract.Guard{DatasourceID: id}
+}
+
+// SetExtractGuard 注入完整守卫（含自举标记，R-85）。
+func (s *datasourceService) SetExtractGuard(g extract.Guard) {
+	s.extract = g
 }
 
 // List returns all datasources with pagination

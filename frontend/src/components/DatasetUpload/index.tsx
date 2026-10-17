@@ -22,6 +22,11 @@ const { Text } = Typography;
 
 // 与后端 extract.MaxUploadBytes（50 << 20）对齐。客户端只做即时反馈，权威校验仍在后端。
 export const MAX_UPLOAD_BYTES = 50 << 20;
+// 与后端 extract.MaxUploadRows 对齐（R-85）。行数上限与体积上限是两件事：
+// 50MB 的窄表可以是上百万行，摄入时间随行数线性增长，拖住的是首次上传的等待。
+export const MAX_UPLOAD_ROWS = 1_000_000;
+// 与后端 extract.MaxUploadColumns 对齐。每列每行占一个占位符，宽表会撞驱动上限。
+export const MAX_UPLOAD_COLUMNS = 1000;
 const ACCEPT = '.csv,.xlsx';
 
 // 推断只会产出标量类型；array/map 不在可选范围。
@@ -29,6 +34,42 @@ const REVIEW_TYPES = ['string', 'integer', 'float', 'boolean', 'date', 'datetime
 
 function errMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+// 后端的超限文案是英文技术表述（"file has N rows, which exceeds the 1000000
+// row limit"）。这里认出它并换成带操作建议的中文提示——用户看到"超了上限"
+// 之后需要知道下一步做什么，而不是知道自己违规了。
+//
+// 刻意只匹配后端稳定的数字与关键词（上限常量在本文件里定义，与后端同源），
+// 不匹配整句英文：后端改措辞不该让这里的识别静默失效。
+function uploadLimitHint(error: unknown): string | null {
+  const msg = error instanceof Error ? error.message : '';
+  if (!msg) return null;
+  if (msg.includes('row limit')) return 'rows';
+  if (msg.includes('column limit')) return 'columns';
+  return null;
+}
+
+/** 把上传错误翻成可操作提示；识别不出的错误原样透出（不吞信息）。 */
+function uploadErrorMessage(
+  error: unknown,
+  intl: { formatMessage: (d: { id: string }, v?: Record<string, unknown>) => string }
+): string {
+  const fallback = intl.formatMessage({ id: 'common.error' });
+  const kind = uploadLimitHint(error);
+  if (kind === 'rows') {
+    return intl.formatMessage(
+      { id: 'dataset.upload.tooManyRows' },
+      { rows: MAX_UPLOAD_ROWS.toLocaleString() }
+    );
+  }
+  if (kind === 'columns') {
+    return intl.formatMessage(
+      { id: 'dataset.upload.tooManyColumns' },
+      { cols: MAX_UPLOAD_COLUMNS }
+    );
+  }
+  return errMessage(error, fallback);
 }
 
 function isSupported(file: File): boolean {
@@ -89,7 +130,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFile, disabled, ti
         {intl.formatMessage({ id: titleId ?? 'dataset.upload.dragText' })}
       </p>
       <p className="ant-upload-hint">
-        {intl.formatMessage({ id: 'dataset.upload.hint' }, { mb: MAX_UPLOAD_BYTES >> 20 })}
+        {intl.formatMessage(
+          { id: 'dataset.upload.hint' },
+          {
+            mb: MAX_UPLOAD_BYTES >> 20,
+            rows: MAX_UPLOAD_ROWS.toLocaleString(),
+            cols: MAX_UPLOAD_COLUMNS,
+          }
+        )}
       </p>
       {error && <Text type="danger">{error}</Text>}
     </Upload.Dragger>
@@ -158,7 +206,7 @@ const DatasetUploadModal: React.FC<DatasetUploadModalProps> = ({
       setInferred(cols);
       setStep(1);
     } catch (error) {
-      message.error(errMessage(error, intl.formatMessage({ id: 'common.error' })));
+      message.error(uploadErrorMessage(error, intl));
     } finally {
       setUploading(false);
     }
@@ -328,7 +376,7 @@ export const DatasetReplaceModal: React.FC<DatasetReplaceModalProps> = ({
       onReplaced(resp.data.data);
       setFile(null);
     } catch (error) {
-      message.error(errMessage(error, intl.formatMessage({ id: 'common.error' })));
+      message.error(uploadErrorMessage(error, intl));
     } finally {
       setLoading(false);
     }

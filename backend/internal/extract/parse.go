@@ -20,6 +20,22 @@ import (
 // share one number.
 const MaxUploadBytes = 50 << 20
 
+// MaxUploadRows caps the data rows (header excluded) of a single upload.
+// The byte cap alone is not enough: a 50MB CSV of one-character cells is
+// millions of rows, and ingestion issues one INSERT per 500 rows, so the work
+// (and the wall-clock a user waits on a first upload) scales with row count
+// while the file stays small. 1,000,000 rows keeps the flagship path fast
+// without rejecting real-world spreadsheets. Issue #201 requires the limit to
+// be stated to users, not just enforced.
+const MaxUploadRows = 1_000_000
+
+// MaxUploadColumns caps the column count of a single upload. Each column costs
+// one placeholder per row per batch, so a very wide sheet can exceed the
+// driver's bind-parameter ceiling (PostgreSQL caps a statement at 65535
+// parameters; 500-row batches already divide that by 500). Rejecting early
+// gives a clear message instead of a driver-level error deep in ingestion.
+const MaxUploadColumns = 1000
+
 // Kind identifies the accepted upload formats.
 type Kind string
 

@@ -18,6 +18,7 @@ import (
 
 	"data-insights/internal/config"
 	"data-insights/internal/database"
+	"data-insights/internal/extract"
 	"data-insights/internal/keystore"
 	"data-insights/internal/migration/columnids"
 	"data-insights/internal/response"
@@ -137,8 +138,17 @@ func main() {
 
 	registerHealthRoute(r)
 
+	// 抽取存储装配（R-85 / issue #201）：EXTRACT_DATASOURCE_ID 显式配了就用它；
+	// 没配则自举出「复用应用自身 PostgreSQL」的隐藏数据源，让本地文件上传开箱可用。
+	// 必须在路由装配前完成——extract 数据源 id 是各service 的构造参数。
+	extractGuard := extract.Resolve(context.Background(), extract.SelfProvisioner{
+		DB:           db.DB,
+		DatabaseURL:  c.Database.Url,
+		ConfiguredID: c.ExtractDatasourceID,
+	})
+
 	// 预警邮件通知：SMTP_HOST 未配置传 nil（评估照常跑，触发记录说明未通知）。
-	alertSvc := SetupRoutes(r, db, securityKey, c.ExtractDatasourceID, c.Database.Url, newEmailNotifier(c.Alert))
+	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, c.Database.Url, newEmailNotifier(c.Alert))
 
 	// 预警评估器：后台 goroutine 定时轮询，随主进程退出（evalCancel）而结束。
 	evalCtx, evalCancel := context.WithCancel(context.Background())
