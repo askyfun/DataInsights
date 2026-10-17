@@ -30,13 +30,28 @@ type ImportRequest struct {
 	Data     []byte
 }
 
+// errExtractStorageUnavailable 是抽取存储彻底不可用时的唯一出口。
+//
+// 正常部署下这条路走不到：启动期会自举出抽取存储（issue #201），Guard 恒 enabled。
+// 仍走到这里只有一种情形——自举本身失败（应用数据库连接串缺失或那条隐藏数据源行
+// 写不进去），此时上传确实无法完成。
+//
+// 文案刻意不提 EXTRACT_DATASOURCE_ID 作为「你要去配这个」的首选动作：零配置是
+// 默认形态，让用户以为自己漏配了某个必填项是误导。真正的兜底动作是排查应用自身
+// 数据库的连通性，那才是此刻唯一真正坏掉的东西。
+func errExtractStorageUnavailable() error {
+	return router.NewBusinessError(response.CodeBadRequest,
+		"upload storage is unavailable: this app could not prepare its internal storage for uploaded files. "+
+			"Check that the application's own database (DATABASE_URL) is reachable, "+
+			"or set EXTRACT_DATASOURCE_ID to a datasource that should hold uploaded data")
+}
+
 // ImportFile parses an upload, infers its columns and lands the data in the
 // designated extract storage datasource as table di_extract_<id>, registering
 // the dataset row (mode=extract) that points at it.
 func (s *datasetService) ImportFile(ctx context.Context, req ImportRequest) (*entity.Dataset, error) {
 	if !s.extract.Enabled() {
-		return nil, router.NewBusinessError(response.CodeBadRequest,
-			"extract storage is not configured: set EXTRACT_DATASOURCE_ID to the datasource that should hold uploaded data")
+		return nil, errExtractStorageUnavailable()
 	}
 
 	cols, rows, err := parseUpload(req)
@@ -83,8 +98,7 @@ func (s *datasetService) ImportFile(ctx context.Context, req ImportRequest) (*en
 // working; removed columns drop out and new columns get fresh ids.
 func (s *datasetService) ReplaceFile(ctx context.Context, id int, req ImportRequest) (*entity.Dataset, error) {
 	if !s.extract.Enabled() {
-		return nil, router.NewBusinessError(response.CodeBadRequest,
-			"extract storage is not configured: set EXTRACT_DATASOURCE_ID to the datasource that should hold uploaded data")
+		return nil, errExtractStorageUnavailable()
 	}
 
 	existing, err := s.getDatasetModelFn(ctx, id)
@@ -156,6 +170,11 @@ func (s *datasetService) ReplaceFile(ctx context.Context, id int, req ImportRequ
 
 // parseUpload validates the upload envelope and returns physical columns plus
 // the normalized rows.
+//
+// The limits are checked in a fixed order (bytes → columns → rows) so the
+// message names the most fundamental thing that is wrong: telling a user their
+// 60MB file has too many rows would be nonsense, and so would telling them a
+// 2-column file is too wide.
 func parseUpload(req ImportRequest) ([]extract.Column, [][]string, error) {
 	if len(req.Data) == 0 {
 		return nil, nil, router.NewBusinessError(response.CodeBadRequest, "uploaded file is empty")
@@ -167,6 +186,14 @@ func parseUpload(req ImportRequest) ([]extract.Column, [][]string, error) {
 	table, err := extract.Parse(req.Filename, req.Data)
 	if err != nil {
 		return nil, nil, router.NewBusinessError(response.CodeBadRequest, err.Error())
+	}
+	if n := len(table.Header); n > extract.MaxUploadColumns {
+		return nil, nil, router.NewBusinessError(response.CodeBadRequest,
+			fmt.Sprintf("file has %d columns, which exceeds the %d column limit", n, extract.MaxUploadColumns))
+	}
+	if n := len(table.Rows); n > extract.MaxUploadRows {
+		return nil, nil, router.NewBusinessError(response.CodeBadRequest,
+			fmt.Sprintf("file has %d rows, which exceeds the %d row limit", n, extract.MaxUploadRows))
 	}
 	cols := extract.AssignPhysical(extract.InferColumns(table))
 	if len(cols) == 0 {

@@ -55,6 +55,10 @@ type Service interface {
 	// SetExtractDatasourceID injects the designated extract storage datasource
 	// (issue #118 reservation, EXTRACT_DATASOURCE_ID). 0 = disabled.
 	SetExtractDatasourceID(id int)
+
+	// SetExtractGuard injects the whole extract guard (R-85), including the
+	// self-provisioned flag that the storage's error messages rely on.
+	SetExtractGuard(g extract.Guard)
 }
 
 // datasetService implements the Service interface
@@ -71,7 +75,10 @@ type datasetService struct {
 // NewService creates a new dataset service
 func NewService(db *bun.DB) Service {
 	service := &datasetService{db: db}
-	service.connectFn = service.connect
+	// connectFn 指向真实拨号实现（不是 service.connect，否则 connect 委派回
+	// connectFn 会无限递归）。connect 负责在拨号前解口令，真实拨号逻辑放这里，
+	// 于是「换掉 connectFn」既能拦到 connect 的调用，也能拦到直连 connectFn 的路径。
+	service.connectFn = service.dialWithPassword
 	service.dialFn = service.dial
 	service.getDatasetModelFn = service.getDatasetModel
 	service.getDatasourceModelFn = service.getDatasourceModel
@@ -483,7 +490,20 @@ func (s *datasetService) getDatasourceModel(ctx context.Context, id int) (*model
 
 // connect resolves the stored password (decrypt / legacy auto-upgrade) before
 // dialing, so encrypted credentials work on every chart/dataset query path.
+//
+// It delegates to connectFn when one is installed: that indirection is the seam
+// every test in this package replaces, so the real dial must live behind it
+// (dialWithPassword). A hand-built service with no connectFn still works —
+// it falls through to the same logic inline.
 func (s *datasetService) connect(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
+	if s.connectFn != nil {
+		return s.connectFn(ctx, ds)
+	}
+	return s.dialWithPassword(ctx, ds)
+}
+
+// dialWithPassword decrypts (or legacy-upgrades) the stored password, then dials.
+func (s *datasetService) dialWithPassword(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
 	password, err := dsservice.ResolvePassword(ctx, s.db, ds, s.key)
 	if err != nil {
 		return nil, err
@@ -499,6 +519,11 @@ func (s *datasetService) SetSecurityKey(key []byte) {
 // SetExtractDatasourceID 注入抽取存储数据源守卫（issue #118 预留，0=未启用）。
 func (s *datasetService) SetExtractDatasourceID(id int) {
 	s.extract = extract.Guard{DatasourceID: id}
+}
+
+// SetExtractGuard 注入完整守卫（含自举标记，R-85）。
+func (s *datasetService) SetExtractGuard(g extract.Guard) {
+	s.extract = g
 }
 
 func (s *datasetService) dial(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {

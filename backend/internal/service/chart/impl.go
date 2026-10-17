@@ -53,6 +53,10 @@ type Service interface {
 	// SetExtractDatasourceID injects the designated extract storage datasource
 	// (issue #118 reservation, EXTRACT_DATASOURCE_ID). 0 = disabled.
 	SetExtractDatasourceID(id int)
+
+	// SetExtractGuard injects the whole extract guard (R-85), including the
+	// self-provisioned flag.
+	SetExtractGuard(g extract.Guard)
 }
 
 // chartService implements the Service interface
@@ -821,6 +825,11 @@ func (s *chartService) SetSecurityKey(key []byte) {
 // SetExtractDatasourceID 注入抽取存储数据源（issue #118 预留，0=未启用）。
 func (s *chartService) SetExtractDatasourceID(id int) {
 	s.extract = extract.Guard{DatasourceID: id}
+}
+
+// SetExtractGuard 注入完整守卫（含自举标记，R-85）。
+func (s *chartService) SetExtractGuard(g extract.Guard) {
+	s.extract = g
 }
 
 func (s *chartService) dial(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {

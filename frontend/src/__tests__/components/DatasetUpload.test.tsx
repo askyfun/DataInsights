@@ -3,12 +3,15 @@
 //   - 上传成功后展示后端推断的列，允许改类型/角色后「开始分析」；
 //   - 未改动则不多发一次 updateColumns（避免无意义写入）。
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { message as antdMessage } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dataset, DatasetColumn } from '../../api';
 import DatasetUploadModal, {
   DatasetReplaceModal,
   MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_COLUMNS,
+  MAX_UPLOAD_ROWS,
 } from '../../components/DatasetUpload';
 import { messages } from '../../i18n/useLocale';
 
@@ -157,5 +160,77 @@ describe('DatasetReplaceModal', () => {
 
     await waitFor(() => expect(onReplaced).toHaveBeenCalledWith(dataset));
     expect(postedUrls()).toContain('/api/datasets/7/replace');
+  });
+});
+
+// R-85：上限口径与错误可区分性。
+//
+// 错误提示断言的是 message.error 的入参而不是 DOM：antd 静态 message 在
+// tests/setup.ts 里被统一短路成空函数（它渲染在 testing-library 的树外 root，
+// 且 rc-motion 的真实定时器会在收尾后触发伪影），断言 DOM 只会永远失败。
+describe('上传上限（R-85）', () => {
+  // 收集本次用例里 message.error 收到的文案。
+  const errorTexts = (): string[] =>
+    (antdMessage.error as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+
+  it('拖拽区同时写明体积、行数与列数上限', async () => {
+    wrap(<DatasetUploadModal open onCancel={vi.fn()} onCreated={vi.fn()} />);
+
+    // 三项上限必须同时出现在提示里：只写体积会让用户以为大文件总是能传。
+    const hint = await screen.findByText(/≤\s*50MB/);
+    expect(hint.textContent).toContain(MAX_UPLOAD_ROWS.toLocaleString());
+    expect(hint.textContent).toContain(String(MAX_UPLOAD_COLUMNS));
+  });
+
+  it('后端报行数超限时给出可区分的中文提示（不是通用失败）', async () => {
+    instance.post.mockImplementation((url: string) => {
+      if (url === '/api/datasets/import') {
+        return Promise.reject(
+          new Error('file has 1200000 rows, which exceeds the 1000000 row limit')
+        );
+      }
+      return Promise.reject(new Error(`unexpected POST ${url}`));
+    });
+    wrap(<DatasetUploadModal open onCancel={vi.fn()} onCreated={vi.fn()} />);
+
+    selectFile(makeFile('big.csv'));
+    fireEvent.click(screen.getByRole('button', { name: '上传并解析' }));
+
+    // 提示必须包含可操作的下一步（拆分/筛选），而不是把后端英文甩给用户。
+    await waitFor(() => expect(errorTexts().join('\n')).toMatch(/1,000,000\s*行/));
+    expect(errorTexts().join('\n')).not.toMatch(/row limit/);
+  });
+
+  it('后端报列数超限时给出可区分的中文提示', async () => {
+    instance.post.mockImplementation((url: string) => {
+      if (url === '/api/datasets/import') {
+        return Promise.reject(
+          new Error('file has 1500 columns, which exceeds the 1000 column limit')
+        );
+      }
+      return Promise.reject(new Error(`unexpected POST ${url}`));
+    });
+    wrap(<DatasetUploadModal open onCancel={vi.fn()} onCreated={vi.fn()} />);
+
+    selectFile(makeFile('wide.csv'));
+    fireEvent.click(screen.getByRole('button', { name: '上传并解析' }));
+
+    await waitFor(() => expect(errorTexts().join('\n')).toMatch(/1000\s*列/));
+  });
+
+  it('无法识别的错误原样透出，不被吞成通用失败', async () => {
+    instance.post.mockImplementation((url: string) => {
+      if (url === '/api/datasets/import') {
+        return Promise.reject(new Error('relation "di_extract_9" does not exist'));
+      }
+      return Promise.reject(new Error(`unexpected POST ${url}`));
+    });
+    wrap(<DatasetUploadModal open onCancel={vi.fn()} onCreated={vi.fn()} />);
+
+    selectFile(makeFile('data.csv'));
+    fireEvent.click(screen.getByRole('button', { name: '上传并解析' }));
+
+    // 吞掉原始错误等于把排查线索也一起吞掉。
+    await waitFor(() => expect(errorTexts().join('\n')).toMatch(/does not exist/));
   });
 });

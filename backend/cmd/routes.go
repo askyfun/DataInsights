@@ -5,6 +5,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"data-insights/internal/handler"
+	"data-insights/internal/extract"
 	"data-insights/internal/middleware"
 	"data-insights/internal/router"
 	"data-insights/internal/service/alert"
@@ -18,23 +19,24 @@ import (
 
 // SetupRoutes configures all routes.
 //
-// extractDatasourceID 是抽取存储数据源 id（EXTRACT_DATASOURCE_ID，issue #118 预留，
-// 0=未启用）：数据源列表隐藏它、数据集创建/改指守卫拒绝它、图表查询对 extract
-// 模式数据集显式报错。
+// extractGuard 是抽取存储守卫（issue #118 预留 + R-85 自举）：数据源列表隐藏它、
+// 数据集创建/改指守卫拒绝它、图表查询对 extract 模式数据集显式报错。
+// 它由 main.go 用 extract.Resolve 装配（显式配置优先，否则自举出应用自身的 PG），
+// routes.go 不读环境变量。
 //
-// 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
-// notifier 也由 main 注入，routes.go 不读环境变量）。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourceID int, notifier alert.Notifier) alert.Service {
+// 返回预警 service，供main.go 在装配后启动后台评估 goroutine（评估间隔与
+// notifier 也由 main 注入）。
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, notifier alert.Notifier) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
-	dsSvc.SetExtractDatasourceID(extractDatasourceID)
+	dsSvc.SetExtractGuard(extractGuard)
 	dsDatasetSvc := dataset.NewService(db)
 	dsDatasetSvc.SetSecurityKey(securityKey)
-	dsDatasetSvc.SetExtractDatasourceID(extractDatasourceID)
+	dsDatasetSvc.SetExtractGuard(extractGuard)
 	dsChartSvc := chart.NewService(db)
 	dsChartSvc.SetSecurityKey(securityKey)
-	dsChartSvc.SetExtractDatasourceID(extractDatasourceID)
+	dsChartSvc.SetExtractGuard(extractGuard)
 	dsQuerySvc := queryrecord.NewService(db)
 	dsDashboardSvc := dashboard.NewService(db)
 	// 盘级批量取数（POST /api/dashboards/{id}/query）逐块复用图表取数管道：

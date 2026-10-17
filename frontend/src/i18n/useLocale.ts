@@ -136,9 +136,11 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'dataset.upload.title': '本地文件上传',
     'dataset.upload.dragText': '点击或拖拽文件到此处上传',
     'dataset.upload.emptyTitle': '拖拽 Excel/CSV 到此，立即开始分析',
-    'dataset.upload.hint': '支持 .csv / .xlsx，单个文件 ≤ {mb}MB',
+    'dataset.upload.hint': '支持 .csv / .xlsx，单个文件 ≤ {mb}MB、≤ {rows} 行、≤ {cols} 列',
     'dataset.upload.invalidType': '仅支持 .csv 或 .xlsx 文件',
     'dataset.upload.tooLarge': '文件超过 {mb}MB 上限',
+    'dataset.upload.tooManyRows': '文件超过 {rows} 行上限，请先拆分或筛选后再上传',
+    'dataset.upload.tooManyColumns': '文件超过 {cols} 列上限，请先精简列后再上传',
     'dataset.upload.namePlaceholder': '数据集名称（缺省用文件名）',
     'dataset.upload.submit': '上传并解析',
     'dataset.upload.reviewHint': '已自动推断字段类型，可在此调整后再开始分析',
@@ -692,9 +694,14 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'dataset.upload.title': 'Upload Local File',
     'dataset.upload.dragText': 'Click or drag a file here to upload',
     'dataset.upload.emptyTitle': 'Drag an Excel/CSV here to start analyzing',
-    'dataset.upload.hint': 'Supports .csv / .xlsx, up to {mb}MB per file',
+    'dataset.upload.hint':
+      'Supports .csv / .xlsx, up to {mb}MB, {rows} rows and {cols} columns per file',
     'dataset.upload.invalidType': 'Only .csv or .xlsx files are supported',
     'dataset.upload.tooLarge': 'File exceeds the {mb}MB limit',
+    'dataset.upload.tooManyRows':
+      'File exceeds the {rows} row limit — split or filter it before uploading',
+    'dataset.upload.tooManyColumns':
+      'File exceeds the {cols} column limit — trim columns before uploading',
     'dataset.upload.namePlaceholder': 'Dataset name (defaults to the file name)',
     'dataset.upload.submit': 'Upload & Parse',
     'dataset.upload.reviewHint':

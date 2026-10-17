@@ -136,7 +136,7 @@ func TestLoadInvalidPort(t *testing.T) {
 }
 
 // TestLoadExtractDatasourceID 钉死抽取存储配置位（issue #118 预留）：
-// 未设置/空 = 0（未启用），正整数生效，非法值 fail-fast。
+// 未设置/空 = 0（未显式指定 → 装配期自举，issue #201），正整数生效，非法值 fail-fast。
 func TestLoadExtractDatasourceID(t *testing.T) {
 	t.Run("unset and empty keep 0", func(t *testing.T) {
 		clearEnv(t)
