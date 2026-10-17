@@ -426,7 +426,7 @@ type chartConfigFilter struct {
 	Logic      string `json:"logic"`
 	// Date 是日期筛选的**意图**（前端 FilterCondition.date）。存在时它是权威：取数时按当前
 	// 时间现算区间，`operator`/`value` 只是「不认识意图的下游」的兜底快照（保存那一刻写下的）。
-	// 没有它就会让仪表盘/分享页的「最近 7 天」永远停在保存那天 —— 见 query.ResolveDateFilter。
+	// 没有它就会让仪表盘/查询记录还原的「最近 7 天」永远停在保存那天 —— 见 query.ResolveDateFilter。
 	Date *query.DateFilterIntent `json:"date"`
 }
 

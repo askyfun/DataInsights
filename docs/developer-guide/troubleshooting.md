@@ -46,11 +46,10 @@
 - ⚠️ `VITE_*` 是**构建期内联**，改完必须重 build，**绝不可放密钥**；为空则**完全跳过 `Sentry.init`**。它与后端 `SENTRY_DSN` 是两个独立项目。
 - 根 `Dockerfile` 三阶段（`backend/`、`frontend/` 各自的 Dockerfile 与 nginx.conf 已删），**构建上下文 = 仓库根**；⚠️ `.dockerignore` **必须排除 `.env`**，否则 Vite 会把 `VITE_*` 内联进浏览器包。
 - `webui` 是分流唯一实现，挂在 gin 的 `NoRoute` 上：`/api`、`/mcp`、`/health` 按**路径段边界**匹配 → 未匹配回 **JSON 404**，**绝不回落 HTML**；其余走 `fs.ValidPath` + `fs.Stat`，未命中回落内存里的 `index.html`。⚠️ **穿越防护靠 `fs.ValidPath`，别换成 `filepath.Clean`**。
-- ⚠️ **`/share/:token` 只在纯 API 模式注册**：托管前端时必须让给前端路由（分享页是 SPA 的 `/share/:token`；后端插同路径的 302 会把人重定向到 `/#/share/<token>`，前端是 **BrowserRouter** → 只渲染首页）。`ShareHandler.View` 与其测试保留未删。
 - **不设 `STATIC_DIR` = 纯 API 模式**：`/api/nope` 回 gin 默认 404（**不是** JSON 信封）。本地验证单进程形态用 `make serve`；⚠️ 若宿主已占用 23352，需换一个空闲端口。
 - ⚠️ **`preinstall` 钩子会让 Dockerfile 的依赖层失败**：`RUN pnpm install` 前必须已 COPY `frontend/scripts/only-pnpm.mjs` → 依赖层要一起 COPY `package.json` + `pnpm-lock.yaml` + `pnpm-workspace.yaml` + `scripts/`。漏 `scripts/` 会报 module not found，容易看错方向。
 - ⚠️ **后端连不上库时是"静默退出"、不留监听端口**：`dial tcp <host>: connect: host is down` 之后没有任何端口监听，极易误判成 "air / 端口占用"。定位手法：先 `lsof -nP -iTCP:23352 -sTCP:LISTEN` 看有没有进程；再前台跑后端拿真实退出码（macOS 无 `timeout`，用 `perl -e 'alarm 20; exec @ARGV' ./bin/server; echo EXIT=$?`）；`nc -z -G 5 <host> 5432` 区分"进程死了"还是"依赖没起来"。
-- ⚠️ **`GET /health` 是裸 handler、不碰数据库，永远 200，不能当"库连上了"的证据**（`ShareHandler.View` 同例）。验证连通要打真实业务接口（如 `/api/datasets`），其错误串会直接印出 `user=... database=... host:port`，是确认实际连接目标最便宜的手段。⚠️ 联动陷阱：运行中的后端常是**旧产物**，旧二进制按旧契约解析新库数据会整片报错 —— 改完后端**先重建再 curl**。
+- ⚠️ **`GET /health` 是裸 handler、不碰数据库，永远 200，不能当"库连上了"的证据**。验证连通要打真实业务接口（如 `/api/datasets`），其错误串会直接印出 `user=... database=... host:port`，是确认实际连接目标最便宜的手段。⚠️ 联动陷阱：运行中的后端常是**旧产物**，旧二进制按旧契约解析新库数据会整片报错 —— 改完后端**先重建再 curl**。
 
 ## API 契约
 
@@ -60,7 +59,7 @@
 - ⚠️ **antd Table 受控排序**：`sortOrder` 一旦受控，antd 会忽略本地 state；取消排序走 legacy 分支时，回调里的 `sorter.field` / `column` 均为 `undefined`。
 - v2 槽位若不属 `{indicators / series_group / rows / columns}`，后端会**静默回退平表格**。建资源前先 `GET` 复查。
 - 契约单一事实源是 `api/openapi.yaml`；生成的 `*Response` 是**信封包装**（裸 payload 对应去后缀类型）；handler 的 In/Out 是 handler-local 镜像（json tag 由 `contract_parity_test.go` 守卫）——详见 `AGENTS.md`。
-- ⚠️ **列表接口必须显式 `ORDER BY`**：不写排序时 PostgreSQL 返回的是**堆物理序**，而 `UPDATE` 会把新行版本追加到堆尾 → 凡是编辑过的行都会漂到列表最后（症状："列表顺序随机 / 编辑完就跑到最后"）。`dashboard`（`created_at DESC, id DESC`）与 `share`（`id DESC`）一直是显式的，**dataset / chart / datasource 曾漏**（dataset 已修，chart / datasource 未改）。⚠️ 排序键**必须带唯一列兜底**：只按时间排、且多行 `created_at` 相同时会**同键抖动**。
+- ⚠️ **列表接口必须显式 `ORDER BY`**：不写排序时 PostgreSQL 返回的是**堆物理序**，而 `UPDATE` 会把新行版本追加到堆尾 → 凡是编辑过的行都会漂到列表最后（症状："列表顺序随机 / 编辑完就跑到最后"）。`dashboard`（`created_at DESC, id DESC`）一直是显式的，**dataset / chart / datasource 曾漏**（dataset 已修，chart / datasource 未改）。⚠️ 排序键**必须带唯一列兜底**：只按时间排、且多行 `created_at` 相同时会**同键抖动**。
 - ⚠️ **"信封套两层"陷阱**：生成物里的 `*Response` 是**完整信封**（`Envelope & { data: ... }`），而 `lib/api/client.ts` 的 `ApiResponse<T> = Omit<Envelope,'data'> & { data: T }` **自带一层信封**。故 `apiClient.get<ApiResponse<T>>` 的泛型只能传**裸 payload**，即 `G['XxxResponse']['data']`；直接传 `G['XxxResponse']` 会套成两层，`res.data.data` 拿到的是信封而不是 payload（症状：`Property 'xxx' does not exist on type ...`）。
 
 ## 架构红线

@@ -367,7 +367,7 @@ func (h *DatasetHandler) Query(req router.Request[datasetQueryIn], res *router.R
 // --- 本地文件上传（issue #138） ---
 //
 // multipart/form-data 绑定与泛型路由的 ShouldBindJSON 语义不兼容（后者对 POST
-// 一律按 JSON 解），循 /health 与 share View 的手工路由先例：这两个端点以裸
+// 一律按 JSON 解），循 /health 的手工路由先例：这两个端点以裸
 // *gin.Context handler 注册（见 cmd/routes.go），不走 RegisterRoute[In, Out]。
 
 // respondServiceError mirrors the generic router's error mapping: business

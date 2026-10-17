@@ -41,7 +41,7 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 │   │   ├── router/           # 泛型路由注册 Register{Get,Post,Put,Delete}Route[In,Out]
 │   │   ├── response/         # 统一响应信封（code/msg/trace/data）
 │   │   ├── idls/             # gen_types.go（oapi-codegen 从 api/openapi.yaml 生成）
-│   │   ├── service/          # 业务逻辑（按领域子包：chart, dashboard, dataset, datasource, share, queryrecord）
+│   │   ├── service/          # 业务逻辑（按领域子包：chart, dashboard, dataset, datasource, queryrecord, alert, auth, sample）
 │   │   ├── domain/entity/    # 领域实体类型
 │   │   ├── query/            # SQL 构造唯一出口（AST + bun_builder + raw.go）
 │   │   │   ├── ast.go / planner.go  # QueryAST + QuerySpec → PlannedAST
@@ -52,7 +52,7 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 │   │   ├── keystore/         # SECURITY_KEY 解析与持久化（留空则首次随机生成、落 bi_setting 表）
 │   │   ├── crypto/           # AES-GCM 加解密（密钥来自 keystore，即 SECURITY_KEY）
 │   │   ├── migration/        # 数据迁移（如 columnids 列 id 规范化）
-│   │   ├── idcodec/ idgen/   # 列/分享 id 的 base58 编解码与生成
+│   │   ├── idcodec/ idgen/   # 列 id / 查询记录短码（地址栏 `?q=`）的 base58 编解码与生成
 │   │   ├── database/         # 数据库连接与事务抽象（WithTx）
 │   │   ├── datasource/       # 数据源驱动抽象
 │   │   │   ├── driver.go     # Driver 接口（Execute(ctx, sql, args...) 参数化执行）
@@ -125,7 +125,7 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 
 要点：
 
-- `query` 包是 SQL 构造的唯一出口。结构化查询走 `planner.go`（`QuerySpec → PlannedAST`）→ `bun_builder.go`（同时收集值参数与构造 SQL，含 `bun_builder_{pivot,boxplot,histogram}.go` 各图表路径）；原始 SQL（表预览、字段分布等）走 `raw.go` 构造。`ast.go` 定义 QueryAST、`chart_spec.go` 定义图表规格、`processor*.go` 处理结果（Table/Pie/Axis/Scatter/Pivot/Stats）、`types.go` 收敛类型。`datefilter.go` 是前端 `lib/dateFilter.ts` 日期语义的 Go 侧镜像（分享页/仪表盘由后端读 config 组查询时解析「最近 7 天」这类意图），两侧共读用例表 `frontend/src/lib/__fixtures__/dateFilterCases.json` 防漂移，改语义必须同步双端。
+- `query` 包是 SQL 构造的唯一出口。结构化查询走 `planner.go`（`QuerySpec → PlannedAST`）→ `bun_builder.go`（同时收集值参数与构造 SQL，含 `bun_builder_{pivot,boxplot,histogram}.go` 各图表路径）；原始 SQL（表预览、字段分布等）走 `raw.go` 构造。`ast.go` 定义 QueryAST、`chart_spec.go` 定义图表规格、`processor*.go` 处理结果（Table/Pie/Axis/Scatter/Pivot/Stats）、`types.go` 收敛类型。`datefilter.go` 是前端 `lib/dateFilter.ts` 日期语义的 Go 侧镜像（仪表盘 / 查询记录还原由后端读 config 组查询时解析「最近 7 天」这类意图），两侧共读用例表 `frontend/src/lib/__fixtures__/dateFilterCases.json` 防漂移，改语义必须同步双端。
 - `Connection.Execute(ctx, sql string, args ...any)` 支持参数化执行，值参数一律通过 args 传递，禁止字符串拼接进 SQL。
 - 标识符一律通过白名单校验：裸名用 `datasource.IsValidIdentifier`；query 包 `safeIdentifier` 额外允许成对引号包裹的标识符。
 - 旧的 `query/builder.go` 与平铺参数兼容链路已删除；Batch 2 进一步删除 `query/dialect.go` 中手写字符串 SQL builder 死路径（`SQLBuilder`/`baseSQLBuilder`/`BuildQueryString`/各方言 builder），`dialect.go` 仅保留 `DialectType`/`ParseDialect`/`BuildQueryStringWithBun`；聚合表达式 `aggExprPattern` 收紧为显式函数白名单（`count|sum|avg|min|max`），堵截经列 `FieldExpr` 注入任意函数名。
@@ -154,8 +154,8 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 ## 契约与路由（Batch 2）
 
 - **契约单一事实源**：`api/openapi.yaml` 定义全部端点请求/响应 + `Envelope`（`code/msg/trace/data`）+ `ChartSpec`/`QuerySpec`；`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。前端运行时类型已切换到生成物打底：`frontend/src/api/index.ts` 的实体/响应/请求类型 alias 到 `components['schemas']`，窄联合处用薄手写层重收紧。⚠️ `make api-gen` 的前端半步当前必然失败（`openapi-typescript` 依赖 `typescript` 运行时导出 `ts.factory`，与本仓 `typescript@7` 不兼容，崩溃在写文件之前），彻底修法是把生成器与 `typescript@7` 解耦；后端那半步正常。
-- **泛型路由**：`backend/internal/router/router.go` 的 `API[In,Out] func(req Request[In], res *Response[Out]) error`（`res` 必须是指针，值传递会丢弃 handler 写入）已接入全部 40 个 API 端点。路由器按 HTTP 方法绑定 JSON body（POST/PUT/PATCH）+ query 参数并统一信封；`cmd/routes.go` 用 `Register{Get,Post,Put,Delete}Route` 注册，迁移样板见 `handler/datasource.go` 顶部 package doc。例外：`/health`（cmd/main.go）与 share `View`（302 重定向无法套 JSON 信封）。
-- **图表配置 v2**：`bi_chart.config` 为 `{version:2, chartType, title, query:{dimensionGroups,metricGroups,filters,sort,limit}, fieldMeta, style, queryOptions}` 文档。字段组的 `fields`（列名数组）升级为 `bindings: BindingInstance[]`，每个「拖入槽位的字段实例」持全局唯一 `bindingId`（形如 `b-0`/`b-1`）；`fieldMeta` 的键由列名改为 `bindingId`（同列拖入两个组各得独立元数据），`sort` 亦以 `bindingId` 引用目标绑定，`bindings[].fieldId`/`filters[].fieldId` 引用的是列的稳定 id（`DatasetColumn.id`）。`frontend/src/lib/chartConfigSchema.ts` 的 `migrateChartConfig` 在加载时把旧结构（无 version：`queryConfig` + 5 个平铺 Record + 位置 `field-N`）与 v1 中间表示逐层迁移到 v2，ShareView 据此渲染。
+- **泛型路由**：`backend/internal/router/router.go` 的 `API[In,Out] func(req Request[In], res *Response[Out]) error`（`res` 必须是指针，值传递会丢弃 handler 写入）已接入全部 58 个 API 端点。路由器按 HTTP 方法绑定 JSON body（POST/PUT/PATCH）+ query 参数并统一信封；`cmd/routes.go` 用 `Register{Get,Post,Put,Delete}Route` 注册，迁移样板见 `handler/datasource.go` 顶部 package doc。另有 3 个手工注册的非泛型路由：`GET /health`（`cmd/main.go` 裸 handler）、`POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`（multipart 绑定走不了泛型路由的 `ShouldBindJSON`，循 `/health` 先例手工注册）。
+- **图表配置 v2**：`bi_chart.config` 为 `{version:2, chartType, title, query:{dimensionGroups,metricGroups,filters,sort,limit}, fieldMeta, style, queryOptions}` 文档。字段组的 `fields`（列名数组）升级为 `bindings: BindingInstance[]`，每个「拖入槽位的字段实例」持全局唯一 `bindingId`（形如 `b-0`/`b-1`）；`fieldMeta` 的键由列名改为 `bindingId`（同列拖入两个组各得独立元数据），`sort` 亦以 `bindingId` 引用目标绑定，`bindings[].fieldId`/`filters[].fieldId` 引用的是列的稳定 id（`DatasetColumn.id`）。`frontend/src/lib/chartConfigSchema.ts` 的 `migrateChartConfig` 在加载时把旧结构（无 version：`queryConfig` + 5 个平铺 Record + 位置 `field-N`）与 v1 中间表示逐层迁移到 v2，图表构建器与仪表盘据此渲染。
 
 ### 响应层
 
@@ -208,7 +208,7 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 - **决策**：handler 统一为 `func(req Request[In], res *Response[Out]) error`，由 `internal/router` 按 HTTP 方法自动绑定 body/query 并包装信封；In 用 handler-local 镜像 struct。
 - **背景**：早期每个 handler 手写 `response.*` 与 gin 绑定，重复且易漏。
 - **取舍**：不直接拿 `entity` 作 In（entity 缺 `form:"-"`，会让 query 参数污染 body）→ 用 handler-local 镜像，代价是需反射守卫其与 entity 的 json tag 一致。
-- **现状**：已接入全部 40 个 API 端点。证据：`backend/internal/router/router.go`、`handler/contract_parity_test.go`。
+- **现状**：已接入全部 58 个 API 端点。证据：`backend/internal/router/router.go`、`handler/contract_parity_test.go`。
 
 ### D5 bun_builder 是图表 SQL 唯一出口（参数化 + 标识符白名单）
 
@@ -220,14 +220,14 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 ### D6 日期语义双端镜像（共用用例表防漂移）
 
 - **决策**：前端 `frontend/src/lib/dateFilter.ts` 是语义单一事实源，后端 `internal/query/datefilter.go` 是其镜像；双端共读用例表防漂移。
-- **背景**：分享页 / 仪表盘由后端读 config 组查询，「最近 7 天」这类动态日期在**后端**也必须成立，不能只在前端解析。
+- **背景**：仪表盘 / 查询记录还原由后端读 config 组查询，「最近 7 天」这类动态日期在**后端**也必须成立，不能只在前端解析。
 - **取舍**：不做两份独立实现 → 一个意图、两端各自解析；代价是改语义必须同时改两边（共读用例表会直接抓出不一致）。
 - **现状**：已实现。证据：`datefilter_test.go` + `dateFilter.cases.test.ts` 各跑一遍 `frontend/src/lib/__fixtures__/dateFilterCases.json`。
 
 ### D7 软删 + 显式级联（同一事务）
 
-- **决策**：5 张业务表用 `deleted_at` 软删，级联显式写在同一事务；`bi_query` 永不物理删。
-- **背景**：BI 资产（图表 / 数据集 / 数据源）被其它资源引用（仪表盘、分享），物理删会断链。
+- **决策**：8 张业务表用 `deleted_at` 软删，级联显式写在同一事务；`bi_query` 永不物理删。
+- **背景**：BI 资产（图表 / 数据集 / 数据源）被其它资源引用（仪表盘、查询记录、预警），物理删会断链。
 - **取舍**：不物理删 → 保留可回溯与引用完整性；代价是查询恒带 `deleted_at IS NULL`，且级联软删的子查询**刻意不过滤**软删（父行刚软删，加过滤会断链）。
 - **现状**：已实现。证据：`service/dashboard/impl.go` 的 `Delete`（显式 `SET deleted_at`，不走整行 UPDATE）、各 service 的级联软删。
 

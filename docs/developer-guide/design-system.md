@@ -4,7 +4,7 @@
 
 > **受众**：维护 Data Insights 前端的工程师，以及在此基础上做二次开发的协作者。
 > **主任务**：拖拽式 BI 可视化分析 —— 选数据源 → 建数据集 → 拖字段配图 → 保存/分享。
-> **范围**：全站 11 个页面（图表构建 / 图表列表 / 数据集列表·详情·编辑 / 数据源列表·详情 / 分享列表 / 分享只读页 / 仪表盘列表 / 仪表盘编辑器）与首页的**表面层级、色彩、字体、页面骨架、组件样式**。
+> **范围**：全站 11 个页面（图表构建 / 图表列表 / 数据集列表·详情·编辑 / 数据源列表·详情 / 仪表盘列表 / 仪表盘编辑器 / 指标预警 / 账号）与首页的**表面层级、色彩、字体、页面骨架、组件样式**。
 > **不覆盖**：图表本身的视觉（`lib/chartOptions.ts` 的 ECharts option 构造；其**主题取色**见 §10）、国际化文案、后端。
 > **依据来源**：全部结论来自源码取证（读 `styles/index.css`、`pages/*.tsx`、antd 6.6.4 发行产物），不含用户调研或可用性测试数据。
 > **关键假设**：产品定位为**内部密集型数据工具**，不面向 C 端；因此优先"一屏塞更多"而非"留白显高级"。
@@ -110,7 +110,7 @@
 }
 ```
 
-**为什么挂在 `:root` 而不是页面作用域**：三类消费者跨页面边界 —— ① 各页的页面骨架；② portal 到 `body` 的 `Drawer`/`Modal`/`Dropdown`；③ 在 `ShareView` 下复用的 `PivotTable`/`TableChart`/`KpiCard`。挂在页面作用域上，后两者取不到值。
+**为什么挂在 `:root` 而不是页面作用域**：三类消费者跨页面边界 —— ① 各页的页面骨架；② portal 到 `body` 的 `Drawer`/`Modal`/`Dropdown`；③ 在仪表盘下复用的 `PivotTable`/`TableChart`/`KpiCard`。挂在页面作用域上，后两者取不到值。
 
 > 上表为**浅色**值。深色下同名 token 由 `[data-theme="dark"]` 整组覆盖（机制与约束见 §10）。
 
@@ -268,8 +268,8 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
 | `pages/DatasetDetail.tsx` | 页头 + 面包屑出卡；元信息条转 `--dr-sunken` + `--dr-border`；字段角色色统一 |
 | `pages/DatasetEdit.tsx` | 页头出卡；表单内分区上边线统一 |
 | `pages/DatasourceDetail.tsx` | 页头 + 面包屑出卡，类型标签移入操作区 |
-| `pages/Share.tsx` | 卡头改为页头；加载态与空态统一到 `.dr-state` |
-| `pages/ShareView.tsx` | 三态（加载/过期/密码）改用 `.dr-page--center`；主视图页头出卡；**修掉 `minHeight:'100vh'` 造成的页面溢出** |
+| `pages/Share.tsx` | 卡头改为页头；加载态与空态统一到 `.dr-state`（已下线，issue #112） |
+| `pages/ShareView.tsx` | 三态（加载/过期/密码）改用 `.dr-page--center`；主视图页头出卡；**修掉 `minHeight:'100vh'` 造成的页面溢出**（已下线，issue #112） |
 | `pages/ChartBuilder.tsx` | 页面内字面量改为变量（token 已到 `:root`，portal 亦可用）；状态点与分组色条统一 |
 | `components/ChartBuilder/DraggableField.tsx` | 语义色表改引用变量；字段行悬停转 `--dr-accent-soft` |
 | `components/ChartBuilder/dropZoneStyles.ts` | 三色改引用变量 |
@@ -344,7 +344,7 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
 | 在非语义位置使用彩色 | 颜色失去信号价值，页面变花 | 审查新增 `color:` 是否对应 2.2 表中的语义 |
 | 为"好看"增加纵向留白 | 直接减少一屏可见数据行，与产品定位冲突 | 对照 5.2 间距刻度 |
 | 空态与加载态用不同高度 | 请求返回时容器跳动 | 两态都应包在 `.dr-state` 内 |
-| 改 `PivotTable` 等复用组件的样式时硬编码 HEX | 它们在 `ShareView` 与 `/chart-builder` 两处渲染 | 应引用 `:root` 变量 |
+| 改 `PivotTable` 等复用组件的样式时硬编码 HEX | 它们在 `/chart-builder` 与仪表盘两处渲染 | 应引用 `:root` 变量 |
 | 改全局 `paddingSM` | 23 个 antd 组件消费该 token | 需要收窄时改 `components.Select` 的组件级 token |
 
 ### 7.2 资产约束
@@ -397,7 +397,7 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
 | 加载 | `.dr-state` / `.dr-page--center` 居中；预览区用虚线占位以免页面高度塌陷 |
 | 空 | 同上容器，`Empty` 用 `PRESENTED_IMAGE_SIMPLE` |
 | 错误 | 沿用 antd `message` 与 `Result`；错误色 `#ff4d4f` |
-| 恢复 | 各页保留"刷新"按钮；分享页保留密码重试（错误以内联文本呈现，不用 toast） |
+| 恢复 | 各页保留"刷新"按钮 |
 
 **已执行的验收**：`npx tsc --noEmit` 通过；`biome check` 零问题；`vitest run` 27 文件 / 309 用例全通过（含新增的 5 条骨架契约用例）。
 **提议但未执行的验收**：真机逐状态目视（悬停/拖拽中/禁用、三种空态高度、1280/1440/1920 三档、移动端 Drawer）、对比度测量、色盲模拟。
@@ -423,7 +423,7 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
 5. 语义色只在语义位置使用：维度蓝(--dr-dim) / 指标绿(--dr-metric) /
    过滤橙(--dr-filter) / 日期紫(--dr-date)。同一语义不允许有两个色值。
 6. 不要为"好看"增加纵向留白；间距只取 5.2 节的刻度。
-7. 改 PivotTable / TableChart / KpiCard 时注意它们在 ShareView 下也会渲染 ——
+7. 改 PivotTable / TableChart / KpiCard 时注意它们在仪表盘下也会渲染 ——
    只能用 :root 变量，不能依赖某个页面的祖先类。
 
 预期产物：修改后的页面/组件 + 必要的 token 扩展 + docs/developer-guide/design-system.md 同步。

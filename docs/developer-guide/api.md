@@ -13,7 +13,7 @@
 
 ## 1. 通用规范
 
-### 1.1 端点清单（40 个 + 2 个例外）
+### 1.1 端点清单（58 个泛型路由端点 + 3 个手工路由）
 
 | 领域 | 端点数 | 前缀 |
 |------|--------|------|
@@ -21,16 +21,21 @@
 | Dataset 数据集 | 9 | `/api/datasets` |
 | Chart 图表 | 8 | `/api/charts` |
 | Dashboard 仪表盘 | 6 | `/api/dashboards` |
-| Share 分享 | 4 | `/api/shares` |
+| DashboardFolder 归档文件夹 | 5 | `/api/dashboard-folders` |
+| Alert 指标预警 | 6 | `/api/alerts` |
+| SampleDataset 示例数据集 | 4 | `/api/sample-dataset` |
+| Auth 认证 | 4 | `/api/auth` |
+| Token PAT 管理 | 3 | `/api/tokens` |
 | QueryRecord 查询记录 | 2 | `/api/queries` |
 | Health 健康检查 | — | `/health` |
 
 所有 `/api` 路由经泛型路由 `router.RegisterXxxRoute[In, Out]` 注册（见
-`backend/cmd/routes.go`）。**2 个例外**不走 JSON 信封的统一绑定路径：
+`backend/cmd/routes.go`）。**3 个手工路由**不走泛型注册的统一绑定路径：
 
 - `GET /health`：在 `cmd/main.go` 用裸 `r.GET` 注册，但响应仍是标准 Envelope；
-- `GET /share/{token}`：成功返回 **HTTP 302**（无法套 JSON 信封），且只在纯 API 模式
-  （未设 `STATIC_DIR`）注册——托管前端时 `/share/:token` 归前端路由。
+- `POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`：本地文件上传，请求体是
+  `multipart/form-data`，与泛型路由对 POST 一律 `ShouldBindJSON` 的语义不兼容，故循 `/health`
+  先例以裸 `*gin.Context` handler 注册（见 `handler/dataset.go` 的 package 注释）。
 
 ### 1.2 统一响应信封（Envelope）
 
@@ -64,7 +69,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 | 20100 | CodeBadRequest | 请求参数错误（含绑定失败、非法 id/短码） | 请求参数有误，请检查输入 |
 | 20200 | CodeUnauthorized | 认证/授权错误（当前平台无登录态，几乎不出现） | 登录状态已失效 |
 | 20300 | CodeNotFound | 资源不存在 | 请求的资源不存在 |
-| 20400 | CodeBusinessError | 业务逻辑错误（如分享链接已过期） | 操作失败，请稍后重试 |
+| 20400 | CodeBusinessError | 业务逻辑错误（如资源被引用不可删） | 操作失败，请稍后重试 |
 | 20500 | CodeThirdPartyErr | 第三方服务错误 | 服务暂时不可用 |
 | 50000 | CodeInternalError | 服务端内部错误（含取数执行失败） | 服务器内部错误 |
 
@@ -83,8 +88,6 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 | 表数据分页（`GET /api/datasources/{id}/tables/{table}/data`） | `page` / `page_size` | page 从 1 起，≤0 归一为 1；page_size 缺省 20，上限 100 |
 | 图表查询分页（`pagination` 对象） | `page` / `page_size` | 仅 `chart_type=table` 分支消费；契约上已声明向 limit/offset 收敛（Batch 3），当前实现仍以 page/page_size 为准 |
 
-`GET /api/shares` **不支持分页**（返回全部，id 倒序）。
-
 ### 1.6 字段命名与"JSON 字符串"惯例
 
 - 全链路 JSON 键为 **snake_case**，前后端字段名完全一致（不存在 camelCase 映射层）。
@@ -97,8 +100,9 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 ### 1.7 前端调用规范
 
 - 全前端**唯一 axios 实例**在 `frontend/src/lib/api/client.ts`（`apiClient`），禁止在别处
-  `axios.create`；`api/index.ts` 按领域导出 6 个模块（`datasourcesApi` / `datasetsApi` /
-  `chartsApi` / `dashboardsApi` / `sharesApi` / `queriesApi`），页面/store 只消费这些模块。
+  `axios.create`；`api/index.ts` 按领域导出 10 个模块（`datasourcesApi` / `datasetsApi` /
+  `chartsApi` / `dashboardsApi` / `dashboardFoldersApi` / `alertsApi` / `sampleDatasetApi` /
+  `authApi` / `tokensApi` / `queriesApi`），页面/store 只消费这些模块。
 - 响应拦截器"非 20000 即错"：`console.error` + reject，**不弹 toast**（提示文案由调用方决定，
   统一弹窗会导致重复提示）。
 - 请求拦截器自动注入 `X-Request-ID`（`crypto.randomUUID` 不可用时退回时间戳方案）。
@@ -236,7 +240,7 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
   `chart`（存 `chartId` 引用，非快照）/ `text`（markdown，渲染前必须 sanitize）/
   `filter`（盘级筛选器，`binding` 是 `(datasetId, column)` 二元组，**column 存列 id 非列名**；
   `scope` 缺省只作用所在页、`all` 作用所有页）。`widgetId` **整盘**唯一且 ≠ chartId。
-- `status`：v1 只会出现 `draft`（published 为将来分享预留），后端不做枚举校验。
+- `status`：v1 只会出现 `draft`（`published` 尚未启用），后端不做枚举校验。
 
 | # | 方法与路径 | 说明 |
 |---|-----------|------|
@@ -283,23 +287,7 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 与 `folder.parent_id` 共用同一口径。悬空引用（指向已软删对象）**不级联清洗**：后端原样回显，
 前端把这种行退化成根级展示。
 
-## 7. Share 分享（4 个 API 端点 + 1 个浏览器入口）
-
-响应实体 `Share`：`id / token / chart_id / expires_at / created_at / has_password`。
-
-- `token` 后端随机生成（16 字节，`hex(8B)-hex(8B)`）；`chart_id` 不校验存在性。
-- `password` 永不回显（bcrypt 哈希也不），密码保护状态唯一信号是 `has_password`。
-- `expires_at` 必须是 RFC3339；**格式非法被后端静默忽略**（等同不设置过期）；null = 永久。
-
-| # | 方法与路径 | 说明 |
-|---|-----------|------|
-| 1 | `GET /api/shares` | 全部分享（id 倒序，**无分页参数**） |
-| 2 | `POST /api/shares` | 创建；password 非空以 bcrypt（cost 10）哈希落库 |
-| 3 | `GET /api/shares/{token}` | 详情；不存在 → 20300。不校验密码、不校验过期 |
-| 4 | `POST /api/shares/{token}/verify` | 校验密码，通过返回 Share（供前端跳转取数）。无密码恒通过；密码错误/分享不存在统一 20100。遗留明文比对成功后透明升级为 bcrypt |
-| 5 | `GET /share/{token}` | **公开视图浏览器入口（非 API）**：成功 302 → `/#/share/{token}`；密码不拦截本端点。失败才回 200 Envelope：不存在 20300、已过期 20400（"share link has expired"）。仅纯 API 模式注册（见 1.1） |
-
-## 8. QueryRecord 查询记录（2 个端点，"地址栏即分享"）
+## 7. QueryRecord 查询记录（2 个端点，"地址栏即分享"）
 
 每次成功查询后由前端调用落库，返回 21 位 base58 短码（`idcodec`，非库内 uuid 原文），
 复制地址栏 `?q=<短码>` 即分享。
@@ -334,7 +322,7 @@ expires_at / expired / hit_count`）。
 - 每次读取 hit_count +1、刷新 last_accessed_at；该写失败只记日志不影响读取。
 - `hit_count` 是**本次读取之后**的累计值（含本次 +1）。
 
-## 9. 变更纪律
+## 8. 变更纪律
 
 - 改接口三步：**先改 `api/openapi.yaml` → `make api-gen` → 双端消费生成物**；禁止直接编辑生成物。
 - 契约测试：`backend/internal/handler/contract_parity_test.go` 反射守卫 handler-local In 镜像与

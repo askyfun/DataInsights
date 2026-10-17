@@ -13,17 +13,26 @@ frontend/src/
 ├── main.tsx              # 入口：Sentry、i18n、BrowserRouter
 ├── App.tsx               # 根组件：Layout + 路由 + 导航菜单
 ├── api/
-│   ├── index.ts          # API 模块封装（datasourcesApi/datasetsApi/chartsApi/dashboardsApi/sharesApi/queriesApi）；只消费 lib/api/client 的单一 axios 实例，实体/响应类型来自 idls/gen_types.ts
+│   ├── index.ts          # API 模块封装（10 个领域模块 / 59 个方法：datasourcesApi/sampleDatasetApi/datasetsApi/chartsApi/dashboardsApi/dashboardFoldersApi/alertsApi/queriesApi/authApi/tokensApi）；只消费 lib/api/client 的单一 axios 实例，实体/响应类型来自 idls/gen_types.ts
 │   └── datatypes.ts      # 标准数据类型系统 + 多数据库类型映射
 ├── lib/
 │   ├── api/client.ts     # 持有唯一 axios 实例（baseURL 由 resolveApiBaseURL 决定）+ get/post/put/del 泛型辅助
 │   ├── chartConfigSchema.ts  # bi_chart.config 的 version:2 文档 schema + migrateChartConfig（旧结构加载时自动迁移）
 │   ├── dateFilter.ts     # 日期筛选语义单一事实源（纯逻辑、零 UI 依赖；语义细节见根 AGENTS.md「日期筛选」）
 │   ├── dashboardFilterValue.ts  # 盘级筛选器取值下发契约（按算子分流 value 形状）
+│   ├── dashboardFolderTree.ts # 仪表盘文件夹组树与落点判定的纯逻辑（零 React 依赖）
 │   ├── dashboardLayoutSchema.ts # 仪表盘 layout schema（filter widget 的 binding.column 是列 ID）
+│   ├── dashboardLinkage.ts   # 仪表盘图表联动纯逻辑（点击数据项 → 追加条件）
 │   ├── chartOptions.ts   # ECharts option 构建
+│   ├── filterOperators.ts # 过滤算子归一化（与后端镜像表双端共读）
 │   ├── querySpec.ts      # store QueryConfig → 后端 QuerySpec 的映射
 │   ├── format.ts         # 数值/单位格式化
+│   ├── reducedMotion.ts  # 「减少动态效果」（prefers-reduced-motion）单一事实源
+│   ├── tableCellMerge.ts # 表格维度列纵向合并的纯逻辑
+│   ├── tableConditionalFormat.ts # 表格条件格式（规则 → 单元格背景色）的纯逻辑
+│   ├── tableSparkline.ts # 表格迷你图序列分组的纯逻辑
+│   ├── tableTranspose.ts # 表格行列转置的纯逻辑（只发生在渲染层）
+│   ├── theme.ts          # 主题（浅色/深色/跟随系统）单一事实源
 │   └── dataTypes.ts      # 数据类型工具
 ├── store/                # 单一 Zustand Store，按领域拆成切片文件（index.ts 只做合成）
 │   ├── index.ts          # 合成入口：AppState + useStore，并再导出类型/纯工具
@@ -44,8 +53,8 @@ frontend/src/
 │   ├── Charts.tsx            # 已保存图表列表
 │   ├── Dashboards.tsx        # 仪表盘列表（首页 `/`）
 │   ├── DashboardEditor.tsx   # 仪表盘编辑器（12 列栅格布局）
-│   ├── Share.tsx             # 分享链接管理
-│   └── ShareView.tsx         # 公开分享视图（密码保护）
+│   ├── Alerts.tsx            # 指标预警（规则 CRUD + 触发历史）
+│   └── Account.tsx           # 账号与个人访问令牌（PAT）管理
 ├── components/
 │   ├── ChartBuilder/     # 图表构建器组件
 │   │   ├── DraggableField.tsx    # 可拖拽字段标签（侧边栏）
@@ -60,10 +69,15 @@ frontend/src/
 │   │   ├── PivotTable.tsx        # 透视表
 │   │   ├── TableChart.tsx        # 表格/透视图渲染器
 │   │   └── chartDefinitions.ts   # 图表类型定义
+│   ├── ChartLinkage/     # 仪表盘图表联动（设置面板 ChartLinkageSettings）
 │   ├── DateFilter/       # 日期筛选（DateFilterModal 完整弹窗 + DateFilterControl 行内控件，共用 DateFilterEditor 编辑体）
 │   ├── DashboardFilterBlock/ # 仪表盘盘级筛选器（块 + 添加筛选器弹窗）
+│   ├── DashboardFolderTree/ # 仪表盘归档文件夹树 UI（组树纯逻辑在 lib/dashboardFolderTree）
+│   ├── DashboardPageTabs/ # 仪表盘底部页面标签条（dnd-kit 拖拽排序）
+│   ├── DatasetUpload/    # 本地文件上传弹窗（.csv / .xlsx → 灌入抽取存储）
+│   ├── SampleDatasetCard/# 示例数据集卡片（试用样例的生成/清理状态）
 │   ├── ChartView/        # 图表渲染容器
-│   └── ClickToEdit.tsx / ModalFooter.tsx / LoadingPlaceholder.tsx / PageHeader.tsx / listPage.tsx  # 公共组件
+│   └── ClickToEdit.tsx / ModalFooter.tsx / LoadingPlaceholder.tsx / PageHeader.tsx / ErrorBoundary.tsx / listPage.tsx  # 公共组件
 ├── i18n/
 │   └── useLocale.ts      # 国际化 hook + 中英文消息字典
 ├── styles/
@@ -89,7 +103,7 @@ frontend/src/
 ### API 层
 
 - `lib/api/client.ts` — 持有**唯一** axios 实例（baseURL 由 `resolveApiBaseURL` 决定：生产同源、开发回退 `http://{hostname}:23352`），提供 `get/post/put/del` 泛型辅助，含 request ID 注入、code 20000 验证、Sentry 错误上报
-- `api/index.ts` — 定义所有 API 模块（datasourcesApi/datasetsApi/chartsApi/dashboardsApi/sharesApi/queriesApi），**只消费** `lib/api/client` 的实例，**不得再 `axios.create`**
+- `api/index.ts` — 定义所有 API 模块（datasourcesApi/sampleDatasetApi/datasetsApi/chartsApi/dashboardsApi/dashboardFoldersApi/alertsApi/queriesApi/authApi/tokensApi，10 个模块共 59 个方法封装），**只消费** `lib/api/client` 的实例，**不得再 `axios.create`**
 - 响应拦截器验证 `code === 20000` 才算成功
 
 ### 路由
@@ -104,10 +118,10 @@ frontend/src/
 | `/datasets/new` | DatasetEdit | 新建数据集 |
 | `/datasets/:id` | DatasetDetail | 数据集详情 |
 | `/datasets/:id/edit` | DatasetEdit | 编辑数据集 |
-| `/chart-builder` | ChartBuilder | 图表构建器（支持 `?edit={id}&datasetId={id}`） |
+| `/chart-builder` | ChartBuilder | 图表构建器（支持 `?edit={id}&datasetId={id}`；`?q={短码}` 还原查询记录直链——「地址栏即分享」，短码优先） |
 | `/charts` | ChartsPage | 图表列表 |
-| `/shares` | SharePage | 分享管理 |
-| `/share/:token` | ShareView | 公开分享视图 |
+| `/alerts` | AlertsPage | 指标预警 |
+| `/account` | AccountPage | 账号与 PAT 管理 |
 
 ### 拖拽实现
 

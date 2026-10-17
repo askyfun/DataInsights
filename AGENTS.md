@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构，包含前端（React/TypeScript）和后端（Go）。核心功能：数据源管理、数据集管理、拖拽式图表构建、分享功能。
+Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构，包含前端（React/TypeScript）和后端（Go）。核心功能：数据源管理、数据集管理、拖拽式图表构建、仪表盘、查询记录短码分享。
 
 ## 架构
 
@@ -21,34 +21,34 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 | 层级 | 目录 | 职责 |
 |------|------|------|
 | Handler | `backend/internal/handler/` | Gin HTTP 处理器，请求绑定，响应格式化 |
-| Service | `backend/internal/service/` | 业务逻辑（按领域：chart, dataset, datasource, share） |
+| Service | `backend/internal/service/` | 业务逻辑（按领域：chart, dataset, datasource, dashboard, queryrecord, alert, auth, sample） |
 | Domain | `backend/internal/domain/entity/` | 领域实体类型 |
 | Query | `backend/internal/query/` | SQL 构造唯一出口：AST + bun_builder（结构化查询）+ raw.go（原始 SQL 构造） |
 | Model | `backend/internal/model/` | 数据库模型（bun ORM） |
-| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：40 个 API 端点经此注册；`/health` 与 share `View` 为 2 个已记录例外，见下） |
+| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：58 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
 | WebUI | `backend/internal/webui/` | 前端构建产物的托管与路径分流（挂在 gin 的 `NoRoute` 上）：命中磁盘文件就返回，未命中回落 `index.html`，保留前缀回 JSON 404 |
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
 | Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `SECURITY_KEY`） |
 
 查询链路：handler → service → `query` 包（AST + bun_builder / raw.go）→ datasource 驱动。**SQL 构造红线（参数化、标识符白名单、聚合函数白名单）的完整规则见 `backend/AGENTS.md`「查询处理」**，此处只记横切面：bun_builder 是图表 SQL 的唯一出口，`dialect.go` 的手写字符串 SQL builder 已作为死代码删除，仅保留 `DialectType`/`ParseDialect`/`BuildQueryStringWithBun`。
 
-契约工程（Batch 2/3）：`api/openapi.yaml` 是前后端接口的单一事实源，`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。**前端运行时类型已切换到生成物打底（Batch 3）**：`frontend/src/api/index.ts` 的实体/响应/请求类型 alias 到 `components['schemas']`，窄联合处用薄手写层（`Omit<G.X,'type'> & { type: Union }`）重收紧；已判死的声明（手写 `typeConfig`——wire 实为 snake `type_config` 且前端零消费、`ColumnInfo` 幽灵字段、`GeneratedSQL` 等）随迁移删除。三条静默红线仍有效：生成 `*Response` 是信封包装（裸 payload 对应 `ChartDataResult` 等去后缀类型，禁按名替换）、`*FormData` 是 UI 数组约定保留手写、store `QueryConfig` 为 camelCase UI 模型不换。后端 handler In/Out 仍为 handler-local 镜像（json tag 由 `contract_parity_test.go` 反射守卫），**未**切换到 `idls.*`——生成 Go 类型无 gin `form:"-"` 语义，直接作 In 会重新引入 query 污染注入面，切换列入 Batch 4 重评。图表 `bi_chart.config` 已升级为带 `version:2` 的文档（`frontend/src/lib/chartConfigSchema.ts` 的 `ChartConfigDocument` + `migrateChartConfig`），旧结构在加载时自动迁移（`fieldId` 由位置 `field-N` 改为列的稳定 id `DatasetColumn.id`），ShareView 据此渲染新结构图表；图表查询请求线不含 `config` 字段（Batch 3 已移除从未生效的 pie 合并比例死链，`query.PieProcessor.MergeOtherBelowRatio` 能力保留但未接线）。
+契约工程（Batch 2/3）：`api/openapi.yaml` 是前后端接口的单一事实源，`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。**前端运行时类型已切换到生成物打底（Batch 3）**：`frontend/src/api/index.ts` 的实体/响应/请求类型 alias 到 `components['schemas']`，窄联合处用薄手写层（`Omit<G.X,'type'> & { type: Union }`）重收紧；已判死的声明（手写 `typeConfig`——wire 实为 snake `type_config` 且前端零消费、`ColumnInfo` 幽灵字段、`GeneratedSQL` 等）随迁移删除。三条静默红线仍有效：生成 `*Response` 是信封包装（裸 payload 对应 `ChartDataResult` 等去后缀类型，禁按名替换）、`*FormData` 是 UI 数组约定保留手写、store `QueryConfig` 为 camelCase UI 模型不换。后端 handler In/Out 仍为 handler-local 镜像（json tag 由 `contract_parity_test.go` 反射守卫），**未**切换到 `idls.*`——生成 Go 类型无 gin `form:"-"` 语义，直接作 In 会重新引入 query 污染注入面，切换列入 Batch 4 重评。图表 `bi_chart.config` 已升级为带 `version:2` 的文档（`frontend/src/lib/chartConfigSchema.ts` 的 `ChartConfigDocument` + `migrateChartConfig`），旧结构在加载时自动迁移（`fieldId` 由位置 `field-N` 改为列的稳定 id `DatasetColumn.id`）；图表查询请求线不含 `config` 字段（Batch 3 已移除从未生效的 pie 合并比例死链，`query.PieProcessor.MergeOtherBelowRatio` 能力保留但未接线）。
 
 ⚠️ **`make api-gen` 的「前端」半步当前必然失败**（不是环境问题）：`openapi-typescript@7.13.0` 依赖 `typescript` 包的运行时导出 `ts.factory`，而本仓 `typescript@7` 没有它 → `TypeError: Cannot read properties of undefined`。崩溃发生在写文件之前（生成物不会被写坏）。绕过方式见 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) 的「版本与依赖」（入库）；彻底修法是把生成器与 `typescript@7` 解耦（独立 package.json 或钉一个 TS 5 别名），属独立改动。**后端那半步能跑，但输出不保证可编译**：issue #201 加了 multipart 端点后，生成物引用 `github.com/oapi-codegen/runtime/types`，而 `backend/go.mod` 没有这个依赖 → 重跑生成会把编译跑坏，得先补依赖或收紧 cfg 的 generate 范围。它只输出被 cfg 允许的子集（不含 `DashboardFilter*` 等 layout schema）。无论走哪条路，重跑生成后都要 `diff` 生成物，确认只漂了本次改动（`ci.yml` 的 contract-drift job 就在自动做这个 diff，只报告不阻断，直到依赖缺口补上）。
 
-`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 40 个 API 端点**；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
+`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 58 个 API 端点**（`cmd/routes.go` 集中注册：datasource 11 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
 
 `datasource/` 包实现了 `Driver` 接口用于多数据库后端——新增驱动只需实现该接口。
 
 数据库 schema 由 goose 版本化迁移管理（`backend/migrations/`，通过 `embed.FS` 内嵌），事务统一走 `database.WithTx`。
 
-运维与安全（Sentry / CORS / 加密存储 / share bcrypt）见 `backend/AGENTS.md`「运维与安全」。
+运维与安全（Sentry / CORS / 加密存储）见 `backend/AGENTS.md`「运维与安全」。
 
 ### 前端结构
 
 ```
 frontend/src/
-├── api/           # API 端点封装（40 个接口，复用 lib/api/client 的单一 axios 实例）
+├── api/           # API 端点封装（10 个领域模块 / 59 个方法，复用 lib/api/client 的单一 axios 实例）
 ├── store/         # Zustand 状态管理
 ├── pages/         # 页面组件
 ├── components/    # 可复用组件（日期筛选器在 components/DateFilter/，过滤弹窗在 components/ChartBuilder/，盘底部页面标签条在 components/DashboardPageTabs/）
@@ -70,7 +70,7 @@ frontend/src/
 - **`DateFilterEditor` 是两个外壳共用的编辑体**：`DateFilterModal`（完整弹窗）与
   `DateFilterControl`（配置完成后留在页面上的行内控件）。不要给两者各写一份编辑逻辑。
 - **意图与快照分离，两端各自解析同一个意图**：`FilterCondition.date` 存的是**意图**（`最近 7 天`），
-  图表查询页在构造请求时解析（`expandDateFilterIntent`）；后端读 config 的路径（分享页 / 仪表盘）
+  图表查询页在构造请求时解析（`expandDateFilterIntent`）；后端读 config 的路径（仪表盘 / 查询记录还原）
   在 `internal/query/datefilter.go` 里解析 —— 所以动态日期在所有路径上都是动态的。
   后端那份是 TS 语义的**镜像**，靠双端共读的用例表
   `frontend/src/lib/__fixtures__/dateFilterCases.json` 防漂移（`datefilter_test.go` +
@@ -152,6 +152,30 @@ frontend/src/
 - **悬空引用不清洗**：指向已软删对象的 `parent_id` / `folder_id` 原样回显，前端退化成根级展示
   （所以组树函数必须能处理环与悬空，见其单测）。
 - 树落点在 `pages/Dashboards.tsx`：`Layout.Sider` 左列可折叠，选中夹 = 过滤右侧表格（只算直属子项）。
+
+### 指标预警（issue #155）
+
+`service/alert/` + `handler/alert.go` + `pages/Alerts.tsx`，表 `bi_alert_rule` / `bi_alert_trigger`（migration 00011，规则与触发历史两张，无独立 `bi_alert` 表）：
+
+- **规则 CRUD**：`/api/alerts`（6 个端点：list / create / get / update / delete / triggers）。规则绑定图表 + 指标 + 阈值条件，后台定时评估。
+- **评估链路**：`alert.Service` 注入 `chart.Provider`（复用图表取数管道）与 `alert.Notifier`（通知出口）；评估间隔与通知方式由 `main.go` 装配。
+- **触发历史**：`GET /api/alerts/:id/triggers` 返回该规则的触发记录，用于回溯与调试。
+
+### 用户认证与 PAT（issue #183 / #184）
+
+`service/auth/` + `handler/auth.go` / `handler/token.go` + `middleware/bearer.go` + `pages/Account.tsx`，表 `bi_user` / `bi_token`（migration 00010）：
+
+- **Auth 端点**（4 个）：`POST /api/auth/register` / `POST /api/auth/login`（公开）；`GET /api/auth/me` / `DELETE /api/auth/logout`（需 Bearer token）。
+- **PAT 端点**（3 个）：`POST /api/tokens` / `GET /api/tokens` / `DELETE /api/tokens/:id`（需 Bearer token，且 `allowPAT=false` 拒绝机器 token 操作人类会话）。
+- **渐进式强制认证**：当前只有 auth/token 端点强制 Bearer，其余资源端点仍开放（Phase C 逐步接入）。`middleware.Bearer` 的 `allowPAT` 参数区分「人类会话 vs 机器 token」的权限边界。
+
+### 本地文件上传（issue #138 / #201）
+
+`internal/extract/` + `datasetHandler.ImportFile` / `datasetHandler.ReplaceFile`：
+
+- **自举模式**（R-85）：未显式配置外部数据源时，自动复用应用自身的 PostgreSQL 作为上传目标（`extract.Resolve` 装配，`routes.go` 不读环境变量）。
+- **两个非泛型路由**：`POST /api/datasets/import`（新建）与 `POST /api/datasets/:id/replace`（替换），multipart 绑定走不了泛型路由的 `ShouldBindJSON`，循 `/health` 先例手工注册。
+- **守卫**：`extract.Guard` 注入 datasource/dataset/chart 三个 service，数据集创建/改指时拒绝非法守卫，图表查询对 extract 模式数据集显式报错。
 
 ## 常用命令
 
@@ -299,7 +323,7 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
   - 静态目录**配错即启动失败**（`webui.New` 读不到 `index.html` 就退出），不会跑起来之后整站 404。
   - 镜像自带的只有 `STATIC_DIR=/app/web`（代码默认值是"空 = 只提供 API"，必须显式指）；监听地址/端口的内置默认值本就是 `0.0.0.0:23352`，无需重复声明。其余全部运行时注入。
 - `docker compose`（唯一一份，`docker-compose.allinone.yml`）: PostgreSQL（端口 5432，本地体验用）+ **一个 app 服务**（23352，前后端同容器），app 用 Docker Hub 发布镜像 `kzzhr/datainsights:${TAG:-latest}` **不构建**；生产环境换外部高可用 PostgreSQL 只跑 app（见 README）。镜像由 `.github/workflows/release.yml` 手动触发发布（校验版本号 + 双端测试 → 冒烟 → 推 amd64/arm64 镜像到 Docker Hub → 打 tag + 建 Release），运维手册见 `docs/deployment/release.md`。
-- 本地不起 Docker 也能验证同一形态：`make serve`（构建前端产物后 `STATIC_DIR=../frontend/dist go run ./cmd`）。不设 `STATIC_DIR` 时后端退化为纯 API 服务，此时 `/share/:token` 才会注册。
+- 本地不起 Docker 也能验证同一形态：`make serve`（构建前端产物后 `STATIC_DIR=../frontend/dist go run ./cmd`）。不设 `STATIC_DIR` 时后端退化为纯 API 服务（只提供 `/api`、`/mcp`、`/health`）。
 - ⚠️ **`frontend/vite.config.js` / `.d.ts` 是 tsc 产物，且会遮蔽 `vite.config.ts`**（Vite 解析 `vite.config.js` 优先于 `.ts`）。曾出现改了 `.ts` 却完全不生效的情况。发现配置改动「没反应」时先 `ls frontend/vite.config.*`，删掉这两个文件再验证。
 
 ## 开发资源
