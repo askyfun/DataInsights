@@ -72,7 +72,7 @@ jobs:
           # 本步的设计是「逐目标看各自 rc 再决定」，errexit 会在第一个非零命令上把整步
           # 掐死——PR #213 实测死在第一句 `find`：internal/config 根本没有 testdata 目录，
           # find 返 1，叠加 pipefail 直接终止，连 go test 都没跑到。
-          # 红绿灯统一由后面的「以失败收场」那一步决定，这里必须关掉 errexit。
+          # 红绿灯统一由后面的「收场」那一步决定，这里必须关掉 errexit。
           set +e
           cd backend
 
@@ -193,9 +193,17 @@ jobs:
             fi
           done < /tmp/crashes.txt
 
-      # 挖到东西就是红：让定时跑批在 Actions 页面上一眼能看出「这轮不安」。
-      - name: 以失败收场（有崩溃时）
+      # 挖到东西怎么收场：定时/手动跑批亮红——那才是给人看「这轮不安」的信号；
+      # PR 上只留 warning 标注、保持绿，因为它不是门禁。
+      # PR #213 实测踩过：三个必需检查全绿，仍被这条红 X 当成「CI 没过、合不了」，
+      # 白排查一轮。非门禁的检查不该借用红绿灯，产出交给 issue。
+      - name: 收场（有崩溃时）
         if: steps.mine.outputs.crashes != '0'
         run: |
-          echo "::error::fuzz 挖掘发现 $(wc -l < /tmp/crashes.txt) 个问题目标，已建/更新 issue"
-          exit 1
+          n=$(wc -l < /tmp/crashes.txt | tr -d ' ')
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            echo "::warning::fuzz 挖掘发现 ${n} 个问题目标（本检查不阻断合并），已建/更新 issue"
+          else
+            echo "::error::fuzz 挖掘发现 ${n} 个问题目标，已建/更新 issue"
+            exit 1
+          fi

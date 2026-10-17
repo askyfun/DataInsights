@@ -7,7 +7,7 @@ GitHub Actions 工作流配置：一条每次提交都跑的测试门禁（`ci.y
 | 文件 | 触发方式 | 用途 |
 |------|----------|------|
 | `ci.yml` | `pull_request` + `push: master` | 每次提交的测试门禁：后端 build/vet/test、前端 biome + tsc + vitest（按用例计数判定）、密钥泄漏扫描；master 额外跑 `-race` 与 `pnpm build`；契约漂移只报告不阻断 |
-| `fuzz.yml` | 每周二 19:00 UTC + PR 改动碰到有 fuzz 目标的包 + 手动 | 逐目标 `-fuzz` 挖掘。**故意不是门禁**（非确定性），产出是 issue + artifact |
+| `fuzz.yml` | 每周二 19:00 UTC + PR 改动碰到有 fuzz 目标的包 + 手动 | 逐目标 `-fuzz` 挖掘。**故意不是门禁**（非确定性），产出是 issue + artifact。PR 上保持绿（只留 warning），定时/手动才亮红 |
 | `release.yml` | 手动（`workflow_dispatch`，填版本号） | 发布：校验版本号 + 双端测试 → 构建并冒烟 → 推多架构镜像到 Docker Hub → 打 tag + 建 Release。手册见 `docs/deployment/release.md` |
 
 ## 配置
