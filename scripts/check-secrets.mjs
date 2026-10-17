@@ -13,9 +13,19 @@ const PATTERNS = [
   { re: /workbuddy/, label: '个人工具链路径 (workbuddy)' },
 ];
 
+// 默认扫本次暂存的内容（pre-commit 钩子用）。CI 里没有暂存区，必须显式给提交范围：
+// `node scripts/check-secrets.mjs --diff origin/master...HEAD`。这样即使用了
+// `git commit --no-verify` 绕过本地钩子，泄漏照样会在 PR 门禁上被挡下来。
+const diffFlag = process.argv.indexOf('--diff');
+const diffCmd =
+  diffFlag >= 0
+    ? `git diff ${process.argv[diffFlag + 1]} -U0 --no-color`
+    : 'git diff --cached -U0 --no-color';
+const mode = diffFlag >= 0 ? 'CI diff 扫描' : 'pre-commit';
+
 let diff = '';
 try {
-  diff = execSync('git diff --cached -U0 --no-color', { encoding: 'utf8' });
+  diff = execSync(diffCmd, { encoding: 'utf8' });
 } catch {
   process.exit(0);
 }
@@ -37,7 +47,7 @@ for (const line of diff.split('\n')) {
 }
 
 if (offenders.length) {
-  console.error('\n✖ pre-commit：检测到疑似敏感信息，已阻止提交：\n');
+  console.error(`\n✖ ${mode}：检测到疑似敏感信息，已阻止：\n`);
   console.error([...new Set(offenders)].join('\n'));
   console.error('\n请改写成占位符（如 <dev-host>、/Users/dev）后再提交。\n');
   process.exit(1);

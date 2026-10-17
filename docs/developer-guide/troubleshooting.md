@@ -1,6 +1,6 @@
 # 排障（Troubleshooting）
 
-> 最后更新：2026-09-26
+> 最后更新：2026-10-17
 > 收录「外部开发者 clone 本仓库、照文档部署后**也会踩到**的坑」，按场景 TOC 查阅。只收"不做记录就会再踩一遍"的坑。
 > 每条按「**现象 → 根因 → 判据 / 处置**」写，力求**可独立阅读**（不假设你看过任何本机笔记）。
 
@@ -130,6 +130,7 @@
 - ⚠️ **`isNull` / `isNotNull` 在盘级载荷里要放一个占位元素**：契约用「数组非空」判定激活，空数组 = 未激活。占位用 `null`（`ACTIVATION_PLACEHOLDER`）而不是 `''`，免得被误当成真实比较值。
 - ⚠️ **别用「跳过 isNull」去找展开后的主条件**：`expandDateFilterIntent` 的主条件恒为 `[0]`，「包含空日期」那条 IS NULL 追加在尾部并带 `logic:'or'`；而特殊值「空日期」的主条件**本身就是 isNull**（实测踩过：按 operator 过滤会让「空日期」与保存快照双双退化成 `eq ''`，静默查出 0 行）。
 - ⚠️ **日期语义是「双端镜像」，靠一张共用用例表防漂移**：前端 `lib/dateFilter.ts`、后端 `internal/query/datefilter.go`，两侧共读 `frontend/src/lib/__fixtures__/dateFilterCases.json`（Go 侧 `datefilter_test.go`，TS 侧 `dateFilter.cases.test.ts`）。**改任何一侧的语义都必须同时改另一侧并跑两边**，否则那张表会直接抓出不一致。新增语义时先往表里加例、再加实现。测试 now 用 `time.ParseInLocation` 按本地时区解释（`time.Parse` 会掉进 UTC，导致「同一天」差一天）。
+- ⚠️ **用例表只保证「表里有的用例双端一致」，不保证「代码支持的分支都在表里」**：`last52w` 曾经双端都实现了、51 例表里却一例都没有（2026-10-17 变异测试顺带查出）。现在由 `internal/query/datefilter_coverage_test.go` 钉住三个方向：TS union 声明的每个 preset ⇒ ① Go 侧必须可达（行为探针，喂进 `ResolveDateFilter` 看是否出区间）② 用例表必须至少一例；用例表里出现 union 未声明的 preset ⇒ 判为幽灵用例。**新增 preset 必须同轮往表里加一例**，否则 CI 红。别把这张表当成「覆盖率」的唯一保障。
 - ⚠️ **后端解析日期时用「单侧边界放 `Value`」的形状**：`buildFilterPart` 对 `gte` / `lte` 只绑 `Value`，`ValueEnd` 仅 `between` 使用 —— 把 lte 的上界塞进 `ValueEnd` 会让它渲染成 `col <= NULL`（恒假、0 行，且全程无报错）。
 - ⚠️ **解析不出条件时整条丢弃，绝不回落 operator / value**：未选择的日期条件在内存态里兜底成「等值空串」，回落会把「不过滤」变成「查出 0 行」。丢弃与前端查询路径的行为一致。
 - ⚠️ **日期解析的「今天」取服务器本地时区**（`datefilter.go` 顶部有说明）。前端用的是浏览器本地日；同一套部署下一致，跨时区多地域部署会有一天边界差 —— 与「数据集按业务时区落数」的假设配套。
@@ -160,3 +161,7 @@
 - ⚠️ **`find -newermt` 在部分受限环境（如沙箱）里会失效**（恒返空）→ 排查"谁在什么时候改了什么"改用 epoch 排序：`find . -type f -name '*.ts' -print0 | xargs -0 stat -f "%m %Sm %N" | sort -rn`。
 - ⚠️ **后台起 dev 服务必须断掉 stdin（`< /dev/null`）**：`make dev` 把 vite 放进后台进程组后，它会为"键盘交互"去读终端 stdin，内核随即以 **SIGTTIN** 停住整个前端进程组 —— 症状极迷惑：进程活着、端口 `LISTEN`、但请求一律超时无响应（`ps` 状态是 `T` 而非 `S`）。⚠️ 别对 `T` 状态进程直接 `kill -CONT` 唤醒：它读完 stdin 会立刻退出，触发 `make dev` 的 EXIT trap **把后端一起收掉**。当前 `Makefile` 的 `dev` 已用 `< /dev/null` 规避，改这段时别把重定向删掉。
 - ⚠️ **清"疑似诊断残留"的进程前必须先反查归属**：`ps -eo pid,ppid,lstart,command` 看父子链与启动时刻，确认是自己某次操作的后代再动手；无法确认就先问，别误杀他人正在跑的服务。
+- ⚠️ **会在运行时读仓库内文件的 Go 测试，会被测试缓存打成假绿**：`internal/query/datefilter_coverage_test.go` 读前端的 `dateFilter.ts`（union 契约源）与 `__fixtures__/dateFilterCases.json`，实测改坏夹具后 `go test ./internal/query/ -run TestDateFilterPresetBranchCoverage` 仍回 `ok ... (cached)`，复用上一轮的绿灯。凡是「测试读文件而不是只读代码」的用例，跑法一律带 `-count=1`（`ci.yml` 的两条 `go test` 已带）。手工验证时同理：不带 `-count=1` 的"通过"不构成证据。
+- ⚠️ **gofmt 会把文档注释里的直引号对换成印刷引号**：想在注释里写 SQL 的引号转义写法（两个连续单引号）会被改写成 `”`(U+201D)，句子直接坏掉；`go1.27` 实测如此，且改完的文件会再次进入 `gofmt -l` 的干净集合，看不出被动过。注释里用中文描述那个写法，别摆字面量。
+- ⚠️ **脚本里拼 Go 包路径必须带 `./` 前缀**：`go test internal/query`（无 `./`）会被当成**标准库导入路径**，报 `package internal/query is not in std` → `[setup failed]`。从 `grep -rl` 结果取 dirname 再喂 `go test` 时尤其容易漏（`fuzz.yml` 的挖掘循环踩过）。
+- ⚠️ **判断"是否新增了文件"别用 `git status --porcelain` 计数**：未跟踪目录会被折叠成一行（`?? a/testdata/fuzz/Name/`），同目录下新增的第 2、3 个文件根本数不出来。要精确比对新产物，用 `find <dir> -type f | sort` 的前后快照 + `comm -13`。

@@ -1,6 +1,9 @@
 package expr
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // 恶意用例表（issue #170 验收标准 3）：注入、越权函数、过深嵌套、方言逃逸。
 // 每个用例都必须被 Validate 拒绝，错误信息携带原因但不回显原表达式全文。
@@ -112,5 +115,56 @@ func TestValidateUnder1ms(t *testing.T) {
 	}
 	for i := 0; i < 1000; i++ {
 		_ = Validate(expr)
+	}
+}
+
+// 行注释在「一元负号位」上的绕过（bug 修复回归测试）。
+//
+// 包文档承诺注释「在语法层即不可达」，但拒绝 `--` 的守卫原先只住在 expr() 的二元
+// 运算符分支：factor() 的一元负号分支会先把相邻两个 `-` 各自当一元负号吃掉，于是
+// `--foo` 这类输入被放行；接线后生成的单行 SQL 会被 `--` 把整条尾巴吞成注释。
+// 本测试钉住两个方向：注释序列一律拒绝（errors.Is(ErrInvalid)），且真实算术里
+// 合法的负号/减法不得被误伤——尤其 `'--'` 字符串字面量内部是数据不是代码。
+func TestValidateRejectsCommentAtUnaryPosition(t *testing.T) {
+	rejected := []struct {
+		name string
+		expr string
+	}{
+		{name: "一元位行注释", expr: "--foo"},
+		{name: "一元位行注释接数字", expr: "--0"},
+		{name: "负号后接行注释", expr: "- --x"},
+		{name: "括号内一元位行注释", expr: "(--foo)"},
+		{name: "二元位行注释", expr: "1 -- 2"},
+		{name: "列名后行注释", expr: "x --注释"},
+	}
+	for _, c := range rejected {
+		t.Run(c.name, func(t *testing.T) {
+			err := Validate(c.expr)
+			if err == nil {
+				t.Fatalf("Validate(%q) = nil, 注释序列必须被拒绝", c.expr)
+			}
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Validate(%q) = %v, want errors.Is(err, ErrInvalid)", c.expr, err)
+			}
+		})
+	}
+}
+
+// 防回归（改过头）：含负号与减法的合法表达式必须继续放行。
+func TestValidateAcceptsLegitimateWithUnaryMinus(t *testing.T) {
+	accepted := []string{
+		"-amount",
+		"1 - -1",
+		"- -1",
+		"-(-1)",
+		"temp_max - temp_min",
+		"'--'", // 单引号字面量内部的 -- 是数据，不是代码
+		"count(*)",
+		"price * quantity",
+	}
+	for _, expr := range accepted {
+		if err := Validate(expr); err != nil {
+			t.Errorf("Validate(%q) = %v, want nil", expr, err)
+		}
 	}
 }

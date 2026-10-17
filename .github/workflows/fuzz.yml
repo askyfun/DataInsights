@@ -1,0 +1,201 @@
+name: Fuzz 挖掘
+
+# 挖掘模式（-fuzz）与种子回归（ci.yml 里的 go test）是两件事：
+#   · 种子回归每次提交都跑，确定、可复现、能当门禁；
+#   · 挖掘非确定，**故意不做门禁**——同一份代码今天挖到、明天挖不到是常态，
+#     把它挂成必需检查会让 PR 随机卡死。这里的产出是一条 issue，不是红绿灯。
+#
+# 触发口径按「地形」而不是按日历瞎撒：
+#   · 每周二跑全量（本地实测：expr 目标第一次按下按钮 1 秒内就挖到绕过，
+#     说明红利在「新地形」，不在重复挖同一片）；
+#   · 只有改动碰到有 fuzz 目标的包时才顺手挖一轮（短时长）。
+on:
+  schedule:
+    # 19:00 UTC = 周三 03:00 北京时间，避开工作时段抢不到 runner。
+    - cron: '0 19 * * 2'
+
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: 每个目标的挖掘时长（Go 的 -fuzztime，如 60s / 5m）
+        required: false
+        default: '60s'
+      only:
+        description: 只跑名字匹配该正则的目标（留空 = 全部）
+        required: false
+        default: ''
+
+  pull_request:
+    paths:
+      - 'backend/internal/query/**'
+      - 'backend/internal/expr/**'
+      - 'backend/internal/datasource/**'
+      - 'backend/internal/crypto/**'
+      - 'backend/internal/idcodec/**'
+      - 'backend/internal/model/**'
+      - 'backend/internal/config/**'
+      - 'backend/internal/webui/**'
+      - '.github/workflows/fuzz.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mine:
+    name: 挖掘（逐目标限时）
+    runs-on: ubuntu-latest
+    # 20 个目标 × 60s + 编译开销的兜底；超时应是「挖太久」而不是「挖到东西」。
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: backend/go.sum
+
+      - name: 逐个目标挖掘
+        id: mine
+        env:
+          ONLY: ${{ inputs.only }}
+          DISPATCH_FUZZTIME: ${{ inputs.fuzztime }}
+        run: |
+          set -uo pipefail
+          # GitHub 给每个 run 都加了 -e（日志里那行 `shell: /usr/bin/bash -e {0}`）。
+          # 本步的设计是「逐目标看各自 rc 再决定」，errexit 会在第一个非零命令上把整步
+          # 掐死——PR #213 实测死在第一句 `find`：internal/config 根本没有 testdata 目录，
+          # find 返 1，叠加 pipefail 直接终止，连 go test 都没跑到。
+          # 红绿灯统一由后面的「以失败收场」那一步决定，这里必须关掉 errexit。
+          set +e
+          cd backend
+
+          # 时长档位：PR 上求快（只为在改动动到围栏时立刻撒一轮），定时/手动求深。
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            limit='15s'
+          else
+            limit="${DISPATCH_FUZZTIME:-60s}"
+          fi
+          echo "每目标时长：$limit"
+
+          # 动态枚举目标（包 → 函数名）。新增 fuzz 函数自动进挖掘面，不维护清单——
+          # 清单式 CI 配置的宿命就是和代码漂移。
+          list=/tmp/targets.txt
+          : > "$list"
+          for f in $(grep -rl '^func Fuzz' --include='*_test.go' internal | sort); do
+            pkg=$(dirname "$f")
+            grep -hoE '^func Fuzz[A-Za-z0-9_]+' "$f" | sed 's/^func //' | while read -r name; do
+              printf '%s\t%s\n' "$pkg" "$name" >> "$list"
+            done
+          done
+          echo "发现目标 $(wc -l < "$list") 个"
+
+          crashes=/tmp/crashes.txt
+          : > "$crashes"
+
+          while IFS=$'\t' read -r pkg name; do
+            # only 过滤（定时/手动才有意义；PR 上跑全量短时长）
+            if [[ -n "${ONLY:-}" && ! "$name" =~ $ONLY ]]; then
+              continue
+            fi
+
+            echo "::group::$pkg — $name"
+            # 新崩溃判据用**文件系统快照**，不用 git status：未跟踪目录会被 git 折叠成
+            # 一行（`?? pkg/testdata/fuzz/Name/`），同目录下第 2、3 个新语料根本数不出来
+            # ——本地实测把真崩溃打成了 "seed-or-build-fail" 误报。
+            # ⚠️ 包路径必须带 ./ 前缀交给 go test：写成 `go test internal/query` 会被 Go
+            # 当成标准库导入路径，直接 [setup failed]（本地实测踩到）。
+            find "$pkg/testdata/fuzz" -type f 2>/dev/null | sort > /tmp/snap_before.txt
+            log=/tmp/fuzz.log
+            go test -count=1 -run "^${name}\$" -fuzz "^${name}\$" -fuzztime "$limit" "./$pkg" >"$log" 2>&1
+            rc=$?
+            tail -40 "$log"
+            if [[ "$rc" -eq 0 ]]; then
+              echo "无崩溃"
+            else
+              find "$pkg/testdata/fuzz" -type f 2>/dev/null | sort > /tmp/snap_after.txt
+              newfile="$(comm -13 /tmp/snap_before.txt /tmp/snap_after.txt | head -1)"
+              if [[ -n "$newfile" ]]; then
+                # 真·新崩溃：Go 已把最小化复现写进 testdata/fuzz/<Name>/<hash>。
+                # 记成仓库根相对路径，让后面的上报 step（cwd=仓库根）能直接 cat。
+                echo "新崩溃语料：$newfile"
+                printf '%s\t%s\t%s\t%s\n' "$pkg" "$name" "new-crash" "backend/$newfile" >> "$crashes"
+              else
+                # 没产生新语料却非零退出：多半是**已入库的种子**在失败（等价于回归破了），
+                # 该由 ci.yml 拦住；这里照样报出来，免得静默。
+                printf '%s\t%s\t%s\t%s\n' "$pkg" "$name" "seed-or-build-fail" "-" >> "$crashes"
+              fi
+            fi
+            echo "::endgroup::"
+          done < "$list"
+
+          n="$(wc -l < "$crashes" | tr -d ' ')"
+          echo "crashes=$n" >> "$GITHUB_OUTPUT"
+          echo "本轮问题目标数：$n"
+
+      - name: 归档崩溃语料
+        if: steps.mine.outputs.crashes != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers-${{ github.run_id }}
+          path: 'backend/**/testdata/fuzz/**'
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # 只在有本仓库 issue 权限时上报：fork PR 的 GITHUB_TOKEN 打不开上游 issue，
+      # 让它去报错只会把「挖到东西」这件事变成一团糊掉的失败日志。
+      - name: 报告到 issue
+        if: >-
+          steps.mine.outputs.crashes != '0' &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          while IFS=$'\t' read -r pkg name kind path; do
+            title="[Fuzz] ${name} 挖掘异常（${kind}）"
+            # git status 输出的是**仓库根**相对路径，而这个 step 的 cwd 就是仓库根，
+            # 所以下面的 cat 不需要再拼 backend/。
+            body="$(
+              printf '由 fuzz.yml 的挖掘作业发现（非门禁：同一代码可能下次挖不到）。\n\n'
+              printf -- '- **包**：`%s`\n- **目标**：`%s`\n- **性质**：`%s`\n' "$pkg" "$name" "$kind"
+              if [[ "$path" != "-" ]]; then
+                hash="$(basename "$path")"
+                printf -- '- **最小化复现语料**：`%s`\n\n```text\n%s\n```\n' "$path" "$(cat "$path")"
+                # 语料一旦入库就是确定性复现，不需要再挖：只跑那一条子用例。
+                printf '本地复现（种子已能稳定复现）：\n\n'
+                printf '```bash\ncd backend && go test -count=1 -v -run "^%s/%s$" "./%s"\n```\n' \
+                  "$name" "$hash" "$pkg"
+              else
+                printf '\n本轮没有产出新语料，但目标以非零退出（多半是**已入库种子**在失败，'
+                printf '或该包构建不起来）。先看跑批日志，再判断是不是回归。\n'
+              fi
+              printf -- '- **跑批记录**：%s\n' "$run_url"
+              printf '\n> 修复后请把该崩溃语料留在 `testdata/fuzz/` 下当永久回归种子，'
+              printf '它就会随 ci.yml 的 `go test` 每次提交一起跑。\n'
+            )"
+            existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+                        --search "in:title \"$name\"" --json number --jq '.[0].number // empty')"
+            if [[ -n "$existing" ]]; then
+              gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+              echo "已追加到 issue #$existing"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+              echo "已建 issue"
+            fi
+          done < /tmp/crashes.txt
+
+      # 挖到东西就是红：让定时跑批在 Actions 页面上一眼能看出「这轮不安」。
+      - name: 以失败收场（有崩溃时）
+        if: steps.mine.outputs.crashes != '0'
+        run: |
+          echo "::error::fuzz 挖掘发现 $(wc -l < /tmp/crashes.txt) 个问题目标，已建/更新 issue"
+          exit 1

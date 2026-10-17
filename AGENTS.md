@@ -34,7 +34,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 契约工程（Batch 2/3）：`api/openapi.yaml` 是前后端接口的单一事实源，`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。**前端运行时类型已切换到生成物打底（Batch 3）**：`frontend/src/api/index.ts` 的实体/响应/请求类型 alias 到 `components['schemas']`，窄联合处用薄手写层（`Omit<G.X,'type'> & { type: Union }`）重收紧；已判死的声明（手写 `typeConfig`——wire 实为 snake `type_config` 且前端零消费、`ColumnInfo` 幽灵字段、`GeneratedSQL` 等）随迁移删除。三条静默红线仍有效：生成 `*Response` 是信封包装（裸 payload 对应 `ChartDataResult` 等去后缀类型，禁按名替换）、`*FormData` 是 UI 数组约定保留手写、store `QueryConfig` 为 camelCase UI 模型不换。后端 handler In/Out 仍为 handler-local 镜像（json tag 由 `contract_parity_test.go` 反射守卫），**未**切换到 `idls.*`——生成 Go 类型无 gin `form:"-"` 语义，直接作 In 会重新引入 query 污染注入面，切换列入 Batch 4 重评。图表 `bi_chart.config` 已升级为带 `version:2` 的文档（`frontend/src/lib/chartConfigSchema.ts` 的 `ChartConfigDocument` + `migrateChartConfig`），旧结构在加载时自动迁移（`fieldId` 由位置 `field-N` 改为列的稳定 id `DatasetColumn.id`），ShareView 据此渲染新结构图表；图表查询请求线不含 `config` 字段（Batch 3 已移除从未生效的 pie 合并比例死链，`query.PieProcessor.MergeOtherBelowRatio` 能力保留但未接线）。
 
-⚠️ **`make api-gen` 的「前端」半步当前必然失败**（不是环境问题）：`openapi-typescript@7.13.0` 依赖 `typescript` 包的运行时导出 `ts.factory`，而本仓 `typescript@7` 没有它 → `TypeError: Cannot read properties of undefined`。崩溃发生在写文件之前（生成物不会被写坏）。绕过方式见 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) 的「版本与依赖」（入库）；彻底修法是把生成器与 `typescript@7` 解耦（独立 package.json 或钉一个 TS 5 别名），属独立改动。**后端那半步正常**，且只输出被 cfg 允许的子集（不含 `DashboardFilter*` 等 layout schema）。无论走哪条路，重跑生成后都要 `diff` 生成物，确认只漂了本次改动。
+⚠️ **`make api-gen` 的「前端」半步当前必然失败**（不是环境问题）：`openapi-typescript@7.13.0` 依赖 `typescript` 包的运行时导出 `ts.factory`，而本仓 `typescript@7` 没有它 → `TypeError: Cannot read properties of undefined`。崩溃发生在写文件之前（生成物不会被写坏）。绕过方式见 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) 的「版本与依赖」（入库）；彻底修法是把生成器与 `typescript@7` 解耦（独立 package.json 或钉一个 TS 5 别名），属独立改动。**后端那半步能跑，但输出不保证可编译**：issue #201 加了 multipart 端点后，生成物引用 `github.com/oapi-codegen/runtime/types`，而 `backend/go.mod` 没有这个依赖 → 重跑生成会把编译跑坏，得先补依赖或收紧 cfg 的 generate 范围。它只输出被 cfg 允许的子集（不含 `DashboardFilter*` 等 layout schema）。无论走哪条路，重跑生成后都要 `diff` 生成物，确认只漂了本次改动（`ci.yml` 的 contract-drift job 就在自动做这个 diff，只报告不阻断，直到依赖缺口补上）。
 
 `backend/internal/router/router.go` 的泛型路由**已全面启用并接入 40 个 API 端点**；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
 
@@ -231,7 +231,8 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 - **Bug 修复测试**: 每个 bug 修复前先写能复现问题的失败测试，修复后再确认测试通过。前后都要有对应单元测试。
 - **代码可测试性**: 设计代码必须具备可测试性，禁止提交无法测试的代码。
 - **文档同步**: 大型业务逻辑调整或架构调整必须同步更新 `docs/` 下的相关文档（四区分区见 `docs/AGENTS.md`）、`README.md`、`AGENTS.md`。
-- **Pre-commit 钩子**: Husky 在前端运行 `lint-staged`，对暂存的 `.ts/.tsx` 文件执行 `biome check`。
+- **Pre-commit 钩子**: Husky 在前端运行 `lint-staged`，对暂存的 `.ts/.tsx` 文件执行 `biome check`；另一步 `scripts/check-secrets.mjs` 扫新增行的敏感串。钩子可用 `--no-verify` 绕过，同一套扫描在 CI 上会再跑一遍。
+- **CI 门禁**（`.github/workflows/ci.yml`，2026-10-17 起）: 每个 PR 与每次 master push 都跑后端 build/vet/test、前端 biome + `tsc --noEmit` + vitest、密钥扫描，这三项是 `master` 的必需检查；`-race` 与 `pnpm build` 只在 master push 跑；契约漂移只报告不阻断。fuzz 挖掘（`fuzz.yml`）非确定，**故意不做门禁**，产出是 issue；修好后把崩溃语料留在 `testdata/fuzz/` 下即成为每次提交都跑的确定性回归种子。细则见 `docs/developer-guide/contributing.md`「CI 门禁」与 `.github/AGENTS.md`。
 
 ## 零容忍
 

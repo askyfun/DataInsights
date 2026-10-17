@@ -162,6 +162,12 @@ func (p *parser) term(depth int) error {
 func (p *parser) factor(depth int) error {
 	p.skipSpace()
 	if p.pos < len(p.src) && p.src[p.pos] == '-' {
+		// 与 expr() 二元分支同一判据：相邻两个 - 即 SQL 行注释开头。
+		// 一元负号会先把这两个 - 各自吃掉，守卫必须在此重复，否则 `--foo`
+		// 被放行后经 bun_builder 原样内插，会把单行 SQL 的尾巴吞成注释。
+		if p.pos+1 < len(p.src) && p.src[p.pos+1] == '-' {
+			return p.fail("comment is not allowed")
+		}
 		p.pos++
 		if depth+1 > maxDepth {
 			return p.fail("nesting too deep (>%d)", maxDepth)
