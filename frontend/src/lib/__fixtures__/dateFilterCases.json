@@ -151,6 +151,13 @@
       "want": { "operator": "between", "start": "2026-06-29", "end": "2026-09-24" }
     },
     {
+      "name": "周粒度：最近 52 周",
+      "granularity": "week",
+      "weekStart": 1,
+      "value": { "kind": "dynamic", "preset": "last52w" },
+      "want": { "operator": "between", "start": "2025-09-29", "end": "2026-09-24" }
+    },
+    {
       "name": "月粒度：最近 1 个月",
       "granularity": "month",
       "weekStart": 1,
