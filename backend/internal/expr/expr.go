@@ -106,6 +106,25 @@ func (p *parser) fail(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
 }
 
+// rejectDoubleDash 是「相邻两个减号即 SQL 行注释开头」这条判据的唯一落点：
+// at 为刚要消费的那个减号所在下标，命中即返回拒绝错误，否则返回 nil。
+// 两个调用点（expr 的二元运算分支、factor 的一元负号分支）共用它，
+// 行为与去重前逐字相同。
+//
+// 判据刻意建立在**原始文本上紧邻的两个减号**，而不是 skipSpace 之后的某个
+// 逻辑位置：SQL 行注释必须由紧挨着的两个减号构成，写成「负号 空格 负号」的
+// 输入在数据库看来仍是减法与一元负号，不能被当作注释拒掉。
+//
+// 约定：今后任何新增的、消费减号的分支（新的运算符、词法调整等）都必须走
+// 这个 helper，不要在调用点手写对后一个字符的探视。一元位绕过就是因为判据
+// 当时只住在二元位一处，新增分支漏掉即静默失效。
+func (p *parser) rejectDoubleDash(at int) error {
+	if at < len(p.src) && p.src[at] == '-' && at+1 < len(p.src) && p.src[at+1] == '-' {
+		return p.fail("comment is not allowed")
+	}
+	return nil
+}
+
 // expr := term (('+'|'-'|'||') term)*
 func (p *parser) expr(depth int) error {
 	if depth > maxDepth {
@@ -121,9 +140,9 @@ func (p *parser) expr(depth int) error {
 		}
 		r := p.src[p.pos]
 		if r == '+' || r == '-' {
-			// '--' 是行注释，不是两次减法；在语法层直接拒绝。
-			if r == '-' && p.pos+1 < len(p.src) && p.src[p.pos+1] == '-' {
-				return p.fail("comment is not allowed")
+			// 相邻两个减号是行注释，不是两次减法；判据见 rejectDoubleDash。
+			if err := p.rejectDoubleDash(p.pos); err != nil {
+				return err
 			}
 			p.pos++
 		} else if r == '|' && p.pos+1 < len(p.src) && p.src[p.pos+1] == '|' {
@@ -162,11 +181,11 @@ func (p *parser) term(depth int) error {
 func (p *parser) factor(depth int) error {
 	p.skipSpace()
 	if p.pos < len(p.src) && p.src[p.pos] == '-' {
-		// 与 expr() 二元分支同一判据：相邻两个 - 即 SQL 行注释开头。
-		// 一元负号会先把这两个 - 各自吃掉，守卫必须在此重复，否则 `--foo`
+		// 与 expr() 二元分支共用 rejectDoubleDash，判据只有一份。
+		// 一元负号会先把这两个 - 各自吃掉，守卫必须在此重复调用，否则 `--foo`
 		// 被放行后经 bun_builder 原样内插，会把单行 SQL 的尾巴吞成注释。
-		if p.pos+1 < len(p.src) && p.src[p.pos+1] == '-' {
-			return p.fail("comment is not allowed")
+		if err := p.rejectDoubleDash(p.pos); err != nil {
+			return err
 		}
 		p.pos++
 		if depth+1 > maxDepth {
@@ -341,7 +360,11 @@ func (p *parser) identOrCall(depth int) error {
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }
 
 func isIdentChar(r rune) bool {
-	// '.' 属于标识符字符：与 query.identifierTokenPattern 的裸标识符形态
-	// [a-zA-Z0-9_.]+ 对齐（db.tbl.col）。
-	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '$' || r == '.'
+	// 字符集必须与下游两处标识符白名单**完全一致**：query.identifierTokenPattern 与
+	// datasource.IsValidIdentifier 都只认 [a-zA-Z0-9_.]（留 '.' 是为了 db.tbl.col 这种
+	// 限定形态）。围栏比下游多放任何一个字符，后果要么是「过了闸却在下游被静默换成
+	// _invalid_identifier」，要么更糟 —— 在 safeAggArg 这类原样内插的路径上把该字符
+	// 直接带进 SQL。美元符此前就在表里而下游从不承认它，而 PostgreSQL 的
+	// dollar-quoted string 使它具备改变字符串/代码边界的能力，故一并从词法中移除。
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '.'
 }

@@ -124,7 +124,10 @@ func TestValidateUnder1ms(t *testing.T) {
 // 运算符分支：factor() 的一元负号分支会先把相邻两个 `-` 各自当一元负号吃掉，于是
 // `--foo` 这类输入被放行；接线后生成的单行 SQL 会被 `--` 把整条尾巴吞成注释。
 // 本测试钉住两个方向：注释序列一律拒绝（errors.Is(ErrInvalid)），且真实算术里
-// 合法的负号/减法不得被误伤——尤其 `'--'` 字符串字面量内部是数据不是代码。
+// 合法的负号/减法不得被误伤——字面量内部的两个减号是数据不是代码，那条反例
+// 已在下方的 TestValidateAcceptsLegitimateWithUnaryMinus 与
+// TestValidateAcceptsLegitimateStringLiterals 里钉住，与本表首条（同一形态出现在
+// 代码位上即拒绝）构成一组对照。
 func TestValidateRejectsCommentAtUnaryPosition(t *testing.T) {
 	rejected := []struct {
 		name string
@@ -136,6 +139,10 @@ func TestValidateRejectsCommentAtUnaryPosition(t *testing.T) {
 		{name: "括号内一元位行注释", expr: "(--foo)"},
 		{name: "二元位行注释", expr: "1 -- 2"},
 		{name: "列名后行注释", expr: "x --注释"},
+		// 串联运算符（||）走完两个字符后落在减号位上：这条路径的消费点是 expr()
+		// 里 pos+=2 之后调用的 term()→factor()，由一元位守卫拒绝。缺了这一例，
+		// 一元位守卫被摘掉时只有减法/负号路径会红，串联路径静默漏过。
+		{name: "串联后落一元位行注释", expr: "a||--b"},
 	}
 	for _, c := range rejected {
 		t.Run(c.name, func(t *testing.T) {
@@ -217,5 +224,34 @@ func TestValidateAcceptsLegitimateStringLiterals(t *testing.T) {
 		if err := Validate(expr); err != nil {
 			t.Errorf("Validate(%q) = %v, want nil", expr, err)
 		}
+	}
+}
+
+// TestValidateRejectsDollarInIdentifier 钉住「围栏不与下游白名单赌字符集」。
+// 下游两处标识符判据（query.identifierTokenPattern 与 datasource.IsValidIdentifier）
+// 都只认字母数字下划线和点，从不承认美元符；而 PostgreSQL 的 dollar-quoted string
+// 使美元符具备改变字符串/代码边界的能力 —— 与字面量反斜杠同一个处理原则。
+func TestValidateRejectsDollarInIdentifier(t *testing.T) {
+	rejected := []struct {
+		name string
+		expr string
+	}{
+		{name: "标识符中间", expr: "a$b"},
+		{name: "标识符开头", expr: "$a"},
+		{name: "标识符结尾", expr: "a$"},
+		{name: "聚合实参内", expr: "sum(a$b)"},
+		{name: "dollar quote 起始", expr: "x$$"},
+		{name: "dollar quote 夹内容", expr: "x$$ SELECT 1 $$"},
+	}
+	for _, c := range rejected {
+		t.Run(c.name, func(t *testing.T) {
+			err := Validate(c.expr)
+			if err == nil {
+				t.Fatalf("Validate(%q) = nil, 含美元符的标识符必须被拒绝（下游白名单不承认它）", c.expr)
+			}
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Validate(%q) = %v, want errors.Is(err, ErrInvalid)", c.expr, err)
+			}
+		})
 	}
 }
