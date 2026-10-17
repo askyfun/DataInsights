@@ -32,6 +32,10 @@
 3. 填 `version`：形如 `v1.2.3`（见 §3）。
 4. `prerelease` 保持默认 `false`；发 RC 类版本时勾上（不移动 `latest`，Release 标记为 Pre-release）。
 5. Run。全程约 15–30 分钟，大头在 QEMU 下的 arm64 构建。
+6. 跑完**校正 Release 正文**：工作流生成的说明是「安装命令 + `git log --no-merges -%s` 的
+   commit 标题清单」，不含迁移水位、鉴权边界、安全修复这些用户真正要看的段落。把
+   `CHANGELOG.md` 对应小节贴进去（`gh release edit <version> --notes-file <file>`）。
+   治本修法见 §8。
 
 ## 3. 版本号规则
 
@@ -104,3 +108,7 @@ git tag -d <version>
 - **`vitest` 的退出码在本仓不可信**：存在一条既有的未处理错误（jsdom 环境拆除期，react-dom 调度出的宏任务晚于环境销毁执行，抛 `ReferenceError: window is not defined`），会让 **584/584 全绿**的跑批同样以退出码 1 收场（Node 22 / Node 24 均可复现）。因此 `verify` 里的前端测试**只按用例计数判定**。**治本方向**：定位把页面组件拉进 jsdom 的用例（`frontend/src/__tests__/chartQuery.test.ts` 是一条线索，它 import 了 `@/pages/ChartBuilder`），在该用例或 `setup.ts` 里补 cleanup / 等宏任务 flush；退一步可在 `frontend/vite.config.ts` 的 `test` 块加 `dangerouslyIgnoreUnhandledErrors: true`（全局放宽，代价是不再兜住未来真正的 unhandled error）。
 - 前端 Sentry DSN 是**构建期内联**的：镜像一旦发布，DSN 就固定了，改它必须重发一个版本。
 - 构建缓存走 GitHub Actions cache（`type=gha`），换版本号不会让缓存失效；依赖清单变更后第一次构建会明显变慢。
+- **Release 正文不读 `CHANGELOG.md`**：`release` job 用 `git log --no-merges --pretty='- %s (%h)'`
+  拼「上一个 tag 到本次」的提交标题，对外只有一行行 commit subject，升级须知与安全修复全都看不到。
+  当前靠 §2 第 6 步人工对齐；**治本**是在该步改为从 `CHANGELOG.md` 抽取 `## [<version>]` 小节作正文
+  （注意去掉「未发布（草稿）」那行——它绝不能出现在对外页面上）。
