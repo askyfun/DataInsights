@@ -11,8 +11,8 @@ import (
 	"data-insights/internal/database"
 	"data-insights/internal/datasource"
 	"data-insights/internal/domain/entity"
-	"data-insights/internal/extract"
 	"data-insights/internal/expr"
+	"data-insights/internal/extract"
 	"data-insights/internal/idgen"
 	"data-insights/internal/model"
 	"data-insights/internal/query"
@@ -113,6 +113,9 @@ func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entit
 	if err := s.extract.CheckDatasource(ds.DatasourceID); err != nil {
 		return nil, router.NewBusinessError(response.CodeBadRequest, err.Error())
 	}
+	if err := s.rejectSampleDatasource(ctx, ds.DatasourceID); err != nil {
+		return nil, err
+	}
 	m := toDatasetModel(ds)
 	m.CreatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	// bun 对零值 sql.NullTime 发显式 NULL（绕过列 DEFAULT CURRENT_TIMESTAMP），
@@ -131,6 +134,9 @@ func (s *datasetService) Update(ctx context.Context, ds *entity.Dataset) (*entit
 	// 同 Create：禁止把数据集改指到抽取存储数据源上（issue #118 预留守卫）。
 	if err := s.extract.CheckDatasource(ds.DatasourceID); err != nil {
 		return nil, router.NewBusinessError(response.CodeBadRequest, err.Error())
+	}
+	if err := s.rejectSampleDatasource(ctx, ds.DatasourceID); err != nil {
+		return nil, err
 	}
 	m := toDatasetModel(ds)
 	// 整行 WherePK 更新会把合并基带入的旧 updated_at 原样写回，导致更新后时间戳
@@ -185,6 +191,26 @@ func (s *datasetService) Delete(ctx context.Context, id int) error {
 		}
 		return nil
 	})
+}
+
+// rejectSampleDatasource blocks user-created datasets on the built-in sample
+// datasource (R-79). The sample datasource points at the application database
+// itself; a dataset with arbitrary SQL on it would expose bi_* tables. The
+// sample service inserts its own datasets directly, so only user write paths
+// are gated here.
+func (s *datasetService) rejectSampleDatasource(ctx context.Context, datasourceID int) error {
+	if s.getDatasourceModelFn == nil {
+		return nil
+	}
+	ds, err := s.getDatasourceModelFn(ctx, datasourceID)
+	if err != nil {
+		return nil // 存在性由外键兜底，这里只做示例守卫
+	}
+	if ds.IsSample {
+		return router.NewBusinessError(response.CodeBadRequest,
+			"内置示例数据源仅供示例数据集使用")
+	}
+	return nil
 }
 
 // GetColumns returns columns for a dataset

@@ -396,6 +396,31 @@ export const datasourcesApi = {
   },
 };
 
+// 内置示例数据集（R-79 / issue #174）。状态是引导卡片的三态来源：
+// loaded=已加载（展示移除入口）、dismissed=已忽略（不再出现引导）。
+export interface SampleDatasetStatus {
+  loaded: boolean;
+  dismissed: boolean;
+}
+
+export const sampleDatasetApi = {
+  getStatus: (): Promise<AxiosResponse<ApiResponse<SampleDatasetStatus>>> => {
+    return apiClient.get<ApiResponse<SampleDatasetStatus>>('/api/sample-dataset/status');
+  },
+
+  load: (): Promise<AxiosResponse<ApiResponse<SampleDatasetStatus>>> => {
+    return apiClient.post<ApiResponse<SampleDatasetStatus>>('/api/sample-dataset/load', {});
+  },
+
+  dismiss: (): Promise<AxiosResponse<ApiResponse<SampleDatasetStatus>>> => {
+    return apiClient.post<ApiResponse<SampleDatasetStatus>>('/api/sample-dataset/dismiss', {});
+  },
+
+  remove: (): Promise<AxiosResponse<ApiResponse<{ status: string }>>> => {
+    return apiClient.delete<ApiResponse<{ status: string }>>('/api/sample-dataset');
+  },
+};
+
 // Datasets API
 export const datasetsApi = {
   // Get all datasets

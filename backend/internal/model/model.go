@@ -10,16 +10,20 @@ import (
 type Datasource struct {
 	bun.BaseModel `bun:"bi_datasource"`
 
-	ID           int          `bun:"id,pk,autoincrement" json:"id"`
-	Name         string       `bun:"name" json:"name"`
-	Type         string       `bun:"type" json:"type"`
-	Host         string       `bun:"host" json:"host"`
-	Port         int          `bun:"port" json:"port"`
-	DatabaseName string       `bun:"database_name" json:"database_name"`
-	Username     string       `bun:"username" json:"username"`
-	Password     string       `bun:"password" json:"password"`
-	CreatedAt    sql.NullTime `bun:"created_at" json:"created_at"`
-	UpdatedAt    sql.NullTime `bun:"updated_at" json:"updated_at"`
+	ID           int    `bun:"id,pk,autoincrement" json:"id"`
+	Name         string `bun:"name" json:"name"`
+	Type         string `bun:"type" json:"type"`
+	Host         string `bun:"host" json:"host"`
+	Port         int    `bun:"port" json:"port"`
+	DatabaseName string `bun:"database_name" json:"database_name"`
+	Username     string `bun:"username" json:"username"`
+	Password     string `bun:"password" json:"password"`
+	// IsSample marks the built-in sample datasource (R-79): it never shows up
+	// in the regular list and cannot back user-created datasets. Hidden from
+	// the API surface (entity omits it).
+	IsSample  bool         `bun:"is_sample" json:"-"`
+	CreatedAt sql.NullTime `bun:"created_at" json:"created_at"`
+	UpdatedAt sql.NullTime `bun:"updated_at" json:"updated_at"`
 	// OwnerID is the R-22 audit column (migration 00009): who created the row.
 	// L0 has no accounts, so create paths stamp model.SystemOwnerID and read
 	// paths never filter on it. Hidden from the API surface (entity omits it).
