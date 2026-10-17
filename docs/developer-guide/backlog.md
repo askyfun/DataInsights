@@ -52,4 +52,4 @@
 - **StarRocks**：`Capabilities()` 保守返全 false（保留 TODO）。
 - **biome**：曾清零 error（原有 2 处 error 已修：`FilterDropZone` 过滤行改原生 button、`ChartBuilder` 去掉未用的 `setMetricAlias`）；仅剩 `styles/index.css` 的 noDescendingSpecificity 警告。**别再让 error 复活**，否则提交会被钩子挡死。
 - ⚠️ **列表页 100 条截断（未修，需动分页契约）**：前端 `datasetsApi.getAll()` 不带 `limit` → 后端 handler 默认 `limit=100`（`handler/dataset.go` 的 `pagination()`），而前端是**纯本地分页**（`Table pagination.pageSize=10`）→ 数据集超过 100 个时**第 101 条起永远查不到**，"共 N 条"也只统计前 100 条。修它必须同时把排序与分页搬到服务端（客户端 `sorter` 只能救急）。
-- ⚠️ **过滤算子笔误**：现行契约（`api/openapi.yaml`）对**未知算子**静默回退 `=`，因此 `ge` / `GT` / `>=` 等写法会全变等值、**返回错误数据**；契约层面当前**尚无**归一化或显式报错的处理。
+- ~~**过滤算子笔误**~~（已修，issue #204）：`internal/query` 先按归一化表把 `>=` / `GT` / `ge` 等别名收成规范算子，再对白名单校验；无法识别的算子返回 20100（含字段、收到的算子、允许集合），不再静默回退 `=`。
