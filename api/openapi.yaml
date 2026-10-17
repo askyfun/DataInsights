@@ -26,6 +26,10 @@ tags:
     description: 数据源管理（CRUD、连接测试、库表元数据、预览与字段分布）
   - name: datasets
     description: 数据集管理（CRUD、列定义、预览、查询）
+  - name: sample-dataset
+    description: >-
+      内置示例数据集（R-79）：状态查询、一键加载、忽略（持久化）与一键移除。
+      加载后示例数据源在数据源列表中隐藏，示例数据集带 sample 标签。
   - name: charts
     description: 图表管理（CRUD、数据集取数预览、图表语义查询）
   - name: queries
@@ -1333,8 +1337,104 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OkResponse'
+  /api/sample-dataset/status:
+    get:
+      tags:
+        - sample-dataset
+      summary: 内置示例数据集引导状态
+      description: |
+        「加载」创建一张隐藏的示例数据源（is_sample，数据源列表不返回）与两个
+        预置列定义的数据集；「忽略」把选择持久化到 bi_setting，重启后仍生效。
+      operationId: getSampleDatasetStatus
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleDatasetStatusResponse'
+  /api/sample-dataset/load:
+    post:
+      tags:
+        - sample-dataset
+      summary: 一键加载内置示例数据集（幂等）
+      description: |
+        创建示例数据源与「示例：电商订单」「示例：商品目录」两个数据集，列类型
+        与维度/指标角色已预置；重复调用返回当前状态，不会重复建行。
+      operationId: loadSampleDataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleDatasetStatusResponse'
+  /api/sample-dataset/dismiss:
+    post:
+      tags:
+        - sample-dataset
+      summary: 忽略示例数据集引导（持久化）
+      operationId: dismissSampleDataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleDatasetStatusResponse'
+  /api/sample-dataset:
+    delete:
+      tags:
+        - sample-dataset
+      summary: 一键移除示例数据集
+      description: |
+        软删示例数据集（连带其图表）与隐藏的示例数据源；种子表保留，再次加载
+        可直接复用。
+      operationId: removeSampleDataset
+      responses:
+        '200':
+          description: "成功 data 为 {status: ok}"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
 components:
   schemas:
+    SampleDatasetStatus:
+      type: object
+      description: 内置示例数据集的引导态；两个字段相互独立。
+      required:
+        - loaded
+        - dismissed
+      properties:
+        loaded:
+          type: boolean
+          description: 示例数据源与数据集是否已加载。
+        dismissed:
+          type: boolean
+          description: 用户是否曾选择「忽略」；忽略持久化在 bi_setting，不再出现引导卡片。
+    SampleDatasetStatusResponse:
+      description: 示例数据集状态 / 加载 / 忽略响应：data 为 SampleDatasetStatus。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/SampleDatasetStatus'
     AuthCredentialsRequest:
       type: object
       required:
@@ -2089,6 +2189,26 @@ components:
           type: string
         operator:
           type: string
+          enum:
+            - eq
+            - neq
+            - gt
+            - gte
+            - lt
+            - lte
+            - like
+            - in
+            - notIn
+            - between
+            - isNull
+            - isNotNull
+            - startsWith
+            - endsWith
+            - isEmptyString
+            - isNotEmptyString
+          description: >-
+            规范算子，与 FilterConfig.op 同一词表与同一归一化表；别名先归一化再校验，
+            无法识别返回 20100（含字段、收到的算子、允许集合）。
         value: {}
         value_end: {}
           # 后端为 interface{}（带 omitempty）：区间过滤上界，任意 JSON 值
@@ -3127,10 +3247,30 @@ components:
           type: string
         op:
           type: string
+          enum:
+            - eq
+            - neq
+            - gt
+            - gte
+            - lt
+            - lte
+            - like
+            - in
+            - notIn
+            - between
+            - isNull
+            - isNotNull
+            - startsWith
+            - endsWith
+            - isEmptyString
+            - isNotEmptyString
           description: >-
-            eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull /
-            startsWith / endsWith / isEmptyString / isNotEmptyString；
-            未知算子后端 fail-closed 渲染恒假谓词（1 = 0），不静默退化为等值。
+            规范算子。输入先按归一化表处理（大小写不敏感、忽略内部空白；`=`/`==`→eq，
+            `!=`/`<>`/`ne`/`notequal`→neq，`>`→gt，`ge`/`>=`→gte，`<`→lt，`le`/`<=`→lte，
+            `not in`→notIn，`is null`→isNull 等），再对白名单校验；无法归一化的算子返回
+            20100，错误信息含字段、收到的算子与允许集合，绝不静默回退等值比较。
+            归一化表是双端唯一事实源（Go `query.filterOperatorAliases` ↔ TS
+            `normalizeFilterOperator`），由 `frontend/src/lib/__fixtures__/filterOperators.json` 共读钉住。
         value: {}
         value_end: {}
           # query.FilterConfig.ValueEnd interface{} omitempty：between 上界，任意 JSON 值

@@ -14,6 +14,7 @@ import (
 	"data-insights/internal/service/dataset"
 	"data-insights/internal/service/datasource"
 	"data-insights/internal/service/queryrecord"
+	"data-insights/internal/service/sample"
 )
 
 // SetupRoutes configures all routes.
@@ -23,8 +24,9 @@ import (
 // 模式数据集显式报错。
 //
 // 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
-// notifier 也由 main 注入，routes.go 不读环境变量）。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourceID int, notifier alert.Notifier) alert.Service {
+// notifier 也由 main 注入，routes.go 不读环境变量）。databaseURL 供内置示例
+// 数据集（R-79）反查应用自身数据库。
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourceID int, databaseURL string, notifier alert.Notifier) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -48,6 +50,12 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	alertSvc := alert.NewService(db)
 	alertSvc.SetChartProvider(dsChartSvc)
 	alertSvc.SetNotifier(notifier)
+
+	// 内置示例数据集（R-79 / issue #174）：种子表由迁移 00012 建好，
+	// 「加载」创建隐藏的示例数据源与两个预置列定义的数据集。
+	sampleSvc := sample.NewService(db, databaseURL)
+	sampleSvc.SetSecurityKey(securityKey)
+	sampleHandler := handler.NewSampleHandler(sampleSvc)
 
 	// Initialize handlers
 	datasourceHandler := handler.NewDatasourceHandler(dsSvc)
@@ -142,6 +150,13 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractDatasourc
 	router.RegisterPutRoute(alerts, "/:id", alertHandler.Update)
 	router.RegisterDeleteRoute(alerts, "/:id", alertHandler.Delete)
 	router.RegisterGetRoute(alerts, "/:id/triggers", alertHandler.ListTriggers)
+
+	// 内置示例数据集（R-79 / issue #174）：状态查询 + 加载 / 忽略 / 一键移除。
+	samples := api.Group("/sample-dataset")
+	router.RegisterGetRoute(samples, "/status", sampleHandler.Status)
+	router.RegisterPostRoute(samples, "/load", sampleHandler.Load)
+	router.RegisterPostRoute(samples, "/dismiss", sampleHandler.Dismiss)
+	router.RegisterDeleteRoute(samples, "", sampleHandler.Remove)
 
 	// Auth routes (R-82 / issue #183). Progressive enforcement: only these
 	// endpoints are behind the bearer middleware for now — the 40 existing

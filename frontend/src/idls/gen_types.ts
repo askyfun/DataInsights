@@ -969,7 +969,8 @@ export interface components {
         Filter: {
             id: string;
             field: string;
-            operator: string;
+            /** @description 规范算子，与 FilterConfig.op 同一词表与同一归一化表；别名先归一化再校验， 无法识别返回 20100（含字段、收到的算子、允许集合）。 */
+            operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "like" | "in" | "notIn" | "between" | "isNull" | "isNotNull" | "startsWith" | "endsWith" | "isEmptyString" | "isNotEmptyString";
             value: unknown;
             value_end?: unknown;
             /** @description 与其他条件的连接逻辑（如 "and" / "or"）。 */
@@ -1386,8 +1387,8 @@ export interface components {
         /** @description 查询层过滤条件（query.FilterConfig）：JSON 键是 op，与旧协议 entity.Filter 的 operator 不同；Batch 3 chart_spec 协议统一采用本形状。 */
         FilterConfig: {
             field: string;
-            /** @description eq / neq / gt / gte / lt / lte / like / in / notIn / between / isNull / isNotNull / startsWith / endsWith / isEmptyString / isNotEmptyString； 未知算子后端 fail-closed 渲染恒假谓词（1 = 0），不静默退化为等值。 */
-            op: string;
+            /** @description 规范算子。输入先按归一化表处理（大小写不敏感、忽略内部空白；`=`/`==`→eq， `!=`/`<>`/`ne`/`notequal`→neq，`>`→gt，`ge`/`>=`→gte，`<`→lt，`le`/`<=`→lte， `not in`→notIn，`is null`→isNull 等），再对白名单校验；无法归一化的算子返回 20100，错误信息含字段、收到的算子与允许集合，绝不静默回退等值比较。 归一化表是双端唯一事实源（Go `query.filterOperatorAliases` ↔ TS `normalizeFilterOperator`），由 `frontend/src/lib/__fixtures__/filterOperators.json` 共读钉住。 */
+            op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "like" | "in" | "notIn" | "between" | "isNull" | "isNotNull" | "startsWith" | "endsWith" | "isEmptyString" | "isNotEmptyString";
             value: unknown;
             value_end?: unknown;
             /** @description 与其他条件的连接逻辑（如 "and" / "or"）。 */
