@@ -99,11 +99,18 @@ jobs:
           crashes=/tmp/crashes.txt
           : > "$crashes"
 
+          # 本轮**真正被执行**的目标数（过完 only 过滤之后才算）。
+          # 为什么必须自己数：本步是 `set +e`，only 正则写错、正则解析失败、目标枚举为空，
+          # 全都只会让循环一路 continue，最后 crashes=0、收场 step 整个跳过——
+          # workflow 绿着结束，读起来却像「挖过了、没挖到东西」。这是假绿，比不跑更坏。
+          executed=0
+
           while IFS=$'\t' read -r pkg name; do
             # only 过滤（定时/手动才有意义；PR 上跑全量短时长）
             if [[ -n "${ONLY:-}" && ! "$name" =~ $ONLY ]]; then
               continue
             fi
+            executed=$((executed + 1))
 
             echo "::group::$pkg — $name"
             # 新崩溃判据用**文件系统快照**，不用 git status：未跟踪目录会被 git 折叠成
@@ -138,6 +145,20 @@ jobs:
           n="$(wc -l < "$crashes" | tr -d ' ')"
           echo "crashes=$n" >> "$GITHUB_OUTPUT"
           echo "本轮问题目标数：$n"
+
+          # 零执行必须是红的：它不是「挖到东西」的信号（那归上面的 crashes 与收场 step 管），
+          # 而是「本轮根本没挖」的信号——only 正则写错、正则解析失败、目标枚举为空，
+          # 三种都会走到这里。本步的非门禁语义不变（不拿挖掘结果当红绿灯），
+          # 只把「配置写错导致的空跑」从静默绿改成显式红。
+          # 顺序讲究：crashes 输出先写好，再做零执行判定。后面几步的判据是
+          # `!= '0'`，对**空串**同样成立；默认失败后不跑后续 step，但一旦有人给
+          # 上报/收场加 always()，空输出会让它报出「发现 0 个问题目标」这种自相矛盾文案。
+          # 注意本 while 用文件重定向（不是管道），executed 不会被子 shell 吞掉。
+          echo "本轮执行 $(wc -l < "$list" | tr -d ' ') 个目标中的 ${executed} 个（only='${ONLY:-}'）"
+          if [[ "$executed" -eq 0 ]]; then
+            echo "::error::本轮 0 个目标被执行（only='${ONLY:-}' 可能写错，或目标枚举为空），本轮没有挖任何东西"
+            exit 1
+          fi
 
       - name: 归档崩溃语料
         if: steps.mine.outputs.crashes != '0'

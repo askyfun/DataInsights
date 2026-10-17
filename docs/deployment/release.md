@@ -1,6 +1,6 @@
 # 发布流程（Release）
 
-> 最后更新：2026-09-26
+> 最后更新：2026-10-17
 > 一句话：在 GitHub Actions 里手动跑一次 `Release` 工作流、填一个版本号，它会校验版本号与测试、构建并推送多架构镜像到 Docker Hub、打 git tag、创建 GitHub Release。
 > 工作流文件：[`.github/workflows/release.yml`](../../.github/workflows/release.yml)。镜像怎么用见[容器部署](docker.md)。
 
@@ -32,10 +32,10 @@
 3. 填 `version`：形如 `v1.2.3`（见 §3）。
 4. `prerelease` 保持默认 `false`；发 RC 类版本时勾上（不移动 `latest`，Release 标记为 Pre-release）。
 5. Run。全程约 15–30 分钟，大头在 QEMU 下的 arm64 构建。
-6. 跑完**校正 Release 正文**：工作流生成的说明是「安装命令 + `git log --no-merges -%s` 的
-   commit 标题清单」，不含迁移水位、鉴权边界、安全修复这些用户真正要看的段落。把
-   `CHANGELOG.md` 对应小节贴进去（`gh release edit <version> --notes-file <file>`）。
-   治本修法见 §8。
+6. 瞄一眼 Release 正文的「变更」部分。它由工作流**自动**从 `CHANGELOG.md` 抽取对应小节
+   （标题写作 `## [<不带 v 的版本号>]`），不再需要手工粘贴；抽不到才回落成 commit 标题清单，
+   并在日志里留一条 `::warning::`。所以发版前**务必**先把 `CHANGELOG.md` 里该小节的水位行
+   （`## [x.y.z] - 未发布（草稿）`）改成正式日期：未定稿状态会被标题行守卫直接拦红（见 §8）。
 
 ## 3. 版本号规则
 
@@ -108,7 +108,10 @@ git tag -d <version>
 - **`vitest` 的退出码在本仓不可信**：存在一条既有的未处理错误（jsdom 环境拆除期，react-dom 调度出的宏任务晚于环境销毁执行，抛 `ReferenceError: window is not defined`），会让 **584/584 全绿**的跑批同样以退出码 1 收场（Node 22 / Node 24 均可复现）。因此 `verify` 里的前端测试**只按用例计数判定**。**治本方向**：定位把页面组件拉进 jsdom 的用例（`frontend/src/__tests__/chartQuery.test.ts` 是一条线索，它 import 了 `@/pages/ChartBuilder`），在该用例或 `setup.ts` 里补 cleanup / 等宏任务 flush；退一步可在 `frontend/vite.config.ts` 的 `test` 块加 `dangerouslyIgnoreUnhandledErrors: true`（全局放宽，代价是不再兜住未来真正的 unhandled error）。
 - 前端 Sentry DSN 是**构建期内联**的：镜像一旦发布，DSN 就固定了，改它必须重发一个版本。
 - 构建缓存走 GitHub Actions cache（`type=gha`），换版本号不会让缓存失效；依赖清单变更后第一次构建会明显变慢。
-- **Release 正文不读 `CHANGELOG.md`**：`release` job 用 `git log --no-merges --pretty='- %s (%h)'`
-  拼「上一个 tag 到本次」的提交标题，对外只有一行行 commit subject，升级须知与安全修复全都看不到。
-  当前靠 §2 第 6 步人工对齐；**治本**是在该步改为从 `CHANGELOG.md` 抽取 `## [<version>]` 小节作正文
-  （注意去掉「未发布（草稿）」那行——它绝不能出现在对外页面上）。
+- **Release 正文取数与两道守卫**（`release` job 的「生成 Release 说明」）：以 `CHANGELOG.md`
+  为事实源，按 `## [<bare>]` **字面**前缀匹配抽小节正文；抽不到则回落 `git log --no-merges -%s`
+  并打 `::warning::`，**不失败**——漏写 changelog 不该在镜像已经推完之后才崩。两个改这块时极易踩的坑：
+  ① 水位字样（未发布 / 草稿）写在**标题行**上，而标题行不进正文，所以守卫必须单独取标题行来查，
+  只检正文永远检不出来（实测：只检正文时该红的不红）；
+  ② 任何 `::warning::` / `::error::` 提示必须打在 `{ ...; } > release-notes.md` 重定向块**外**，
+  写进块内会把运维提示原样混进对外 Release 正文（实测抓到过一次）。

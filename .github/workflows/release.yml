@@ -318,6 +318,24 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          # CHANGELOG.md 是发版说明的事实源。commit 标题清单不足以交代迁移水位、
+          # 鉴权边界与安全修复——而这些正是用户升级前必须知道的内容。
+          # 小节标题形如 `## [0.3.0] - 2026-10-17`（版本号不带 v 前缀），
+          # 用 index()==1 做**字面**前缀匹配：`[` 在正则里要转义，字面匹配不用操心。
+          bare="${VERSION#v}"
+          # 水位字样（未发布 / 草稿）写在**标题行**上，而标题行不进正文，
+          # 所以守卫必须单独取标题行来查——只检正文会永远检不出来。
+          changelog_header="$(awk -v hdr="## [$bare]" 'index($0, hdr) == 1 { print; exit }' CHANGELOG.md)"
+          if [ -n "$changelog_header" ] && printf '%s' "$changelog_header" | grep -qE '未发布|草稿'; then
+            echo "::error::CHANGELOG.md 的 [$bare] 小节仍是未定稿状态：$changelog_header"
+            exit 1
+          fi
+          changelog_section="$(awk -v hdr="## [$bare]" '
+            index($0, hdr) == 1 { inside = 1; next }
+            inside && /^## \[/  { exit }
+            inside              { print }
+          ' CHANGELOG.md)"
+
           prev_tag="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
           if [ -n "$prev_tag" ]; then
             range="$prev_tag..HEAD"
@@ -325,6 +343,12 @@ jobs:
           else
             range="HEAD"
             from_line="首个发布版本。"
+          fi
+          # 回落而不是失败：漏写 changelog 不该让整条流水线在推完镜像之后才崩。
+          # 提示必须打在 {} 块**外**——{} 整体重定向进 release-notes.md，
+          # 写在里面会把 "::warning::…" 这行运维提示混进对外 Release 正文。
+          if [ -z "$changelog_section" ]; then
+            echo "::warning::CHANGELOG.md 找不到 [$bare] 小节，Release 说明回落为 commit 标题清单"
           fi
           {
             printf '%s\n\n' "## 安装"
@@ -341,8 +365,12 @@ jobs:
             printf '%s\n\n' '```'
             printf '%s\n\n' "启动后访问 http://localhost:23352 。其余方式（源码运行 / 本地开发）见仓库 README。"
             printf '%s\n\n' "## 变更"
-            printf '%s\n\n' "$from_line"
-            git log --no-merges --pretty='- %s (%h)' "$range"
+            if [ -n "$changelog_section" ]; then
+              printf '%s\n' "$changelog_section"
+            else
+              printf '%s\n\n' "$from_line"
+              git log --no-merges --pretty='- %s (%h)' "$range"
+            fi
           } > release-notes.md
           cat release-notes.md
 
