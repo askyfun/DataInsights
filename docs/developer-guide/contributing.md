@@ -1,6 +1,6 @@
 # 贡献指南（Contributing）
 
-> 最后更新：2026-09-26
+> 最后更新：2026-10-17
 > 语言无关的行为准则（先思考再编码、极简优先、精准修改、接口先行等）以仓库根 `AGENTS.md` 为准，
 > 本文件收录**协作流程**与**语言级**编码规范。
 
@@ -9,7 +9,7 @@
 - **分支**：从 `master` 切主题分支，命名 `<type>/<topic>`（如 `refactor/batch2-contract`、`feat/chart-funnel`）。一个分支只做一件事。
 - **提交信息**：遵循 Conventional Commits —— `type(scope): 描述`。`type` 常用 `feat` / `fix` / `refactor` / `test` / `docs` / `chore` / `style`；`scope` 取模块名（如 `query`、`frontend`、`docs`、`dashboard`）。描述用中文，一句话说清「改了什么、为什么」。
 - **提交纪律**：一次提交只包含一个可解释的改动；每行改动都应能追溯到需求，不做顺手重构（见根 `AGENTS.md`「精准修改」）。
-- **PR / 评审**：CI（`.github/workflows/`）对 PR 自动跑代码审查（代码质量、潜在 bug、改进建议）；合并前本地必须过「提交前门禁」。变更应附带对应测试。
+- **PR / 评审**：`.github/workflows/ci.yml` 对每个 PR 与每次 master push 自动跑双端测试与密钥扫描（详见下节「CI 门禁」），其中三项是 `master` 的**必需检查**，不绿合不进去。另有 GitHub 自带的 CodeQL 静态分析（`Code Quality: PR #…`，仓库里没有对应 workflow 文件）——它**不跑任何测试**，别把它的绿当成"测试过了"。
 
 ## 提交前门禁
 
@@ -18,6 +18,28 @@
 - **pre-commit 钩子**（`.husky/pre-commit`）自动执行两步，任一步失败即拒绝提交：
   1. `node scripts/check-secrets.mjs` —— 扫描**新增行**里的敏感串：内网 IP、个人家目录绝对路径、个人工具链路径（正则见 `scripts/check-secrets.mjs`）。命中即拒绝，请改成占位符后再提交。
   2. `cd frontend && pnpm exec lint-staged` —— 对**暂存**的 `.ts/.tsx` 跑 `biome check`，任何 error 都会让提交失败。
+   ⚠️ 这个钩子能绕过（`git commit --no-verify`），所以同一套敏感串模式在 CI 上又跑了一遍（`check-secrets.mjs --diff <本次范围>`），绕过也拦得住。
+
+## CI 门禁
+
+> 2026-10-17 之前本仓**没有**每次提交都跑的 CI：双端测试只在有人本地跑、或手动触发 `release.yml` 时执行。
+> PR 页面上那两个 `Analyze (go)` / `Analyze (javascript-typescript)` 是 GitHub 自带的 CodeQL 静态分析，不含任何测试。
+
+| 档 | 跑什么 | 何时 | 必需检查 |
+|----|--------|------|----------|
+| `ci.yml` 后端测试 | `go build` + `go vet` + `go test -count=1 ./...`（本机约 2s，**19 个 fuzz 目标的种子语料就在这 2s 里**） | 每个 PR + 每次 master push | ✅ |
+| `ci.yml` 前端检查与测试 | `pnpm check` + `tsc --noEmit` + `scripts/gate-frontend-tests.sh` | 每个 PR + 每次 master push | ✅ |
+| `ci.yml` 密钥泄漏扫描 | `check-secrets.mjs --diff <本次范围>` | 每个 PR + 每次 master push | ✅ |
+| `ci.yml` 后端竞态检测 | `go test -race -count=1 ./...`（本机实测 80s，PR 上等不起） | 仅 master push | ❌ 不挂 PR |
+| `ci.yml` 构建产物 | `pnpm build` | 仅 master push | ❌ |
+| `ci.yml` 契约漂移报告 | 重跑 oapi-codegen 到临时文件、与入库生成物比对，只写 Job summary | 每个 PR | ❌ 见下 |
+| `fuzz.yml` 挖掘 | 逐目标 `-fuzz` 撒输入，挖到就建/更新 issue | 每周二 + 改动碰到有 fuzz 目标的包 + 手动 | ❌ 非确定，故意不门禁 |
+
+- **必需检查用 job 的中文名**（`后端测试` / `前端检查与测试` / `密钥泄漏扫描`）：GitHub 的 status check context 就是 job name，改 `name:` 会让保护失配、PR 永远卡在「Expected」。
+- **契约漂移为什么只报告不阻断**：① 生成物现在引用 `github.com/oapi-codegen/runtime/types`，而 `backend/go.mod` 没有这个依赖，真去同步会把编译跑坏（issue #201 加 multipart 端点后引入）；② `make api-gen` 前端那半步在本仓必然失败（`openapi-typescript@7` 要 `typescript` 提供 `ts.factory`，本仓是 `typescript@7`）。两个前置修好后这项才该转成必需检查。
+- **fuzz 挖掘不挂门禁**：同一份代码今天挖到、明天挖不到是常态，挂成必需检查会让 PR 随机卡死。它的产出是 issue + 跑批 artifact；**修好后把崩溃语料留在 `testdata/fuzz/` 下**，它就变成每次提交都跑的确定性回归种子（`--0` 那条就是这么处理的）。
+- **前端测试判据只有一份**：`scripts/gate-frontend-tests.sh`（`ci.yml` 与 `release.yml` 共用）。它**按用例计数判定而非退出码**——本仓 jsdom 拆除期有一条既有未处理错误，全绿也会以 1 收场，细节见脚本头注释。
+- **后端测试一律带 `-count=1`**：有测试在运行时读仓库内的文件（日期筛选的分支覆盖门禁要读前端 union），Go 的测试缓存对这类读取不总能及时失效，见 `troubleshooting.md`「工具与验证」。
 
 ## 通用工具链约定
 

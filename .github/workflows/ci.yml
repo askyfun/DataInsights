@@ -1,0 +1,198 @@
+name: CI
+
+# PR 与 master push 都跑。这是本仓第一次有「每次提交都跑」的门禁：
+# 在此之前双端测试只在有人手动跑、或手动触发 release.yml 时才执行。
+# 定时 fuzz 挖掘是另一条流水线，见 fuzz.yml。
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# 只读代码；fuzz.yml 才需要 issues: write。
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # PR 上被新提交顶掉的旧跑批直接取消；master 的跑批要留下完整记录，不取消。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ===========================================================================
+  # 1. 后端：编译 + vet + 单测。
+  #    20 个 fuzz 目标的**种子语料**就搭这趟车（go test 会自动跑 testdata/fuzz 下的
+  #    语料），所以入库一份崩溃语料 = 永久回归种子，成本 0。
+  #    -race 只在 master push 跑（本机实测 80s，PR 上等不起）。
+  # ===========================================================================
+  backend:
+    name: 后端测试
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      # Go 版本的唯一事实源是仓库根 Dockerfile（golang:1.27-alpine）；改基础镜像时
+      # 这里与 release.yml 要一起改。见 .github/AGENTS.md。
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: backend/go.sum
+
+      - name: 编译
+        run: go build ./...
+
+      - name: 静态检查
+        run: go vet ./...
+
+      # ⚠️ -count=1 是必须的：本仓有测试在运行时读仓库内的文件
+      # （internal/query/datefilter_coverage_test.go 读前端的 union 与用例表），
+      # 而 Go 的测试缓存对这类文件读取不总能及时失效，本地实测出现过「改了夹具仍复用上次
+      # 的绿灯」。CI 上是冷缓存所以看不出问题，但这条把陷阱一次性钉死。
+      - name: 测试（含 fuzz 种子语料回归）
+        run: go test -count=1 ./...
+
+  backend-race:
+    name: 后端竞态检测（仅 master）
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: backend/go.sum
+      - name: 测试（含竞态检测）
+        run: go test -race -count=1 ./...
+
+  # ===========================================================================
+  # 2. 前端：biome + 类型检查 + 测试（按用例计数判定）+ 构建（仅 master）。
+  #    测试判据住在 scripts/gate-frontend-tests.sh，与 release.yml 共用同一份——
+  #    「全绿也因未处理错误退出码 1」那条坑绝不能在两处各写一遍。
+  # ===========================================================================
+  frontend:
+    name: 前端检查与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 版本的唯一事实源同样是 Dockerfile（node:24-alpine）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+        # ⚠️ 不要在这里加 `cache: pnpm`：setup-node 的缓存要在 **corepack 启用之前**
+        # 定位 pnpm 可执行文件去算 store path，本仓 runner 上直接报
+        # `Unable to locate executable file: pnpm`（PR #213 实测把 job 掐在 6 秒）。
+        # 要提速就单独走 actions/cache + `pnpm store path`，且必须排在 corepack 之后。
+
+      # packageManager 钉死 pnpm@12.4.2（根 + frontend 一致），且 preinstall 钩子会
+      # 硬拦 npm/yarn/bun —— 这里只能走 corepack，不能换包管理器。
+      - name: 启用 corepack 并按 packageManager 取 pnpm
+        run: |
+          corepack enable
+          echo "COREPACK_ENABLE_DOWNLOAD_PROMPT=0" >> "$GITHUB_ENV"
+
+      - name: 安装依赖
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: biome 检查（lint + 格式）
+        working-directory: frontend
+        run: pnpm check
+
+      # 单独立一步而不是等 pnpm build：noEmit 快（本机 0.6s），能把「类型错误」和
+      # 「产物构建失败」分成两类信号。
+      - name: 类型检查
+        working-directory: frontend
+        run: pnpm exec tsc --noEmit
+
+      - name: 测试（按用例计数判定，不认退出码）
+        run: bash scripts/gate-frontend-tests.sh
+
+      - name: 构建产物（仅 master）
+        if: github.event_name == 'push'
+        working-directory: frontend
+        run: pnpm build
+
+  # ===========================================================================
+  # 3. 密钥泄漏扫描：把本地 pre-commit 钩子的那套模式在 CI 再跑一遍。
+  #    check-secrets.mjs 默认只扫暂存区，在 runner 上等于永久空转，因此这里显式
+  #    给它提交范围——这样 `git commit --no-verify` 绕过本地钩子也拦得住。
+  #    仓库是公开的，这一条值得当成必需检查。
+  # ===========================================================================
+  secret-scan:
+    name: 密钥泄漏扫描
+    runs-on: ubuntu-latest
+    steps:
+      # 要按 sha 范围取 diff，必须抓到完整历史（默认浅克隆只有 1 个提交）。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 扫描本次变更里的敏感信息
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # 新建分支 / 强推时 event.before 是全 0（或空），退回只扫最新一个提交。
+          if [[ -z "${BASE_SHA//0}" ]]; then
+            BASE_SHA="${HEAD_SHA}~1"
+          fi
+          node scripts/check-secrets.mjs --diff "${BASE_SHA}..${HEAD_SHA}"
+
+  # ===========================================================================
+  # 4. 契约漂移：openapi.yaml 改过但没重跑 make api-gen —— 报告，不阻断。
+  #
+  # 为什么不阻断（两个已知前置问题，任一修好后就可以改成必需检查）：
+  #   ① 生成物现在引用 github.com/oapi-codegen/runtime/types，而 backend/go.mod 没有
+  #      这个依赖：真去同步漂移会把编译跑坏（issue #201 加 multipart 端点后引入）。
+  #   ② make api-gen 的前端那半步在本地必然失败（openapi-typescript@7 需要
+  #      typescript 的 ts.factory，本仓 typescript@7 不提供），所以 TS 侧生成物没法比。
+  # 现在只把漂移事实打在 step summary 上，不假装门禁存在。
+  # 详见根 AGENTS.md「契约工程」与 docs/developer-guide/troubleshooting.md。
+  # ===========================================================================
+  contract-drift:
+    name: 契约漂移报告（不阻断）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: backend/go.sum
+
+      - name: 比对 openapi.yaml 与入库生成物
+        # continue-on-error 兜住「生成器本身报错」这类情况，别让报告类检查变成假红门禁。
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # GitHub 给每个 run 都加了 -e；本步是「报告型」，diff 有差异返回 1 属正常结果，
+          # 不能让 errexit 把 summary 写到一半掐掉。
+          set +e
+          out=/tmp/apigen/gen_types.go
+          mkdir -p /tmp/apigen
+          # 只改 output 路径，其余配置与 make api-gen 完全一致；绝不写工作区文件。
+          sed 's#^output:.*#output: '"$out"'#' api/gen/backend.cfg.yaml > /tmp/apigen/cfg.yaml
+          if ! (cd backend && go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen \
+              -config /tmp/apigen/cfg.yaml ../api/openapi.yaml >/dev/null); then
+            echo "⚠️ oapi-codegen 自身执行失败，本次无法判断漂移（详见日志）" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if diff -q "$out" backend/internal/idls/gen_types.go >/dev/null; then
+            echo "✅ 后端契约生成物与 api/openapi.yaml 同步" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### ⚠️ 契约漂移：\`api/openapi.yaml\` 改过，但 \`make api-gen\` 没重跑"
+              echo
+              echo '生成物应有如下差异（本检查不阻断，原因见 ci.yml 里的注释）：'
+              echo '```diff'
+              diff -u "$out" backend/internal/idls/gen_types.go | head -60
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "发现漂移，详情见 Job summary"
+          fi

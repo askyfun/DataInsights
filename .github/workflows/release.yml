@@ -135,27 +135,11 @@ jobs:
         run: pnpm check
 
       - name: 前端测试
-        working-directory: frontend
-        # ⚠️ 不能只看退出码。本仓有一条既有的未处理错误（jsdom 环境拆除期 react-dom 调度出的
-        # 宏任务晚于环境销毁执行，抛 `ReferenceError: window is not defined`），它会让**全绿**
-        # 的跑批也以退出码 1 收场（Node 22 / Node 24 均可复现）。因此门禁只认用例计数：
-        # 出现任何 failed 就红，且必须真的存在 passed 计数（挡掉「跑都没跑起来」）。
-        run: |
-          set -euo pipefail
-          log="$(mktemp)"
-          pnpm exec vitest run --pool=threads --maxWorkers=2 >"$log" 2>&1 || true
-          cat "$log"
-          # CI 下 vitest 输出带 ANSI 颜色码，计数行行首不是空白而是 \e[2m，
-          # 先剥离再匹配，否则全绿的跑批也会在这里误判失败。
-          summary="$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -E '^[[:space:]]+(Test Files|Tests)[[:space:]]+' || true)"
-          printf '%s\n' "$summary"
-          if printf '%s' "$summary" | grep -q 'failed'; then
-            echo "::error::前端存在失败用例（见上方 vitest 输出）"
-            exit 1
-          fi
-          printf '%s' "$summary" | grep -Eq 'Test Files[[:space:]]+[0-9]+ passed \('
-          printf '%s' "$summary" | grep -Eq 'Tests[[:space:]]+[0-9]+ passed \('
-          echo "前端测试通过（仅按用例计数判定，已忽略仓库既有的未处理错误）" >> "$GITHUB_STEP_SUMMARY"
+        # 判据住在 scripts/gate-frontend-tests.sh，与 ci.yml 共用同一份。
+        # ⚠️ 不要在这里重抄一遍「为什么不能看退出码」——那段解释（jsdom 拆除期的未处理
+        # 错误会让全绿跑批也以 1 收场）只该有一个出处，两处各写迟早漂移。脚本自带 cd frontend，
+        # 所以这里不再设 working-directory。
+        run: bash scripts/gate-frontend-tests.sh
 
   # ---------------------------------------------------------------------------
   # 2. 构建镜像并真跑一遍。单测过不代表镜像能起——Dockerfile、STATIC_DIR、
