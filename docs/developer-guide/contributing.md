@@ -36,8 +36,9 @@
 | `fuzz.yml` 挖掘 | 逐目标 `-fuzz` 撒输入，挖到就建/更新 issue | 每周二 + 改动碰到有 fuzz 目标的包 + 手动 | ❌ 非确定，故意不门禁 |
 
 - **必需检查用 job 的中文名**（`后端测试` / `前端检查与测试` / `密钥泄漏扫描`）：GitHub 的 status check context 就是 job name，改 `name:` 会让保护失配、PR 永远卡在「Expected」。
+- **切新分支前先同步 master**：`pull_request` 事件用的是**头分支里那份** `ci.yml`。从没有 `ci.yml` 的旧 master 切出来的分支开 PR，不会产生任何必需检查，PR 会永远卡在「Expected — Waiting for status to be reported」。表现为「CI 没过、合不了」时，先确认分支基线晚于 2026-10-17（`git ls-tree HEAD .github/workflows/` 里有 `ci.yml`）。管理员可以绕过保护直接合（`enforce_admins` 未开），别把它当日常通道。
 - **契约漂移为什么只报告不阻断**：① 生成物现在引用 `github.com/oapi-codegen/runtime/types`，而 `backend/go.mod` 没有这个依赖，真去同步会把编译跑坏（issue #201 加 multipart 端点后引入）；② `make api-gen` 前端那半步在本仓必然失败（`openapi-typescript@7` 要 `typescript` 提供 `ts.factory`，本仓是 `typescript@7`）。两个前置修好后这项才该转成必需检查。
-- **fuzz 挖掘不挂门禁**：同一份代码今天挖到、明天挖不到是常态，挂成必需检查会让 PR 随机卡死。它的产出是 issue + 跑批 artifact；**修好后把崩溃语料留在 `testdata/fuzz/` 下**，它就变成每次提交都跑的确定性回归种子（`--0` 那条就是这么处理的）。
+- **fuzz 挖掘不挂门禁**：同一份代码今天挖到、明天挖不到是常态，挂成必需检查会让 PR 随机卡死。它的产出是 issue + 跑批 artifact；**修好后把崩溃语料留在 `testdata/fuzz/` 下**，它就变成每次提交都跑的确定性回归种子（`--0` 那条就是这么处理的）。⚠️ PR 上这条检查**刻意保持绿**（只留 warning 标注），定时/手动跑批才亮红——非门禁的检查不该借用红绿灯，否则一个红 X 就会被读成「CI 没过、合不了」（PR #213 真踩过这轮空排查）。
 - **前端测试判据只有一份**：`scripts/gate-frontend-tests.sh`（`ci.yml` 与 `release.yml` 共用）。它**按用例计数判定而非退出码**——本仓 jsdom 拆除期有一条既有未处理错误，全绿也会以 1 收场，细节见脚本头注释。
 - **后端测试一律带 `-count=1`**：有测试在运行时读仓库内的文件（日期筛选的分支覆盖门禁要读前端 union），Go 的测试缓存对这类读取不总能及时失效，见 `troubleshooting.md`「工具与验证」。
 
