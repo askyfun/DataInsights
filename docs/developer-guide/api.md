@@ -67,7 +67,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 |------|------|------|--------------|
 | 20000 | CodeSuccess | 成功 | — |
 | 20100 | CodeBadRequest | 请求参数错误（含绑定失败、非法 id/短码） | 请求参数有误，请检查输入 |
-| 20200 | CodeUnauthorized | 认证/授权错误（当前平台无登录态，几乎不出现） | 登录状态已失效 |
+| 20200 | CodeUnauthorized | 认证/授权错误（Bearer 校验失败、口令错误、注册已关闭、PAT 被拒于管理端点——当前仅 auth/tokens 端点会产生，见 10/11 节） | 登录状态已失效 |
 | 20300 | CodeNotFound | 资源不存在 | 请求的资源不存在 |
 | 20400 | CodeBusinessError | 业务逻辑错误（如资源被引用不可删） | 操作失败，请稍后重试 |
 | 20500 | CodeThirdPartyErr | 第三方服务错误 | 服务暂时不可用 |
@@ -79,6 +79,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 |----|------|------|
 | `X-Request-ID` | 请求 | 可选，客户端生成；缺省由后端 requestID 中间件生成（非全零），响应头与 Envelope.trace 原样回显 |
 | `Content-Type: application/json` | 请求 | POST/PUT 请求体 |
+| `Authorization: Bearer <token>` | 请求 | 仅 `GET /api/auth/me`、`DELETE /api/auth/logout`、`/api/tokens/*` 强制（渐进强制，其余端点仍匿名；令牌形态与会话/PAT 边界见 10/11 节） |
 
 ### 1.5 分页参数：两套口径，别混用
 
@@ -281,7 +282,7 @@ histogram / boxplot`（未知值按 axis 处理器回退）。
 | 2 | `POST /api/dashboard-folders` | 建夹；`parent_id` 缺省/null/`""` 都是根级；父级不存在或已软删 → 20300；name 空 → 20100 |
 | 3 | `GET /api/dashboard-folders/{id}` | 详情 |
 | 4 | `PUT /api/dashboard-folders/{id}` | 改名 / 移动；`parent_id` **三态**：缺省或 null 保留、`""` 移到根级、UUID 移到该夹下；移动到自己或任意后代（成环）→ 20400 |
-| 5 | `DELETE /api/dashboard-folders/{id}` | 软删，**仅空夹可删**：仍有未软删子夹或仪表盘 → 20400（消息带剩余数量），不级联、不孤儿化 |
+| 5 | `DELETE /api/dashboard-folders/{id}` | 软删，**仅空夹可删**：仍有未软删子夹或仪表盘 → 20400（消息带剩余数量），不级联、不孤儿化。**不幂等**：`getFolderModel` 的存在性门控（带 `deleted_at IS NULL`）先于删除语句，重复删除已删/不存在的夹 → 20300（对比 `DELETE /api/dashboards/{id}`：无门控、命中 0 行仍成功，是真幂等） |
 
 `""` 作为「清空归属」的显式哨兵是 JSON 无法区分「缺省」与「null」的必然产物，`dashboard.folder_id`
 与 `folder.parent_id` 共用同一口径。悬空引用（指向已软删对象）**不级联清洗**：后端原样回显，
@@ -322,7 +323,83 @@ expires_at / expired / hit_count`）。
 - 每次读取 hit_count +1、刷新 last_accessed_at；该写失败只记日志不影响读取。
 - `hit_count` 是**本次读取之后**的累计值（含本次 +1）。
 
-## 8. 变更纪律
+## 8. Alert 指标预警（6 个端点）
+
+响应实体 `AlertRule`：`id / name / chart_id / metric / operator / threshold / enabled / last_triggered_date / created_at / updated_at`。表 `bi_alert_rule` / `bi_alert_trigger`（migration 00011，**不存在独立的 `bi_alert` 表**），规则 `id` 是后端生成的 UUIDv7 字符串（非自增）。
+
+- `operator` 词表仅 `gt / lt / eq`，其余值 20100；求值是纯数值比较（`eq` 是浮点精确相等）。
+- `metric` 是**图表数据行的输出列键**（别名优先；页面下拉候选由前端解析该图表配置的指标槽位得到，见 `frontend/src/pages/Alerts.tsx`）。
+- `last_triggered_date` 是最近一次触发的 UTC 日期（`YYYY-MM-DD`），同时是评估器「同 UTC 日去重」标记与前端「最近触发日」展示列；**从未触发时该键整体缺省而非 null**（实体标了 `omitempty`，yaml「null/缺省」的描述以代码为准），前端按 `-` 渲染。
+- 路径 `{id}` **不做形态校验**：原样交主键查询，非法形态与不存在/已软删一样都是 20300（不像 Dashboard 另有「非 UUID → 20100」的门槛）。
+
+| # | 方法与路径 | 说明 |
+|---|-----------|------|
+| 1 | `GET /api/alerts` | 全部存活规则列表（`created_at ASC, id ASC`）；**本期不分页**，data 为裸数组（空 → `[]`） |
+| 2 | `POST /api/alerts` | 创建。name/metric 空 → 20100；operator 非法 → 20100；`chart_id` 须为正整数（20100）且指向**存在且未软删的图表**（否则 20300「绑定的图表不存在」——预警只作用已保存图表）。`enabled` 创建时固定 true，启停走 PUT |
+| 3 | `GET /api/alerts/{id}` | 详情；不存在/已软删 → 20300 |
+| 4 | `PUT /api/alerts/{id}` | 更新（全字段指针，**未提供/null 则保留存量**，行内启停开关只发 `{enabled}`）。name/metric 显式空串 → 20100；chart_id 提供时重做正整数与存活图表校验；threshold/enabled 提供即覆盖。`created_at / last_triggered_date / deleted_at` 恒不写回，updated_at 由后端前进 |
+| 5 | `DELETE /api/alerts/{id}` | 软删（只打 `deleted_at`，绝不物理删；触发记录行保留）。`data = {status: "ok"}`。⚠️ 重复删除已删/不存在 id 实际返回 **20300**——service 的存在性门控先于更新语句；openapi.yaml 该端点「重复删除影响 0 行不报错」的描述与代码不符，**以代码为准** |
+| 6 | `GET /api/alerts/{id}/triggers` | 触发历史（`created_at DESC`，**上限 50**，本期不分页）；规则本身须存活，否则 20300（防软删规则经此端点被遍历） |
+
+`AlertTrigger`（只追加不改写）：`id / rule_id / metric_value / threshold / message / notified / notify_error / created_at`。`notify_error` 是家族里唯一的可空字段——`null` = 通知已送达；非 null = 未送达原因（伴随 `notified=false`），不影响触发本身成立。
+
+### 8.1 后台评估（不是端点契约，但决定触发记录的内容）
+
+- 评估器是进程内 goroutine（`cmd/main.go` 启动、随主进程退出），每 `ALERT_EVAL_INTERVAL` 秒扫一轮 `enabled` 且未软删的规则（默认 300；非法值回退默认并打 warning，不拦启动）。首轮评估要等**一整个间隔**过去才执行。
+- 取数复用 `chart.Service.GetData`（与 Dashboard 同款窄接口 + 装配期注入），绑定图表改配置后规则天然跟随；未保存的构建器草稿不在评估范围（评估按 chart id 读**持久化 config**）。
+- 仅两种取数形状参与评估：**行集 `[]map[string]any`**（逐行比较，任一行越线即触发、记录**首个**越线行数值；字符串数值可 coerce，缺列/NaN/不可解析的行跳过）与 **KPI 卡 `*query.KpiResponse`**（单值比较，此形状下 metric 键不参与取值，但字段仍必填）。其余形状（表格的包装响应、轴/饼等聚合形状）本期跳过——只记服务日志，不报错、不触发。
+- **同 UTC 日去重**：`last_triggered_date` 与今天同日直接跳过（连取数都不做）；触发时「INSERT 触发记录 + UPDATE 去重标记」在同一事务成型，落库失败一起回滚、下轮重试。
+- 通知只有 SMTP 邮件通道（587/STARTTLS 语义，本期不做 465 隐式 TLS，无重试队列）。`SMTP_HOST` 未配置 → 装配注入 nil Notifier：评估与落库照常，`notify_error` 写「未配置邮件通知」文案；配了 host 但 `SMTP_FROM`/收件人为空 → 按发送失败留档。通知失败**从不**影响触发落库。
+
+## 9. SampleDataset 内置示例数据集（4 个端点）
+
+状态实体 `SampleDatasetStatus`：`{loaded, dismissed}`（两个布尔**相互独立**——先忽略后加载、先加载后移除，都只改变其中一个）。`loaded` 的判定是「`bi_datasource` 存在 `is_sample=TRUE` 的存活行」（不是数数据集）；`dismissed` = `bi_setting` 键 `sample_dataset_dismissed` 为 `'true'`。
+
+| # | 方法与路径 | 说明 |
+|---|-----------|------|
+| 1 | `GET /api/sample-dataset/status` | 引导卡片三态的来源（前端据此决定显隐与「移除示例数据」入口） |
+| 2 | `POST /api/sample-dataset/load` | 一键加载，**幂等**：已加载时原样返回当前状态、不重复建行（partial 唯一索引保证至多一个存活示例数据源，migration 00012）。事务内创建隐藏示例数据源（`is_sample=TRUE`，连接信息反解自应用自身 `DATABASE_URL`，口令 AES-GCM 存储）+「示例：电商订单」「示例：商品目录」两个数据集（列类型、维度/指标角色与稳定列 id 已预置，`tags=["sample"]`）。返回加载后的状态 |
+| 3 | `POST /api/sample-dataset/dismiss` | 「忽略」持久化（upsert `bi_setting`），重启仍生效；返回状态。**没有「取消忽略」端点** |
+| 4 | `DELETE /api/sample-dataset` | 一键移除：事务内软删图表 → 数据集 → 示例数据源；**未加载时静默 no-op 成功**。种子表 `di_sample_*`（migration 00012 灌数）保留，再次加载直接复用。`data = {status: "ok"}` |
+
+易踩点：
+
+- `load / dismiss` 是泛型路由 POST：**请求体必须是合法 JSON**（前端发 `{}`），空 body 会 EOF 绑定失败 → 20100。
+- 示例数据源**不出现在** `GET /api/datasources`（列表恒带 `is_sample = FALSE`，`service/datasource/impl.go`），也不能被用户建/改数据集引用（datasource/dataset 两侧守卫）——示例数据集是内部引用它。
+- `load` 对 `DATABASE_URL` 只接受 `postgres / postgresql` scheme，且 host 与库名必填；不合法 → 50000（普通内部错误，非业务码）。
+- 本族 4 个端点当前**匿名可调**（未接 Bearer，与第 10 节的渐进强制同一口径）。
+
+## 10. Auth 认证（4 个端点）
+
+令牌模型（会话与 PAT 共用 `bi_token` 表，migration 00010）：明文 = `di_session_…` / `di_pat_…` + 32 随机字节 base64url，**只在签发响应回显一次**；库内只存 sha256 摘要与非密钥的可识别前缀（标记 + 前 6 位密钥字符）。校验是**每次实时查库**（无签名、无缓存 → 撤销即时生效、无静默窗口），每次命中顺带 best-effort 刷新 `last_used_at/ip/ua`（刷新失败不会拒绝有效令牌）。`Authorization` 头的 `Bearer` scheme 大小写不敏感。
+
+实体：`AuthResult = {token, kind: "session", expires_at, user}`（register/login 的 data）；`AuthUser = {id, username, role, created_at}`（**绝不回出口令或其哈希**；当前注册产出的 role 为 `admin`）。
+
+| # | 方法与路径 | 说明 |
+|---|-----------|------|
+| 1 | `POST /api/auth/register` | 公开。**引导式注册**：仅当无存活用户时成功，该账号 `role=admin`，并在同一事务把 datasource/dataset/chart 三表里 `owner_id=0`（L0 占位归属）的存量行认到其名下；已有存活用户 → 20200「注册已关闭：系统管理员已建立」。username/password 空 → 20100。口令 bcrypt。成功即签发 **24h** 会话 token（无自动续期） |
+| 2 | `POST /api/auth/login` | 公开。缺字段 / 用户不存在 / 口令错一律**统一 20200 `"invalid username or password"`**（刻意不区分，防用户名枚举）。成功每次签发**新的**会话 token（旧 token 不连带撤销，各自 24h 自然到期） |
+| 3 | `GET /api/auth/me` | **Bearer 必需**（`allowPAT=true`：自助身份查询，机器令牌也可用）。`data = AuthUser` |
+| 4 | `DELETE /api/auth/logout` | **Bearer 必需**（`allowPAT=true`）。撤销「本次调用所用凭证自身」（会话或 PAT），即时生效。`data = {status: "ok"}`。**用 DELETE 而非 POST**：泛型路由的 POST 必绑 JSON body，登出无 body → EOF 绑定失败（`cmd/routes.go` 注释钉死） |
+
+易踩点：
+
+- **渐进强制**：当前只有本族 me/logout 两个端点与第 11 节的 3 个端点强制 Bearer，`register / login` 是本族仅有的公开端点；其余资源端点仍匿名（Phase C 逐步接入）——不要按「全站已鉴权」理解 20200。
+- 20200 不只属于认证：Bearer 中间件对非业务错误也 fail-closed 成 20200（`middleware/bearer.go`）。
+
+## 11. Token PAT 管理（3 个端点）
+
+三个端点全挂 `Bearer(allowPAT=false)`：**用户管理操作，仅限人类会话**——机器令牌在此 20200「个人访问令牌不允许访问该端点」（防机器令牌自我提权，issue #184 验收 3）。
+
+实体 `TokenInfo = {id, name, prefix, created_at, last_used_at, last_used_ip, last_used_ua, expires_at, revoked}`——**绝不含哈希或明文**；`expires_at` 空串 = 不过期。
+
+| # | 方法与路径 | 说明 |
+|---|-----------|------|
+| 1 | `POST /api/tokens` | 创建。body `{name, never}`（yaml 声明两项 required，服务端不硬校验：name 空 → 存 NULL，never 缺省 → false）。默认有效期 **90 天**；`never=true` → `expires_at=NULL`（长期不过期，UI 侧需显式勾选并提示风险）。`data = PATCreateResult {token, info}`——token 为**唯一一次**明文回显 |
+| 2 | `GET /api/tokens` | 仅列**调用者本人**的 PAT（`created_at DESC, id DESC`）；已撤销行**不隐藏**，以 `revoked: true` 标注。空 → `[]` |
+| 3 | `DELETE /api/tokens/{id}` | 按数字 id 撤销（非数字 → 20100「invalid id」）。UPDATE 以 `user_id + kind=pat + 未撤销` 三重限域：**跨用户/不存在/已撤销都落 0 行并返回成功**（没有存在性门控，真幂等——与第 8 节 Alert DELETE 的 20300 行为**相反**）。撤销即时生效 |
+
+## 12. 变更纪律
 
 - 改接口三步：**先改 `api/openapi.yaml` → `make api-gen` → 双端消费生成物**；禁止直接编辑生成物。
 - 契约测试：`backend/internal/handler/contract_parity_test.go` 反射守卫 handler-local In 镜像与

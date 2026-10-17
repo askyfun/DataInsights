@@ -1111,7 +1111,8 @@ paths:
         - dashboard-folders
       summary: 删除仪表盘文件夹（软删，仅空夹可删）
       description: |
-        软删：只打 `deleted_at = now()`，幂等（重复删除影响 0 行不报错）。
+        软删：只打 `deleted_at = now()`，绝不物理删除。⚠️ **不幂等**：`getFolderModel`
+        的存在性门控带 `deleted_at IS NULL`，重复删除已删或不存在的夹 → 20300。
 
         **第一期采用「仅空夹可删」策略**：文件夹下仍有未软删的**子文件夹**或**仪表盘**
         时返回 20400 业务错误（消息指出还有几项），绝不级联删子夹、也绝不把子项孤儿化。
@@ -1209,10 +1210,12 @@ paths:
     delete:
       tags:
         - alerts
-      summary: 删除预警规则（软删，幂等）
+      summary: 删除预警规则（软删）
       description: |
-        软删：只打 `deleted_at = now()`，重复删除影响 0 行不报错。
-        触发历史（triggers）保留可查。
+        软删：只打 `deleted_at = now()`，绝不物理删除；触发历史（triggers）保留可查。
+        ⚠️ **不幂等**：service 的存在性门控（`deleted_at IS NULL`）先于更新语句执行，
+        重复删除已删或不存在的 id → 20300。与 `DELETE /api/dashboards/{id}` 相反 ——
+        那个没有门控、直接 UPDATE 命中 0 行，是真幂等。
       operationId: deleteAlert
       parameters:
         - $ref: '#/components/parameters/AlertId'
