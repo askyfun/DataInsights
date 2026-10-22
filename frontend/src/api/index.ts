@@ -37,6 +37,9 @@ export type Datasource = Omit<G['Datasource'], 'type'> & {
   type: DatasourceType;
 };
 
+// R-78：方言能力投影，dialect 与 Datasource.type 同一口径。
+export type DatasourceCapabilities = G['DatasourceCapabilities'];
+
 export interface DatasourceFormData {
   name: string;
   type: DatasourceType;
@@ -348,6 +351,13 @@ export const datasourcesApi = {
 
   getTables: (id: number): Promise<AxiosResponse<ApiResponse<TableInfo[]>>> => {
     return apiClient.get<ApiResponse<TableInfo[]>>(`/api/datasources/${id}/tables`);
+  },
+
+  // R-78：方言能力（懒探针，只读）——用于图型选择的边界说明。
+  getCapabilities: (id: number): Promise<AxiosResponse<ApiResponse<DatasourceCapabilities>>> => {
+    return apiClient.get<ApiResponse<DatasourceCapabilities>>(
+      `/api/datasources/${id}/capabilities`
+    );
   },
 
   getTableColumns: (

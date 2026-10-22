@@ -13,7 +13,7 @@
 
 ## 1. 通用规范
 
-### 1.1 端点清单（58 个泛型路由端点 + 3 个手工路由）
+### 1.1 端点清单（59 个泛型路由端点 + 3 个手工路由）
 
 | 领域 | 端点数 | 前缀 |
 |------|--------|------|
@@ -117,7 +117,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 健康检查。恒 HTTP 200 + Envelope，`data = { "status": "ok" }`。
 注意：当前实现**不探库**——只证明进程活着，不代表 `DATABASE_URL` 可连。
 
-## 3. Datasource 数据源（11 个端点）
+## 3. Datasource 数据源（12 个端点）
 
 响应实体 `Datasource`：`id / name / type / host / port / database_name / username / created_at / updated_at`。
 
@@ -139,6 +139,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 | 9 | `GET /api/datasources/{id}/tables/{table}/data` | 分页读表数据（`page`/`page_size`/`sort_field`/`sort_order`）。**`sort_field` 必须是主键列之一**，否则 50000；`sort_order` 大小写不敏感匹配 desc，其余归一为 ASC。响应 `TableDataResult`：`columns / data / total / primary_keys / page / page_size` |
 | 10 | `POST /api/datasources/{id}/preview` | 预览表或 SQL 结果，固定前 10 行。请求体 `query_type: "table" | "sql"` 决定用 `table_name` 还是 `query_sql`（二选一，后端不强校验）。响应 `PreviewResult`：`columns / data` |
 | 11 | `POST /api/datasources/{id}/field-distribution` | 字段值分布。`field_name` 必填（缺失 20100）；`limit` ≤0 或 >50 归一为 20。响应 `FieldDistribution`：`field_name / total_count / unique_count / distribution[]`，每项 `{value, count, percentage}`（percentage 两位小数） |
+| 12 | `GET /api/datasources/{id}/capabilities` | 方言能力（R-78）。只读懒探针，返回 `dialect` 与 `supports_grouping_sets / supports_percentile_cont / supports_window_functions / percentile_strategy`；前端据此置灰不支持的图型。连接/探针失败 → 50000（前端按「能力未知」放开，不置灰） |
 
 ## 4. Dataset 数据集（9 个端点）
 

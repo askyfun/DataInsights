@@ -31,6 +31,7 @@ type mockDatasourceService struct {
 	testConnectionFunc    func(ctx context.Context, config entity.DatasourceConnectionConfig, driverType string) error
 	getTablesFunc         func(ctx context.Context, id int) ([]entity.TableInfo, error)
 	getColumnsFunc        func(ctx context.Context, id int, tableName string) ([]entity.ColumnInfo, error)
+	getCapabilitiesFunc   func(ctx context.Context, id int) (*entity.DatasourceCapabilities, error)
 	previewFunc           func(ctx context.Context, id int, tableName, querySQL, queryType string) (*entity.PreviewResult, error)
 	fieldDistributionFunc func(ctx context.Context, id int, tableName, querySQL, queryType, fieldName string, limit int) (*entity.FieldDistribution, error)
 	tableDataFunc         func(ctx context.Context, id int, tableName string, page, pageSize int, sortField, sortOrder string) (*entity.TableDataResult, error)
@@ -92,6 +93,13 @@ func (m *mockDatasourceService) GetColumns(ctx context.Context, id int, tableNam
 	return nil, nil
 }
 
+func (m *mockDatasourceService) GetCapabilities(ctx context.Context, id int) (*entity.DatasourceCapabilities, error) {
+	if m.getCapabilitiesFunc != nil {
+		return m.getCapabilitiesFunc(ctx, id)
+	}
+	return nil, nil
+}
+
 func (m *mockDatasourceService) Preview(ctx context.Context, id int, tableName, querySQL, queryType string) (*entity.PreviewResult, error) {
 	if m.previewFunc != nil {
 		return m.previewFunc(ctx, id, tableName, querySQL, queryType)
@@ -128,6 +136,7 @@ func newDatasourceTestRouter(h *DatasourceHandler) *gin.Engine {
 	router.RegisterDeleteRoute(ds, "/:id", h.Delete)
 	router.RegisterPostRoute(ds, "/test", h.TestConnection)
 	router.RegisterGetRoute(ds, "/:id/tables", h.GetTables)
+	router.RegisterGetRoute(ds, "/:id/capabilities", h.GetCapabilities)
 	router.RegisterGetRoute(ds, "/:id/tables/:table/columns", h.GetColumns)
 	router.RegisterGetRoute(ds, "/:id/tables/:table/data", h.GetTableData)
 	router.RegisterPostRoute(ds, "/:id/preview", h.Preview)
@@ -585,6 +594,42 @@ func TestDatasourceGetTables_ServiceError(t *testing.T) {
 		getTablesFunc: func(_ context.Context, _ int) ([]entity.TableInfo, error) { return nil, errBoom() },
 	})
 	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources/2/tables", "")
+	assertBody(t, w, internalErrorBoom)
+}
+
+// ---------------------------------------------------------------- GetCapabilities
+
+func TestDatasourceGetCapabilities_Success(t *testing.T) {
+	h := NewDatasourceHandler(&mockDatasourceService{
+		getCapabilitiesFunc: func(_ context.Context, id int) (*entity.DatasourceCapabilities, error) {
+			if id != 2 {
+				t.Errorf("expected id=2, got %d", id)
+			}
+			return &entity.DatasourceCapabilities{
+				Dialect:                "mysql",
+				PercentileStrategy:     "unsupported",
+				SupportsGroupingSets:   false,
+				SupportsPercentileCont: false,
+			}, nil
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources/2/capabilities", "")
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"dialect":"mysql","supports_grouping_sets":false,"supports_percentile_cont":false,"supports_window_functions":false,"percentile_strategy":"unsupported"}}`)
+}
+
+func TestDatasourceGetCapabilities_InvalidID(t *testing.T) {
+	h := NewDatasourceHandler(&mockDatasourceService{})
+	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources/abc/capabilities", "")
+	assertBody(t, w, badRequestInvalidID)
+}
+
+func TestDatasourceGetCapabilities_ServiceError(t *testing.T) {
+	h := NewDatasourceHandler(&mockDatasourceService{
+		getCapabilitiesFunc: func(_ context.Context, _ int) (*entity.DatasourceCapabilities, error) {
+			return nil, errBoom()
+		},
+	})
+	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources/2/capabilities", "")
 	assertBody(t, w, internalErrorBoom)
 }
 

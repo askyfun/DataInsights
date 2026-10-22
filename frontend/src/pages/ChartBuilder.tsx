@@ -58,12 +58,15 @@ import {
   ChartMetricGroup,
   ChartQueryAggregation,
   ChartQueryRequest,
+  type DatasourceCapabilities,
+  datasourcesApi,
   isPivotV2Payload,
   isTablePayload,
   type QueryRecord,
   queriesApi,
 } from '../api';
 import {
+  type BuilderChartType,
   chartDefinitions,
   normalizeQueryConfigForChartType,
 } from '../components/ChartBuilder/chartDefinitions';
@@ -88,6 +91,7 @@ import DateFilterControl from '../components/DateFilter/DateFilterControl';
 import DateFilterModal, {
   type DateFilterModalPayload,
 } from '../components/DateFilter/DateFilterModal';
+import { chartUnavailableReason } from '../lib/chartCapabilities';
 import {
   type ChartConfigDocument,
   type ChartType,
@@ -1080,6 +1084,8 @@ interface ConfigPanelProps {
    * 由父层按活动指标的聚合函数算出（只有 sum/count 可加），卡片据此置灰并写明原因。
    */
   topNMergeOtherBlocked?: string;
+  /** R-78：图型在当前数据源方言下的不可用原因；undefined = 可用（含能力未知）。 */
+  chartUnavailableFor: (chartType: BuilderChartType) => string | undefined;
 }
 
 const chartTypeOptions = Object.values(chartDefinitions).map((def) => ({
@@ -1140,6 +1146,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   dimensionBindingCount,
   comparisonDimensionOptions,
   topNMergeOtherBlocked,
+  chartUnavailableFor,
 }) => {
   // styleKeys 决定当前图型显示哪些样式控件（Task 0-4 声明、本任务首次真正接线）。
   // 7 种图型现在都应显式声明 styleKeys（见 chartDefinitions.ts），undefined 理论上
@@ -1237,28 +1244,40 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   return null;
                 }
                 const selected = config.chartType === opt.type;
+                // R-78：方言不支持时入口仍可见（功能存在感），但置灰 + 悬停给原因。
+                // 禁用按钮不派发鼠标事件，Tooltip 必须包一层 span 才能弹出。
+                const unavailable = chartUnavailableFor(opt.type);
                 return (
                   <Tooltip
                     key={opt.type}
-                    title={opt.label}
+                    title={unavailable ?? opt.label}
                     placement="top"
                     mouseEnterDelay={0}
                     mouseLeaveDelay={0}
                   >
-                    <Button
-                      type={selected ? 'primary' : 'text'}
-                      icon={React.createElement(opt.icon)}
-                      // 图型按钮只有图标，文字挂在 Tooltip 上不进 accessible name：
-                      // 补 aria-label 让读屏与测试都能按名称定位（否则按 role+name 查不到）。
-                      aria-label={opt.label}
-                      onClick={() => onConfigChange({ chartType: opt.type })}
-                      style={{ width: 32, height: 28, padding: 0 }}
-                    />
+                    <span style={{ display: 'inline-flex' }}>
+                      <Button
+                        type={selected ? 'primary' : 'text'}
+                        icon={React.createElement(opt.icon)}
+                        // 图型按钮只有图标，文字挂在 Tooltip 上不进 accessible name：
+                        // 补 aria-label 让读屏与测试都能按名称定位（否则按 role+name 查不到）。
+                        aria-label={opt.label}
+                        disabled={unavailable !== undefined}
+                        data-testid={`chart-type-${opt.type}`}
+                        onClick={() => onConfigChange({ chartType: opt.type })}
+                        style={{ width: 32, height: 28, padding: 0 }}
+                      />
+                    </span>
                   </Tooltip>
                 );
               })}
             </div>
           ))}
+          {chartUnavailableFor(config.chartType) && (
+            <Text type="warning" style={{ fontSize: 12 }} data-testid="chart-type-gate-note">
+              {chartUnavailableFor(config.chartType)}
+            </Text>
+          )}
         </div>
       </Card>
 
@@ -2083,6 +2102,43 @@ const ChartBuilder: React.FC = () => {
   const currentDataset = useMemo(
     () => datasets.find((ds) => ds.id === selectedDatasetId) ?? null,
     [datasets, selectedDatasetId]
+  );
+
+  /**
+   * R-78：当前数据集所连方言的能力（只读懒探针）。null = 未知（未选数据集 /
+   * 请求失败），此时不门控任何图型——缺省按现状放开，不误伤。
+   */
+  const [datasourceCapabilities, setDatasourceCapabilities] =
+    useState<DatasourceCapabilities | null>(null);
+  const selectedDatasourceId = currentDataset?.datasource_id ?? null;
+
+  useEffect(() => {
+    setDatasourceCapabilities(null);
+    if (selectedDatasourceId == null) {
+      return;
+    }
+    let cancelled = false;
+    datasourcesApi
+      .getCapabilities(selectedDatasourceId)
+      .then((response) => {
+        if (!cancelled) {
+          setDatasourceCapabilities(response.data.data);
+        }
+      })
+      .catch(() => {
+        // 能力未知时保持放开：置灰只依据探针结果，不依据探测失败。
+        if (!cancelled) {
+          setDatasourceCapabilities(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDatasourceId]);
+
+  const chartUnavailableFor = useCallback(
+    (chartType: BuilderChartType) => chartUnavailableReason(chartType, datasourceCapabilities),
+    [datasourceCapabilities]
   );
 
   useEffect(() => {
@@ -3945,6 +4001,7 @@ const ChartBuilder: React.FC = () => {
             dimensionBindingCount={dimensionBindingCount}
             comparisonDimensionOptions={comparisonDimensionOptions}
             topNMergeOtherBlocked={topNMergeOtherBlocked}
+            chartUnavailableFor={chartUnavailableFor}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
             }
@@ -4012,6 +4069,7 @@ const ChartBuilder: React.FC = () => {
             dimensionBindingCount={dimensionBindingCount}
             comparisonDimensionOptions={comparisonDimensionOptions}
             topNMergeOtherBlocked={topNMergeOtherBlocked}
+            chartUnavailableFor={chartUnavailableFor}
             onQueryOptionsChange={(options) =>
               setChartQueryOptionsState({ ...chartQueryOptions, ...options })
             }
