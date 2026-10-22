@@ -129,6 +129,15 @@ frontend/src/
   （区间 OR IS NULL）在仪表盘侧表达不出来；② **未落库的图表块**走本地取数（`GET /api/charts/{id}/data`），
   不带盘级筛选——新增的筛选器只作用到**已保存**的图表块。
 
+### 动态维度/指标（issue #134）
+
+槽位的 `bindings[].candidates`（**不含**默认列）声明可切换的其他列；纯逻辑在
+`frontend/src/lib/dynamicFieldSlots.ts`（`effectiveFieldId` / `dynamicSlotsOf` / `fieldOverridesOf`）。
+切换是**观看侧会话态**，不写回 config：构建页/仪表盘只把选择传给查询组装（`composeChartQueryRequest`
+的 `fieldOverrides`）或 `/query` 的 `selections[]`，后端在内存 config 投影上换列并校验候选集。
+`?q=` 快照落库前用 `applyFieldOverrides` 把当前选择物化进 bindings（图表保存路径不物化）。
+仪表盘仅对已落库块渲染切换器（未保存块走 `GET /api/charts/{id}/data` 本地取数）。
+
 ### 查询容器（第一期，issue #154）
 
 `type:"container"` 是一块**只做视觉分组 + 置顶**的栅格 widget（对标火山「查询容器」），把本页若干盘级筛选器收进一个带标题的控件条：

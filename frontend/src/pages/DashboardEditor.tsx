@@ -47,6 +47,7 @@ import {
   dashboardsApi,
   datasetsApi,
 } from '../api';
+import DynamicSlotSwitcher from '../components/ChartBuilder/DynamicSlotSwitcher';
 import ChartLinkageSettings from '../components/ChartLinkage/ChartLinkageSettings';
 import ChartView from '../components/ChartView/ChartView';
 import AddFilterWidgetModal, {
@@ -58,6 +59,11 @@ import DateFilterModal, {
   type DateFilterModalPayload,
 } from '../components/DateFilter/DateFilterModal';
 import PageHeader from '../components/PageHeader';
+import {
+  type ChartConfigDocument,
+  type ChartType,
+  migrateChartConfig,
+} from '../lib/chartConfigSchema';
 import {
   type DashboardQueryFilterValue,
   dashboardFiltersPayload,
@@ -100,6 +106,11 @@ import {
 } from '../lib/dashboardLinkage';
 import type { DateGranularity, WeekStart } from '../lib/dateFilter';
 import { isDateFilterValue } from '../lib/dateFilter';
+import {
+  type DynamicFieldSelections,
+  dynamicSlotsOf,
+  fieldOverridesOf,
+} from '../lib/dynamicFieldSlots';
 import { useStore } from '../store';
 
 const { Text } = Typography;
@@ -204,6 +215,15 @@ const DashboardEditor: React.FC = () => {
    * 点击产生的是取值。
    */
   const [activeLinkages, setActiveLinkages] = useState<ActiveLinkageMap>({});
+  /**
+   * 动态维度/指标的观看侧选择（issue #134）：widgetId → (bindingId → 列 id)。
+   * 与筛选器取值/联动同款会话态：只随本次查询下发给后端，不写进 layout 或图表配置。
+   */
+  const [dynamicSelections, setDynamicSelections] = useState<
+    Record<string, DynamicFieldSelections>
+  >({});
+  /** 同步镜像：切换后要立刻用新选择重查，不能等 React 提交后再读 state。 */
+  const dynamicSelectionsRef = useRef<Record<string, DynamicFieldSelections>>({});
   /** 正在配置联动设置的图表块；null 时弹窗不渲染内容。 */
   const [linkageSettingsFor, setLinkageSettingsFor] = useState<string | null>(null);
   /** 数据集 id → 列（跨数据集联动要在目标数据集上选关联字段）。 */
@@ -239,10 +259,21 @@ const DashboardEditor: React.FC = () => {
     ) => {
       setQuerying(true);
       try {
+        // 动态槽位选择（issue #134）：按 widget 展开成扁平数组，同一槽位只下发一条；
+        // 与筛选器/联动一样，后端才是合并/校验的单点。
+        const selections = Object.entries(dynamicSelectionsRef.current).flatMap(
+          ([widgetId, byBinding]) =>
+            Object.entries(byBinding).map(([bindingId, fieldId]) => ({
+              widgetId,
+              bindingId,
+              fieldId,
+            }))
+        );
         const response = await dashboardsApi.query(dashboardId, {
           page_id: pageId,
           filters,
           linkages,
+          ...(selections.length > 0 ? { selections } : {}),
         });
         const map: Record<string, DashboardQueryResult> = {};
         for (const result of response.data.data.results ?? []) {
@@ -299,6 +330,28 @@ const DashboardEditor: React.FC = () => {
     [runQuery]
   );
 
+  /**
+   * 动态维度/指标切换（issue #134）：只改会话选择并立即重取当前页。
+   * 选择不写进 layout / 图表配置——刷新或换人打开仍是作者配置的默认列。
+   * 只对**已落库**的块渲染切换器（未保存的块走后端不认识的本地取数路径）。
+   */
+  const handleDynamicFieldSelect = useCallback(
+    (widgetId: string, bindingId: string, fieldId: string) => {
+      const prev = dynamicSelectionsRef.current;
+      const next = {
+        ...prev,
+        [widgetId]: { ...(prev[widgetId] ?? {}), [bindingId]: fieldId },
+      };
+      dynamicSelectionsRef.current = next;
+      setDynamicSelections(next);
+      if (!id) {
+        return;
+      }
+      void queryWithState(id, doc.widgets, filterValues, activePageId, activeLinkages);
+    },
+    [activeLinkages, activePageId, doc.widgets, filterValues, id, queryWithState]
+  );
+
   const load = useCallback(
     async (dashboardId: string) => {
       setLoading(true);
@@ -321,6 +374,9 @@ const DashboardEditor: React.FC = () => {
         // 联动是会话内状态：重新装载（含丢弃草稿）一律回到「没有联动」。
         setActiveLinkages({});
         setLinkageSettingsFor(null);
+        // 动态槽位选择同理：换盘/重载后会话选择一律清空，回到图表默认列。
+        dynamicSelectionsRef.current = {};
+        setDynamicSelections({});
 
         const serverDoc = migrateDashboardLayout(dashboard.layout_json);
 
@@ -500,6 +556,18 @@ const DashboardEditor: React.FC = () => {
     }
     return [...ids].sort((a, b) => a - b);
   }, [doc.widgets, chartsById]);
+
+  /**
+   * 图表 id → v2 配置文档：动态槽位投影与 ChartView 的字段名解析共用同一份迁移结果。
+   * 只随图表清单变化重算，不随会话选择/筛选取值重跑。
+   */
+  const chartDocById = useMemo(() => {
+    const map: Record<number, ChartConfigDocument> = {};
+    for (const chart of charts) {
+      map[chart.id] = migrateChartConfig(chart.config, chart.chart_type as ChartType);
+    }
+    return map;
+  }, [charts]);
 
   /**
    * 按当前引用的数据集**补齐缺失的列清单**（已拉过的不再重复请求）。
@@ -1273,6 +1341,69 @@ const DashboardEditor: React.FC = () => {
     );
   };
 
+  /**
+   * 渲染一块图表，并在上方挂动态槽位切换器（issue #134）。
+   *
+   * 只有已落库的块才挂切换器：未保存的块走 `GET /api/charts/{id}/data` 本地取数，
+   * 后端没有「本块 + 选择」的入口；强行展示只会给出「切了没反应」的假控件。
+   * 选择通过 `bindingFieldOverrides` 传给 ChartView，让展示名/槽位也按生效列解析。
+   */
+  const renderChartCell = (
+    widget: DashboardChartWidget,
+    chart: Chart,
+    data: ChartDataResponse,
+    showSwitcher: boolean
+  ) => {
+    const chartDoc = chartDocById[chart.id];
+    const columns = columnsByDataset[chart.dataset_id] ?? [];
+    const groups = chartDoc
+      ? [...chartDoc.query.dimensionGroups, ...chartDoc.query.metricGroups]
+      : [];
+    const slots = showSwitcher && chartDoc ? dynamicSlotsOf(groups, columns) : [];
+    const selections = dynamicSelections[widget.widgetId] ?? {};
+    const overrides = fieldOverridesOf(slots, selections);
+
+    const view = (
+      <ChartView
+        chart={chart}
+        data={data}
+        fieldNames={fieldNames}
+        echartsStyle={{ height: '100%', minHeight: 0 }}
+        linkageFieldId={linkageFieldIdOf(widget)}
+        onDataPointClick={
+          linkageFieldIdOf(widget)
+            ? (column, value) => handleDataPointClick(widget.widgetId, column, value)
+            : undefined
+        }
+        bindingFieldOverrides={overrides}
+      />
+    );
+
+    if (slots.length === 0) {
+      return view;
+    }
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+        }}
+      >
+        <DynamicSlotSwitcher
+          slots={slots}
+          selections={selections}
+          onChange={(bindingId, fieldId) =>
+            handleDynamicFieldSelect(widget.widgetId, bindingId, fieldId)
+          }
+          testIdPrefix={`dashboard-dynamic-${widget.widgetId}`}
+        />
+        <div style={{ flex: 1, minHeight: 0 }}>{view}</div>
+      </div>
+    );
+  };
+
   const renderChartBlock = (widget: DashboardChartWidget) => {
     const result = results[widget.widgetId];
 
@@ -1315,20 +1446,7 @@ const DashboardEditor: React.FC = () => {
           />
         );
       }
-      return (
-        <ChartView
-          chart={chart}
-          data={data}
-          fieldNames={fieldNames}
-          echartsStyle={{ height: '100%', minHeight: 0 }}
-          linkageFieldId={linkageFieldIdOf(widget)}
-          onDataPointClick={
-            linkageFieldIdOf(widget)
-              ? (column, value) => handleDataPointClick(widget.widgetId, column, value)
-              : undefined
-          }
-        />
-      );
+      return renderChartCell(widget, chart, data, true);
     }
 
     // 未持久化的块：键不存在 = 仍在取数；值为 null = 取数失败。
@@ -1366,20 +1484,8 @@ const DashboardEditor: React.FC = () => {
         />
       );
     }
-    return (
-      <ChartView
-        chart={chart}
-        data={pending}
-        fieldNames={fieldNames}
-        echartsStyle={{ height: '100%', minHeight: 0 }}
-        linkageFieldId={linkageFieldIdOf(widget)}
-        onDataPointClick={
-          linkageFieldIdOf(widget)
-            ? (column, value) => handleDataPointClick(widget.widgetId, column, value)
-            : undefined
-        }
-      />
-    );
+    // 未保存的块：本地取数路径不认识动态槽位选择，因此不挂切换器（见 renderChartCell）。
+    return renderChartCell(widget, chart, pending, false);
   };
 
   // ⚠️ 装载态与错误态**不**走提前 return：`<div ref={containerRef}>` 必须在首屏 commit

@@ -55,7 +55,12 @@ describe('FieldSettingsModal', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
 
-    expect(onOk).toHaveBeenCalledWith({ alias: '销售额', unit: '元', format: '0,0.00' });
+    expect(onOk).toHaveBeenCalledWith({
+      alias: '销售额',
+      unit: '元',
+      format: '0,0.00',
+      candidates: [],
+    });
   });
 
   it('维度字段：只有显示名称，单位/格式不渲染', () => {
@@ -71,7 +76,12 @@ describe('FieldSettingsModal', () => {
     renderModal({ onOk, initial: { alias: '销售额', unit: '元', format: '0,0.00' } });
 
     fireEvent.click(screen.getByRole('button', { name: '确 定' }));
-    expect(onOk).toHaveBeenCalledWith({ alias: '销售额', unit: '元', format: '0,0.00' });
+    expect(onOk).toHaveBeenCalledWith({
+      alias: '销售额',
+      unit: '元',
+      format: '0,0.00',
+      candidates: [],
+    });
   });
 
   it('取消上抛 onCancel', () => {
@@ -137,20 +147,63 @@ describe('FieldSettingsModal 占比开关', () => {
     const { onOk } = renderModal({ initial: { alias: '', unit: '', format: '0,0.00' } });
     clickPercentSwitch();
     clickModalOk();
-    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00%' });
+    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00%', candidates: [] });
   });
 
   it('关闭开关后确定：剥掉 % 后缀，其余格式保留', () => {
     const { onOk } = renderModal({ initial: { alias: '', unit: '', format: '0,0.00%' } });
     clickPercentSwitch();
     clickModalOk();
-    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00' });
+    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00', candidates: [] });
   });
 
   it('格式为空时打开开关：给一个两位小数的默认格式，而不是孤零零一个 %', () => {
     const { onOk } = renderModal({ initial: { alias: '', unit: '', format: '' } });
     clickPercentSwitch();
     clickModalOk();
-    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00%' });
+    expect(onOk).toHaveBeenCalledWith({ alias: '', unit: '', format: '0,0.00%', candidates: [] });
+  });
+});
+
+describe('FieldSettingsModal：动态维度/指标候选（issue #134）', () => {
+  it('没有候选选项时不渲染候选控件（普通字段属性弹窗形状不变）', () => {
+    renderModal();
+    expect(screen.queryByTestId('field-settings-candidates')).not.toBeInTheDocument();
+  });
+
+  it('勾选候选字段 → 确定时随字段属性一起上抛', async () => {
+    const onOk = vi.fn();
+    render(
+      <FieldSettingsModal
+        open
+        kind="dimension"
+        field={DIM_FIELD}
+        initial={{ alias: '', unit: '', format: '', candidates: [] }}
+        candidateOptions={[
+          { id: 'city', name: 'city' },
+          { id: 'region', name: 'region' },
+        ]}
+        onOk={onOk}
+        onCancel={() => {}}
+      />
+    );
+
+    const select = screen.getByTestId('field-settings-candidates');
+    fireEvent.mouseDown(select);
+    fireEvent.click(
+      await screen.findByText('city', { selector: '.ant-select-item-option-content' })
+    );
+    fireEvent.mouseDown(select);
+    fireEvent.click(
+      await screen.findByText('region', { selector: '.ant-select-item-option-content' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }));
+
+    expect(onOk).toHaveBeenCalledWith({
+      alias: '',
+      unit: '',
+      format: '',
+      candidates: ['city', 'region'],
+    });
   });
 });

@@ -71,6 +71,7 @@ import DraggableField, {
   FieldDragPreview,
   fieldTagColor,
 } from '../components/ChartBuilder/DraggableField';
+import DynamicSlotSwitcher from '../components/ChartBuilder/DynamicSlotSwitcher';
 import { BindingDragData, BindingSlotDropData } from '../components/ChartBuilder/FieldDropZone';
 import FieldSettingsModal, {
   type FieldSettingsValue,
@@ -107,11 +108,19 @@ import {
   expandDateFilterIntent,
   isDateFilterValue,
 } from '../lib/dateFilter';
+import {
+  type DynamicFieldSelections,
+  dynamicSlotsOf,
+  effectiveFieldId,
+  fieldOverridesOf,
+  pruneSelections,
+} from '../lib/dynamicFieldSlots';
 import { isPercentOfTotalFormat } from '../lib/format';
 import {
   buildChartConfigDocument,
   buildQuerySpecDocument,
   parseQuerySpecDocument,
+  withDynamicSelections,
 } from '../lib/querySpec';
 import { usePrefersReducedMotion } from '../lib/reducedMotion';
 import type { ConditionalFormat } from '../lib/tableConditionalFormat';
@@ -385,6 +394,11 @@ export interface ChartQueryRequestInput {
   queryOptions: ChartQueryOptions;
   /** 返回对象是否可携带 sort 键（仅当 queryConfig.sort 存在且 bindingId 在活动组内可解析时实际携带）。历史上两个自动查询 effect 传 false（从不发送 sort，R-50 bug）；Task 1-7 起三个调用点统一为 true。 */
   includeSort: boolean;
+  /**
+   * 动态维度/指标的会话选择覆盖（issue #134）：bindingId → 本次生效的列 id。
+   * 缺省 = 全部用配置默认列。只影响本次请求，绝不改 queryConfig。
+   */
+  fieldOverrides?: DynamicFieldSelections;
 }
 
 /**
@@ -459,10 +473,13 @@ export const composeChartQueryRequest = (
     tablePagination,
     queryOptions,
     includeSort,
+    fieldOverrides,
   } = input;
 
   const activeGroups = getActiveFieldGroups(chartType, queryConfig);
   const fieldMap = new Map(fields.map((f) => [f.id, f]));
+  // 动态槽位的生效列（issue #134）：会话选择只在这里生效，queryConfig 本身不改。
+  const fieldIdOf = (binding: BindingInstance): string => effectiveFieldId(binding, fieldOverrides);
 
   // 过滤条件展开：日期条件带上的是「意图」（最近 7 天 / 本月 …），在**下发请求这一刻**
   // 才解析成具体区间——这样动态日期是真的动态，页面挂着跨天也不会失真；其余条件照旧直传。
@@ -520,7 +537,7 @@ export const composeChartQueryRequest = (
     if (!sortBinding) {
       return undefined;
     }
-    const columnName = fieldMap.get(sortBinding.binding.fieldId)?.name;
+    const columnName = fieldMap.get(fieldIdOf(sortBinding.binding))?.name;
     if (columnName === undefined) {
       return undefined;
     }
@@ -542,7 +559,7 @@ export const composeChartQueryRequest = (
       return undefined;
     }
     const valueBinding = activeGroups.metricGroups[0]?.bindings[0];
-    const columnName = valueBinding ? fieldMap.get(valueBinding.fieldId)?.name : undefined;
+    const columnName = valueBinding ? fieldMap.get(fieldIdOf(valueBinding))?.name : undefined;
     if (!valueBinding || columnName === undefined) {
       return {};
     }
@@ -608,7 +625,7 @@ export const composeChartQueryRequest = (
         return;
       }
       const groupFields: ChartDimensionField[] = group.bindings.flatMap((binding) => {
-        const chartField = fieldMap.get(binding.fieldId);
+        const chartField = fieldMap.get(fieldIdOf(binding));
         if (!chartField) {
           return [];
         }
@@ -624,7 +641,7 @@ export const composeChartQueryRequest = (
         return;
       }
       const groupFields: ChartMetricField[] = group.bindings.flatMap((binding) => {
-        const chartField = fieldMap.get(binding.fieldId);
+        const chartField = fieldMap.get(fieldIdOf(binding));
         if (!chartField) {
           return [];
         }
@@ -670,7 +687,7 @@ export const composeChartQueryRequest = (
 
   // v1 平铺协议：逻辑与改动前完全一致
   const dimensionFields = activeGroups.dimensionGroups
-    .flatMap((group) => group.bindings.map((b) => b.fieldId))
+    .flatMap((group) => group.bindings.map((b) => fieldIdOf(b)))
     .map((name) => fieldMap.get(name))
     .filter((f): f is ChartField => f !== undefined);
 
@@ -680,7 +697,7 @@ export const composeChartQueryRequest = (
   const metrics = activeGroups.metricGroups
     .flatMap((group) => group.bindings)
     .flatMap((binding) => {
-      const chartField = fieldMap.get(binding.fieldId);
+      const chartField = fieldMap.get(fieldIdOf(binding));
       if (!chartField) {
         return [];
       }
@@ -743,6 +760,8 @@ interface ChartCanvasProps {
   chartStyle: ChartStyleConfig;
   /** 查询选项（R-63：参考线在此透传给 buildChartOption）。 */
   queryOptions: ChartQueryOptions;
+  /** 动态槽位的会话选择（issue #134）：labels/维度名按生效列解析。 */
+  fieldOverrides?: DynamicFieldSelections;
 }
 
 /** 离屏主题探针样式：不影响布局，仅供 chartPalette 读取当前主题的 --dr-*。 */
@@ -789,6 +808,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   metricFormats,
   chartStyle,
   queryOptions,
+  fieldOverrides,
 }) => {
   // 主题宿主探针（与 ChartView 同一机制）：canvas 取不到 CSS 变量，须在构造 option 时
   // 把当前主题的颜色算成字面值。resolvedTheme 入依赖 → 切主题即重建 option 实时重绘。
@@ -809,13 +829,16 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
     const dimensionBindings = queryConfig.dimensionGroups.flatMap((g) => g.bindings);
     const metricBindings = queryConfig.metricGroups.flatMap((g) => g.bindings);
+    // 动态槽位的生效列（issue #134）：会话选择只影响本次渲染，不改 store。
+    const fieldIdOf = (binding: BindingInstance): string =>
+      effectiveFieldId(binding, fieldOverrides);
     // context.dimensions/metrics 仍是列名：buildChartOption 用它们匹配结构化响应的
     // x_axis / series[].name（后端目前仍按列名/别名返回，未切到 bindingId）。
     const dimensions = dimensionBindings
-      .map((b) => fieldMap.get(b.fieldId)?.name)
+      .map((b) => fieldMap.get(fieldIdOf(b))?.name)
       .filter((name): name is string => name !== undefined);
     const metrics = metricBindings
-      .map((b) => fieldMap.get(b.fieldId)?.name)
+      .map((b) => fieldMap.get(fieldIdOf(b))?.name)
       .filter((name): name is string => name !== undefined);
 
     // labels 的键保持列名（buildChartOption 按列名/系列名查显示名），但 label/alias/unit
@@ -825,14 +848,14 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     // 同一个 metricBindings 循环里填，避免两处各写一遍「bindingId → 输出列名」的翻译。
     const formats: Record<string, string> = {};
     for (const binding of dimensionBindings) {
-      const name = fieldMap.get(binding.fieldId)?.name;
+      const name = fieldMap.get(fieldIdOf(binding))?.name;
       const label = dimensionLabels[binding.bindingId];
       if (name && label) {
         labels[name] = label;
       }
     }
     for (const binding of metricBindings) {
-      const baseName = fieldMap.get(binding.fieldId)?.name || binding.fieldId;
+      const baseName = fieldMap.get(fieldIdOf(binding))?.name || fieldIdOf(binding);
       const alias = metricAliases[binding.bindingId];
       const unit = metricUnits[binding.bindingId];
       const displayName = alias || baseName;
@@ -860,7 +883,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
               slot: def.id,
               metrics: (queryConfig.metricGroups[index]?.bindings ?? [])
                 .map((b) =>
-                  wireAliasOf(metricAliases[b.bindingId], fieldMap.get(b.fieldId)?.name ?? '')
+                  wireAliasOf(metricAliases[b.bindingId], fieldMap.get(fieldIdOf(b))?.name ?? '')
                 )
                 .filter((name): name is string => name !== undefined),
             }))
@@ -896,6 +919,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     metricUnits,
     metricFormats,
     queryOptions,
+    fieldOverrides,
     hostEl,
     resolvedTheme,
     reducedMotion,
@@ -1965,6 +1989,12 @@ const ChartBuilder: React.FC = () => {
     kind: 'dimension' | 'metric';
     bound: BoundField;
   } | null>(null);
+  /**
+   * 动态维度/指标的观看侧选择（issue #134）：bindingId → 本次生效的列 id。
+   * 刻意不进 store / 不写回图表 config：切换只是「这次看哪一列」，作者配置的默认列
+   * 仍是 binding.fieldId。清空（撤销/切换数据集）时由 prune effect 收敛。
+   */
+  const [dynamicSelections, setDynamicSelections] = useState<DynamicFieldSelections>({});
   // 左侧字段栏宽度（可拖拽调节）
   const [leftSiderWidth, setLeftSiderWidth] = useState(150);
   const [resizeHandleHover, setResizeHandleHover] = useState(false);
@@ -2050,6 +2080,7 @@ const ChartBuilder: React.FC = () => {
     setMetricAggregations,
     setMetricAliases,
     setDimensionLabel,
+    setBindingCandidates,
     setDimensionLabels,
     setMetricUnit,
     setMetricUnits,
@@ -2425,6 +2456,32 @@ const ChartBuilder: React.FC = () => {
   );
 
   /**
+   * 当前图型的动态槽位（issue #134）：候选里至少有一列仍在数据集中才成为切换项。
+   * 标签优先用作者设的显示名/别名，回落列名——与图表渲染的标签口径保持一致。
+   */
+  const dynamicSlots = useMemo(
+    () =>
+      dynamicSlotsOf(
+        [...activeQueryConfig.dimensionGroups, ...activeQueryConfig.metricGroups],
+        chartBuilderFields,
+        (binding, field) =>
+          dimensionLabels[binding.bindingId] || metricAliases[binding.bindingId] || field.name
+      ),
+    [activeQueryConfig, chartBuilderFields, dimensionLabels, metricAliases]
+  );
+
+  /** 交给查询组装与渲染的覆盖表（只含真正切换过的槽位） */
+  const dynamicFieldOverrides = useMemo(
+    () => fieldOverridesOf(dynamicSlots, dynamicSelections),
+    [dynamicSlots, dynamicSelections]
+  );
+
+  // 失效选择（槽位删除 / 候选被改 / 换数据集）自动回落默认列，避免把过期列发进查询。
+  useEffect(() => {
+    setDynamicSelections((prev) => pruneSelections(prev, dynamicSlots));
+  }, [dynamicSlots]);
+
+  /**
    * 把一份 v2 图表配置文档灌进 store。`?edit=`（图表库）与 `?q=`（查询记录直链）
    * 两条还原路径共用同一个出口——两份实现迟早会漏掉 fieldMeta 或 style 其中之一。
    *
@@ -2789,6 +2846,7 @@ const ChartBuilder: React.FC = () => {
         tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
         queryOptions: chartQueryOptions,
         includeSort: true,
+        fieldOverrides: dynamicFieldOverrides,
       });
     },
     [
@@ -2802,6 +2860,7 @@ const ChartBuilder: React.FC = () => {
       tablePagination.pageSize,
       chartBuilderFields,
       chartQueryOptions,
+      dynamicFieldOverrides,
     ]
   );
 
@@ -2824,19 +2883,26 @@ const ChartBuilder: React.FC = () => {
         return;
       }
 
-      const spec = buildQuerySpecDocument({
-        chartType: chartBuilderConfig.chartType,
-        title: chartBuilderConfig.title,
-        queryConfig,
-        activeQueryConfig,
-        dimensionLabels,
-        metricAggregations,
-        metricAliases,
-        metricUnits,
-        metricFormats,
-        chartStyle,
-        chartQueryOptions,
-      });
+      const spec = buildQuerySpecDocument(
+        withDynamicSelections(
+          {
+            chartType: chartBuilderConfig.chartType,
+            title: chartBuilderConfig.title,
+            // ?q= 快照要带「当时看的是哪个候选」（issue #134）：选择物化进 bindings 副本，
+            // 但**不**回写 store / 图表配置——分享链接还原出来的是那一刻的视角。
+            queryConfig,
+            activeQueryConfig,
+            dimensionLabels,
+            metricAggregations,
+            metricAliases,
+            metricUnits,
+            metricFormats,
+            chartStyle,
+            chartQueryOptions,
+          },
+          dynamicFieldOverrides
+        )
+      );
 
       // 本次成功查询记账：预览不再置灰；spec.document 就是 v2 配置文档，历史快照直接复用，
       // 与查询记录落库 / 保存图表保证同一份序列化出口（lib/querySpec）。
@@ -2903,6 +2969,7 @@ const ChartBuilder: React.FC = () => {
       queryConfig,
       selectedDatasetId,
       setSearchParams,
+      dynamicFieldOverrides,
     ]
   );
 
@@ -3143,6 +3210,7 @@ const ChartBuilder: React.FC = () => {
       tablePagination: { page: tablePagination.page, pageSize: tablePagination.pageSize },
       queryOptions: chartQueryOptions,
       includeSort: true,
+      fieldOverrides: dynamicFieldOverrides,
     });
     if (request) {
       void runChartQueryRef.current(request);
@@ -3160,6 +3228,7 @@ const ChartBuilder: React.FC = () => {
     tablePagination.page,
     tablePagination.pageSize,
     chartQueryOptions,
+    dynamicFieldOverrides,
   ]);
 
   // #141：自动查询关闭时，配置一旦相对上一次成功执行的请求发生变更，就把预览标记为
@@ -3478,6 +3547,7 @@ const ChartBuilder: React.FC = () => {
           metricFormats={metricFormats}
           chartStyle={chartStyle}
           queryOptions={chartQueryOptions}
+          fieldOverrides={dynamicFieldOverrides}
         />
       </ChartErrorBoundary>
     );
@@ -3633,6 +3703,13 @@ const ChartBuilder: React.FC = () => {
               />
             }
           >
+            <DynamicSlotSwitcher
+              slots={dynamicSlots}
+              selections={dynamicSelections}
+              onChange={(bindingId, fieldId) =>
+                setDynamicSelections((prev) => ({ ...prev, [bindingId]: fieldId }))
+              }
+            />
             <div
               style={{
                 height: 'calc(100vh - 400px)',
@@ -3920,6 +3997,13 @@ const ChartBuilder: React.FC = () => {
                 message="配置已变更，图表展示的是上次查询的结果——点击「执行查询」查看最新数据"
               />
             )}
+            <DynamicSlotSwitcher
+              slots={dynamicSlots}
+              selections={dynamicSelections}
+              onChange={(bindingId, fieldId) =>
+                setDynamicSelections((prev) => ({ ...prev, [bindingId]: fieldId }))
+              }
+            />
             <div
               style={{
                 flex: 1,
@@ -4125,6 +4209,17 @@ const ChartBuilder: React.FC = () => {
         open={fieldSettings !== null}
         kind={fieldSettings?.kind ?? 'metric'}
         field={fieldSettings?.bound.field ?? null}
+        candidateOptions={
+          fieldSettings
+            ? chartBuilderFields
+                .filter(
+                  (candidate) =>
+                    candidate.type === fieldSettings.kind &&
+                    candidate.id !== fieldSettings.bound.binding.fieldId
+                )
+                .map((candidate) => ({ id: candidate.id, name: candidate.name }))
+            : []
+        }
         initial={
           fieldSettings
             ? {
@@ -4134,8 +4229,9 @@ const ChartBuilder: React.FC = () => {
                     : (dimensionLabels[fieldSettings.bound.binding.bindingId] ?? ''),
                 unit: metricUnits[fieldSettings.bound.binding.bindingId] ?? '',
                 format: metricFormats[fieldSettings.bound.binding.bindingId] ?? '',
+                candidates: fieldSettings.bound.binding.candidates ?? [],
               }
-            : { alias: '', unit: '', format: '' }
+            : { alias: '', unit: '', format: '', candidates: [] }
         }
         onOk={(value: FieldSettingsValue) => {
           if (!fieldSettings) return;
@@ -4147,6 +4243,7 @@ const ChartBuilder: React.FC = () => {
           } else {
             setDimensionLabel(bindingId, value.alias);
           }
+          setBindingCandidates(bindingId, value.candidates ?? []);
           setFieldSettings(null);
         }}
         onCancel={() => setFieldSettings(null)}

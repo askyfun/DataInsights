@@ -524,3 +524,81 @@ describe('migrateChartConfig：ShareView 消费契约', () => {
     expect(doc.fieldMeta['b-1'].aggregation).toBe('sum');
   });
 });
+
+describe('migrateChartConfig：动态维度/指标候选集（issue #134）', () => {
+  const v2WithCandidates = {
+    version: 2,
+    chartType: 'bar',
+    title: 't',
+    query: {
+      dimensionGroups: [
+        {
+          id: 'dims',
+          bindings: [
+            { bindingId: 'b-0', fieldId: 'd-1', candidates: ['d-2', 'd-2', 'd-1', '', 5] },
+          ],
+        },
+      ],
+      metricGroups: [{ id: 'values', bindings: [{ bindingId: 'b-1', fieldId: 'm-1' }] }],
+      filters: [],
+    },
+    fieldMeta: {},
+    style: {},
+    queryOptions: {},
+  };
+
+  it('v2 直通保留候选集，并剔除重复项 / 默认列 / 非法值', () => {
+    const doc = migrateChartConfig(JSON.stringify(v2WithCandidates), 'bar');
+    expect(doc.query.dimensionGroups[0].bindings[0].candidates).toEqual(['d-2']);
+    // 没有候选的绑定不凭空长出 candidates 键（旧文档形状不变）
+    expect(doc.query.metricGroups[0].bindings[0].candidates).toBeUndefined();
+  });
+
+  it('候选全是非法值时不保留空数组（形状等价于没有候选）', () => {
+    const doc = migrateChartConfig(
+      JSON.stringify({
+        ...v2WithCandidates,
+        query: {
+          ...v2WithCandidates.query,
+          dimensionGroups: [
+            { id: 'dims', bindings: [{ bindingId: 'b-0', fieldId: 'd-1', candidates: ['d-1'] }] },
+          ],
+        },
+      }),
+      'bar'
+    );
+    expect(doc.query.dimensionGroups[0].bindings[0].candidates).toBeUndefined();
+  });
+
+  it('候选列与 fieldId 同口径升级：列名候选按字段列表翻译为列 ID', () => {
+    const doc = migrateChartConfig(
+      JSON.stringify({
+        version: 2,
+        chartType: 'bar',
+        query: {
+          dimensionGroups: [
+            {
+              id: 'dims',
+              bindings: [{ bindingId: 'b-0', fieldId: 'region', candidates: ['city'] }],
+            },
+          ],
+          metricGroups: [],
+          filters: [],
+        },
+        fieldMeta: {},
+        style: {},
+        queryOptions: {},
+      }),
+      'bar',
+      [
+        { id: 'd-1', name: 'region' },
+        { id: 'd-2', name: 'city' },
+      ]
+    );
+    expect(doc.query.dimensionGroups[0].bindings[0]).toEqual({
+      bindingId: 'b-0',
+      fieldId: 'd-1',
+      candidates: ['d-2'],
+    });
+  });
+});
