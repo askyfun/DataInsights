@@ -42,7 +42,7 @@ func Bearer(svc auth.Service, allowPAT bool) gin.HandlerFunc {
 			return
 		}
 		if !allowPAT && principal.Kind == "pat" {
-			response.Unauthorized(c, "个人访问令牌不允许访问该端点")
+			response.Forbidden(c, "个人访问令牌不允许访问该端点")
 			c.Abort()
 			return
 		}
@@ -69,6 +69,25 @@ func PrincipalFrom(c *gin.Context) (*auth.Principal, bool) {
 	}
 	p, ok := v.(*auth.Principal)
 	return p, ok
+}
+
+// RequireAdmin 只放行管理员。必须挂在 Bearer 之后：它只读 Principal，不自行认证。
+// 用户管理端点用它做角色闸（issue #202），非管理员连只读壳都不给。
+func RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := PrincipalFrom(c)
+		if !ok {
+			response.Unauthorized(c, "unauthenticated")
+			c.Abort()
+			return
+		}
+		if p.Role != "admin" {
+			response.Forbidden(c, "需要管理员权限")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 // RawTokenFrom reads the plaintext bearer token (for self-revocation on logout).

@@ -8,14 +8,17 @@ import {
   DatabaseOutlined,
   GlobalOutlined,
   MenuOutlined,
+  TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import { authApi } from './api';
 import LoadingPlaceholder from './components/LoadingPlaceholder';
 import { useLocale } from './i18n/useLocale';
+import { setSessionUser, useSessionUser } from './lib/authSession';
 import { type ThemeMode, useTheme } from './lib/theme';
 
 // 页面级代码分割：各路由按需加载，echarts / 图表构建等重资源不再进首屏 bundle。
@@ -30,6 +33,7 @@ const DatasetDetail = lazy(() => import('./pages/DatasetDetail'));
 const DatasetEdit = lazy(() => import('./pages/DatasetEdit'));
 const DatasourcePage = lazy(() => import('./pages/Datasource'));
 const DatasourceDetailPage = lazy(() => import('./pages/DatasourceDetail'));
+const UsersPage = lazy(() => import('./pages/Users'));
 
 const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
@@ -45,7 +49,16 @@ const App: React.FC = () => {
   ];
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const me = useSessionUser();
   const location = useLocation();
+
+  // 会话 token 只在内存里：刷新后 me() 失败即视为未登录，用户管理入口一并收起。
+  useEffect(() => {
+    authApi
+      .me()
+      .then((r) => setSessionUser(r.data.data))
+      .catch(() => setSessionUser(null));
+  }, []);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -95,6 +108,15 @@ const App: React.FC = () => {
       icon: <AlertOutlined />,
       label: <Link to="/alerts">{intl.formatMessage({ id: 'nav.alerts' })}</Link>,
     },
+    ...(me?.role === 'admin'
+      ? [
+          {
+            key: '/users',
+            icon: <TeamOutlined />,
+            label: <Link to="/users">{intl.formatMessage({ id: 'nav.users' })}</Link>,
+          },
+        ]
+      : []),
     {
       key: '/account',
       icon: <UserOutlined />,
@@ -245,6 +267,7 @@ const App: React.FC = () => {
                 <Route path="/chart-builder" element={<ChartBuilder />} />
                 <Route path="/charts" element={<ChartsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/users" element={<UsersPage />} />
                 <Route path="/account" element={<AccountPage />} />
               </Routes>
             </Suspense>

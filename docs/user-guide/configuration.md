@@ -104,3 +104,23 @@ cp .env.example .env    # 然后按需修改
 - ⚠️ `.dockerignore` **必须排除 `.env`**，否则 Vite 会把 `VITE_*` 内联进浏览器包。
 - compose 读根 `.env` **只用于变量插值**（`docker-compose.allinone.yml` 里的 `${...}`），本身**不挂 `env_file`**：进容器的只有 `environment:` 里逐个 `${...}` 引用的那几项，其余变量不影响容器。所以**别把无关工具的变量混进这个文件**。
 - 静态托管下 `/api`、`/mcp`、`/health` 及其子路径走后端（匹配不到即 JSON 404，**不会回落成 HTML**），其余路径查 `STATIC_DIR` 里的文件、未命中回落 `index.html` 交给前端路由。带内容哈希的 `assets/` 产物走 `immutable` 长缓存，其余 `no-cache`。
+
+## 7. 认证现状：哪些端点强制 Bearer
+
+当前是**渐进式强制认证**（Phase C 之前的状态），登录页出现不等于全站受保护。以下口径与 `backend/cmd/routes.go` 的路由注册逐一对应：
+
+| 范围 | 端点 | 凭据要求 |
+|------|------|----------|
+| 公开 | `POST /api/auth/register`、`POST /api/auth/login` | 无 |
+| **仍匿名** | `/api/datasources*`、`/api/datasets*`、`/api/charts*`、`/api/queries*`、`/api/dashboards*`、`/api/dashboard-folders*`、`/api/alerts*`、`/api/sample-dataset*`、`/health` | 无 |
+| 人类或机器 | `GET /api/auth/me`、`DELETE /api/auth/logout` | Bearer（会话或 PAT） |
+| 仅人类会话 | `/api/tokens*` | Bearer，且**拒绝 PAT** |
+| 仅人类会话 + 管理员 | `/api/users*` | Bearer + 拒绝 PAT + 角色为 `admin` |
+
+要点：
+
+- **资源端点仍匿名可读写**。若把平台暴露到公网，请自行在网络层限制访问，不要仅依赖登录入口；「已登录 = 数据受保护」在当前版本不成立。
+- `POST /api/auth/register` 只在**没有任何存活账号**时可用，用于创建首个管理员；之后注册关闭，新增账号只能由管理员在「用户管理」页创建（`POST /api/users`）。
+- 禁用账号会立即吊销该用户全部未撤销 token（会话与 PAT），下一跳即失效；最后一个启用中的管理员不可降级、不可禁用。
+- 错误码区分**未认证**与**越权**：`20200` 表示没登录 / 凭据失效，`20201` 表示已登录但无权限（非管理员调 `/api/users*`、PAT 调管理类端点）。
+- 所有 Bearer 校验都是**每次请求实时查库**（不签名、不缓存），撤销与禁用没有生效窗口。

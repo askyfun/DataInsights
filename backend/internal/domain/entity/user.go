@@ -3,10 +3,12 @@ package entity
 // User is the API-facing user record. It deliberately carries NO password or
 // password_hash — those live only on model.User and never leave the service.
 type User struct {
-	ID        int    `json:"id"`
-	Username  string `json:"username"`
-	Role      string `json:"role"`
-	CreatedAt string `json:"created_at"`
+	ID          int    `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	Disabled    bool   `json:"disabled"`
+	CreatedAt   string `json:"created_at"`
 }
 
 // AuthResult is the payload of POST /api/auth/register and /api/auth/login:

@@ -192,5 +192,16 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	router.RegisterGetRoute(tokens, "", tokenHandler.List)
 	router.RegisterDeleteRoute(tokens, "/:id", tokenHandler.Revoke)
 
+	// 最小用户管理（issue #202）：管理员建号 / 改显示名与角色 / 禁用 / 重置口令。
+	// 三重闸：Bearer(allowPAT=false) 拒绝机器令牌 + RequireAdmin 拒绝非管理员；
+	// 开放注册保持关闭，这条是新增账号的唯一入口。
+	userHandler := handler.NewUserHandler(authSvc)
+	users := api.Group("/users")
+	users.Use(middleware.Bearer(authSvc, false), middleware.RequireAdmin())
+	router.RegisterGetRoute(users, "", userHandler.List)
+	router.RegisterPostRoute(users, "", userHandler.Create)
+	router.RegisterPutRoute(users, "/:id", userHandler.Update)
+	router.RegisterPostRoute(users, "/:id/password", userHandler.ResetPassword)
+
 	return alertSvc
 }

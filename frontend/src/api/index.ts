@@ -715,8 +715,26 @@ export const queriesApi = {
 export interface ApiUser {
   id: number;
   username: string;
+  display_name: string;
   role: string;
+  disabled: boolean;
   created_at: string;
+}
+
+export type UserRole = 'admin' | 'user';
+
+export interface UserCreateInput {
+  username: string;
+  display_name?: string;
+  password: string;
+  role?: UserRole;
+}
+
+// 「未提供则保留」：省略的字段不动，显式传 false / 空串才覆盖。
+export interface UserUpdateInput {
+  display_name?: string;
+  role?: UserRole;
+  disabled?: boolean;
 }
 
 // 登录/注册响应：会话 token 明文（仅这一次回显）+ 归属用户。
@@ -763,6 +781,22 @@ export const tokensApi = {
   create: (d: PATCreateInput) => apiClient.post<ApiResponse<PATCreateResult>>('/api/tokens', d),
   list: () => apiClient.get<ApiResponse<TokenInfo[]>>('/api/tokens'),
   revoke: (id: number) => apiClient.delete<ApiResponse<{ status: string }>>(`/api/tokens/${id}`),
+};
+
+// 最小用户管理（issue #202）：仅管理员 + 仅人类会话可调。列表跳过 GET 微缓存，
+// 否则刚建号/禁用后 reload 会拿到 5 秒内的旧页。
+export const usersApi = {
+  getAll: (params?: ListQuery): Promise<AxiosResponse<ApiResponse<ListPage<ApiUser>>>> => {
+    return apiClient.get<ApiResponse<ListPage<ApiUser>>>('/api/users', {
+      params,
+      skipCache: true,
+    });
+  },
+  create: (d: UserCreateInput) => apiClient.post<ApiResponse<ApiUser>>('/api/users', d),
+  update: (id: number, d: UserUpdateInput) =>
+    apiClient.put<ApiResponse<ApiUser>>(`/api/users/${id}`, d),
+  resetPassword: (id: number, password: string) =>
+    apiClient.post<ApiResponse<{ status: string }>>(`/api/users/${id}/password`, { password }),
 };
 
 export default apiClient;

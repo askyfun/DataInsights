@@ -1435,6 +1435,116 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OkResponse'
+  /api/users:
+    get:
+      tags:
+        - users
+      summary: 列出账号（管理员）
+      description: >-
+        需人类会话且角色为 admin（未登录 20200；PAT 与非管理员 20201）。分页返回存活账号，
+        含已禁用；keyword 同时匹配用户名与显示名。
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: keyword
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功 data 为 {items,total}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+    post:
+      tags:
+        - users
+      summary: 管理员建号（开放注册仍关闭）
+      description: >-
+        创建账号并设置初始口令，不签发会话；role 缺省为 user。用户名在存活账号内唯一。
+      operationId: createUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest'
+      responses:
+        '200':
+          description: 成功 data 为新建账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+  /api/users/{id}:
+    put:
+      tags:
+        - users
+      summary: 修改显示名 / 角色 / 禁用位（管理员）
+      description: >-
+        未提供的字段保留存量。最后一个启用中的管理员不可降级、不可禁用；
+        禁用会吊销该用户全部未撤销 token（会话与 PAT 下一跳即失效）。
+      operationId: updateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+      responses:
+        '200':
+          description: 成功 data 为更新后的账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+  /api/users/{id}/password:
+    post:
+      tags:
+        - users
+      summary: 管理员重置口令
+      operationId: resetUserPassword
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserPasswordRequest'
+      responses:
+        '200':
+          description: "成功 data 为 {status: ok}"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
   /api/sample-dataset/status:
     get:
       tags:
@@ -1549,18 +1659,24 @@ components:
       required:
         - id
         - username
+        - display_name
         - role
+        - disabled
         - created_at
       properties:
         id:
           type: integer
         username:
           type: string
+        display_name:
+          type: string
         role:
           type: string
           enum:
             - admin
             - user
+        disabled:
+          type: boolean
         created_at:
           type: string
     AuthResult:
@@ -1657,6 +1773,75 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/AuthUser'
+    UserCreateRequest:
+      type: object
+      description: POST /api/users 请求体。role 缺省为 user。
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        display_name:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+          enum:
+            - admin
+            - user
+    UserUpdateRequest:
+      type: object
+      description: PUT /api/users/{id} 请求体。省略字段保留存量（未提供则保留）。
+      properties:
+        display_name:
+          type: string
+        role:
+          type: string
+          enum:
+            - admin
+            - user
+        disabled:
+          type: boolean
+    UserPasswordRequest:
+      type: object
+      description: POST /api/users/{id}/password 请求体。
+      required:
+        - password
+      properties:
+        password:
+          type: string
+    UserResponse:
+      description: 用户管理端点响应：data 为单个 AuthUser。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/AuthUser'
+    UserListResponse:
+      description: GET /api/users 响应：data 为 `{items,total}`，total 是过滤后的全量行数。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              required:
+                - items
+                - total
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/AuthUser'
+                total:
+                  type: integer
     TokenInfoListResponse:
       description: GET /api/tokens 响应：data 为 TokenInfo 数组。
       allOf:
