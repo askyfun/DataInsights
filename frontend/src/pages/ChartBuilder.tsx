@@ -3,12 +3,16 @@ import {
   BarChartOutlined,
   CodeOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   DownOutlined,
   ExportOutlined,
   FieldBinaryOutlined,
+  FileExcelOutlined,
+  FileTextOutlined,
   FunctionOutlined,
   HistoryOutlined,
   LinkOutlined,
+  PictureOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RedoOutlined,
@@ -46,7 +50,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts, { type EChartsInstance } from 'echarts-for-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -58,6 +62,7 @@ import {
   ChartMetricGroup,
   ChartQueryAggregation,
   ChartQueryRequest,
+  chartsApi,
   isPivotV2Payload,
   isTablePayload,
   type QueryRecord,
@@ -107,6 +112,13 @@ import {
   expandDateFilterIntent,
   isDateFilterValue,
 } from '../lib/dateFilter';
+import {
+  buildExportFilename,
+  downloadBlob,
+  downloadDataURL,
+  EXPORT_ROW_LIMIT,
+  type ExportFormat,
+} from '../lib/export';
 import { isPercentOfTotalFormat } from '../lib/format';
 import {
   buildChartConfigDocument,
@@ -743,6 +755,11 @@ interface ChartCanvasProps {
   chartStyle: ChartStyleConfig;
   /** 查询选项（R-63：参考线在此透传给 buildChartOption）。 */
   queryOptions: ChartQueryOptions;
+  /**
+   * ECharts 实例出口（issue #120 下载图片）：本组件是预览的唯一渲染点，实例只
+   * 存在这里，页面级的「下载 PNG」需要拿到 getDataURL；不传则不导出。
+   */
+  instanceRef?: React.MutableRefObject<EChartsInstance | null>;
 }
 
 /** 离屏主题探针样式：不影响布局，仅供 chartPalette 读取当前主题的 --dr-*。 */
@@ -789,6 +806,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   metricFormats,
   chartStyle,
   queryOptions,
+  instanceRef,
 }) => {
   // 主题宿主探针（与 ChartView 同一机制）：canvas 取不到 CSS 变量，须在构造 option 时
   // 把当前主题的颜色算成字面值。resolvedTheme 入依赖 → 切主题即重建 option 实时重绘。
@@ -972,6 +990,11 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         option={chartOption}
         style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }}
         opts={{ renderer: 'canvas' }}
+        onChartReady={(instance) => {
+          if (instanceRef) {
+            instanceRef.current = instance;
+          }
+        }}
       />
     </>
   );
@@ -2078,6 +2101,10 @@ const ChartBuilder: React.FC = () => {
     past,
     future,
   } = useStore();
+
+  /** 预览 ECharts 实例（下载 PNG 用）：由 ChartCanvas 在 onChartReady 时挂载。 */
+  const chartInstanceRef = useRef<EChartsInstance | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
 
   /** 桌面端左栏顶部的数据集标识取对象而非 id，免得模板里重复 find。 */
   const currentDataset = useMemo(
@@ -3296,6 +3323,107 @@ const ChartBuilder: React.FC = () => {
     }
   };
 
+  /**
+   * 下载（issue #120）：数据走后端同一条查询管道导出 CSV/XLSX，图片直接取 ECharts
+   * 画布（与屏幕逐像素同源）。
+   * 调用场景：预览卡片右上角的「下载」菜单。
+   */
+  const handleExport = async (format: ExportFormat) => {
+    const exportName = chartBuilderConfig.title.trim() || '图表';
+    if (format === 'png') {
+      const instance = chartInstanceRef.current;
+      if (!instance) {
+        message.warning('图表尚未渲染，暂时无法导出图片');
+        return;
+      }
+      // 画布主题来自 CSS 变量（canvas 取不到变量），导出时按当前主题填底色，
+      // 否则深色主题的图落到白底文档上是「白字消失」。
+      const background =
+        getComputedStyle(document.documentElement).getPropertyValue('--dr-surface').trim() ||
+        '#ffffff';
+      let dataURL = '';
+      try {
+        dataURL = instance.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: background });
+      } catch {
+        // 切图型后实例可能已销毁：拿不到画布就明确告知，不导出一张空图。
+        dataURL = '';
+      }
+      if (!dataURL) {
+        message.warning('图表尚未渲染完成，暂时无法导出图片');
+        return;
+      }
+      downloadDataURL(dataURL, buildExportFilename(exportName, 'png', new Date()));
+      return;
+    }
+
+    const request = buildChartQueryRequest();
+    if (!request) {
+      message.warning('请先选择数据集并配置查询');
+      return;
+    }
+    setExportingFormat(format);
+    try {
+      const response = await chartsApi.exportChartData({
+        query: request,
+        format,
+        limit: EXPORT_ROW_LIMIT,
+        name: exportName,
+        // v1 请求的 dims 是列 id，导出表头要用列名：把当前数据集的 id→name 一并带上。
+        column_names: Object.fromEntries(chartBuilderFields.map((f) => [f.id, f.name])),
+      });
+      downloadBlob(response.data, buildExportFilename(exportName, format, new Date()));
+      if (response.headers['x-export-truncated'] === 'true') {
+        message.warning(
+          `数据超过 ${EXPORT_ROW_LIMIT} 行，已按上限截断（本次导出 ${response.headers['x-export-rows']} 行）`
+        );
+      } else {
+        message.success('导出成功');
+      }
+    } catch (error) {
+      message.error(`导出失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  /**
+   * 预览卡片的「下载」菜单。图片只对 ECharts 图型可用——table/pivot/kpi 不是
+   * canvas，没有 getDataURL 可取。
+   */
+  const renderDownloadMenu = () => {
+    const canExportImage = !['table', 'pivot', 'kpi'].includes(chartBuilderConfig.chartType);
+    return (
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: [
+            { key: 'csv', icon: <FileTextOutlined />, label: '下载数据（CSV）' },
+            { key: 'xlsx', icon: <FileExcelOutlined />, label: '下载数据（Excel）' },
+            {
+              key: 'png',
+              icon: <PictureOutlined />,
+              label: '下载图片（PNG）',
+              disabled: !canExportImage,
+            },
+          ],
+          onClick: ({ key }) => {
+            void handleExport(key as ExportFormat);
+          },
+        }}
+      >
+        <Button
+          size="small"
+          icon={<DownloadOutlined />}
+          loading={exportingFormat !== null}
+          disabled={isEmptyPayload(chartData)}
+          data-testid="chart-download-button"
+        >
+          下载
+        </Button>
+      </Dropdown>
+    );
+  };
+
   const handleReset = () => {
     resetChartBuilder();
     setSelectedDatasetId(null);
@@ -3471,6 +3599,7 @@ const ChartBuilder: React.FC = () => {
         <ChartCanvas
           config={chartBuilderConfig}
           data={chartData}
+          instanceRef={chartInstanceRef}
           loading={chartDataLoading}
           dimensionLabels={dimensionLabels}
           metricAliases={metricAliases}
@@ -3626,11 +3755,14 @@ const ChartBuilder: React.FC = () => {
             size="small"
             style={{ flex: 1, minHeight: 300 }}
             extra={
-              <QueryStatusBadge
-                loading={chartDataLoading}
-                hasData={!isEmptyPayload(chartData)}
-                chartTypeLabel={chartDefinitions[chartBuilderConfig.chartType].label}
-              />
+              <Space size={4}>
+                <QueryStatusBadge
+                  loading={chartDataLoading}
+                  hasData={!isEmptyPayload(chartData)}
+                  chartTypeLabel={chartDefinitions[chartBuilderConfig.chartType].label}
+                />
+                {renderDownloadMenu()}
+              </Space>
             }
           >
             <div
@@ -3905,11 +4037,14 @@ const ChartBuilder: React.FC = () => {
               },
             }}
             extra={
-              <QueryStatusBadge
-                loading={chartDataLoading}
-                hasData={!isEmptyPayload(chartData)}
-                chartTypeLabel={chartDefinitions[chartBuilderConfig.chartType].label}
-              />
+              <Space size={4}>
+                <QueryStatusBadge
+                  loading={chartDataLoading}
+                  hasData={!isEmptyPayload(chartData)}
+                  chartTypeLabel={chartDefinitions[chartBuilderConfig.chartType].label}
+                />
+                {renderDownloadMenu()}
+              </Space>
             }
           >
             {queryStale && (

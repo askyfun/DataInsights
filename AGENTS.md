@@ -25,7 +25,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 | Domain | `backend/internal/domain/entity/` | 领域实体类型 |
 | Query | `backend/internal/query/` | SQL 构造唯一出口：AST + bun_builder（结构化查询）+ raw.go（原始 SQL 构造） |
 | Model | `backend/internal/model/` | 数据库模型（bun ORM） |
-| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：58 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
+| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：58 个 API 端点经此注册；另有 4 个手工注册例外，见下） |
 | WebUI | `backend/internal/webui/` | 前端构建产物的托管与路径分流（挂在 gin 的 `NoRoute` 上）：命中磁盘文件就返回，未命中回落 `index.html`，保留前缀回 JSON 404 |
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
 | Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `SECURITY_KEY`） |
@@ -175,6 +175,7 @@ frontend/src/
 
 - **自举模式**（R-85）：未显式配置外部数据源时，自动复用应用自身的 PostgreSQL 作为上传目标（`extract.Resolve` 装配，`routes.go` 不读环境变量）。
 - **两个非泛型路由**：`POST /api/datasets/import`（新建）与 `POST /api/datasets/:id/replace`（替换），multipart 绑定走不了泛型路由的 `ShouldBindJSON`，循 `/health` 先例手工注册。
+- **图表导出也是手工路由**：`POST /api/charts/export`（issue #120）成功时响应体是 CSV/XLSX 文件流而非 JSON 信封，同样循 `/health` 先例注册（见 `handler.ChartHandler.Export`）。
 - **守卫**：`extract.Guard` 注入 datasource/dataset/chart 三个 service，数据集创建/改指时拒绝非法守卫，图表查询对 extract 模式数据集显式报错。
 
 ## 常用命令

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/listpage"
+	"data-insights/internal/query"
 	"data-insights/internal/router"
 	"data-insights/internal/service/chart"
 
@@ -96,6 +98,7 @@ func newChartTestRouter(h *ChartHandler) *gin.Engine {
 	router.RegisterDeleteRoute(charts, "/:id", h.Delete)
 	router.RegisterGetRoute(charts, "/:id/data", h.GetData)
 	router.RegisterPostRoute(charts, "/query", h.Query)
+	charts.POST("/export", h.Export)
 	return r
 }
 
@@ -623,4 +626,117 @@ func TestChartQuery_ServiceError(t *testing.T) {
 	})
 	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts/query", `{"dataset_id":1}`)
 	assertBody(t, w, internalErrorBoom)
+}
+
+// ---------------------------------------------------------------- Export (#120)
+
+func TestChartExport_CSVTruncatesAndSetsHeaders(t *testing.T) {
+	var got *entity.ChartQueryRequest
+	h := NewChartHandler(&mockChartService{
+		queryFunc: func(_ context.Context, req *entity.ChartQueryRequest) (entity.ChartDataResult, error) {
+			got = req
+			return entity.ChartDataResult{Data: &query.TableResponse{
+				Columns: []string{"渠道", "销售额"},
+				Data: []map[string]any{
+					{"渠道": "线上", "销售额": 1.0},
+					{"渠道": "线下", "销售额": 2.0},
+				},
+				Pagination: query.TablePagination{Total: 9},
+			}}, nil
+		},
+	})
+	body := `{"format":"csv","limit":2,"name":"月度 销售","query":{"dataset_id":3,"chart_type":"table","dims":["渠道"],"metrics":[{"field":"amount","agg":"sum"}],"pagination":{"page":5,"page_size":20}}}`
+	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts/export", body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if got == nil || got.Pagination == nil || got.Pagination.Page != 1 || got.Pagination.PageSize != 2 {
+		t.Fatalf("pagination must be overridden to page=1/page_size=limit, got %+v", got)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/csv") {
+		t.Errorf("content-type = %q", ct)
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment;") ||
+		!strings.Contains(cd, "filename*=UTF-8''%E6%9C%88%E5%BA%A6_%E9%94%80%E5%94%AE.csv") {
+		t.Errorf("content-disposition = %q", cd)
+	}
+	if w.Header().Get("X-Export-Truncated") != "true" {
+		t.Errorf("truncation not reported: %q", w.Header().Get("X-Export-Truncated"))
+	}
+	if w.Header().Get("X-Export-Rows") != "2" {
+		t.Errorf("rows header = %q", w.Header().Get("X-Export-Rows"))
+	}
+	out := w.Body.String()
+	if !strings.HasPrefix(out, "\ufeff渠道,销售额\n") {
+		t.Errorf("csv body = %q", out)
+	}
+}
+
+func TestChartExport_XLSXContentType(t *testing.T) {
+	h := NewChartHandler(&mockChartService{
+		queryFunc: func(_ context.Context, _ *entity.ChartQueryRequest) (entity.ChartDataResult, error) {
+			return entity.ChartDataResult{Data: &query.KpiResponse{Label: "销售额", Value: 12.5}}, nil
+		},
+	})
+	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts/export",
+		`{"format":"xlsx","query":{"dataset_id":3,"chart_type":"kpi","metrics":[{"field":"amount","agg":"sum"}]}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+		t.Errorf("content-type = %q", ct)
+	}
+	if !strings.HasPrefix(w.Body.String(), "PK") {
+		t.Errorf("xlsx body is not a zip: %q", w.Body.String()[:min(len(w.Body.String()), 8)])
+	}
+}
+
+func TestChartExport_RejectsBadInput(t *testing.T) {
+	h := NewChartHandler(&mockChartService{})
+	cases := []struct{ name, body string }{
+		{"missing query", `{"format":"csv"}`},
+		{"bad format", `{"format":"pdf","query":{"dataset_id":1,"chart_type":"table"}}`},
+		{"bad json", `{`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts/export", c.body)
+			if w.Code != http.StatusOK {
+				t.Fatalf("envelope errors still use HTTP 200, got %d", w.Code)
+			}
+			if !strings.Contains(w.Body.String(), `"code":20100`) {
+				t.Errorf("expected bad-request envelope, got %s", w.Body.String())
+			}
+		})
+	}
+}
+
+func TestChartExport_ServiceError(t *testing.T) {
+	h := NewChartHandler(&mockChartService{
+		queryFunc: func(_ context.Context, _ *entity.ChartQueryRequest) (entity.ChartDataResult, error) {
+			return entity.ChartDataResult{}, errBoom()
+		},
+	})
+	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts/export",
+		`{"query":{"dataset_id":1,"chart_type":"table"}}`)
+	assertBody(t, w, internalErrorBoom)
+}
+
+func TestChartExport_ResolvesColumnNamesForAxisCharts(t *testing.T) {
+	h := NewChartHandler(&mockChartService{
+		queryFunc: func(_ context.Context, _ *entity.ChartQueryRequest) (entity.ChartDataResult, error) {
+			return entity.ChartDataResult{Data: &query.AxisResponse{
+				XAxis:  []string{"广东省"},
+				Series: []query.AxisSeries{{Name: "total_sales", Data: []any{1.0}}},
+			}}, nil
+		},
+	})
+	body := `{"format":"csv","column_names":{"0000i52x":"province"},"query":{"dataset_id":46,"chart_type":"bar","dims":["0000i52x"],"metrics":[{"field":"total_sales","agg":"sum"}]}}`
+	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts/export", body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", w.Code)
+	}
+	if !strings.HasPrefix(w.Body.String(), "\ufeffprovince,total_sales\n") {
+		t.Errorf("csv header must use the column name, got %q", w.Body.String())
+	}
 }
