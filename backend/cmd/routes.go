@@ -110,6 +110,9 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	router.RegisterDeleteRoute(charts, "/:id", chartHandler.Delete)
 	router.RegisterGetRoute(charts, "/:id/data", chartHandler.GetData)
 	router.RegisterPostRoute(charts, "/query", chartHandler.Query)
+	// 数据下载（issue #120）：响应体是 CSV/XLSX 文件流而非 JSON 信封，走不了
+	// 泛型路由；与 /health、数据集 multipart 上传同一先例手工注册。
+	charts.POST("/export", chartHandler.Export)
 	// Chart-side reference count (dashboard handler: it scans
 	// bi_dashboard.layout_json, but the route belongs to the chart resource).
 	router.RegisterGetRoute(charts, "/:id/references", dashboardHandler.ListChartReferences)

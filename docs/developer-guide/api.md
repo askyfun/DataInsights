@@ -13,7 +13,7 @@
 
 ## 1. 通用规范
 
-### 1.1 端点清单（58 个泛型路由端点 + 3 个手工路由）
+### 1.1 端点清单（58 个泛型路由端点 + 4 个手工路由）
 
 | 领域 | 端点数 | 前缀 |
 |------|--------|------|
@@ -30,12 +30,14 @@
 | Health 健康检查 | — | `/health` |
 
 所有 `/api` 路由经泛型路由 `router.RegisterXxxRoute[In, Out]` 注册（见
-`backend/cmd/routes.go`）。**3 个手工路由**不走泛型注册的统一绑定路径：
+`backend/cmd/routes.go`）。**4 个手工路由**不走泛型注册的统一绑定路径：
 
 - `GET /health`：在 `cmd/main.go` 用裸 `r.GET` 注册，但响应仍是标准 Envelope；
 - `POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`：本地文件上传，请求体是
   `multipart/form-data`，与泛型路由对 POST 一律 `ShouldBindJSON` 的语义不兼容，故循 `/health`
-  先例以裸 `*gin.Context` handler 注册（见 `handler/dataset.go` 的 package 注释）。
+  先例以裸 `*gin.Context` handler 注册（见 `handler/dataset.go` 的 package 注释）；
+- `POST /api/charts/export`：图表数据导出（issue #120），成功时响应体是 CSV/XLSX 文件流而不是
+  JSON 信封，故同样手工注册（见 `handler/chart.go` 的 `Export`）。
 
 ### 1.2 统一响应信封（Envelope）
 

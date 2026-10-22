@@ -63,7 +63,7 @@ handler → service → domain/entity
 `router/router.go` 提供 `RegisterRoute[In, Out]` 泛型函数（`RegisterGetRoute`/`RegisterPostRoute`/`RegisterPutRoute`/`RegisterDeleteRoute`），自动绑定 query 参数和 JSON body，统一包装响应。**58 个 API 端点已全部经此注册**（datasource 11 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）。
 
 - 签名 `API[In,Out] func(req Request[In], res *Response[Out]) error`——`res` 为指针，值传递会静默丢弃 handler 写入。
-- 路由器按 HTTP 方法自动绑定 JSON body（POST/PUT/PATCH 绑定，GET/DELETE 不绑定）+ query 参数；handler 内部不再手写 `response.*`。手工注册的例外共 3 个：`/health` 在 cmd/main.go 用裸 `r.GET`+`response.Success`；`POST /api/datasets/import`（上传新建数据集）与 `POST /api/datasets/:id/replace`（上传替换已有数据集）是 multipart，绑定与泛型路由的 `ShouldBindJSON` 语义不兼容，循 `/health` 先例在 cmd/routes.go 以裸 `*gin.Context` handler 注册。
+- 路由器按 HTTP 方法自动绑定 JSON body（POST/PUT/PATCH 绑定，GET/DELETE 不绑定）+ query 参数；handler 内部不再手写 `response.*`。手工注册的例外共 4 个：`/health` 在 cmd/main.go 用裸 `r.GET`+`response.Success`；`POST /api/datasets/import`（上传新建数据集）与 `POST /api/datasets/:id/replace`（上传替换已有数据集）是 multipart，绑定与泛型路由的 `ShouldBindJSON` 语义不兼容；`POST /api/charts/export`（下载数据，issue #120）成功时是文件流而非信封。后三者均循 `/health` 先例在 cmd/routes.go 以裸 `*gin.Context` handler 注册。
 - handler 入参用 handler-local In 镜像 struct（entity 不带 `form:"-"`，否则 query 参数会污染 body），其与 entity 的 json tag 一致性由 `internal/handler/contract_parity_test.go` 反射守卫。
 - 已接受的两类"不可消除差异"（bind 错误文本含 struct 名、双非法输入时 body 绑定错误优先于 path）由 baseline 测试钉死（8 个 path+body 端点 × 双非法 Empty/Malformed 变体全覆盖）。迁移样板见 `handler/datasource.go` 顶部 package doc。
 - PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例）：payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
@@ -150,7 +150,7 @@ go test -race ./...                        # 带竞态检测运行测试
 
 ## API 路由
 
-所有路由前缀 `/api`，除 3 个手工注册的 `GET /health`（健康检查，cmd/main.go）、`POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`（本地文件上传，multipart，cmd/routes.go）外，共 **58 个端点** 经泛型路由注册（datasource 11 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）。
+所有路由前缀 `/api`，除 4 个手工注册的 `GET /health`（健康检查，cmd/main.go）、`POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`（本地文件上传，multipart，cmd/routes.go）、`POST /api/charts/export`（图表导出，文件流，cmd/routes.go）外，共 **58 个端点** 经泛型路由注册（datasource 11 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）。
 
 | 领域 | 路由 |
 |------|------|

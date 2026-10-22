@@ -175,6 +175,18 @@ export type ChartDimensionField = G['ChartDimensionField'];
 export type ChartMetricGroup = G['ChartMetricGroup'];
 export type ChartMetricField = G['ChartMetricField'];
 
+// 导出请求（POST /api/charts/export，issue #120）。openapi 的 ChartExportRequest
+// 尚未进入生成物（与 query_options/total 同一条「裁定 A：不重跑 api-gen」），
+// 这里按契约手写：query 与 /charts/query 同一请求体，format/limit/name 只影响落盘。
+export interface ChartExportRequest {
+  query: ChartQueryRequest;
+  format: 'csv' | 'xlsx';
+  limit?: number;
+  name?: string;
+  /** 列稳定 id → 列名（v1 请求的 dims 是列 id，导出表头要用列名）。 */
+  column_names?: Record<string, string>;
+}
+
 // 表格响应。`total`（合计行，issue #131）走手写薄层补齐：生成物早于 openapi 的
 // ChartTableResponse.total 改动（与上面 query_options 同一裁定 A：不重新生成
 // gen_types.ts），形状与后端 query.TableResponse.Total（Go map[string]any omitempty）
@@ -573,6 +585,12 @@ export const chartsApi = {
     request: ChartQueryRequest
   ): Promise<AxiosResponse<ApiResponse<ChartQueryResponse>>> => {
     return apiClient.post<ApiResponse<ChartQueryResponse>>('/api/charts/query', request);
+  },
+
+  // 导出当前查询结果（issue #120）：响应体是文件流（CSV/XLSX），不是 JSON 信封。
+  // 行数上限与截断标记走请求参数与 X-Export-* 响应头，文件名由调用方拼装。
+  exportChartData: (request: ChartExportRequest): Promise<AxiosResponse<Blob>> => {
+    return apiClient.post<Blob>('/api/charts/export', request, { responseType: 'blob' });
   },
 
   // 引用该图表的仪表盘（PRD R-75）：删除前的提示数据源，提示不阻断删除（D2）。

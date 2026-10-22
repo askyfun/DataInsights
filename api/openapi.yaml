@@ -806,6 +806,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChartQueryResponse'
+  /api/charts/export:
+    post:
+      tags:
+        - charts
+      summary: 导出当前查询结果（CSV / XLSX 流）
+      description: |
+        把**当前查询**（同一 ChartSpecQueryRequest，含筛选 / TopN / 同环比列）
+        经与 POST /api/charts/query 完全相同的处理器管道取数后摊平成表格并落盘。
+        导出列名与图表展示的列名逐字一致（table 即响应里的 columns），数值保持
+        数值单元格（CSV 为裸数字、XLSX 为数值单元格）。
+
+        **这是本仓唯一不返回 JSON 信封的 POST 端点**：成功时响应体是文件流，
+        失败（参数非法 / 查询失败）仍返回 JSON 信封。
+
+        行数上限由 `limit` 控制（缺省 10000，上限 100000）；table 走服务端分页
+        （page=1、page_size=limit），超限时响应头 `X-Export-Truncated: true`，
+        实际行数见 `X-Export-Rows`。CSV 带 UTF-8 BOM（Excel 双击不乱码），
+        以 `=`/`+`/`-`/`@` 开头的文本单元格会加单引号前缀（CSV 注入防护）。
+      operationId: exportChart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChartExportRequest'
+      responses:
+        '200':
+          description: 文件流（text/csv 或 xlsx）
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="<name>.<ext>"; filename*=UTF-8''…'
+            X-Export-Rows:
+              schema:
+                type: integer
+              description: 实际导出的数据行数（不含表头）
+            X-Export-Limit:
+              schema:
+                type: integer
+              description: 本次生效的行数上限
+            X-Export-Truncated:
+              schema:
+                type: boolean
+              description: 结果是否因行数上限被截断
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
   /api/charts/{id}/references:
     get:
       tags:
@@ -2638,6 +2691,41 @@ components:
           $ref: '#/components/schemas/ChartPagination'
         sort:
           $ref: '#/components/schemas/SortConfig'
+    # ChartExportRequest：POST /api/charts/export 请求体（issue #120）。
+    ChartExportRequest:
+      type: object
+      description: >-
+        导出请求。query 与 POST /api/charts/query 的请求体**同一 schema**
+        （ChartSpecQueryRequest），导出复用同一条取数/处理管道；format/limit/name
+        只影响落盘形态，不影响取数口径。
+      required:
+        - query
+      properties:
+        query:
+          $ref: '#/components/schemas/ChartSpecQueryRequest'
+        format:
+          type: string
+          enum: [csv, xlsx]
+          default: csv
+          description: 导出格式；缺省 csv。
+        limit:
+          type: integer
+          default: 10000
+          minimum: 1
+          maximum: 100000
+          description: 数据行数上限；超过时截断并通过 X-Export-Truncated 告知。
+        name:
+          type: string
+          description: >-
+            文件名主干（图表名），服务端会清掉路径分隔符/引号等非法字符；
+            缺省 export。时间戳由调用方拼（服务端不猜时区）。
+        column_names:
+          type: object
+          additionalProperties:
+            type: string
+          description: >-
+            列稳定 id → 列名。v1 请求的 dims 是列的稳定 id（如 0000i52x），
+            导出表头必须用列名才能与图表展示一致；缺失的键回退成列 id。
     # ChartSpecQueryRequest：POST /api/charts/query 请求体（v1/v2 超集）。
     # 与 handler 的 chartQueryIn / entity.ChartQueryRequest 对称（裁定2：同一个超集
     # struct 承载两种协议，不是两个独立 schema 竞争同一路由）。

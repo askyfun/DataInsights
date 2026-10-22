@@ -1,10 +1,18 @@
 package handler
 
 import (
+	"fmt"
+	"log/slog"
+	"net/url"
 	"strconv"
+	"strings"
+
+	"github.com/gin-gonic/gin"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/export"
 	"data-insights/internal/listpage"
+	"data-insights/internal/query"
 	"data-insights/internal/response"
 	"data-insights/internal/router"
 	"data-insights/internal/service/chart"
@@ -230,4 +238,112 @@ func (h *ChartHandler) Query(req router.Request[chartQueryIn], res *router.Respo
 	}
 	res.Out = result
 	return nil
+}
+
+const (
+	// 默认导出行数上限（issue #120「行数上限可配（超限截断并提示）」的默认值）。
+	defaultExportLimit = 10000
+	maxExportLimit     = 100000
+)
+
+// chartExportIn 是 POST /api/charts/export 的请求体（issue #120）：
+// 查询部分与 /charts/query **同一个** ChartSpecQueryRequest（v1/v2 超集），
+// 保证导出与屏幕上的图表走同一条处理器管道；format/limit/name 只影响落盘形态。
+type chartExportIn struct {
+	Name   string        `json:"name"`
+	Format string        `json:"format"`
+	Limit  int           `json:"limit"`
+	Query  *chartQueryIn `json:"query"`
+	// ColumnNames 是列稳定 id → 列名的映射。v1 请求的 dims 发的是列 id
+	// （0000i52x），而导出表头要用列名，后台拿不到前端字段表，故由调用方随请求带上；
+	// 缺失时回退列 id（不猜、不查库）。
+	ColumnNames map[string]string `json:"column_names"`
+}
+
+// Export handles POST /api/charts/export（手工注册：响应体是文件流，不是 JSON 信封）。
+//
+// 行数上限：table 走服务端分页（page=1、page_size=limit），其他图型的负载是聚合
+// 结果（行数很小），仍在写盘前裁一次。截断与否通过 X-Export-Truncated 告知前端。
+func (h *ChartHandler) Export(c *gin.Context) {
+	var in chartExportIn
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Error(c, response.CodeBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if in.Query == nil {
+		response.Error(c, response.CodeBadRequest, "query is required")
+		return
+	}
+	format := strings.ToLower(strings.TrimSpace(in.Format))
+	if format == "" {
+		format = "csv"
+	}
+	if format != "csv" && format != "xlsx" {
+		response.Error(c, response.CodeBadRequest, "format must be csv or xlsx")
+		return
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = defaultExportLimit
+	}
+	if limit > maxExportLimit {
+		limit = maxExportLimit
+	}
+
+	chartReq := in.Query.toRequest()
+	// table 的「当前查询」通常是某一页；导出要的是整份结果，因此覆盖分页为
+	// 「首页 + limit 行」。其他图型不使用 pagination，保持请求原样。
+	if chartReq.ChartType == "table" {
+		chartReq.Pagination = &entity.Pagination{Page: 1, PageSize: limit}
+	}
+
+	result, err := h.svc.Query(c.Request.Context(), &chartReq)
+	if err != nil {
+		respondServiceError(c, err)
+		return
+	}
+
+	table := export.Tabularize(&chartReq, result.Data, in.ColumnNames)
+	if table == nil {
+		response.Error(c, response.CodeBadRequest, "chart data cannot be exported as a table")
+		return
+	}
+	truncated := false
+	if tr, ok := result.Data.(*query.TableResponse); ok && tr.Pagination.Total > limit {
+		truncated = true
+	}
+	if len(table.Rows) > limit {
+		table.Rows = table.Rows[:limit]
+		truncated = true
+	}
+
+	name := export.SanitizeFilename(in.Name)
+	if name == "" {
+		name = "export"
+	}
+	ext := format
+	disposition := fmt.Sprintf("attachment; filename=\"%s.%s\"; filename*=UTF-8''%s.%s",
+		name, ext, url.PathEscape(name), ext)
+	c.Header("Content-Disposition", disposition)
+	c.Header("X-Export-Rows", strconv.Itoa(len(table.Rows)))
+	c.Header("X-Export-Limit", strconv.Itoa(limit))
+	if truncated {
+		c.Header("X-Export-Truncated", "true")
+	} else {
+		c.Header("X-Export-Truncated", "false")
+	}
+
+	if format == "xlsx" {
+		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		if err := export.WriteXLSX(c.Writer, table, "Data"); err != nil {
+			// 头已下发、body 已开始写，无法再改成 JSON 错误信封：记日志即可
+			// （AGENTS.md 禁止空错误块）。
+			slog.Error("chart export: write xlsx", "name", name, "err", err)
+		}
+		return
+	}
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	if err := export.WriteCSV(c.Writer, table); err != nil {
+		slog.Error("chart export: write csv", "name", name, "err", err)
+	}
 }
