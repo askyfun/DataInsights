@@ -42,7 +42,7 @@ func Bearer(svc auth.Service, allowPAT bool) gin.HandlerFunc {
 			return
 		}
 		if !allowPAT && principal.Kind == "pat" {
-			response.Unauthorized(c, "个人访问令牌不允许访问该端点")
+			response.Forbidden(c, "个人访问令牌不允许访问该端点")
 			c.Abort()
 			return
 		}
@@ -82,7 +82,7 @@ func RequireAdmin() gin.HandlerFunc {
 			return
 		}
 		if p.Role != "admin" {
-			response.Error(c, response.CodeUnauthorized, "需要管理员权限")
+			response.Forbidden(c, "需要管理员权限")
 			c.Abort()
 			return
 		}

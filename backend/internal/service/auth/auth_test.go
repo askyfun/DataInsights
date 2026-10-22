@@ -135,6 +135,25 @@ func TestRegister_ClosedAfterFirstUser(t *testing.T) {
 	}
 }
 
+// TestRegister_ClosedWhenOnlyDisabledAdminExists 钉住 #202 的高危回归：
+// 禁用走 disabled_at、不软删，所以「已禁用管理员」仍计入关闭判据（deleted_at IS NULL）。
+// 若哪天把禁用改成软删，这里会红——否则禁用最后一个管理员会重新打开注册，任何人都能抢管理员。
+func TestRegister_ClosedWhenOnlyDisabledAdminExists(t *testing.T) {
+	s, mock := newMockAuth(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectRollback()
+
+	_, err := s.Register(context.Background(), "intruder", "pw", "", "")
+	if err == nil || errorCode(err) != 20200 {
+		t.Fatalf("registration must stay closed with a disabled admin present, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+}
+
 // --- Login ---
 
 func TestLogin_OK(t *testing.T) {

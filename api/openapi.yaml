@@ -1441,7 +1441,7 @@ paths:
         - users
       summary: 列出账号（管理员）
       description: >-
-        需人类会话且角色为 admin（PAT 与非管理员一律 20200）。分页返回存活账号，
+        需人类会话且角色为 admin（未登录 20200；PAT 与非管理员 20201）。分页返回存活账号，
         含已禁用；keyword 同时匹配用户名与显示名。
       operationId: listUsers
       security:

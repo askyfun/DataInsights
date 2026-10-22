@@ -67,7 +67,8 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 |------|------|------|--------------|
 | 20000 | CodeSuccess | 成功 | — |
 | 20100 | CodeBadRequest | 请求参数错误（含绑定失败、非法 id/短码） | 请求参数有误，请检查输入 |
-| 20200 | CodeUnauthorized | 认证/授权错误（Bearer 校验失败、口令错误、注册已关闭、PAT 被拒于管理端点——当前仅 auth/tokens 端点会产生，见 10/11 节） | 登录状态已失效 |
+| 20200 | CodeUnauthorized | 未认证：Bearer 缺失/失效、口令错误、注册已关闭 | 登录状态已失效 |
+| 20201 | CodeForbidden | 已认证但无权限：非管理员调 `/api/users*`、PAT 调管理类端点（tokens/users，见 11/11.1 节） | 当前账号没有该操作权限 |
 | 20300 | CodeNotFound | 资源不存在 | 请求的资源不存在 |
 | 20400 | CodeBusinessError | 业务逻辑错误（如资源被引用不可删） | 操作失败，请稍后重试 |
 | 20500 | CodeThirdPartyErr | 第三方服务错误 | 服务暂时不可用 |
@@ -389,7 +390,7 @@ expires_at / expired / hit_count`）。
 
 ## 11. Token PAT 管理（3 个端点）
 
-三个端点全挂 `Bearer(allowPAT=false)`：**用户管理操作，仅限人类会话**——机器令牌在此 20200「个人访问令牌不允许访问该端点」（防机器令牌自我提权，issue #184 验收 3）。
+三个端点全挂 `Bearer(allowPAT=false)`：**用户管理操作，仅限人类会话**——机器令牌在此 20201「个人访问令牌不允许访问该端点」（防机器令牌自我提权，issue #184 验收 3；20201 见 1.3 节与 issue #202）。
 
 实体 `TokenInfo = {id, name, prefix, created_at, last_used_at, last_used_ip, last_used_ua, expires_at, revoked}`——**绝不含哈希或明文**；`expires_at` 空串 = 不过期。
 
@@ -398,6 +399,19 @@ expires_at / expired / hit_count`）。
 | 1 | `POST /api/tokens` | 创建。body `{name, never}`（yaml 声明两项 required，服务端不硬校验：name 空 → 存 NULL，never 缺省 → false）。默认有效期 **90 天**；`never=true` → `expires_at=NULL`（长期不过期，UI 侧需显式勾选并提示风险）。`data = PATCreateResult {token, info}`——token 为**唯一一次**明文回显 |
 | 2 | `GET /api/tokens` | 仅列**调用者本人**的 PAT（`created_at DESC, id DESC`）；已撤销行**不隐藏**，以 `revoked: true` 标注。空 → `[]` |
 | 3 | `DELETE /api/tokens/{id}` | 按数字 id 撤销（非数字 → 20100「invalid id」）。UPDATE 以 `user_id + kind=pat + 未撤销` 三重限域：**跨用户/不存在/已撤销都落 0 行并返回成功**（没有存在性门控，真幂等——与第 8 节 Alert DELETE 的 20300 行为**相反**）。撤销即时生效 |
+
+## 11.1 用户管理（4 个端点，issue #202）
+
+全挂 `Bearer(allowPAT=false)` + `RequireAdmin`：**仅人类会话 + 角色 admin**。未登录 → 20200（Bearer 缺失）；已登录但非管理员 / 用 PAT → **20201**。开放注册保持关闭，管理员建号是新增账号的唯一入口。
+
+| # | 方法与路径 | 说明 |
+|---|-----------|------|
+| 1 | `GET /api/users` | 服务端分页（`limit/offset/keyword`），按 `created_at DESC, id DESC`；含**已禁用**账号，`keyword` 同时匹配用户名与显示名。`data = {items,total}` |
+| 2 | `POST /api/users` | 管理员建号。body `{username, display_name?, password, role?}`，`role` 缺省 `user`；不签发会话。存活账号内用户名重复 → 20400 |
+| 3 | `PUT /api/users/{id}` | 改显示名 / 角色 / 禁用位；**未提供的字段保留存量**。守卫：**最后一个启用中的管理员不可降级、不可禁用**（20400）。禁用会同时吊销该用户全部未撤销 token（会话与 PAT），且 `Verify` 每次请求检查 `disabled_at IS NULL`，下一跳即失效；启用不恢复旧 token |
+| 4 | `POST /api/users/{id}/password` | 管理员重置口令。旧口令立即失效；**不撤销**该用户已登录会话（需强制下线请禁用再启用）。用户不存在 → 20300 |
+
+禁用用 `disabled_at` 而非软删：软删会让「存活用户数」归零从而**重新打开注册**（任何人可抢管理员）；注册关闭判据是「存在任何 `deleted_at IS NULL` 的用户（含已禁用）」。
 
 ## 12. 变更纪律
 
