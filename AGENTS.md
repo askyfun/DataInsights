@@ -25,7 +25,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 | Domain | `backend/internal/domain/entity/` | 领域实体类型 |
 | Query | `backend/internal/query/` | SQL 构造唯一出口：AST + bun_builder（结构化查询）+ raw.go（原始 SQL 构造） |
 | Model | `backend/internal/model/` | 数据库模型（bun ORM） |
-| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：58 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
+| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：59 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
 | WebUI | `backend/internal/webui/` | 前端构建产物的托管与路径分流（挂在 gin 的 `NoRoute` 上）：命中磁盘文件就返回，未命中回落 `index.html`，保留前缀回 JSON 404 |
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
 | Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `SECURITY_KEY`） |
@@ -36,7 +36,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 ⚠️ **`make api-gen` 的「前端」半步当前必然失败**（不是环境问题）：`openapi-typescript@7.13.0` 依赖 `typescript` 包的运行时导出 `ts.factory`，而本仓 `typescript@7` 没有它 → `TypeError: Cannot read properties of undefined`。崩溃发生在写文件之前（生成物不会被写坏）。绕过方式见 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) 的「版本与依赖」（入库）；彻底修法是把生成器与 `typescript@7` 解耦（独立 package.json 或钉一个 TS 5 别名），属独立改动。**后端那半步能跑，但输出不保证可编译**：issue #201 加了 multipart 端点后，生成物引用 `github.com/oapi-codegen/runtime/types`，而 `backend/go.mod` 没有这个依赖 → 重跑生成会把编译跑坏，得先补依赖或收紧 cfg 的 generate 范围。它只输出被 cfg 允许的子集（不含 `DashboardFilter*` 等 layout schema）。无论走哪条路，重跑生成后都要 `diff` 生成物，确认只漂了本次改动（`ci.yml` 的 contract-drift job 就在自动做这个 diff，只报告不阻断，直到依赖缺口补上）。
 
-`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 58 个 API 端点**（`cmd/routes.go` 集中注册：datasource 11 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
+`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 59 个 API 端点**（`cmd/routes.go` 集中注册：datasource 12 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
 
 `datasource/` 包实现了 `Driver` 接口用于多数据库后端——新增驱动只需实现该接口。
 
@@ -48,7 +48,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 ```
 frontend/src/
-├── api/           # API 端点封装（10 个领域模块 / 59 个方法，复用 lib/api/client 的单一 axios 实例）
+├── api/           # API 端点封装（10 个领域模块 / 60 个方法，复用 lib/api/client 的单一 axios 实例）
 ├── store/         # Zustand 状态管理
 ├── pages/         # 页面组件
 ├── components/    # 可复用组件（日期筛选器在 components/DateFilter/，过滤弹窗在 components/ChartBuilder/，盘底部页面标签条在 components/DashboardPageTabs/）

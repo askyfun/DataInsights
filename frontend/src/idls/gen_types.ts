@@ -113,6 +113,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/datasources/{id}/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读取数据源的方言能力
+         * @description 返回该连接方言的查询能力（R-78）。探针是懒加载、按连接缓存的只读探测，
+         *     不产生新数据；前端据此把当前方言不支持的图型置灰并说明原因。
+         *     {id} 非法 → 20100；连接或探针失败 → 50000。
+         */
+        get: operations["getDatasourceCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/datasources/{id}/tables/{table}/columns": {
         parameters: {
             query?: never;
@@ -995,6 +1017,23 @@ export interface components {
         /** @description GET /api/datasources/{id}/tables 响应：data 为 TableInfo 数组。 */
         TableListResponse: components["schemas"]["Envelope"] & {
             data: components["schemas"]["TableInfo"][];
+        };
+        /**
+         * @description 方言能力投影（entity.DatasourceCapabilities）。dialect 为数据源驱动类型名
+         *     （postgresql / mysql / clickhouse / starrocks）；percentile_strategy 取值
+         *     percentile_cont | percentile_cont_args_first | quantilesExactInclusive |
+         *     window_ntile | unsupported。
+         */
+        DatasourceCapabilities: {
+            dialect: string;
+            supports_grouping_sets: boolean;
+            supports_percentile_cont: boolean;
+            supports_window_functions: boolean;
+            percentile_strategy: string;
+        };
+        /** @description GET /api/datasources/{id}/capabilities 响应：data 为 DatasourceCapabilities。 */
+        DatasourceCapabilitiesResponse: components["schemas"]["Envelope"] & {
+            data: components["schemas"]["DatasourceCapabilities"];
         };
         /** @description GET /api/datasources/{id}/tables/{table}/columns 响应：data 为 ColumnInfo 数组。 */
         ColumnListResponse: components["schemas"]["Envelope"] & {
@@ -1974,6 +2013,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TableListResponse"];
+                };
+            };
+        };
+    };
+    getDatasourceCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 数据源 ID（gin 通配符 :id；非法数字返回 20100）。 */
+                id: components["parameters"]["DatasourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTTP 恒 200；业务结果由 Envelope.code 表达 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourceCapabilitiesResponse"];
                 };
             };
         };

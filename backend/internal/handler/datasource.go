@@ -301,6 +301,21 @@ func (h *DatasourceHandler) GetTables(req router.Request[datasourcePathIn], res 
 	return nil
 }
 
+// GetCapabilities handles GET /api/datasources/:id/capabilities
+func (h *DatasourceHandler) GetCapabilities(req router.Request[datasourcePathIn], res *router.Response[*entity.DatasourceCapabilities]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
+	if err != nil {
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
+	}
+
+	caps, err := h.svc.GetCapabilities(req.Ctx.Request.Context(), id)
+	if err != nil {
+		return err
+	}
+	res.Out = caps
+	return nil
+}
+
 // GetColumns handles GET /api/datasources/:id/tables/:table/columns
 func (h *DatasourceHandler) GetColumns(req router.Request[datasourcePathIn], res *router.Response[[]map[string]any]) error {
 	id, err := strconv.Atoi(req.Ctx.Param("id"))
