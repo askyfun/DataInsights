@@ -379,7 +379,9 @@ func (s *chartService) executeQueryOnConn(
 		QueryOptions: req.QueryOptions,
 	}
 
+	startedAt := time.Now()
 	result, err := executor.Execute(ctx, queryReq)
+	durationMs := time.Since(startedAt).Milliseconds()
 	if err != nil {
 		return entity.ChartDataResult{}, fmt.Errorf("query execution failed: %w", err)
 	}
@@ -388,7 +390,27 @@ func (s *chartService) executeQueryOnConn(
 		Data:      result.Data,
 		SelectSQL: result.Select,
 		CountSQL:  result.Count,
+		Diagnostics: &entity.ChartQueryDiagnostics{
+			DatasourceType: dsModel.Type,
+			Dialect:        string(query.ParseDialect(dsModel.Type)),
+			DurationMs:     durationMs,
+			Capabilities:   queryCapabilitiesSnapshot(result.Capabilities),
+		},
 	}, nil
+}
+
+// queryCapabilitiesSnapshot 把执行期读到的方言能力转成诊断快照；nil 保持 nil，
+// 以便面板区分「未触发门控」与「门控结果」。
+func queryCapabilitiesSnapshot(caps *datasource.DialectCapabilities) *entity.ChartQueryCapabilities {
+	if caps == nil {
+		return nil
+	}
+	return &entity.ChartQueryCapabilities{
+		SupportsGroupingSets:    caps.SupportsGroupingSets,
+		SupportsPercentileCont:  caps.SupportsPercentileCont,
+		SupportsWindowFunctions: caps.SupportsWindowFunctions,
+		PercentileStrategy:      caps.PercentileStrategy,
+	}
 }
 
 // chartConfigV1 是 bi_chart.config 持久化 v1 文档中重建查询所需的最小子集，

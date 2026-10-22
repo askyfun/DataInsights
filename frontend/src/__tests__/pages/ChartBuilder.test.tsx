@@ -304,6 +304,11 @@ describe('ChartBuilder', () => {
           },
           select_sql: 'select region from sales',
           count_sql: 'select count(*) from sales',
+          diagnostics: {
+            datasource_type: 'postgresql',
+            dialect: 'postgresql',
+            duration_ms: 12,
+          },
         },
       })
     );
@@ -343,6 +348,71 @@ describe('ChartBuilder', () => {
         pagination: { page: 1, page_size: 100 },
       })
     );
+  });
+
+  it('shows query diagnostics with SQL and execution metadata (R-20)', async () => {
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+    });
+
+    // 两个入口同名：图标按钮（title）与「查询配置」卡头文字按钮，点第一个即可。
+    const [diagnosticsButton] = await screen.findAllByRole('button', { name: /查询诊断/ });
+    fireEvent.click(diagnosticsButton);
+
+    expect(
+      await screen.findByText('数据源：postgresql · SQL 方言：postgresql')
+    ).toBeInTheDocument();
+    expect(screen.getByText('执行耗时：12 ms')).toBeInTheDocument();
+    expect(screen.getByText('返回行数：1')).toBeInTheDocument();
+    expect(screen.getByText('能力门控：未触发（本次图型不依赖可选方言能力）')).toBeInTheDocument();
+    expect(screen.getByText('select region from sales')).toBeInTheDocument();
+  });
+
+  it('shows gated dialect capabilities in diagnostics (R-20)', async () => {
+    mockExecuteChartQuery.mockResolvedValue(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          data: {
+            columns: ['region'],
+            data: [{ region: 'East' }],
+            pagination: { page: 1, page_size: 100, total: 1, total_pages: 1 },
+          },
+          select_sql: 'select region from sales',
+          diagnostics: {
+            datasource_type: 'starrocks',
+            dialect: 'mysql',
+            duration_ms: 34,
+            capabilities: {
+              supports_grouping_sets: false,
+              supports_percentile_cont: true,
+              supports_window_functions: true,
+              percentile_strategy: 'percentile_cont_args_first',
+            },
+          },
+        },
+      })
+    );
+
+    renderChartBuilder();
+
+    await waitFor(() => {
+      expect(mockExecuteChartQuery).toHaveBeenCalledTimes(1);
+    });
+
+    const [diagnosticsButton] = await screen.findAllByRole('button', { name: /查询诊断/ });
+    fireEvent.click(diagnosticsButton);
+
+    expect(await screen.findByText('数据源：starrocks · SQL 方言：mysql')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        '能力门控：分组集 不支持 · percentile percentile_cont_args_first · 窗口函数 支持'
+      )
+    ).toBeInTheDocument();
   });
 
   it('switches query group labels based on chart definition', async () => {

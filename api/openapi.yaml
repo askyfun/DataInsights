@@ -788,10 +788,11 @@ paths:
         v1/v2 两种协议）：spec_version 缺失或 !=2 时走 v1 平铺协议（dims/metrics，
         形状同 ChartQueryRequest）；spec_version=2 时走 v2 槽位协议
         （dimension_groups/metric_groups，槽位名与 binding_id 保留进查询 AST）。
-        成功 data 为 ChartDataResult：{ data, select_sql, count_sql }，其中 data 的
+        成功 data 为 ChartDataResult：{ data, select_sql, count_sql, diagnostics }，其中 data 的
         形状由 chart_type 决定（table/pie/axis/scatter 四族，另加 pivot，详见
         ChartDataResult 描述）。select_sql 成功时恒返回；count_sql 仅 table +
-        pagination 分支返回。执行失败统一 Envelope.code = 50000。
+        pagination 分支返回；diagnostics 为执行元信息（方言 / 耗时 / 能力门控）。
+        执行失败统一 Envelope.code = 50000。
       operationId: queryChart
       requestBody:
         required: true
@@ -2716,7 +2717,7 @@ components:
     ChartDataResult:
       type: object
       description: >-
-        POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。
+        POST /api/charts/query 的业务负载（entity.ChartDataResult）。
         data 为查询处理器输出，是按 chart_type 判别的五形状（契约上 oneOf 语义、
         未生成 union 类型：data 为无类型 schema，成员见下方各 Chart*Response
         schema；pie/scatter/table 成员间存在结构重叠，消费方以 chart_type 为准，
@@ -2741,6 +2742,60 @@ components:
           description: >-
             生成的计数 SQL；仅 chart_type=table 且携带 pagination 分支返回
             （executor.Execute 的 count 查询路径），其余形状缺省。
+        diagnostics:
+          $ref: '#/components/schemas/ChartQueryDiagnostics'
+    ChartQueryDiagnostics:
+      type: object
+      description: >-
+        一次查询的执行元信息（R-20 / issue #182）：只读诊断口径，不提供任何可执行
+        入口（路线图 N2：不做自由 SQL 工作台）。图表构建器的「查询诊断」弹窗消费它，
+        与 select_sql 一起展示「做了什么、怎么跑的」；仪表盘取数走同一条执行链，
+        响应里的 ChartDataResult 也携带该字段。
+      required:
+        - datasource_type
+        - dialect
+        - duration_ms
+      properties:
+        datasource_type:
+          type: string
+          description: >-
+            数据源记录的原始类型（postgresql / mysql / clickhouse / starrocks）。
+        dialect:
+          type: string
+          description: >-
+            SQL 生成实际使用的方言（query.ParseDialect 的产物）：mysql /
+            postgresql / clickhouse。StarRocks 走 mysql。
+        duration_ms:
+          type: integer
+          format: int64
+          description: >-
+            SQL 生成 + 执行的耗时（毫秒），在 query.Executor.Execute 前后计时，
+            不含网络往返与响应加工。
+        capabilities:
+          $ref: '#/components/schemas/ChartQueryCapabilities'
+    ChartQueryCapabilities:
+      type: object
+      description: >-
+        本次执行实际读到的方言能力快照。只有走能力门控的分支（pivot 的
+        GROUPING SETS 选择、boxplot / percentile 前置门）才返回；缺省表示本次
+        图型不依赖可选方言能力。
+      required:
+        - supports_grouping_sets
+        - supports_percentile_cont
+        - supports_window_functions
+        - percentile_strategy
+      properties:
+        supports_grouping_sets:
+          type: boolean
+        supports_percentile_cont:
+          type: boolean
+        supports_window_functions:
+          type: boolean
+        percentile_strategy:
+          type: string
+          description: >-
+            percentile 实现策略：percentile_cont / percentile_cont_args_first /
+            quantilesExactInclusive / window_ntile / unsupported。
     ChartTableResponse:
       type: object
       description: table 图表响应（query.TableResponse）。
