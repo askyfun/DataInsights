@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -24,6 +25,7 @@ import (
 
 	"data-insights/internal/database"
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/model"
 	"data-insights/internal/response"
 	"data-insights/internal/router"
@@ -61,6 +63,30 @@ type Service interface {
 	CreatePAT(ctx context.Context, userID int, name string, never bool) (*entity.PATCreateResult, error)
 	ListPATs(ctx context.Context, userID int) ([]entity.TokenInfo, error)
 	RevokeByID(ctx context.Context, userID, id int) error
+
+	// 最小用户管理（issue #202）：管理员建号 / 改显示名与角色 / 禁用 / 重置口令。
+	// 开放注册仍保持关闭；这些方法只由挂 Bearer(allowPAT=false) 且校验 admin
+	// 角色的路由调用。
+	ListUsers(ctx context.Context, params listpage.Params) (listpage.Result[entity.User], error)
+	CreateUser(ctx context.Context, in CreateUserInput) (*entity.User, error)
+	UpdateUser(ctx context.Context, id int, in UpdateUserInput) (*entity.User, error)
+	ResetPassword(ctx context.Context, id int, password string) error
+}
+
+// CreateUserInput 是管理员建号的入参。Role 为空时按普通用户落库（最小权限）。
+type CreateUserInput struct {
+	Username    string
+	DisplayName string
+	Password    string
+	Role        string
+}
+
+// UpdateUserInput 用指针区分「未提供」与「显式置零」，与项目 PUT 的
+// 「未提供则保留」约定一致：nil 保留存量，非 nil 才覆盖。
+type UpdateUserInput struct {
+	DisplayName *string
+	Role        *string
+	Disabled    *bool
 }
 
 type authService struct {
@@ -104,10 +130,12 @@ func tokenPrefix(raw string) string {
 
 func toUserEntity(m *model.User) *entity.User {
 	return &entity.User{
-		ID:        m.ID,
-		Username:  m.Username,
-		Role:      m.Role,
-		CreatedAt: m.CreatedAt.Format(time.RFC3339),
+		ID:          m.ID,
+		Username:    m.Username,
+		DisplayName: m.DisplayName,
+		Role:        m.Role,
+		Disabled:    m.DisabledAt.Valid,
+		CreatedAt:   m.CreatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -202,6 +230,9 @@ func (s *authService) Login(ctx context.Context, username, password, ip, ua stri
 	if err != nil {
 		return nil, fmt.Errorf("lookup user: %w", err)
 	}
+	if u.DisabledAt.Valid {
+		return nil, router.NewBusinessError(response.CodeUnauthorized, "账号已被禁用")
+	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
 		return nil, errInvalidCredentials
 	}
@@ -263,6 +294,8 @@ func (s *authService) Verify(ctx context.Context, rawToken, ip, ua string) (*Pri
 	err = s.db.NewSelect().Model(u).
 		Where("id = ?", tok.UserID).
 		Where("deleted_at IS NULL").
+		// 禁用即失效（#202）：账号被禁用后，仍在有效期内的会话/PAT 下一跳即被拒。
+		Where("disabled_at IS NULL").
 		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, router.NewBusinessError(response.CodeUnauthorized, "invalid token: user gone")
@@ -396,6 +429,196 @@ func (s *authService) RevokeByID(ctx context.Context, userID, id int) error {
 		Where("revoked_at IS NULL").
 		Exec(ctx); err != nil {
 		return fmt.Errorf("revoke PAT: %w", err)
+	}
+	return nil
+}
+
+// --- 最小用户管理（issue #202） ---
+
+// ListUsers 分页返回存活账号（含已禁用），keyword 同时匹配用户名与显示名。
+func (s *authService) ListUsers(ctx context.Context, params listpage.Params) (listpage.Result[entity.User], error) {
+	var users []model.User
+	q := s.db.NewSelect().Model(&users).Where("deleted_at IS NULL")
+	if params.Keyword != "" {
+		pat := listpage.Contains(params.Keyword)
+		q = q.Where("(username ILIKE ? OR display_name ILIKE ?)", pat, pat)
+	}
+	total, err := q.Count(ctx)
+	if err != nil {
+		return listpage.Result[entity.User]{}, fmt.Errorf("count users: %w", err)
+	}
+	if err := q.OrderExpr("created_at DESC, id DESC").Limit(params.Limit).Offset(params.Offset).Scan(ctx); err != nil {
+		return listpage.Result[entity.User]{}, fmt.Errorf("list users: %w", err)
+	}
+	items := make([]entity.User, 0, len(users))
+	for i := range users {
+		items = append(items, *toUserEntity(&users[i]))
+	}
+	return listpage.Result[entity.User]{Items: items, Total: total}, nil
+}
+
+// validRole 收敛角色词表；开放注册保持关闭，角色只能由管理员在建号/改角色时指定。
+func validRole(role string) bool {
+	return role == model.RoleAdmin || role == model.RoleUser
+}
+
+// CreateUser 由管理员建号：不签发会话（账号需自行登录），开放注册仍关闭。
+func (s *authService) CreateUser(ctx context.Context, in CreateUserInput) (*entity.User, error) {
+	in.Username = strings.TrimSpace(in.Username)
+	in.DisplayName = strings.TrimSpace(in.DisplayName)
+	if in.Username == "" || in.Password == "" {
+		return nil, router.NewBusinessError(response.CodeBadRequest, "username and password are required")
+	}
+	if in.Role == "" {
+		in.Role = model.RoleUser
+	}
+	if !validRole(in.Role) {
+		return nil, router.NewBusinessError(response.CodeBadRequest, "invalid role")
+	}
+	live, err := s.db.NewSelect().Model((*model.User)(nil)).
+		Where("username = ?", in.Username).
+		Where("deleted_at IS NULL").
+		Count(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("check username: %w", err)
+	}
+	if live > 0 {
+		return nil, router.NewBusinessError(response.CodeBusinessError, "用户名已存在")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+	u := &model.User{
+		Username:     in.Username,
+		DisplayName:  in.DisplayName,
+		PasswordHash: string(hash),
+		Role:         in.Role,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if _, err := s.db.NewInsert().Model(u).Returning("id").Exec(ctx); err != nil {
+		return nil, fmt.Errorf("insert user: %w", err)
+	}
+	return toUserEntity(u), nil
+}
+
+// UpdateUser 按「未提供则保留」更新显示名/角色/禁用位。守卫：
+//   - 最后一个启用中的管理员不可降级、不可禁用；
+//   - 禁用即吊销该用户全部未撤销 token（会话与 PAT），下一跳即失效。
+func (s *authService) UpdateUser(ctx context.Context, id int, in UpdateUserInput) (*entity.User, error) {
+	if in.Role != nil && !validRole(*in.Role) {
+		return nil, router.NewBusinessError(response.CodeBadRequest, "invalid role")
+	}
+	var out *entity.User
+	err := database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
+		u := &model.User{}
+		err := tx.NewSelect().Model(u).
+			Where("id = ?", id).
+			Where("deleted_at IS NULL").
+			Scan(ctx)
+		if errors.Is(err, sql.ErrNoRows) {
+			return router.NewBusinessError(response.CodeNotFound, "user not found")
+		}
+		if err != nil {
+			return fmt.Errorf("load user: %w", err)
+		}
+
+		nextRole := u.Role
+		if in.Role != nil {
+			nextRole = *in.Role
+		}
+		nextDisabled := u.DisabledAt.Valid
+		if in.Disabled != nil {
+			nextDisabled = *in.Disabled
+		}
+		losesAdmin := u.Role == model.RoleAdmin && (nextRole != model.RoleAdmin || nextDisabled)
+		if losesAdmin {
+			others, err := tx.NewSelect().Model((*model.User)(nil)).
+				Where("id <> ?", id).
+				Where("deleted_at IS NULL").
+				Where("disabled_at IS NULL").
+				Where("role = ?", model.RoleAdmin).
+				Count(ctx)
+			if err != nil {
+				return fmt.Errorf("count admins: %w", err)
+			}
+			if others == 0 {
+				return router.NewBusinessError(response.CodeBusinessError, "最后一个启用中的管理员不可降级或禁用")
+			}
+		}
+
+		q := tx.NewUpdate().Model((*model.User)(nil)).
+			Set("updated_at = ?", time.Now()).
+			Where("id = ?", id)
+		if in.DisplayName != nil {
+			q = q.Set("display_name = ?", strings.TrimSpace(*in.DisplayName))
+		}
+		if in.Role != nil {
+			q = q.Set("role = ?", nextRole)
+		}
+		if in.Disabled != nil {
+			if nextDisabled {
+				q = q.Set("disabled_at = ?", time.Now())
+			} else {
+				q = q.Set("disabled_at = NULL")
+			}
+		}
+		if _, err := q.Exec(ctx); err != nil {
+			return fmt.Errorf("update user: %w", err)
+		}
+		if nextDisabled && !u.DisabledAt.Valid {
+			if _, err := tx.NewUpdate().Model((*model.Token)(nil)).
+				Set("revoked_at = ?", time.Now()).
+				Where("user_id = ?", id).
+				Where("revoked_at IS NULL").
+				Exec(ctx); err != nil {
+				return fmt.Errorf("revoke user tokens: %w", err)
+			}
+		}
+
+		u.Role = nextRole
+		if in.DisplayName != nil {
+			u.DisplayName = strings.TrimSpace(*in.DisplayName)
+		}
+		if nextDisabled {
+			u.DisabledAt = sql.NullTime{Time: time.Now(), Valid: true}
+		} else {
+			u.DisabledAt = sql.NullTime{}
+		}
+		out = toUserEntity(u)
+		return nil
+	})
+	if err != nil {
+		var be router.BusinessError
+		if errors.As(err, &be) {
+			return nil, be
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+// ResetPassword 由管理员重置口令。开放注册关闭，这是账号口令唯一的找回路径。
+func (s *authService) ResetPassword(ctx context.Context, id int, password string) error {
+	if password == "" {
+		return router.NewBusinessError(response.CodeBadRequest, "password is required")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	res, err := s.db.NewUpdate().Model((*model.User)(nil)).
+		Set("password_hash = ?", string(hash)).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("reset password: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return router.NewBusinessError(response.CodeNotFound, "user not found")
 	}
 	return nil
 }

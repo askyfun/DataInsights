@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"data-insights/internal/domain/entity"
+	"data-insights/internal/listpage"
 	"data-insights/internal/response"
 	"data-insights/internal/router"
 	"data-insights/internal/service/auth"
@@ -32,6 +33,16 @@ func (f *fakeAuth) CreatePAT(context.Context, int, string, bool) (*entity.PATCre
 }
 func (f *fakeAuth) ListPATs(context.Context, int) ([]entity.TokenInfo, error) { return nil, nil }
 func (f *fakeAuth) RevokeByID(context.Context, int, int) error                { return nil }
+func (f *fakeAuth) ListUsers(context.Context, listpage.Params) (listpage.Result[entity.User], error) {
+	return listpage.Result[entity.User]{}, nil
+}
+func (f *fakeAuth) CreateUser(context.Context, auth.CreateUserInput) (*entity.User, error) {
+	return nil, nil
+}
+func (f *fakeAuth) UpdateUser(context.Context, int, auth.UpdateUserInput) (*entity.User, error) {
+	return nil, nil
+}
+func (f *fakeAuth) ResetPassword(context.Context, int, string) error { return nil }
 func (f *fakeAuth) Verify(_ context.Context, raw, _, _ string) (*auth.Principal, error) {
 	if f.reject || raw == "" || strings.Contains(raw, "invalid") {
 		return nil, router.NewBusinessError(response.CodeUnauthorized, "invalid or expired token")

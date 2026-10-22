@@ -286,3 +286,125 @@ func TestRevokeByID_ScopedToUser(t *testing.T) {
 		t.Fatalf("sqlmock: %v", err)
 	}
 }
+
+// --- 最小用户管理（issue #202） ---
+
+func errorCode(err error) int {
+	var be router.BusinessError
+	if errors.As(err, &be) {
+		return be.Code
+	}
+	return 0
+}
+
+func TestLogin_DisabledUserRejected(t *testing.T) {
+	s, mock := newMockAuth(t)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.DefaultCost)
+	mock.ExpectQuery(`SELECT .* FROM "bi_user"`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "display_name", "password_hash", "role", "created_at", "updated_at", "disabled_at"}).
+			AddRow(1, "alice", "", string(hash), "admin", time.Now(), time.Now(), time.Now()))
+
+	_, err := s.Login(context.Background(), "alice", "pw", "", "")
+	if err == nil || errorCode(err) != 20200 {
+		t.Fatalf("disabled user login must be rejected with 20200, got %v", err)
+	}
+}
+
+func TestVerify_DisabledUserRejected(t *testing.T) {
+	s, mock := newMockAuth(t)
+	raw := "di_session_disabled"
+	mock.ExpectQuery(`SELECT .* FROM "bi_token"`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "kind", "token_hash", "prefix"}).
+			AddRow(9, 1, "session", hashToken(raw), "di_session_disabl"))
+	mock.ExpectQuery(`SELECT .* FROM "bi_user".*disabled_at IS NULL`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"})) // 用户被禁用 → 查不到
+
+	_, err := s.Verify(context.Background(), raw, "", "")
+	if err == nil || errorCode(err) != 20200 {
+		t.Fatalf("disabled user's token must be rejected with 20200, got %v", err)
+	}
+}
+
+func TestUpdateUser_LastAdminCannotBeDemotedOrDisabled(t *testing.T) {
+	s, mock := newMockAuth(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .* FROM "bi_user"`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "display_name", "password_hash", "role", "created_at", "updated_at", "disabled_at"}).
+			AddRow(1, "alice", "", "hash", "admin", time.Now(), time.Now(), nil))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectRollback()
+
+	admin := "user"
+	_, err := s.UpdateUser(context.Background(), 1, UpdateUserInput{Role: &admin})
+	if err == nil || errorCode(err) != 20400 {
+		t.Fatalf("last admin demotion must be refused with 20400, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+}
+
+func TestUpdateUser_DisableRevokesAllTokens(t *testing.T) {
+	s, mock := newMockAuth(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .* FROM "bi_user"`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "display_name", "password_hash", "role", "created_at", "updated_at", "disabled_at"}).
+			AddRow(2, "bob", "Bob", "hash", "user", time.Now(), time.Now(), nil))
+	mock.ExpectExec(`UPDATE "bi_user" AS "user" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE "bi_token" AS "token" SET revoked_at`).WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectCommit()
+
+	disabled := true
+	u, err := s.UpdateUser(context.Background(), 2, UpdateUserInput{Disabled: &disabled})
+	if err != nil {
+		t.Fatalf("UpdateUser: %v", err)
+	}
+	if !u.Disabled {
+		t.Fatal("returned user must reflect disabled state")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+}
+
+func TestCreateUser_DefaultsToPlainUser(t *testing.T) {
+	s, mock := newMockAuth(t)
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`INSERT INTO "bi_user".*RETURNING id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+
+	u, err := s.CreateUser(context.Background(), CreateUserInput{Username: "bob", Password: "pw"})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if u.Role != "user" {
+		t.Fatalf("role must default to user, got %q", u.Role)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+}
+
+func TestCreateUser_DuplicateUsernameRefused(t *testing.T) {
+	s, mock := newMockAuth(t)
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	_, err := s.CreateUser(context.Background(), CreateUserInput{Username: "bob", Password: "pw"})
+	if err == nil || errorCode(err) != 20400 {
+		t.Fatalf("duplicate username must be refused with 20400, got %v", err)
+	}
+}
+
+func TestResetPassword_NotFound(t *testing.T) {
+	s, mock := newMockAuth(t)
+	mock.ExpectExec(`UPDATE "bi_user" AS "user" SET password_hash`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	err := s.ResetPassword(context.Background(), 99, "newpw")
+	if err == nil || errorCode(err) != 20300 {
+		t.Fatalf("missing user must be 20300, got %v", err)
+	}
+}
