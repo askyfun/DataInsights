@@ -177,6 +177,75 @@ func TestChartServiceQuery_TableRequestCompatibility(t *testing.T) {
 	if result.SelectSQL == "" || result.CountSQL == "" {
 		t.Fatalf("expected select/count sql to be forwarded, got select=%q count=%q", result.SelectSQL, result.CountSQL)
 	}
+	// R-20 诊断：非能力门控图型仍给方言/耗时，但 capabilities 必须缺省。
+	if result.Diagnostics == nil {
+		t.Fatal("expected diagnostics to be populated")
+	}
+	if result.Diagnostics.DatasourceType != "postgresql" || result.Diagnostics.Dialect != "postgresql" {
+		t.Fatalf("unexpected diagnostics source/dialect: %+v", result.Diagnostics)
+	}
+	if result.Diagnostics.DurationMs < 0 {
+		t.Fatalf("expected non-negative duration, got %d", result.Diagnostics.DurationMs)
+	}
+	if result.Diagnostics.Capabilities != nil {
+		t.Fatalf("expected no capabilities for non-gated query, got %+v", result.Diagnostics.Capabilities)
+	}
+}
+
+// TestChartServiceQuery_DiagnosticsCarryCapabilities 验证能力门控分支读到的
+// 方言能力进入诊断快照，且原始数据源类型与 SQL 方言分别保留（StarRocks→mysql）。
+func TestChartServiceQuery_DiagnosticsCarryCapabilities(t *testing.T) {
+	executor := &stubExecutor{
+		result: query.ExecutorResult{
+			Data: &query.PivotResponse{Columns: []string{"region"}, Data: []map[string]any{{"region": "华东"}}},
+			GeneratedSQL: query.GeneratedSQL{
+				Select: "SELECT ...",
+			},
+			Capabilities: &datasource.DialectCapabilities{
+				SupportsGroupingSets:    false,
+				SupportsPercentileCont:  true,
+				SupportsWindowFunctions: true,
+				PercentileStrategy:      "percentile_cont",
+			},
+		},
+	}
+
+	service := NewService(nil).(*chartService)
+	service.getDatasetModelFn = func(ctx context.Context, id int) (*model.Dataset, error) {
+		return &model.Dataset{ID: id, DatasourceID: 1, QueryType: "table"}, nil
+	}
+	service.getDatasourceModelFn = func(ctx context.Context, id int) (*model.Datasource, error) {
+		return &model.Datasource{ID: id, Type: "starrocks"}, nil
+	}
+	service.connectFn = func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
+		return &stubConnection{}, nil
+	}
+	service.executorFactory = func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor {
+		return executor
+	}
+
+	result, err := service.Query(context.Background(), &entity.ChartQueryRequest{DatasetID: 1, ChartType: "pivot"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	diagnostics := result.Diagnostics
+	if diagnostics == nil {
+		t.Fatal("expected diagnostics to be populated")
+	}
+	if diagnostics.DatasourceType != "starrocks" || diagnostics.Dialect != "mysql" {
+		t.Fatalf("expected starrocks source with mysql dialect, got %+v", diagnostics)
+	}
+	caps := diagnostics.Capabilities
+	if caps == nil {
+		t.Fatal("expected capabilities snapshot")
+	}
+	if caps.SupportsGroupingSets || !caps.SupportsPercentileCont || !caps.SupportsWindowFunctions {
+		t.Fatalf("unexpected capability booleans: %+v", caps)
+	}
+	if caps.PercentileStrategy != "percentile_cont" {
+		t.Fatalf("unexpected percentile strategy: %q", caps.PercentileStrategy)
+	}
 }
 
 // TestChartServiceQuery_LineRequestCompatibility 验证折线图请求继续保持旧请求到 query 层的兼容转换。

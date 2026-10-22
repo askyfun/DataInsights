@@ -57,6 +57,8 @@ import {
   ChartMetricField,
   ChartMetricGroup,
   ChartQueryAggregation,
+  type ChartQueryCapabilities,
+  type ChartQueryDiagnostics,
   ChartQueryRequest,
   isPivotV2Payload,
   isTablePayload,
@@ -730,6 +732,63 @@ const countResultRows = (payload: unknown): number | undefined => {
   }
   return undefined;
 };
+
+/** 查询诊断里的「返回行数」：按图型形状取可读的行数（诊断口径，允许各形状自解释）。 */
+const countDiagnosticRows = (payload: unknown): number | undefined => {
+  if (Array.isArray(payload)) {
+    return payload.length;
+  }
+  if (typeof payload !== 'object' || payload === null) {
+    return undefined;
+  }
+  if ('data' in payload && Array.isArray(payload.data)) {
+    return payload.data.length;
+  }
+  if ('x_axis' in payload && Array.isArray(payload.x_axis)) {
+    return payload.x_axis.length;
+  }
+  if ('bins' in payload && Array.isArray(payload.bins)) {
+    return payload.bins.length;
+  }
+  if ('indicators' in payload && Array.isArray(payload.indicators)) {
+    return payload.indicators.length;
+  }
+  return undefined;
+};
+
+/** 查询诊断里的能力门控摘要（R-20）：nil = 本次图型未触发方言能力门控。 */
+const describeQueryCapabilities = (caps?: ChartQueryCapabilities): string => {
+  if (!caps) {
+    return '未触发（本次图型不依赖可选方言能力）';
+  }
+  const yesNo = (supported: boolean) => (supported ? '支持' : '不支持');
+  return `分组集 ${yesNo(caps.supports_grouping_sets)} · percentile ${
+    caps.percentile_strategy || '未知'
+  } · 窗口函数 ${yesNo(caps.supports_window_functions)}`;
+};
+
+/** 「查询诊断」弹窗的元信息区：查询做了什么、怎么跑的（只读，issue #182）。 */
+const QueryDiagnosticsSummary = ({
+  diagnostics,
+  rowCount,
+}: {
+  diagnostics?: ChartQueryDiagnostics;
+  rowCount?: number;
+}) => (
+  <Space
+    orientation="vertical"
+    size={2}
+    // Space 默认 inline-flex，会和后面的「数据查询:」挤在同一行；诊断元信息要独占一块。
+    style={{ display: 'flex', marginBottom: 16 }}
+  >
+    <Text type="secondary">
+      数据源：{diagnostics?.datasource_type ?? '—'} · SQL 方言：{diagnostics?.dialect ?? '—'}
+    </Text>
+    <Text type="secondary">执行耗时：{diagnostics ? `${diagnostics.duration_ms} ms` : '—'}</Text>
+    {rowCount !== undefined && <Text type="secondary">返回行数：{rowCount}</Text>}
+    <Text type="secondary">能力门控：{describeQueryCapabilities(diagnostics?.capabilities)}</Text>
+  </Space>
+);
 
 interface ChartCanvasProps {
   config: ChartConfig;
@@ -3552,7 +3611,7 @@ const ChartBuilder: React.FC = () => {
               icon={<CodeOutlined />}
               onClick={() => setSqlModalVisible(true)}
               disabled={isEmptyPayload(chartData)}
-              title="SQL"
+              title="查询诊断"
             />
             <Button
               size="small"
@@ -3818,7 +3877,7 @@ const ChartBuilder: React.FC = () => {
                     icon={<CodeOutlined />}
                     onClick={() => setSqlModalVisible(true)}
                   >
-                    查看 SQL
+                    查询诊断
                   </Button>
                 )}
                 <Tooltip title="查询历史：本次会话内最近 20 次成功查询的配置快照，点击回填">
@@ -4034,7 +4093,7 @@ const ChartBuilder: React.FC = () => {
         ) : null}
       </DragOverlay>
       <Modal
-        title="生成的 SQL"
+        title="查询诊断"
         open={sqlModalVisible}
         onCancel={() => setSqlModalVisible(false)}
         footer={null}
@@ -4042,6 +4101,10 @@ const ChartBuilder: React.FC = () => {
       >
         {chartQueryResponse && (
           <div>
+            <QueryDiagnosticsSummary
+              diagnostics={chartQueryResponse.diagnostics}
+              rowCount={countDiagnosticRows(chartData)}
+            />
             <Text strong>数据查询:</Text>
             <pre
               style={{

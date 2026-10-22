@@ -114,6 +114,10 @@ func TestExecutor_Pivot_GroupingSetsPath(t *testing.T) {
 	if conn.capsCalls != 1 {
 		t.Errorf("expected exactly 1 Capabilities call, got %d", conn.capsCalls)
 	}
+	// 诊断（R-20）：能力门控分支必须把读到的能力带回结果，供「查询诊断」展示。
+	if result.Capabilities == nil || !result.Capabilities.SupportsGroupingSets {
+		t.Errorf("expected gated capabilities on result, got %+v", result.Capabilities)
+	}
 	if len(conn.sqlCalls) != 1 {
 		t.Fatalf("expected exactly 1 Execute call, got %d", len(conn.sqlCalls))
 	}

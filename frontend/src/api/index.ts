@@ -248,10 +248,26 @@ export function isPivotV2Payload(x: unknown): x is PivotResponseV2 {
   );
 }
 
+// 查询诊断（issue #182 / openapi ChartQueryDiagnostics）：执行元信息。生成物
+// （gen_types.ts）早于该字段，故在这里补薄层；字段与契约逐一对应。
+export type ChartQueryCapabilities = {
+  supports_grouping_sets: boolean;
+  supports_percentile_cont: boolean;
+  supports_window_functions: boolean;
+  percentile_strategy: string;
+};
+export type ChartQueryDiagnostics = {
+  datasource_type: string;
+  dialect: string;
+  duration_ms: number;
+  capabilities?: ChartQueryCapabilities;
+};
+
 // NOT G['ChartQueryResponse'] (that is the Envelope wrapper): the bare wire
 // payload is G['ChartDataResult'], with data narrowed from unknown to the union.
 export type ChartQueryResponse = Omit<G['ChartDataResult'], 'data'> & {
   data: ChartDataResponse;
+  diagnostics?: ChartQueryDiagnostics;
 };
 
 // 查询记录（地址栏即分享）。spec 的信封类型来自生成 schema，但 document 字段要
