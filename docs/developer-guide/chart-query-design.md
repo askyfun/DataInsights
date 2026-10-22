@@ -116,6 +116,11 @@ interface FilterConfig {
 - 字段组 `fields: string[]` 升级为 `bindings: BindingInstance[]`，每个拖入槽位的字段实例持有全局唯一 `bindingId`（`b-0`/`b-1`…）；
 - `fieldMeta` 的键由列名改为 `bindingId`——同一列拖入两个组得到两个独立 binding 与各自元数据；
 - `sort` 以 `bindingId` 引用排序目标；`bindings[].fieldId` 与 `filters[].fieldId` 引用列的稳定 id（`DatasetColumn.id`），列改名不切断已存图表。
+- `bindings[].candidates` 是动态维度/指标（issue #134）的候选列（**不含**默认列 `fieldId`）：作者配候选集、观看侧切换只改会话选择；
+  查询组装用 `frontend/src/lib/dynamicFieldSlots.ts` 的 `effectiveFieldId` 解析生效列，**不**改写 `queryConfig`。
+  仪表盘把选择作为 `selections[]`（widgetId + bindingId + fieldId）随 `/query` 下发，后端 `applyFieldSelections`
+  在**内存中的 config 投影**上换列并要求目标列属于该绑定的候选集（越界即块级报错）；`?q=` 快照在落库前
+  由 `applyFieldOverrides` 把当前选择物化进 bindings，还原出来就是当时的视角。图表自身的保存路径不物化选择。
 
 ### 日期筛选（双端镜像）
 

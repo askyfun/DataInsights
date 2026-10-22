@@ -33,6 +33,14 @@ type fakeChartProvider struct {
 	mu        sync.Mutex
 	metaCalls []int
 	dataCalls []dataCall
+	// selectionCalls 记录每次带动态槽位选择（issue #134）的取数。
+	selectionCalls []selectionCall
+}
+
+// selectionCall 是一次 GetDataWithOverrides 调用。
+type selectionCall struct {
+	chartID    int
+	selections []entity.ChartFieldSelection
 }
 
 func (f *fakeChartProvider) ChartQueryContext(ctx context.Context, id int) (*entity.ChartQueryContext, error) {
@@ -48,13 +56,31 @@ func (f *fakeChartProvider) ChartQueryContext(ctx context.Context, id int) (*ent
 func (f *fakeChartProvider) GetDataWithFilterOverrides(
 	ctx context.Context, id int, overrides []entity.Filter,
 ) (entity.ChartDataResult, error) {
+	f.recordDataCall(id, overrides)
+	if f.dataFn != nil {
+		return f.dataFn(ctx, id, overrides)
+	}
+	return entity.ChartDataResult{Data: []map[string]any{{"chart": id}}}, nil
+}
+
+func (f *fakeChartProvider) GetDataWithOverrides(
+	ctx context.Context, id int, overrides []entity.Filter,
+	selections []entity.ChartFieldSelection,
+) (entity.ChartDataResult, error) {
 	f.mu.Lock()
 	f.dataCalls = append(f.dataCalls, dataCall{chartID: id, overrides: overrides})
+	f.selectionCalls = append(f.selectionCalls, selectionCall{chartID: id, selections: selections})
 	f.mu.Unlock()
 	if f.dataFn != nil {
 		return f.dataFn(ctx, id, overrides)
 	}
 	return entity.ChartDataResult{Data: []map[string]any{{"chart": id}}}, nil
+}
+
+func (f *fakeChartProvider) recordDataCall(id int, overrides []entity.Filter) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dataCalls = append(f.dataCalls, dataCall{chartID: id, overrides: overrides})
 }
 
 func (f *fakeChartProvider) dataCallCount() int {
@@ -1407,5 +1433,50 @@ func TestMergeOverridesEmptyLinkagesReturnsFiltersAsIs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(applied, []string{"region"}) {
 		t.Errorf("applied = %#v, want [region]", applied)
+	}
+}
+
+// TestQueryRoutesDynamicSelectionsToOwningBlock 动态维度/指标选择（issue #134）
+// 必须只落到它声明的 widget 上：别的块照旧走「无选择」的取数路径，缺 widgetId
+// 的条目被丢弃（它是坏请求，不该影响任何块）。
+func TestQueryRoutesDynamicSelectionsToOwningBlock(t *testing.T) {
+	svc, mock, _ := newTestService(t)
+	expectDashboardRead(t, mock, layoutDoc(layoutChart("w-1", 42), layoutChart("w-2", 43)))
+
+	fake := &fakeChartProvider{}
+	svc.chartProvider = fake
+
+	_, err := svc.Query(context.Background(), testID, entity.DashboardQueryRequest{
+		Selections: []entity.DashboardQuerySelection{
+			{WidgetID: "w-2", BindingID: "b-1", FieldID: "col-b"},
+			{WidgetID: "", BindingID: "b-9", FieldID: "col-x"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+
+	fake.mu.Lock()
+	calls := append([]selectionCall{}, fake.selectionCalls...)
+	dataCalls := append([]dataCall{}, fake.dataCalls...)
+	fake.mu.Unlock()
+
+	if len(calls) != 1 || calls[0].chartID != 43 {
+		t.Fatalf("带选择的取数应只发生在 w-2/chart 43，实际 %+v", calls)
+	}
+	want := []entity.ChartFieldSelection{{BindingID: "b-1", FieldID: "col-b"}}
+	if !reflect.DeepEqual(calls[0].selections, want) {
+		t.Errorf("selections = %#v, want %#v", calls[0].selections, want)
+	}
+	if len(dataCalls) != 2 {
+		t.Fatalf("两块都应取数一次，实际 %+v", dataCalls)
+	}
+	for _, call := range dataCalls {
+		if call.chartID == 43 && len(call.overrides) != 0 {
+			t.Errorf("本用例没有盘级筛选，chart 43 的 overrides 应为空: %#v", call.overrides)
+		}
 	}
 }

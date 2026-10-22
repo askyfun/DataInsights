@@ -1,4 +1,4 @@
-import { Input, Modal, Space, Switch } from 'antd';
+import { Input, Modal, Select, Space, Switch } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { applyPercentFormat, splitPercentFormat } from '@/lib/format';
 import type { ChartField } from '@/store';
@@ -10,6 +10,8 @@ export interface FieldSettingsValue {
   unit: string;
   /** 格式（仅指标）：如 0,0.00 → 千分位 + 两位小数；以 `%` 结尾表示按占比显示。 */
   format: string;
+  /** 动态维度/指标的候选列（issue #134，不含当前列）；缺省/空数组 = 取消动态槽位。 */
+  candidates?: string[];
 }
 
 export interface FieldSettingsModalProps {
@@ -18,6 +20,8 @@ export interface FieldSettingsModalProps {
   kind: 'dimension' | 'metric';
   field: ChartField | null;
   initial: FieldSettingsValue;
+  /** 可选的候选列（与当前字段同 kind，已排除当前列）。 */
+  candidateOptions?: Array<{ id: string; name: string }>;
   onOk: (value: FieldSettingsValue) => void;
   onCancel: () => void;
 }
@@ -32,6 +36,7 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
   kind,
   field,
   initial,
+  candidateOptions,
   onOk,
   onCancel,
 }) => {
@@ -40,11 +45,14 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
   const [percentOfTotal, setPercentOfTotal] = useState(false);
   // 「格式」输入框承载不含 `%` 的部分；占比开关只负责最后补/剥那个后缀。
   const [format, setFormat] = useState('');
+  /** 动态维度/指标候选（issue #134）：不含当前列的附加可选列。 */
+  const [candidates, setCandidates] = useState<string[]>([]);
 
   // 依赖必须拆成原始值：调用方每次都传内联对象字面量，直接依赖 initial
   // 会让弹窗打开期间的任何父级重渲染（例如查询结果回流）把用户正在输入的
   // 内容重置回 store 里的旧值。
   const { alias: initialAlias, unit: initialUnit, format: initialFormat } = initial;
+  const initialCandidatesKey = (initial.candidates ?? []).join('\u0000');
   useEffect(() => {
     if (!open) return;
     const parsed = splitPercentFormat(initialFormat ?? '');
@@ -52,7 +60,8 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
     setUnit(initialUnit ?? '');
     setFormat(parsed.base);
     setPercentOfTotal(parsed.percent);
-  }, [open, initialAlias, initialUnit, initialFormat]);
+    setCandidates(initialCandidatesKey === '' ? [] : initialCandidatesKey.split('\u0000'));
+  }, [open, initialAlias, initialUnit, initialFormat, initialCandidatesKey]);
 
   const isMetric = kind === 'metric';
 
@@ -67,6 +76,7 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
           alias: alias.trim(),
           unit: unit.trim(),
           format: applyPercentFormat(format, percentOfTotal),
+          candidates: candidates.filter((id) => id !== field?.id),
         })
       }
       onCancel={onCancel}
@@ -125,6 +135,29 @@ const FieldSettingsModal: React.FC<FieldSettingsModalProps> = ({
               </div>
             </div>
           </>
+        )}
+        {(candidateOptions?.length ?? 0) > 0 && (
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--dr-text-2)', marginBottom: 4 }}>
+              候选字段（动态{isMetric ? '指标' : '维度'}）
+            </div>
+            <Select
+              mode="multiple"
+              allowClear
+              value={candidates}
+              onChange={(values: string[]) => setCandidates(values)}
+              placeholder="选择可在图表上切换的其他列"
+              options={(candidateOptions ?? []).map((option) => ({
+                value: option.id,
+                label: option.name,
+              }))}
+              style={{ width: '100%' }}
+              data-testid="field-settings-candidates"
+            />
+            <div style={{ fontSize: 12, color: 'var(--dr-text-3)', marginTop: 4 }}>
+              观看者在图表上方切换候选列即可换视角；切换不改变当前列（默认选中项）。
+            </div>
+          </div>
         )}
       </Space>
     </Modal>

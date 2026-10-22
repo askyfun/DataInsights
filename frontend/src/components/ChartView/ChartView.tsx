@@ -10,9 +10,11 @@ import {
   normalizePieMergeRatio,
   normalizeReferenceLines,
 } from '../../lib/chartOptions';
+import { type DynamicFieldSelections, effectiveFieldId } from '../../lib/dynamicFieldSlots';
 import { isPercentOfTotalFormat } from '../../lib/format';
 import { usePrefersReducedMotion } from '../../lib/reducedMotion';
 import { useResolvedTheme } from '../../lib/theme';
+import type { BindingInstance } from '../../store';
 import { chartDefinitions } from '../ChartBuilder/chartDefinitions';
 import KpiCard from '../ChartBuilder/KpiCard';
 import PivotTable from '../ChartBuilder/PivotTable';
@@ -50,6 +52,11 @@ interface ChartViewProps {
   linkageFieldId?: string | null;
   /** 数据项点击回调（与 {@link linkageFieldId} 成对出现）。 */
   onDataPointClick?: (fieldId: string, value: unknown) => void;
+  /**
+   * 动态维度/指标的会话选择（issue #134）：bindingId → 本次生效的列 id。
+   * 只影响展示名/槽位解析；数据本身由调用方按同一份选择取回（仪表盘下发 selections）。
+   */
+  bindingFieldOverrides?: DynamicFieldSelections;
 }
 
 /** 分享页的 ECharts 容器尺寸（改造前的原值，勿改：ShareView 行为按此冻结）。 */
@@ -86,6 +93,7 @@ const ChartView: React.FC<ChartViewProps> = ({
   fieldNames,
   linkageFieldId,
   onDataPointClick,
+  bindingFieldOverrides,
 }) => {
   const chartDoc = useMemo(
     () => migrateChartConfig(chart.config, chart.chart_type as ChartType),
@@ -100,6 +108,12 @@ const ChartView: React.FC<ChartViewProps> = ({
     [fieldNames]
   );
 
+  /** 动态槽位的生效列（issue #134）：没有会话选择时等于 binding.fieldId。 */
+  const fieldIdOf = useCallback(
+    (binding: BindingInstance): string => effectiveFieldId(binding, bindingFieldOverrides),
+    [bindingFieldOverrides]
+  );
+
   // 展示名：优先 fieldMeta 的 label/alias，其次列名
   const displayLabels = useMemo(() => {
     // 无原型容器：列名为 __proto__ 时 `labels[name] = ...` 才不会落进 setter 被吞
@@ -111,12 +125,12 @@ const ChartView: React.FC<ChartViewProps> = ({
         // 已知歧义：同一列有多个 binding（多个不同 label）时，共享列名键上
         // 后写入者覆盖先写入者。
         const meta = chartDoc.fieldMeta[binding.bindingId];
-        const name = nameOf(binding.fieldId);
+        const name = nameOf(fieldIdOf(binding));
         labels[name] = meta?.label || meta?.alias || name;
       }
     }
     return labels;
-  }, [chartDoc, nameOf]);
+  }, [chartDoc, nameOf, fieldIdOf]);
 
   // 指标显示格式（fieldMeta.format），键空间与 displayLabels 一致（输出列名）。
   // 两条消费路径共用：数据标注（option 构造）与表格占比列判定（见下方 isTableLike 分支）。
@@ -126,12 +140,12 @@ const ChartView: React.FC<ChartViewProps> = ({
       for (const binding of group.bindings) {
         const format = chartDoc.fieldMeta[binding.bindingId]?.format;
         if (format) {
-          formats[nameOf(binding.fieldId)] = format;
+          formats[nameOf(fieldIdOf(binding))] = format;
         }
       }
     }
     return formats;
-  }, [chartDoc, nameOf]);
+  }, [chartDoc, nameOf, fieldIdOf]);
 
   // 样式来自持久化 v1 文档的 style 小节（schema 上是 unknown）：
   // 缺失/形状非法时经 normalizeChartStyle 回落 ChartStyleConfig 默认值。
@@ -168,7 +182,7 @@ const ChartView: React.FC<ChartViewProps> = ({
             .map((def, index) => ({
               slot: def.id,
               metrics: (chartDoc.query.metricGroups[index]?.bindings ?? []).map(
-                (b) => chartDoc.fieldMeta[b.bindingId]?.alias || nameOf(b.fieldId)
+                (b) => chartDoc.fieldMeta[b.bindingId]?.alias || nameOf(fieldIdOf(b))
               ),
             }))
         : undefined;
@@ -180,10 +194,10 @@ const ChartView: React.FC<ChartViewProps> = ({
       {
         title: chartDoc.title || chart.name,
         dimensions: chartDoc.query.dimensionGroups.flatMap((g) =>
-          g.bindings.map((b) => nameOf(b.fieldId))
+          g.bindings.map((b) => nameOf(fieldIdOf(b)))
         ),
         metrics: chartDoc.query.metricGroups.flatMap((g) =>
-          g.bindings.map((b) => nameOf(b.fieldId))
+          g.bindings.map((b) => nameOf(fieldIdOf(b)))
         ),
         metricSlots,
         // 参考线（R-63）：持久化文档 queryOptions 小节是 unknown，与 ChartBuilder 恢复路径
@@ -210,6 +224,7 @@ const ChartView: React.FC<ChartViewProps> = ({
     chartStyle,
     displayLabels,
     nameOf,
+    fieldIdOf,
     hostEl,
     resolvedTheme,
     metricFormatByOutputName,

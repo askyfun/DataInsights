@@ -756,3 +756,91 @@ describe('pie 长尾合并与标签模式（issue #27）', () => {
     expect(percentOpt.series[0].label.formatter).toBe('{b}: {d}%');
   });
 });
+
+describe('composeChartQueryRequest：动态维度/指标的会话选择（issue #134）', () => {
+  const fields = [
+    { id: 'd-1', name: 'region', type: 'dimension' as const, dataType: 'string' },
+    { id: 'd-2', name: 'city', type: 'dimension' as const, dataType: 'string' },
+    { id: 'm-1', name: 'amount', type: 'metric' as const, dataType: 'number' },
+    { id: 'm-2', name: 'qty', type: 'metric' as const, dataType: 'number' },
+  ];
+  const queryConfig = {
+    dimensionGroups: [
+      { id: 'dim-group-1', bindings: [{ bindingId: 'b-0', fieldId: 'd-1', candidates: ['d-2'] }] },
+    ],
+    metricGroups: [
+      {
+        id: 'metric-group-1',
+        bindings: [{ bindingId: 'b-1', fieldId: 'm-1', candidates: ['m-2'] }],
+      },
+    ],
+    filters: [],
+  };
+  const baseInput = {
+    datasetId: 1,
+    chartType: 'bar' as const,
+    queryConfig,
+    fields,
+    metricAggregations: {},
+    metricAliases: {},
+    metricFormats: {},
+    tablePagination: { page: 1, pageSize: 10 },
+    queryOptions: {},
+    includeSort: true,
+  };
+
+  it('v1：维度选择换列，metric 选择同时换列与默认别名（别名不残留旧列名）', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      fieldOverrides: { 'b-0': 'd-2', 'b-1': 'm-2' },
+    });
+
+    expect(request?.dims).toEqual(['d-2']);
+    expect(request?.metrics).toEqual([{ field: 'm-2', agg: 'sum', alias: 'qty' }]);
+    // queryConfig 本身不被修改（选择只是会话态）
+    expect(queryConfig.dimensionGroups[0].bindings[0].fieldId).toBe('d-1');
+  });
+
+  it('sort 引用被切换的槽位时，按生效列名下发（v1 平铺协议）', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      queryConfig: { ...queryConfig, sort: { bindingId: 'b-1', order: 'desc' as const } },
+      fieldOverrides: { 'b-1': 'm-2' },
+    });
+
+    expect(request?.sort).toEqual({ field: 'qty', order: 'desc' });
+  });
+
+  it('v2 槽位协议：绑定 id 不变、字段换成候选列（combo 双轴）', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      chartType: 'combo',
+      queryConfig: {
+        ...queryConfig,
+        metricGroups: [
+          { id: 'metric-group-1', bindings: [{ bindingId: 'b-1', fieldId: 'm-1' }] },
+          {
+            id: 'metric-group-2',
+            bindings: [{ bindingId: 'b-2', fieldId: 'm-1', candidates: ['m-2'] }],
+          },
+        ],
+      },
+      fieldOverrides: { 'b-2': 'm-2' },
+    });
+
+    expect(request?.spec_version).toBe(2);
+    const secondary = request?.metric_groups?.find((group) => group.name === 'secondary_values');
+    expect(secondary?.fields).toEqual([
+      { field: 'm-2', agg: 'sum', alias: 'qty', binding_id: 'b-2' },
+    ]);
+  });
+
+  it('覆盖表里出现非候选列（调用方失效数据）：不做越界解析，回落默认列', () => {
+    const request = composeChartQueryRequest({
+      ...baseInput,
+      fieldOverrides: { 'b-0': 'm-1' },
+    });
+
+    expect(request?.dims).toEqual(['d-1']);
+  });
+});

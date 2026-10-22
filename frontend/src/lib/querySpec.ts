@@ -10,6 +10,7 @@
 import type { ChartConfig, ChartQueryOptions, ChartStyleConfig, QueryConfig } from '../store';
 import { type ChartConfigDocument, type ChartMeta, migrateChartConfig } from './chartConfigSchema';
 import { materializeDateFilterSnapshot } from './dateFilter';
+import { applyFieldOverrides } from './dynamicFieldSlots';
 
 /** 记录级 spec 版本；与后端 entity.CurrentQuerySpecVersion 必须一致。 */
 export const CURRENT_QUERY_SPEC_VERSION = 1;
@@ -88,6 +89,28 @@ export function buildChartConfigDocument(input: ChartConfigDocumentInput): Chart
 /** 组装一份可直接提交给 POST /api/queries 的记录信封。 */
 export function buildQuerySpecDocument(input: ChartConfigDocumentInput): QuerySpecDocument {
   return { v: CURRENT_QUERY_SPEC_VERSION, document: buildChartConfigDocument(input) };
+}
+
+/**
+ * 把动态维度/指标的会话选择物化进文档输入（issue #134），供 `?q=` 快照使用：
+ * 分享链接要还原「落库那一刻看的是哪个候选」。**图表配置（保存）不走这里**——
+ * 选择是观看侧会话态，落库的默认列仍是 binding.fieldId。
+ *
+ * 字段组有两条来源：`activeQueryConfig`（裁剪后的组，文档实际写它）与 `queryConfig`
+ * （filters/sort/limit）。两处都必须套同一份覆盖，只改后者会让快照静默写回默认列。
+ */
+export function withDynamicSelections(
+  input: ChartConfigDocumentInput,
+  fieldOverrides: Record<string, string>
+): ChartConfigDocumentInput {
+  if (Object.keys(fieldOverrides).length === 0) {
+    return input;
+  }
+  return {
+    ...input,
+    queryConfig: applyFieldOverrides(input.queryConfig, fieldOverrides),
+    activeQueryConfig: applyFieldOverrides(input.activeQueryConfig, fieldOverrides),
+  };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
