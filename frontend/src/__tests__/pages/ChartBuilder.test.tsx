@@ -1,10 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { AxiosResponse } from 'axios';
 import { type ReactNode, StrictMode } from 'react';
+import { IntlProvider } from 'react-intl';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueryRecord } from '../../api';
 import { chartsApi, datasetsApi, queriesApi } from '../../api';
+import { messages } from '../../i18n/useLocale';
 import type { ApiResponse } from '../../lib/api/client';
 import type { ChartConfigDocument } from '../../lib/chartConfigSchema';
 import ChartBuilder from '../../pages/ChartBuilder';
@@ -153,23 +155,27 @@ const resetChartBuilderState = () => {
 
 const renderChartBuilder = () => {
   return render(
-    <MemoryRouter initialEntries={['/chart-builder?edit=1&datasetId=1']}>
-      <LocationProbe />
-      <Routes>
-        <Route path="/chart-builder" element={<ChartBuilder />} />
-      </Routes>
-    </MemoryRouter>
+    <IntlProvider locale="en" messages={messages['en-US']}>
+      <MemoryRouter initialEntries={['/chart-builder?edit=1&datasetId=1']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/chart-builder" element={<ChartBuilder />} />
+        </Routes>
+      </MemoryRouter>
+    </IntlProvider>
   );
 };
 
 const renderNewChartBuilder = () => {
   return render(
-    <MemoryRouter initialEntries={['/chart-builder?datasetId=1']}>
-      <LocationProbe />
-      <Routes>
-        <Route path="/chart-builder" element={<ChartBuilder />} />
-      </Routes>
-    </MemoryRouter>
+    <IntlProvider locale="en" messages={messages['en-US']}>
+      <MemoryRouter initialEntries={['/chart-builder?datasetId=1']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/chart-builder" element={<ChartBuilder />} />
+        </Routes>
+      </MemoryRouter>
+    </IntlProvider>
   );
 };
 
@@ -181,12 +187,14 @@ const renderNewChartBuilder = () => {
  */
 const renderQueryRecordBuilder = (shortId: string, extraQuery = '', strict = false) => {
   const tree = (
-    <MemoryRouter initialEntries={[`/chart-builder?q=${shortId}${extraQuery}`]}>
-      <LocationProbe />
-      <Routes>
-        <Route path="/chart-builder" element={<ChartBuilder />} />
-      </Routes>
-    </MemoryRouter>
+    <IntlProvider locale="en" messages={messages['en-US']}>
+      <MemoryRouter initialEntries={[`/chart-builder?q=${shortId}${extraQuery}`]}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/chart-builder" element={<ChartBuilder />} />
+        </Routes>
+      </MemoryRouter>
+    </IntlProvider>
   );
   return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 };

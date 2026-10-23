@@ -1,8 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import type { AxiosResponse } from 'axios';
+import { IntlProvider } from 'react-intl';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { chartsApi, datasetsApi } from '../../api';
+import { messages } from '../../i18n/useLocale';
 import type { ApiResponse } from '../../lib/api/client';
 import ChartBuilder, { composeChartQueryRequest } from '../../pages/ChartBuilder';
 import type { QueryConfig } from '../../store';
@@ -227,9 +229,11 @@ const seedApis = (config: string) => {
 
 const renderBuilder = () =>
   render(
-    <MemoryRouter initialEntries={['/chart-builder?edit=7&datasetId=1']}>
-      <ChartBuilder />
-    </MemoryRouter>
+    <IntlProvider locale="en" messages={messages['en-US']}>
+      <MemoryRouter initialEntries={['/chart-builder?edit=7&datasetId=1']}>
+        <ChartBuilder />
+      </MemoryRouter>
+    </IntlProvider>
   );
 
 describe('ChartBuilder 同环比卡片（恢复已存图表）', () => {

@@ -63,6 +63,7 @@ import {
   type QueryRecord,
   queriesApi,
 } from '../api';
+import ComputedFieldModal from '../components/ChartBuilder/ComputedFieldModal';
 import {
   chartDefinitions,
   normalizeQueryConfigForChartType,
@@ -980,6 +981,8 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
 interface FieldListPanelProps {
   fields: ChartField[];
   loading: boolean;
+  /** 有数据集时可从画布内新建计算字段（issue #181）。 */
+  onCreateField?: () => void;
 }
 
 /**
@@ -1011,9 +1014,23 @@ const FieldGroupHeader: React.FC<{ label: string; count: number; color: string }
   </div>
 );
 
-const FieldListPanel: React.FC<FieldListPanelProps> = ({ fields, loading }) => {
+const FieldListPanel: React.FC<FieldListPanelProps> = ({ fields, loading, onCreateField }) => {
   const dimensions = fields.filter((f) => f.type === 'dimension');
   const metrics = fields.filter((f) => f.type === 'metric');
+
+  const createFieldButton = onCreateField ? (
+    <Button
+      type="dashed"
+      size="small"
+      block
+      icon={<PlusOutlined />}
+      onClick={onCreateField}
+      style={{ marginBottom: 8 }}
+      data-testid="create-computed-field"
+    >
+      新建计算字段
+    </Button>
+  ) : null;
 
   if (loading) {
     return (
@@ -1027,11 +1044,17 @@ const FieldListPanel: React.FC<FieldListPanelProps> = ({ fields, loading }) => {
   }
 
   if (fields.length === 0) {
-    return <Empty description="请先选择数据集" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    return (
+      <div>
+        {createFieldButton}
+        <Empty description="请先选择数据集" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+      </div>
+    );
   }
 
   return (
     <div>
+      {createFieldButton}
       {/* 原为 Divider 分隔两组：带色条的分组标题本身就是更强的分隔符，
           去掉 Divider 省下 ~17px 纵向空白（本页约定：留白只服务于"看得清"）。 */}
       <div style={{ marginBottom: 10 }}>
@@ -1948,6 +1971,7 @@ const ChartBuilder: React.FC = () => {
   const [selectedDatasetId, setSelectedDatasetId] = useState<number | null>(null);
   const [editingChartId, setEditingChartId] = useState<number | null>(null);
   const [sqlModalVisible, setSqlModalVisible] = useState(false);
+  const [computedFieldOpen, setComputedFieldOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
@@ -3744,7 +3768,11 @@ const ChartBuilder: React.FC = () => {
             </Button>
           </Dropdown>
           <Card title="可用字段" size="small" styles={{ body: { padding: '2px 2px 4px' } }}>
-            <FieldListPanel fields={chartBuilderFields} loading={chartBuilderFieldsLoading} />
+            <FieldListPanel
+              fields={chartBuilderFields}
+              loading={chartBuilderFieldsLoading}
+              onCreateField={selectedDatasetId ? () => setComputedFieldOpen(true) : undefined}
+            />
           </Card>
           {/* 右缘拖拽手柄：按住可调节左侧栏宽度 */}
           {/* biome-ignore lint/a11y/noStaticElementInteractions: 鼠标拖拽调节手柄，非交互控件 */}
@@ -3992,7 +4020,11 @@ const ChartBuilder: React.FC = () => {
           size={300}
         >
           <Card title="字段列表" size="small">
-            <FieldListPanel fields={chartBuilderFields} loading={chartBuilderFieldsLoading} />
+            <FieldListPanel
+              fields={chartBuilderFields}
+              loading={chartBuilderFieldsLoading}
+              onCreateField={selectedDatasetId ? () => setComputedFieldOpen(true) : undefined}
+            />
           </Card>
         </Drawer>
 
@@ -4150,6 +4182,17 @@ const ChartBuilder: React.FC = () => {
           setFieldSettings(null);
         }}
         onCancel={() => setFieldSettings(null)}
+      />
+
+      <ComputedFieldModal
+        open={computedFieldOpen}
+        datasetId={selectedDatasetId}
+        onClose={() => setComputedFieldOpen(false)}
+        onSaved={async () => {
+          if (selectedDatasetId) {
+            await fetchDatasetFields(selectedDatasetId);
+          }
+        }}
       />
 
       <Drawer title="查询历史" open={historyOpen} onClose={() => setHistoryOpen(false)} size={320}>
