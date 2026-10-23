@@ -146,6 +146,7 @@ interface FilterConfig {
 | pie | PieProcessor | 百分比计算、（可选）长尾合并 |
 | funnel | PieProcessor（复用） | 返回 `{name,value}`，降序由前端注入的 ORDER BY 决定 |
 | bar / line / area | AxisProcessor | 透传数据 |
+| waterfall | AxisProcessor（复用） | 与 bar 同取数形状；累计值与浮动基线由前端渲染层现算 |
 | combo | AxisProcessor（复用） | primary/secondary 区分在槽位名，processor 不感知 |
 | scatter | ScatterProcessor | 透传数据 |
 | pivot | PivotProcessor | 行列转换 |

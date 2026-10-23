@@ -3,6 +3,7 @@ import {
   AreaChartOutlined,
   BarChartOutlined,
   BoxPlotOutlined,
+  ColumnHeightOutlined,
   DashboardOutlined,
   DotChartOutlined,
   FundOutlined,
@@ -124,6 +125,37 @@ export const chartDefinitions: Record<BuilderChartType, ChartDefinition> = {
         label: '数值',
         emptyText: '拖拽数值指标到此，或点击+添加',
         minGroups: 1,
+      },
+    ],
+  },
+  waterfall: {
+    type: 'waterfall',
+    label: '瀑布图',
+    // waterfall（R-139 候选清单第 1 项）与 bar 共用后端取数形状（x_axis + series）：
+    // 增减分解的累计值与浮动柱基线是纯展示计算，由 buildChartOption 现算，
+    // 因此分享页/仪表盘读同一份配置时也得到同一张图。
+    resultShape: 'axis',
+    icon: ColumnHeightOutlined,
+    // 只用语义色区分增减（不消费 colors 调色板）；数据标注与柱状图同款。
+    styleKeys: ['dataLabel'],
+    fieldGroups: [
+      {
+        // 单维度：瀑布图按类目顺序逐个累加，多个维度会让累计语义不可读。
+        id: 'x_axis',
+        kind: 'dimension',
+        label: 'X 轴维度',
+        emptyText: '拖拽 X 轴维度到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
+      },
+      {
+        // 单指标：累计口径必须唯一（sum 与 avg 混排没有「累计」含义）。
+        id: 'values',
+        kind: 'metric',
+        label: '数值',
+        emptyText: '拖拽数值指标到此，或点击+添加',
+        minGroups: 1,
+        maxFields: 1,
       },
     ],
   },

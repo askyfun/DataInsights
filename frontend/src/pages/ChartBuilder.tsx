@@ -1099,7 +1099,7 @@ const chartTypeGroups: {
   types: Array<(typeof chartTypeOptions)[number]['type']>;
 }[] = [
   { label: '表格', types: ['table', 'pivot'] },
-  { label: '趋势', types: ['bar', 'line', 'area', 'combo'] },
+  { label: '趋势', types: ['bar', 'line', 'area', 'combo', 'waterfall'] },
   { label: '分布', types: ['pie', 'histogram', 'boxplot'] },
   { label: '其他', types: ['scatter', 'radar', 'kpi', 'funnel'] },
 ];
