@@ -1,5 +1,6 @@
 import type { EChartsOption } from 'echarts';
 import { describe, expect, it } from 'vitest';
+import type { ChartDataResponse } from '@/api';
 import {
   buildChartOption,
   DARK_CHART_PALETTE,
@@ -2111,5 +2112,144 @@ describe('buildChartOption：大数据渲染（issue #76）', () => {
     );
     expect(option.animation).toBe(false);
     expect(option.series[0].sampling).toBe('lttb');
+  });
+});
+
+describe('buildChartOption：waterfall 瀑布图（R-139）', () => {
+  interface WaterfallSeriesView {
+    name?: string;
+    type: string;
+    stack?: string;
+    silent?: boolean;
+    legendHoverLink?: boolean;
+    data: ({ value: number | null; itemStyle?: { color?: string } } | number | null)[];
+    itemStyle?: { color?: string };
+    emphasis?: { itemStyle?: { color?: string } };
+    label?: { show?: boolean };
+  }
+
+  interface WaterfallOptionView {
+    xAxis: { type: string; data?: (string | number)[] };
+    yAxis: { type: string };
+    legend?: { data?: string[] };
+    tooltip?: { trigger?: string; formatter?: unknown };
+    series: WaterfallSeriesView[];
+    color?: string[];
+  }
+
+  const payload = {
+    x_axis: ['期初', '收入', '成本', '期末'],
+    // 后端原样返回增减值（不累计）：100 → +40 → -30 → 0
+    series: [{ name: 'amount', data: [100, 40, -30, 0] }],
+  };
+
+  // 结构化的 style 形参：baseStyle 的 colors 推断为 never[]，直接用它做默认值
+  // 会把「传入自定义调色板」的用例挡在类型层。
+  type WaterfallStyle = {
+    colors: string[];
+    smooth: boolean;
+    tableRowSize: 'small' | 'middle' | 'large';
+  };
+  const call = (
+    data: ChartDataResponse = payload,
+    style: WaterfallStyle = baseStyle,
+    theme?: 'light' | 'dark'
+  ): WaterfallOptionView =>
+    view<WaterfallOptionView>(
+      buildChartOption(
+        'waterfall',
+        data,
+        style,
+        {},
+        { title: '', dimensions: ['stage'], metrics: ['amount'] },
+        theme
+      )
+    );
+
+  it('把增减值换算成浮动柱：透明基线系列承载累计值，可见系列承载落差绝对值', () => {
+    const option = call();
+    expect(option.xAxis.type).toBe('category');
+    expect(option.xAxis.data).toEqual(['期初', '收入', '成本', '期末']);
+    expect(option.series).toHaveLength(2);
+    expect(option.series.map((s) => s.type)).toEqual(['bar', 'bar']);
+    // 两条系列必须同一 stack 才会叠成浮动柱
+    expect(option.series[0].stack).toBe('waterfall');
+    expect(option.series[1].stack).toBe('waterfall');
+    // 基线：0 → 累计 0,100,140,110 取较小者
+    expect(option.series[0].data).toEqual([0, 100, 110, 110]);
+    expect(option.series[0].itemStyle?.color).toBe('transparent');
+    expect(option.series[0].silent).toBe(true);
+    // 可见系列：落差绝对值
+    expect(option.series[1].data.map((d) => (d as { value: number }).value)).toEqual([
+      100, 40, 30, 0,
+    ]);
+  });
+
+  it('涨跌用语义色区分，且不消费 style.colors 调色板', () => {
+    const option = call(payload, { ...baseStyle, colors: ['#ff0000'] });
+    const colors = option.series[1].data.map(
+      (d) => (d as { itemStyle: { color: string } }).itemStyle.color
+    );
+    expect(colors).toEqual(['#52c41a', '#52c41a', '#ff4d4f', '#52c41a']);
+    // 语义色优先，用户调色板不进入 option.color
+    expect(option.color).toBeUndefined();
+  });
+
+  it('深色主题使用对应的涨跌色', () => {
+    const option = call(payload, baseStyle, 'dark');
+    const colors = option.series[1].data.map(
+      (d) => (d as { itemStyle: { color: string } }).itemStyle.color
+    );
+    expect(colors).toEqual(['#73d13d', '#73d13d', '#ff7875', '#73d13d']);
+  });
+
+  it('图例只列真正的数值系列，不暴露基线系列', () => {
+    const option = call();
+    expect(option.legend?.data).toEqual(['amount']);
+  });
+
+  it('空值断开累计：缺失点留空，后续累计从最后一个有效值继续', () => {
+    const option = call({
+      x_axis: ['a', 'b', 'c'],
+      series: [{ name: 'amount', data: [10, null, 5] }],
+    });
+    expect(option.series[0].data).toEqual([0, null, 10]);
+    expect(option.series[1].data.map((d) => (d as { value: number | null }).value)).toEqual([
+      10,
+      null,
+      5,
+    ]);
+  });
+
+  it('tooltip 展示增减值与累计值', () => {
+    const option = call();
+    const formatter = option.tooltip?.formatter as (params: unknown) => string;
+    const html = formatter([
+      // 基线系列先出现（ECharts 按 series 顺序给 params）
+      { seriesName: '__waterfall_base__', name: '成本', dataIndex: 2 },
+      { seriesName: 'amount', name: '成本', dataIndex: 2 },
+    ]);
+    expect(html).toContain('成本');
+    expect(html).toContain('amount: -30');
+    expect(html).toContain('累计: 110');
+    // 只有基线系列的命中（不可见）不应产出内容
+    expect(formatter([{ seriesName: '__waterfall_base__', name: '成本', dataIndex: 2 }])).toBe('');
+  });
+
+  it('数据标注关闭时带 label.show=false（与柱状图同款）', () => {
+    const option = call();
+    expect(option.series[1].label).toEqual({ show: false });
+  });
+
+  it('空 x_axis 被 isEmptyPayload 拦下 → 返回 null', () => {
+    expect(
+      buildChartOption(
+        'waterfall',
+        { x_axis: [], series: [] },
+        baseStyle,
+        {},
+        { title: '', dimensions: ['stage'], metrics: ['amount'] }
+      )
+    ).toBeNull();
   });
 });

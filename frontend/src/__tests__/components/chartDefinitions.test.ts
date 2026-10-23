@@ -3,6 +3,7 @@ import {
   AreaChartOutlined,
   BarChartOutlined,
   BoxPlotOutlined,
+  ColumnHeightOutlined,
   DashboardOutlined,
   DotChartOutlined,
   FundOutlined,
@@ -50,6 +51,7 @@ const EXPECTED_RESULT_SHAPE: Record<BuilderChartType, ResultShape> = {
   funnel: 'pie',
   radar: 'radar',
   boxplot: 'boxplot',
+  waterfall: 'axis',
 };
 
 /** 期望的 chartType → icon 组件映射，须与迁移前 ChartBuilder.tsx 的硬编码逐项一致。 */
@@ -67,6 +69,7 @@ const EXPECTED_ICON: Record<BuilderChartType, ChartDefinition['icon']> = {
   funnel: FunnelPlotOutlined,
   radar: RadarChartOutlined,
   boxplot: BoxPlotOutlined,
+  waterfall: ColumnHeightOutlined,
 };
 
 const CHART_TYPES = Object.keys(chartDefinitions) as BuilderChartType[];

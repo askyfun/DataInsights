@@ -270,7 +270,8 @@ export interface ChartConfig {
     | 'histogram'
     | 'funnel'
     | 'radar'
-    | 'boxplot';
+    | 'boxplot'
+    | 'waterfall';
   xAxisField: string | null;
   yAxisFields: string[];
   title: string;

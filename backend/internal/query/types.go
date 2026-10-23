@@ -18,6 +18,10 @@ const (
 	ChartTypeFunnel    ChartType = "funnel"
 	ChartTypeRadar     ChartType = "radar"
 	ChartTypeKpi       ChartType = "kpi"
+	// ChartTypeWaterfall 瀑布图（R-139 候选清单第 1 项）：取数与 bar 完全相同
+	// （GROUP BY 维度 + AGG 指标，AxisResponse 形状），累计值与浮动柱基线由前端
+	// buildChartOption 现算——后端不做二次计算，分享页/仪表盘因此天然同口径。
+	ChartTypeWaterfall ChartType = "waterfall"
 )
 
 // AggregationType 聚合函数类型

@@ -569,6 +569,11 @@ func GetProcessor(chartType ChartType) Processor {
 		return NewPieProcessor()
 	case ChartTypeBar, ChartTypeLine, ChartTypeArea:
 		return &AxisProcessor{}
+	case ChartTypeWaterfall:
+		// waterfall（瀑布图）与 bar 共用取数语义：GROUP BY 维度 + AGG 指标，
+		// 返回 AxisResponse。增减分解所需的累计值与浮动基线是纯展示计算，放在前端
+		// buildChartOption 里现算，后端不引入第二种响应形状。
+		return &AxisProcessor{}
 	case ChartTypeCombo:
 		// combo（双轴组合图，R-58）复用 AxisProcessor：primary/secondary 的区分在
 		// ChartSpec 的 metric 槽位名中，两个槽位的 metrics 合并进同一个 metrics[] 传给

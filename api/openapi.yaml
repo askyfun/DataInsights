@@ -2496,8 +2496,9 @@ components:
           type: string
           description: >-
             后端不做强校验、落库什么返回什么。查询层已知取值：table / bar / line /
-            pie / area / scatter / pivot；未知值按 axis 处理器回退
-            （query.GetProcessor default 分支）。
+            pie / area / scatter / pivot / waterfall；未知值按 axis 处理器回退
+            （query.GetProcessor default 分支）。waterfall 与 bar 同构（返回
+            ChartAxisResponse），增减分解由前端渲染层计算。
         config:
           type: string
           description: 图表配置的 JSON 字符串；创建/更新为空时后端写 "{}"。

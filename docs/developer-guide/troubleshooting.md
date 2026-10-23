@@ -87,7 +87,7 @@
 
 ## 图表槽位
 
-- **内置 13 种图型**（`chartDefinitions.ts` 与 `backend/internal/query/types.go` 双端一致）；**图型中文名的唯一来源 = `chartDefinitions[type].label`**。
+- **内置 14 种图型**（`chartDefinitions.ts` 与 `backend/internal/query/types.go` 双端一致）；**图型中文名的唯一来源 = `chartDefinitions[type].label`**。
 - **已下线槽位** `color_group` / `series_group`（某次决策后下线）；后端 `SlotColorGroup` / `SlotSeriesGroup` 常量与归槽分支**刻意保留**，**勿当死代码删**。
 - **字段组有两套口径，别混**：`getActiveFieldGroups` 按定义槽位 `slice` 裁剪；`normalizeQueryConfigForChartType` 按 `minGroups` 补齐并把溢出组绑定**搬进**同类型保留组——不搬运则透视表切表格会**静默丢列维度**。**v2 wire 触发** = combo 双轴指标槽位 ∨ 具名维度槽位。⚠️ `maxFields` 是**纯声明、无校验** → **不要为满足它丢字段**。
 - **过滤**（`FilterDropZone.tsx`）是**图型无关的公共行，不写进 `chartDefinitions.fieldGroups`**；多条件恒「且」；同字段可重复加入（`>=` + `<=` 即区间）；条件存**列名**。
