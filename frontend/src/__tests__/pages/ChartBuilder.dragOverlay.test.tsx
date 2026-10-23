@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { AxiosResponse } from 'axios';
+import { IntlProvider } from 'react-intl';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { chartsApi, datasetsApi } from '../../api';
+import { messages } from '../../i18n/useLocale';
 import type { ApiResponse } from '../../lib/api/client';
 import ChartBuilder from '../../pages/ChartBuilder';
 import { useStore } from '../../store';
@@ -106,11 +108,13 @@ const resetChartBuilderState = (): void => {
  */
 const renderChartBuilder = () => {
   return render(
-    <MemoryRouter initialEntries={['/chart-builder?edit=1&datasetId=1']}>
-      <Routes>
-        <Route path="/chart-builder" element={<ChartBuilder />} />
-      </Routes>
-    </MemoryRouter>
+    <IntlProvider locale="en" messages={messages['en-US']}>
+      <MemoryRouter initialEntries={['/chart-builder?edit=1&datasetId=1']}>
+        <Routes>
+          <Route path="/chart-builder" element={<ChartBuilder />} />
+        </Routes>
+      </MemoryRouter>
+    </IntlProvider>
   );
 };
 

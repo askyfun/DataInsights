@@ -82,7 +82,7 @@ describe('DatasetDetailPage 虚拟字段保存后重取列', () => {
       target: { value: 'delta' },
     });
     fireEvent.change(screen.getByPlaceholderText('e.g., price * quantity'), {
-      target: { value: '[temp_max] - [date]' },
+      target: { value: 'temp_max - 1' },
     });
     // 页面上还有别的 common.save（如分片配置），限定在虚拟字段弹窗内点保存
     const modal = screen
@@ -100,5 +100,53 @@ describe('DatasetDetailPage 虚拟字段保存后重取列', () => {
 
     const sentColumns = mockUpdateColumns.mock.calls[0][1];
     expect(sentColumns.some((col: { name: string }) => col.name === 'delta')).toBe(true);
+  });
+
+  it('编辑虚拟字段时回填并写回 expr（表单名 expression ↔ wire 名 expr）', async () => {
+    mockGetColumns.mockResolvedValue({
+      data: {
+        data: [
+          ...serverColumns,
+          {
+            id: 'v1',
+            name: 'double_temp',
+            type: 'float',
+            role: 'metric',
+            comment: '',
+            expr: 'temp_max * 2',
+          },
+        ],
+      },
+    });
+
+    renderPage();
+    await screen.findByRole('tab', { name: /dataset.detail.tabFields/ });
+    await waitFor(() => expect(mockGetColumns).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByTestId('virtual-field-edit-v1'));
+    const textarea = (await screen.findByPlaceholderText(
+      'e.g., price * quantity'
+    )) as HTMLTextAreaElement;
+    // 修复前表达式列取 record.expression（不存在）→ 编辑时输入框为空
+    await waitFor(() => expect(textarea.value).toBe('temp_max * 2'));
+
+    fireEvent.change(textarea, { target: { value: 'temp_max * 3' } });
+
+    const modal = screen
+      .getByPlaceholderText('e.g., total_price')
+      .closest('.ant-modal') as HTMLElement;
+    const saveButton = Array.from(modal.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('common.save')
+    );
+    if (!saveButton) throw new Error('save button not found');
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(mockUpdateColumns).toHaveBeenCalledTimes(1));
+    const sentColumns = mockUpdateColumns.mock.calls[0][1] as Array<{
+      id: string;
+      expr: string;
+    }>;
+    // 修复前 expr 仍是旧值（表单值被 spread 成未知的 expression 键）
+    expect(sentColumns.find((col) => col.id === 'v1')?.expr).toBe('temp_max * 3');
   });
 });

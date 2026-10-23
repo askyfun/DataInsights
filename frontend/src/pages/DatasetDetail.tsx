@@ -34,8 +34,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { DatasetColumn } from '../api';
 import { DatasetPreview, datasetsApi } from '../api';
 import ClickToEdit from '../components/ClickToEdit';
+import ExpressionEditor from '../components/ExpressionEditor';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
+import { normalizeDataType } from '../lib/dataTypes';
+import { validateExpr } from '../lib/expr';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
@@ -187,7 +190,9 @@ const DatasetDetailPage: React.FC = () => {
   const handleOpenVirtualFieldModal = (record?: DatasetColumn) => {
     setEditingVirtualField(record || null);
     if (record) {
-      form.setFieldsValue(record);
+      // 表单字段名（dataType/expression）与 wire 列字段名（type/expr）不同，
+      // 必须显式映射；直接 setFieldsValue(record) 会让编辑时的类型与表达式丢失。
+      form.setFieldsValue({ ...record, dataType: record.type, expression: record.expr });
     } else {
       form.resetFields();
     }
@@ -199,18 +204,24 @@ const DatasetDetailPage: React.FC = () => {
       const values = await form.validateFields();
       const isEditing = !!editingVirtualField;
 
+      // 表单值统一收敛成 wire 列形状：不要用 spread 把 dataType/expression 带进列对象，
+      // 否则编辑时 expr 仍是旧值（textarea 的改动会被静默丢弃）。
+      const columnPayload = {
+        name: values.name,
+        type: normalizeDataType(values.dataType),
+        role: values.role || 'dimension',
+        expr: values.expression || '',
+        comment: values.comment || '',
+      };
+
       let newColumn: DatasetColumn;
       if (isEditing && editingVirtualField) {
-        newColumn = { ...editingVirtualField, ...values };
+        newColumn = { ...editingVirtualField, ...columnPayload };
       } else {
         newColumn = {
           // 空 id = 请后端分配（列的稳定标识由后端 idgen 生成）
           id: '',
-          name: values.name,
-          type: values.type || 'string',
-          role: values.role || 'dimension',
-          expr: values.expression || '',
-          comment: values.comment || '',
+          ...columnPayload,
         };
       }
 
@@ -291,6 +302,13 @@ const DatasetDetailPage: React.FC = () => {
   // shard_keys 存列 ID；历史数据里存的还是列名，故两种都认（迁移后只剩 ID）
   const isShardKey = (col: DatasetColumn) => shardKeySet.has(col.id) || shardKeySet.has(col.name);
 
+  // 表达式只能引用**物理列**：虚拟字段的 expr 是相对来源表求值的，引用另一个虚拟字段
+  // 在 SQL 里并不存在该列（G1 只校验语法，查不出这种引用）。这里把虚拟字段排除出
+  // 可插入/可引用列表，同时也挡住新字段引用自身。
+  const referenceableFields = columns
+    .filter((col) => !(col.expr && col.expr !== col.name))
+    .map((col) => col.name);
+
   const columnsManagementTableData = [...columns]
     .sort((a, b) => {
       const aShard = isShardKey(a) ? 0 : 1;
@@ -368,7 +386,7 @@ const DatasetDetailPage: React.FC = () => {
           <Select.Option value="string">
             {intl.formatMessage({ id: 'dataType.string' })}
           </Select.Option>
-          <Select.Option value="int">
+          <Select.Option value="integer">
             {intl.formatMessage({ id: 'dataType.integer' })}
           </Select.Option>
           <Select.Option value="float">
@@ -433,6 +451,8 @@ const DatasetDetailPage: React.FC = () => {
               type="text"
               size="small"
               icon={<EditOutlined />}
+              aria-label={intl.formatMessage({ id: 'virtualField.edit' })}
+              data-testid={`virtual-field-edit-${record.id}`}
               onClick={() => handleOpenVirtualFieldModal(record)}
             />
             <Popconfirm
@@ -742,7 +762,7 @@ const DatasetDetailPage: React.FC = () => {
               <Select.Option value="string">
                 {intl.formatMessage({ id: 'dataType.string' })}
               </Select.Option>
-              <Select.Option value="int">
+              <Select.Option value="integer">
                 {intl.formatMessage({ id: 'dataType.integer' })}
               </Select.Option>
               <Select.Option value="float">
@@ -781,9 +801,26 @@ const DatasetDetailPage: React.FC = () => {
                 required: true,
                 message: intl.formatMessage({ id: 'field.pleaseEnterExpression' }),
               },
+              {
+                // 保存闸口与编辑器内联提示同源（validateExpr）：即使有人绕过 UI，
+                // 仍拿不到非法表达式。后端 internal/expr 是最终权威。
+                validator: (_, value: string) => {
+                  if (!value?.trim()) {
+                    return Promise.resolve();
+                  }
+                  const result = validateExpr(value, referenceableFields);
+                  return result.ok
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(intl.formatMessage({ id: 'expr.invalid' })));
+                },
+              },
             ]}
           >
-            <Input.TextArea placeholder="e.g., price * quantity" rows={3} />
+            <ExpressionEditor
+              fields={referenceableFields}
+              rows={3}
+              placeholder="e.g., price * quantity"
+            />
           </Form.Item>
           <Form.Item name="comment" label={intl.formatMessage({ id: 'field.description' })}>
             <Input.TextArea
