@@ -23,6 +23,7 @@ import (
 	"data-insights/internal/migration/columnids"
 	"data-insights/internal/response"
 	"data-insights/internal/service/alert"
+	"data-insights/internal/service/auth"
 	"data-insights/internal/webui"
 
 	"github.com/getsentry/sentry-go"
@@ -147,8 +148,23 @@ func main() {
 		ConfiguredID: c.ExtractDatasourceID,
 	})
 
+	// 首管建立与恢复通道：ADMIN_USERNAME/ADMIN_PASSWORD 幂等建管理员；
+	// 否则在无管理员时签发一次性 bootstrap token（只在启动打印这一行明文）。
+	authSvc := auth.NewService(db, auth.AdminConfig{
+		Username:   c.Admin.Username,
+		Password:   c.Admin.Password,
+		ResetToken: c.Admin.ResetToken,
+	})
+	if raw, generated, err := authSvc.EnsureBootstrap(context.Background()); err != nil {
+		slog.Error("Failed to bootstrap administrator", "error", err)
+		os.Exit(1)
+	} else if generated {
+		slog.Info("bootstrap token issued", "prefix", raw[:len("di_boot_")+6]+"…", "ttl", "30m")
+		fmt.Printf("BOOTSTRAP TOKEN: %s\n", raw)
+	}
+
 	// 预警邮件通知：SMTP_HOST 未配置传 nil（评估照常跑，触发记录说明未通知）。
-	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, c.Database.Url, newEmailNotifier(c.Alert))
+	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, c.Database.Url, newEmailNotifier(c.Alert), authSvc)
 
 	// 预警评估器：后台 goroutine 定时轮询，随主进程退出（evalCancel）而结束。
 	evalCtx, evalCancel := context.WithCancel(context.Background())

@@ -13,7 +13,7 @@
 
 ## 1. 通用规范
 
-### 1.1 端点清单（58 个泛型路由端点 + 3 个手工路由）
+### 1.1 端点清单（60 个泛型路由端点 + 3 个手工路由）
 
 | 领域 | 端点数 | 前缀 |
 |------|--------|------|
@@ -24,7 +24,7 @@
 | DashboardFolder 归档文件夹 | 5 | `/api/dashboard-folders` |
 | Alert 指标预警 | 6 | `/api/alerts` |
 | SampleDataset 示例数据集 | 4 | `/api/sample-dataset` |
-| Auth 认证 | 4 | `/api/auth` |
+| Auth 认证 | 6 | `/api/auth` |
 | Token PAT 管理 | 3 | `/api/tokens` |
 | QueryRecord 查询记录 | 2 | `/api/queries` |
 | Health 健康检查 | — | `/health` |
@@ -369,7 +369,7 @@ expires_at / expired / hit_count`）。
 - `load` 对 `DATABASE_URL` 只接受 `postgres / postgresql` scheme，且 host 与库名必填；不合法 → 50000（普通内部错误，非业务码）。
 - 本族 4 个端点当前**匿名可调**（未接 Bearer，与第 10 节的渐进强制同一口径）。
 
-## 10. Auth 认证（4 个端点）
+## 10. Auth 认证（6 个端点）
 
 令牌模型（会话与 PAT 共用 `bi_token` 表，migration 00010）：明文 = `di_session_…` / `di_pat_…` + 32 随机字节 base64url，**只在签发响应回显一次**；库内只存 sha256 摘要与非密钥的可识别前缀（标记 + 前 6 位密钥字符）。校验是**每次实时查库**（无签名、无缓存 → 撤销即时生效、无静默窗口），每次命中顺带 best-effort 刷新 `last_used_at/ip/ua`（刷新失败不会拒绝有效令牌）。`Authorization` 头的 `Bearer` scheme 大小写不敏感。
 
@@ -377,14 +377,17 @@ expires_at / expired / hit_count`）。
 
 | # | 方法与路径 | 说明 |
 |---|-----------|------|
-| 1 | `POST /api/auth/register` | 公开。**引导式注册**：仅当无存活用户时成功，该账号 `role=admin`，并在同一事务把 datasource/dataset/chart 三表里 `owner_id=0`（L0 占位归属）的存量行认到其名下；已有存活用户 → 20200「注册已关闭：系统管理员已建立」。username/password 空 → 20100。口令 bcrypt。成功即签发 **24h** 会话 token（无自动续期） |
-| 2 | `POST /api/auth/login` | 公开。缺字段 / 用户不存在 / 口令错一律**统一 20200 `"invalid username or password"`**（刻意不区分，防用户名枚举）。成功每次签发**新的**会话 token（旧 token 不连带撤销，各自 24h 自然到期） |
-| 3 | `GET /api/auth/me` | **Bearer 必需**（`allowPAT=true`：自助身份查询，机器令牌也可用）。`data = AuthUser` |
-| 4 | `DELETE /api/auth/logout` | **Bearer 必需**（`allowPAT=true`）。撤销「本次调用所用凭证自身」（会话或 PAT），即时生效。`data = {status: "ok"}`。**用 DELETE 而非 POST**：泛型路由的 POST 必绑 JSON body，登出无 body → EOF 绑定失败（`cmd/routes.go` 注释钉死） |
+| 1 | `GET /api/auth/bootstrap-status` | 公开。`data = {needs_bootstrap, enforce_mode}`。`needs_bootstrap` 仅在库中没有任何管理员行（含软删）时为 true；`enforce_mode` 当前恒为 `off`（资源端点尚未强制 Bearer，R-92 引入开关） |
+| 2 | `POST /api/auth/register` | 公开，**需一次性 bootstrap token**。仅当无任何管理员行时成功（存在含禁用的管理员 → 20200「注册已关闭」），该账号 `role=admin`，并在同一事务把 datasource/dataset/chart 三表里 `owner_id=0`（L0 占位归属）的存量行认到其名下。`bootstrap_token` 缺失/过期/不匹配 → 20200（文案与登录失败可区分）；username/password 空 → 20100。口令 bcrypt。并发抢注由 `pg_advisory_xact_lock` 串行化，只有一个成功。成功即消费 token 并签发 **24h** 会话 token（无自动续期） |
+| 3 | `POST /api/auth/recover-admin` | 公开，需 `ADMIN_RESET_TOKEN`（env 留空 = 功能关闭）。body `{reset_token, new_password}`；token 单次有效（成功后同一 token 再用 → 20200）。重置首个有效管理员口令并撤销其全部现存会话。`data = {status: "ok"}` |
+| 4 | `POST /api/auth/login` | 公开。缺字段 / 用户不存在 / 口令错一律**统一 20200 `"invalid username or password"`**（刻意不区分，防用户名枚举）。成功每次签发**新的**会话 token（旧 token 不连带撤销，各自 24h 自然到期） |
+| 5 | `GET /api/auth/me` | **Bearer 必需**（`allowPAT=true`：自助身份查询，机器令牌也可用）。`data = AuthUser` |
+| 6 | `DELETE /api/auth/logout` | **Bearer 必需**（`allowPAT=true`）。撤销「本次调用所用凭证自身」（会话或 PAT），即时生效。`data = {status: "ok"}`。**用 DELETE 而非 POST**：泛型路由的 POST 必绑 JSON body，登出无 body → EOF 绑定失败（`cmd/routes.go` 注释钉死） |
 
 易踩点：
 
-- **渐进强制**：当前只有本族 me/logout 两个端点与第 11 节的 3 个端点强制 Bearer，`register / login` 是本族仅有的公开端点；其余资源端点仍匿名（Phase C 逐步接入）——不要按「全站已鉴权」理解 20200。
+- **首管建立**：首次部署看启动日志的 `BOOTSTRAP TOKEN:`（只打印明文一次，库中存 sha256，TTL 30 分钟）；无头部署改用 `ADMIN_USERNAME`+`ADMIN_PASSWORD`（成对，幂等）。两种路径都会在其他管理员行存在时保持不动。
+- **渐进强制**：当前只有本族 me/logout 两个端点与第 11 节的 3 个端点强制 Bearer，`bootstrap-status / register / recover-admin / login` 是本族仅有的公开端点；其余资源端点仍匿名（Phase C 逐步接入）——不要按「全站已鉴权」理解 20200。
 - 20200 不只属于认证：Bearer 中间件对非业务错误也 fail-closed 成 20200（`middleware/bearer.go`）。
 
 ## 11. Token PAT 管理（3 个端点）

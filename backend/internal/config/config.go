@@ -58,6 +58,17 @@ type Config struct {
 	ExtractDatasourceID int
 	// Alert 是指标预警（issue #155）的运行期配置：评估间隔 + SMTP 通知。
 	Alert AlertConfig
+	// Admin 是首管建立与恢复的逃生口（R-91）：三者都留空 = 走一次性
+	// bootstrap token（启动时打印）。
+	Admin AdminConfig
+}
+
+// AdminConfig 聚合首管相关的环境变量。ADMIN_USERNAME 与 ADMIN_PASSWORD
+// 必须成对出现；ADMIN_RESET_TOKEN 留空即关闭恢复通道。
+type AdminConfig struct {
+	Username   string
+	Password   string
+	ResetToken string
 }
 
 // AlertConfig 聚合预警模块的环境变量。SMTP 五项 + 收件人任何一项缺失都不拦启动：
@@ -208,6 +219,16 @@ func (c *Config) Load() error {
 	}
 	if v := os.Getenv("ALERT_NOTIFY_EMAIL"); v != "" {
 		c.Alert.NotifyEmails = v
+	}
+
+	if v := os.Getenv("ADMIN_USERNAME"); v != "" {
+		c.Admin.Username = v
+	}
+	if v := os.Getenv("ADMIN_PASSWORD"); v != "" {
+		c.Admin.Password = v
+	}
+	if v := os.Getenv("ADMIN_RESET_TOKEN"); v != "" {
+		c.Admin.ResetToken = v
 	}
 
 	return nil

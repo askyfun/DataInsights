@@ -61,6 +61,16 @@
 
 ## 7. 升级与回滚
 
+- **忘记管理员口令**：设置 `ADMIN_RESET_TOKEN` 后重启容器，用一次性令牌重置（成功一次即失效，记得随后更换或清空该变量）：
+
+  ```bash
+  # 在宿主机执行（镜像内只有 server 与静态产物，没有 curl）
+  curl -sS -X POST http://127.0.0.1:23352/api/auth/recover-admin \
+    -H 'Content-Type: application/json' \
+    -d "{\"reset_token\":\"$ADMIN_RESET_TOKEN\",\"new_password\":\"<新口令>\"}"
+  ```
+
+
 - **迁移前先备份**：迁移随启动自动应用，升级前先对 `DATABASE_URL` 指向的库做一次备份。
 - **镜像用不可变 tag**：用版本号或提交 sha 打 tag，避免 `latest` 无法区分版本、难以回滚。
 - **回滚注意 `SECURITY_KEY`**：回滚到旧版本时，`SECURITY_KEY` 必须与库里已加密数据对应的 key 保持一致（留空时 key 落在数据库里，容器重建会自动复用；显式配置时须保持同一把）。

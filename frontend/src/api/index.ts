@@ -750,8 +750,15 @@ export interface PATCreateResult {
   info: TokenInfo;
 }
 
+export interface BootstrapStatus {
+  needs_bootstrap: boolean;
+  /** 资源端点是否强制 Bearer；当前恒为 off（R-92 引入开关）。 */
+  enforce_mode: string;
+}
+
 export const authApi = {
-  register: (d: { username: string; password: string }) =>
+  bootstrapStatus: () => apiClient.get<ApiResponse<BootstrapStatus>>('/api/auth/bootstrap-status'),
+  register: (d: { username: string; password: string; bootstrap_token: string }) =>
     apiClient.post<ApiResponse<AuthResult>>('/api/auth/register', d),
   login: (d: { username: string; password: string }) =>
     apiClient.post<ApiResponse<AuthResult>>('/api/auth/login', d),
