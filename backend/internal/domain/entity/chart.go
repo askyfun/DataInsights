@@ -7,8 +7,15 @@ type Chart struct {
 	DatasetID int    `json:"dataset_id"`
 	ChartType string `json:"chart_type"` // "line", "bar", "pie"
 	Config    string `json:"config"`     // JSON configuration
+	// OwnerID 是 R-95（#220）的归属注入位：handler 从已认证 principal 取值塞进
+	// 来，service 落库；匿名请求保持 0（由 service 换算成 SystemOwnerID）。
+	// json:"-" 不上 wire、不参与请求绑定（chartCreateIn 因此转为有意裁剪档）。
+	OwnerID   int    `json:"-"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	// OwnerName 是读出口的创建人用户名（列表回填，可空）；单体 GET/POST/PUT 响应
+	// 目前不回填，序列化为 null。
+	OwnerName *string `json:"owner_name"`
 }
 
 // ChartQueryRequest represents a chart query request.

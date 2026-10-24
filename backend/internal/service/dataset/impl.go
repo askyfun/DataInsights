@@ -145,7 +145,34 @@ func (s *datasetService) List(ctx context.Context, opts ListOptions) (listpage.R
 	}
 	out.Items = toDatasetEntityList(datasets)
 	out.Total = total
+	// R-95（#220）：列表出口带创建人用户名（可空；匿名/存量行 owner_id=0 → null）。
+	if err := fillOwnerNames(ctx, s.db, datasets, out.Items); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+// fillOwnerNames 按行序把创建人用户名写进列表项（与 datasource 包同款；模型行与
+// 实体项同序同长，owner_id=0/NULL 的行保持 null）。
+func fillOwnerNames(ctx context.Context, db bun.IDB, rows []model.Dataset, items []entity.Dataset) error {
+	ids := make([]int32, 0, len(rows))
+	for i := range rows {
+		if rows[i].OwnerID.Valid && rows[i].OwnerID.Int32 > 0 {
+			ids = append(ids, rows[i].OwnerID.Int32)
+		}
+	}
+	names, err := model.OwnerNames(ctx, db, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if i < len(rows) && rows[i].OwnerID.Valid {
+			if n, ok := names[rows[i].OwnerID.Int32]; ok {
+				items[i].OwnerName = &n
+			}
+		}
+	}
+	return nil
 }
 
 // GetByID returns a dataset by ID
@@ -172,8 +199,9 @@ func (s *datasetService) Create(ctx context.Context, ds *entity.Dataset) (*entit
 	// bun 对零值 sql.NullTime 发显式 NULL（绕过列 DEFAULT CURRENT_TIMESTAMP），
 	// 故 updated_at 需与 created_at 一样在插入时显式打戳，否则新建行 updated_at 为空。
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
-	// R-22 归属（#171）：L0 无账号，打系统占位 id；#183 落地后换成上下文真实用户。
-	m.OwnerID = sql.NullInt32{Int32: model.SystemOwnerID, Valid: true}
+	// R-22 归属（#171）+ R-95（#220）：handler 注入 principal 用户 id，匿名仍打
+	// 系统占位 0（口径不变）。
+	m.OwnerID = sql.NullInt32{Int32: model.ResolveOwnerID(ds.OwnerID), Valid: true}
 	if _, err := s.db.NewInsert().Model(m).Returning("*").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create dataset: %w", err)
 	}

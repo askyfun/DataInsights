@@ -752,6 +752,11 @@ export interface components {
             created_at: string;
             /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
             updated_at: string;
+            /**
+             * @description 创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL）
+             * 为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
+             */
+            owner_name?: string | null;
         };
         /** @description POST /api/datasources 请求体；password 仅出现在请求侧。 */
         DatasourceCreateRequest: {
@@ -888,6 +893,11 @@ export interface components {
             created_at: string;
             /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
             updated_at: string;
+            /**
+             * @description 创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL）
+             * 为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
+             */
+            owner_name?: string | null;
         };
         /** @description POST /api/datasets 请求体。table_name/query_sql/description 未传或为空串时 后端置为 null；query_type/mode 为空缺省 "table"/"direct"；tags/columns 为空 缺省 "[]"。 */
         DatasetCreateRequest: {
@@ -1051,6 +1061,11 @@ export interface components {
             created_at: string;
             /** @description RFC3339 时间；数据库时间戳无效时为空字符串。 */
             updated_at: string;
+            /**
+             * @description 创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL）
+             * 为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
+             */
+            owner_name?: string | null;
         };
         /** @description POST /api/charts 请求体。后端整体绑定 entity.Chart（created_at/updated_at 不参与落库映射；id 会被 toChartModel 透传进 insert——传非零值有指定主键风险， 故本 schema 不定义 id）；name/dataset_id/chart_type 为规范性收紧的 required （后端零值可过，见 task-3 报告）。 */
         ChartCreateRequest: {
@@ -1489,6 +1504,11 @@ export interface components {
             created_at: string;
             /** @description RFC3339；由后端在每次更新时显式前进（表无触发器）。 */
             updated_at: string;
+            /**
+             * @description 创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL）
+             * 为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
+             */
+            owner_name?: string | null;
         };
         /** @description POST /api/dashboards 请求体（entity.DashboardCreateRequest）。不含 id： 主键由后端生成 UUIDv7。 */
         DashboardCreateRequest: {

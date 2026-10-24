@@ -101,7 +101,7 @@ func newChartTestRouter(h *ChartHandler) *gin.Engine {
 
 const (
 	notFoundChart  = `{"code":20300,"msg":"chart not found: sql: no rows in result set","trace":"","data":{}}`
-	chartFoundJSON = `{"id":7,"name":"c","dataset_id":3,"chart_type":"line","config":"{}","created_at":"","updated_at":""}`
+	chartFoundJSON = `{"id":7,"name":"c","dataset_id":3,"chart_type":"line","config":"{}","created_at":"","updated_at":"","owner_name":null}`
 )
 
 // ---------------------------------------------------------------- List
@@ -133,7 +133,7 @@ func TestChartList_ExplicitPaging(t *testing.T) {
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodGet, "/api/charts?limit=2&offset=3", "")
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"items":[{"id":1,"name":"c1","dataset_id":2,"chart_type":"bar","config":"{}","created_at":"","updated_at":""}],"total":9}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"items":[{"id":1,"name":"c1","dataset_id":2,"chart_type":"bar","config":"{}","created_at":"","updated_at":"","owner_name":null}],"total":9}}`)
 	if got.Limit != 2 || got.Offset != 3 {
 		t.Errorf("expected limit=2 offset=3, got limit=%d offset=%d", got.Limit, got.Offset)
 	}
@@ -242,7 +242,7 @@ func TestChartCreate_Success(t *testing.T) {
 	})
 	body := `{"name":"new","dataset_id":4,"chart_type":"line","config":"{\"x\":1}"}`
 	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts", body)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":8,"name":"new","dataset_id":4,"chart_type":"line","config":"{\"x\":1}","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":8,"name":"new","dataset_id":4,"chart_type":"line","config":"{\"x\":1}","created_at":"","updated_at":"","owner_name":null}}`)
 	if got == nil || got.Name != "new" || got.DatasetID != 4 || got.ChartType != "line" || got.Config != `{"x":1}` {
 		t.Fatalf("service received unexpected entity: %+v", got)
 	}
@@ -259,7 +259,7 @@ func TestChartCreate_ConfigDefault(t *testing.T) {
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodPost, "/api/charts", `{"name":"n"}`)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":0,"name":"n","dataset_id":0,"chart_type":"","config":"{}","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":0,"name":"n","dataset_id":0,"chart_type":"","config":"{}","created_at":"","updated_at":"","owner_name":null}}`)
 	if got == nil || got.Config != "{}" {
 		t.Fatalf("expected default config \"{}\", got %+v", got)
 	}
@@ -342,7 +342,7 @@ func TestChartUpdate_BindsDatasetID(t *testing.T) {
 		"config": "{\"chartType\":\"pie\"}"
 	}`
 	w := serve(newChartTestRouter(h), http.MethodPut, "/api/charts/3", body)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":3,"name":"test chart","dataset_id":5,"chart_type":"pie","config":"{\"chartType\":\"pie\"}","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":3,"name":"test chart","dataset_id":5,"chart_type":"pie","config":"{\"chartType\":\"pie\"}","created_at":"","updated_at":"","owner_name":null}}`)
 	if got == nil || got.ID != 3 || got.DatasetID != 5 || got.Name != "test chart" || got.ChartType != "pie" {
 		t.Fatalf("expected ID=3 DatasetID=5 Name=\"test chart\" ChartType=\"pie\", got %+v", got)
 	}

@@ -140,6 +140,8 @@ func (h *DatasetHandler) Create(req router.Request[datasetCreateIn], res *router
 	if ds.Columns == "" {
 		ds.Columns = "[]"
 	}
+	// R-95（#220）：有已认证主体则带归属创建。
+	ds.OwnerID = principalOwnerID(req.Ctx)
 
 	result, err := h.svc.Create(req.Ctx.Request.Context(), ds)
 	if err != nil {
