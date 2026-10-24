@@ -42,11 +42,12 @@ export interface DashboardFilterBlockProps {
   onChange: (next: unknown) => void;
   /** 换算子（数值族在块上直接改）。 */
   onOperatorChange: (operator: FilterOperator) => void;
-  /** 改作用范围：`'page'` 只作用本页，`'all'` 作用所有页。 */
-  onScopeChange: (scope: DashboardFilterScope) => void;
-  /** 打开完整日期筛选弹窗（粒度 / 快捷选项 / 高级起止 / 特殊值）——仅日期族。 */
-  onConfigure: () => void;
-  onRemove: () => void;
+  /** 改作用范围：`'page'` 只作用本页，`'all'` 作用所有页。缺省 = 不渲染范围切换（移动端阅览）。 */
+  onScopeChange?: (scope: DashboardFilterScope) => void;
+  /** 打开完整日期筛选弹窗（粒度 / 快捷选项 / 高级起止 / 特殊值）——仅日期族。缺省 = 不渲染「配置」。 */
+  onConfigure?: () => void;
+  /** 缺省 = 不渲染移除按钮（移动端阅览模式下编辑入口收敛）。 */
+  onRemove?: () => void;
 }
 
 /**
@@ -200,20 +201,22 @@ const DashboardFilterBlock: React.FC<DashboardFilterBlockProps> = ({
       title={widget.label}
       extra={
         <>
-          <Select
-            size="small"
-            value={widget.scope ?? 'page'}
-            aria-label={intl.formatMessage({ id: 'dashboard.filterScope' })}
-            data-testid="dashboard-filter-scope"
-            style={{ width: 96 }}
-            options={[
-              { value: 'page', label: intl.formatMessage({ id: 'dashboard.filterScopePage' }) },
-              { value: 'all', label: intl.formatMessage({ id: 'dashboard.filterScopeAll' }) },
-            ]}
-            // 词表在这里是普通字符串（与 FAMILY_OPERATORS 同款），到边界收成字面量联合。
-            onChange={(next) => onScopeChange(next as DashboardFilterScope)}
-          />
-          {family === 'date' && (
+          {onScopeChange && (
+            <Select
+              size="small"
+              value={widget.scope ?? 'page'}
+              aria-label={intl.formatMessage({ id: 'dashboard.filterScope' })}
+              data-testid="dashboard-filter-scope"
+              style={{ width: 96 }}
+              options={[
+                { value: 'page', label: intl.formatMessage({ id: 'dashboard.filterScopePage' }) },
+                { value: 'all', label: intl.formatMessage({ id: 'dashboard.filterScopeAll' }) },
+              ]}
+              // 词表在这里是普通字符串（与 FAMILY_OPERATORS 同款），到边界收成字面量联合。
+              onChange={(next) => onScopeChange(next as DashboardFilterScope)}
+            />
+          )}
+          {onConfigure && family === 'date' && (
             <Button
               type="text"
               size="small"
@@ -223,15 +226,17 @@ const DashboardFilterBlock: React.FC<DashboardFilterBlockProps> = ({
               onClick={onConfigure}
             />
           )}
-          <Button
-            type="text"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            aria-label="移除筛选器"
-            data-testid="dashboard-filter-remove"
-            onClick={onRemove}
-          />
+          {onRemove && (
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label="移除筛选器"
+              data-testid="dashboard-filter-remove"
+              onClick={onRemove}
+            />
+          )}
         </>
       }
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}

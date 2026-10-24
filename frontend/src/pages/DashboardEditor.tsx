@@ -100,6 +100,7 @@ import {
 } from '../lib/dashboardLinkage';
 import type { DateGranularity, WeekStart } from '../lib/dateFilter';
 import { isDateFilterValue } from '../lib/dateFilter';
+import { useIsMobile } from '../lib/useIsMobile';
 import { useStore } from '../store';
 
 const { Text } = Typography;
@@ -165,6 +166,8 @@ const DashboardEditor: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { width, mounted, containerRef } = useContainerWidth();
+  // 移动端阅览模式（issue #158）：窄屏降级为单列堆叠，编辑入口整体收敛。
+  const isMobile = useIsMobile();
   // message 取 App 上下文实例，不用静态 message.*：静态方法读不到 ConfigProvider 的
   // 主题上下文，antd 6 会打 "Static function can not consume context like dynamic theme"。
   // 依赖根部的 <App> 包裹（见 main.tsx）——没有它 useApp() 拿到的是空对象。
@@ -436,6 +439,16 @@ const DashboardEditor: React.FC = () => {
   const pinnedContainers = useMemo(
     () => containerWidgetsOf(pageWidgets).filter((widget) => widget.pinned),
     [pageWidgets]
+  );
+
+  /**
+   * 移动端阅览模式的堆叠顺序：按 placement 的 (y, x) 排——即桌面栅格的视觉阅读序
+   * （从上到下、从左到右）。与 gridWidgets 同一集合（不含被归拢筛选器与置顶容器），
+   * 只是丢弃四轴改用纵向流式排列。
+   */
+  const mobileWidgets = useMemo(
+    () => [...gridWidgets].sort((a, b) => a.y - b.y || a.x - b.x),
+    [gridWidgets]
   );
 
   /**
@@ -1425,16 +1438,19 @@ const DashboardEditor: React.FC = () => {
             >
               {intl.formatMessage({ id: 'common.refresh' })}
             </Button>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saving}
-              disabled={!dirty}
-              data-testid="dashboard-save"
-              onClick={handleSave}
-            >
-              {intl.formatMessage({ id: 'common.save' })}
-            </Button>
+            {/* 移动端阅览模式不提供保存入口：布局在窄屏下不可编辑（下方工具条同样收敛）。 */}
+            {!isMobile && (
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={saving}
+                disabled={!dirty}
+                data-testid="dashboard-save"
+                onClick={handleSave}
+              >
+                {intl.formatMessage({ id: 'common.save' })}
+              </Button>
+            )}
           </>
         }
       />
@@ -1453,44 +1469,47 @@ const DashboardEditor: React.FC = () => {
       )}
 
       <Card>
-        <div className="dr-card-toolbar">
-          <Input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={intl.formatMessage({ id: 'dashboard.name' })}
-            aria-label={intl.formatMessage({ id: 'dashboard.name' })}
-            status={loading || name.trim() ? undefined : 'error'}
-            style={{ maxWidth: 320 }}
-          />
-          <Space>
-            <Text type="secondary">{intl.formatMessage({ id: 'dashboard.addChart' })}</Text>
-            <Select
-              value={null}
-              onChange={(value: number) => handleAddChart(value)}
-              placeholder={intl.formatMessage({ id: 'dashboard.selectChart' })}
-              aria-label={intl.formatMessage({ id: 'dashboard.selectChart' })}
-              options={chartOptions}
-              notFoundContent={intl.formatMessage({ id: 'dashboard.noCharts' })}
-              showSearch
-              optionFilterProp="label"
-              style={{ minWidth: 220 }}
+        {/* 改名与加块都是编辑入口，移动端阅览模式整体不渲染（issue #158）。 */}
+        {!isMobile && (
+          <div className="dr-card-toolbar">
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={intl.formatMessage({ id: 'dashboard.name' })}
+              aria-label={intl.formatMessage({ id: 'dashboard.name' })}
+              status={loading || name.trim() ? undefined : 'error'}
+              style={{ maxWidth: 320 }}
             />
-            <Button
-              icon={<PlusOutlined />}
-              data-testid="dashboard-add-filter"
-              onClick={() => setAddFilterOpen(true)}
-            >
-              {intl.formatMessage({ id: 'dashboard.addFilter' })}
-            </Button>
-            <Button
-              icon={<PlusOutlined />}
-              data-testid="dashboard-add-container"
-              onClick={handleAddContainer}
-            >
-              {intl.formatMessage({ id: 'dashboard.addContainer' })}
-            </Button>
-          </Space>
-        </div>
+            <Space>
+              <Text type="secondary">{intl.formatMessage({ id: 'dashboard.addChart' })}</Text>
+              <Select
+                value={null}
+                onChange={(value: number) => handleAddChart(value)}
+                placeholder={intl.formatMessage({ id: 'dashboard.selectChart' })}
+                aria-label={intl.formatMessage({ id: 'dashboard.selectChart' })}
+                options={chartOptions}
+                notFoundContent={intl.formatMessage({ id: 'dashboard.noCharts' })}
+                showSearch
+                optionFilterProp="label"
+                style={{ minWidth: 220 }}
+              />
+              <Button
+                icon={<PlusOutlined />}
+                data-testid="dashboard-add-filter"
+                onClick={() => setAddFilterOpen(true)}
+              >
+                {intl.formatMessage({ id: 'dashboard.addFilter' })}
+              </Button>
+              <Button
+                icon={<PlusOutlined />}
+                data-testid="dashboard-add-container"
+                onClick={handleAddContainer}
+              >
+                {intl.formatMessage({ id: 'dashboard.addContainer' })}
+              </Button>
+            </Space>
+          </div>
+        )}
 
         <div ref={containerRef}>
           {/* 置顶容器渲染在盘顶控件条，脱离栅格；取消置顶即回到原四轴（见 gridWidgets 分流）。 */}
@@ -1531,6 +1550,68 @@ const DashboardEditor: React.FC = () => {
                   </Space>
                 }
               />
+            </div>
+          ) : isMobile ? (
+            /* 移动端阅览模式（issue #158）：脱离 12 列栅格，按 (y, x) 单列堆叠；
+               不渲染任何编辑入口（加块 / 拖拽 / 块菜单 / 删除），筛选器保留取值与算子。 */
+            <div className="dr-mobile-stack" data-testid="dashboard-mobile-stack">
+              {mobileWidgets.map((widget) => {
+                if (widget.type === 'chart') {
+                  return (
+                    <Card
+                      key={widget.widgetId}
+                      size="small"
+                      title={blockTitle(widget)}
+                      /* 固定高度代替栅格行数：图随卡片伸缩（ChartView 拿 height:100%）。 */
+                      style={{ height: 340, display: 'flex', flexDirection: 'column' }}
+                      styles={{ body: { flex: 1, minHeight: 0, padding: 8, overflow: 'hidden' } }}
+                    >
+                      {renderChartBlock(widget)}
+                    </Card>
+                  );
+                }
+                if (widget.type === 'filter') {
+                  return (
+                    <DashboardFilterBlock
+                      key={widget.widgetId}
+                      widget={widget}
+                      value={filterValues[widget.widgetId]}
+                      onChange={(next) => applyFilterState(widget.widgetId, next)}
+                      onOperatorChange={(operator) =>
+                        handleFilterOperatorChange(widget.widgetId, operator)
+                      }
+                    />
+                  );
+                }
+                if (widget.type === 'container') {
+                  const children = childrenOfContainer(doc.widgets, widget);
+                  return (
+                    <Card
+                      key={widget.widgetId}
+                      size="small"
+                      title={widget.label}
+                      style={{ display: 'flex', flexDirection: 'column' }}
+                      styles={{ body: { flex: 1, minHeight: 0, padding: 8, overflow: 'auto' } }}
+                    >
+                      <Space size={8} wrap style={{ width: '100%' }} align="start">
+                        {children.map((child) => (
+                          <DashboardFilterBlock
+                            key={child.widgetId}
+                            widget={child}
+                            value={filterValues[child.widgetId]}
+                            onChange={(next) => applyFilterState(child.widgetId, next)}
+                            onOperatorChange={(operator) =>
+                              handleFilterOperatorChange(child.widgetId, operator)
+                            }
+                          />
+                        ))}
+                      </Space>
+                    </Card>
+                  );
+                }
+                // text 块与桌面栅格同口径：占序但不画内容。
+                return null;
+              })}
             </div>
           ) : mounted && width > 0 ? (
             <GridLayout
@@ -1645,11 +1726,12 @@ const DashboardEditor: React.FC = () => {
           )}
         </div>
 
-        {/* 页面标签条：编辑区在底部（对齐火山引擎盘底部多页面编辑区）。 */}
+        {/* 页面标签条：编辑区在底部（对齐火山引擎盘底部多页面编辑区）；移动端只读。 */}
         <DashboardPageTabs
           pages={pages}
           activePageId={activePageId}
           canRemove={pages.length > 1}
+          readOnly={isMobile}
           onActivate={handleActivatePage}
           onAdd={handleAddPage}
           onRename={handleRenamePage}
