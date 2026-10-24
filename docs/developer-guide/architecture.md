@@ -154,7 +154,7 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 ## 契约与路由（Batch 2）
 
 - **契约单一事实源**：`api/openapi.yaml` 定义全部端点请求/响应 + `Envelope`（`code/msg/trace/data`）+ `ChartSpec`/`QuerySpec`；`make api-gen` 生成 `backend/internal/idls/gen_types.go`（oapi-codegen）与 `frontend/src/idls/gen_types.ts`（openapi-typescript）。前端运行时类型已切换到生成物打底：`frontend/src/api/index.ts` 的实体/响应/请求类型 alias 到 `components['schemas']`，窄联合处用薄手写层重收紧。⚠️ `make api-gen` 的前端半步当前必然失败（`openapi-typescript` 依赖 `typescript` 运行时导出 `ts.factory`，与本仓 `typescript@7` 不兼容，崩溃在写文件之前），彻底修法是把生成器与 `typescript@7` 解耦；后端那半步正常。
-- **泛型路由**：`backend/internal/router/router.go` 的 `API[In,Out] func(req Request[In], res *Response[Out]) error`（`res` 必须是指针，值传递会丢弃 handler 写入）已接入全部 58 个 API 端点。路由器按 HTTP 方法绑定 JSON body（POST/PUT/PATCH）+ query 参数并统一信封；`cmd/routes.go` 用 `Register{Get,Post,Put,Delete}Route` 注册，迁移样板见 `handler/datasource.go` 顶部 package doc。另有 3 个手工注册的非泛型路由：`GET /health`（`cmd/main.go` 裸 handler）、`POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`（multipart 绑定走不了泛型路由的 `ShouldBindJSON`，循 `/health` 先例手工注册）。
+- **泛型路由**：`backend/internal/router/router.go` 的 `API[In,Out] func(req Request[In], res *Response[Out]) error`（`res` 必须是指针，值传递会丢弃 handler 写入）已接入全部 60 个 API 端点。路由器按 HTTP 方法绑定 JSON body（POST/PUT/PATCH）+ query 参数并统一信封；`cmd/routes.go` 用 `Register{Get,Post,Put,Delete}Route` 注册，迁移样板见 `handler/datasource.go` 顶部 package doc。另有 3 个手工注册的非泛型路由：`GET /health`（`cmd/main.go` 裸 handler）、`POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`（multipart 绑定走不了泛型路由的 `ShouldBindJSON`，循 `/health` 先例手工注册）。
 - **图表配置 v2**：`bi_chart.config` 为 `{version:2, chartType, title, query:{dimensionGroups,metricGroups,filters,sort,limit}, fieldMeta, style, queryOptions}` 文档。字段组的 `fields`（列名数组）升级为 `bindings: BindingInstance[]`，每个「拖入槽位的字段实例」持全局唯一 `bindingId`（形如 `b-0`/`b-1`）；`fieldMeta` 的键由列名改为 `bindingId`（同列拖入两个组各得独立元数据），`sort` 亦以 `bindingId` 引用目标绑定，`bindings[].fieldId`/`filters[].fieldId` 引用的是列的稳定 id（`DatasetColumn.id`）。`frontend/src/lib/chartConfigSchema.ts` 的 `migrateChartConfig` 在加载时把旧结构（无 version：`queryConfig` + 5 个平铺 Record + 位置 `field-N`）与 v1 中间表示逐层迁移到 v2，图表构建器与仪表盘据此渲染。
 
 ### 响应层
@@ -208,7 +208,7 @@ handler → service → query 包（QueryAST + bun_builder / raw.go）→ dataso
 - **决策**：handler 统一为 `func(req Request[In], res *Response[Out]) error`，由 `internal/router` 按 HTTP 方法自动绑定 body/query 并包装信封；In 用 handler-local 镜像 struct。
 - **背景**：早期每个 handler 手写 `response.*` 与 gin 绑定，重复且易漏。
 - **取舍**：不直接拿 `entity` 作 In（entity 缺 `form:"-"`，会让 query 参数污染 body）→ 用 handler-local 镜像，代价是需反射守卫其与 entity 的 json tag 一致。
-- **现状**：已接入全部 58 个 API 端点。证据：`backend/internal/router/router.go`、`handler/contract_parity_test.go`。
+- **现状**：已接入全部 60 个 API 端点。证据：`backend/internal/router/router.go`、`handler/contract_parity_test.go`。
 
 ### D5 bun_builder 是图表 SQL 唯一出口（参数化 + 标识符白名单）
 

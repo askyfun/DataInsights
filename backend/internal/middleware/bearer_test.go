@@ -19,9 +19,12 @@ import (
 // test can exercise the session-vs-PAT branch by choosing the bearer value.
 type fakeAuth struct{ reject bool }
 
-func (f *fakeAuth) Register(context.Context, string, string, string, string) (*entity.AuthResult, error) {
+func (f *fakeAuth) Register(context.Context, string, string, string, string, string) (*entity.AuthResult, error) {
 	return nil, nil
 }
+func (f *fakeAuth) EnsureBootstrap(context.Context) (string, bool, error) { return "", false, nil }
+func (f *fakeAuth) BootstrapStatus(context.Context) (bool, string, error) { return false, "off", nil }
+func (f *fakeAuth) RecoverAdmin(context.Context, string, string) error    { return nil }
 func (f *fakeAuth) Login(context.Context, string, string, string, string) (*entity.AuthResult, error) {
 	return nil, nil
 }

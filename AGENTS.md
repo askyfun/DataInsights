@@ -25,7 +25,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 | Domain | `backend/internal/domain/entity/` | 领域实体类型 |
 | Query | `backend/internal/query/` | SQL 构造唯一出口：AST + bun_builder（结构化查询）+ raw.go（原始 SQL 构造） |
 | Model | `backend/internal/model/` | 数据库模型（bun ORM） |
-| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：58 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
+| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：60 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
 | WebUI | `backend/internal/webui/` | 前端构建产物的托管与路径分流（挂在 gin 的 `NoRoute` 上）：命中磁盘文件就返回，未命中回落 `index.html`，保留前缀回 JSON 404 |
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
 | Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `SECURITY_KEY`） |
@@ -36,7 +36,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 ⚠️ **`make api-gen` 的「前端」半步当前必然失败**（不是环境问题）：`openapi-typescript@7.13.0` 依赖 `typescript` 包的运行时导出 `ts.factory`，而本仓 `typescript@7` 没有它 → `TypeError: Cannot read properties of undefined`。崩溃发生在写文件之前（生成物不会被写坏）。绕过方式见 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) 的「版本与依赖」（入库）；彻底修法是把生成器与 `typescript@7` 解耦（独立 package.json 或钉一个 TS 5 别名），属独立改动。**后端那半步能跑，但输出不保证可编译**：issue #201 加了 multipart 端点后，生成物引用 `github.com/oapi-codegen/runtime/types`，而 `backend/go.mod` 没有这个依赖 → 重跑生成会把编译跑坏，得先补依赖或收紧 cfg 的 generate 范围。它只输出被 cfg 允许的子集（不含 `DashboardFilter*` 等 layout schema）。无论走哪条路，重跑生成后都要 `diff` 生成物，确认只漂了本次改动（`ci.yml` 的 contract-drift job 就在自动做这个 diff，只报告不阻断，直到依赖缺口补上）。
 
-`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 58 个 API 端点**（`cmd/routes.go` 集中注册：datasource 11 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
+`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 60 个 API 端点**（`cmd/routes.go` 集中注册：datasource 11 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 6 + token 3）；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
 
 `datasource/` 包实现了 `Driver` 接口用于多数据库后端——新增驱动只需实现该接口。
 
@@ -161,11 +161,13 @@ frontend/src/
 - **评估链路**：`alert.Service` 注入 `chart.Provider`（复用图表取数管道）与 `alert.Notifier`（通知出口）；评估间隔与通知方式由 `main.go` 装配。
 - **触发历史**：`GET /api/alerts/:id/triggers` 返回该规则的触发记录，用于回溯与调试。
 
-### 用户认证与 PAT（issue #183 / #184）
+### 用户认证与 PAT（issue #183 / #184 / #216）
 
-`service/auth/` + `handler/auth.go` / `handler/token.go` + `middleware/bearer.go` + `pages/Account.tsx`，表 `bi_user` / `bi_token`（migration 00010）：
+`service/auth/` + `handler/auth.go` / `handler/token.go` + `middleware/bearer.go` + `pages/Account.tsx`，表 `bi_user` / `bi_token`（migration 00010）与 `bi_setting`（bootstrap token / 恢复令牌状态）：
 
-- **Auth 端点**（4 个）：`POST /api/auth/register` / `POST /api/auth/login`（公开）；`GET /api/auth/me` / `DELETE /api/auth/logout`（需 Bearer token）。
+- **Auth 端点**（6 个）：`GET /api/auth/bootstrap-status`、`POST /api/auth/register`、`POST /api/auth/recover-admin`、`POST /api/auth/login`（公开）；`GET /api/auth/me` / `DELETE /api/auth/logout`（需 Bearer token）。
+- **首管 bootstrap（R-91）**：无管理员时启动签发 30 分钟一次性 token（库中只存 sha256，stdout 打印一次明文），`register` 必须携带它；`ADMIN_USERNAME`+`ADMIN_PASSWORD` 是幂等无头逃生口（设置后不打印 token）。`ADMIN_RESET_TOKEN` 非空才开启 `recover-admin`，令牌单次有效且成功会撤销该管理员全部会话。并发抢注由 `pg_advisory_xact_lock` 串行化。
+- **注册关闭判据**：存在任何管理员行（含软删）即关闭；用户名唯一索引覆盖全表（migration 00013），禁用者的名字不可复用。
 - **PAT 端点**（3 个）：`POST /api/tokens` / `GET /api/tokens` / `DELETE /api/tokens/:id`（需 Bearer token，且 `allowPAT=false` 拒绝机器 token 操作人类会话）。
 - **渐进式强制认证**：当前只有 auth/token 端点强制 Bearer，其余资源端点仍开放（Phase C 逐步接入）。`middleware.Bearer` 的 `allowPAT` 参数区分「人类会话 vs 机器 token」的权限边界。
 

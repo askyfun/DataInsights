@@ -4,8 +4,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/uptrace/bun"
 
-	"data-insights/internal/handler"
 	"data-insights/internal/extract"
+	"data-insights/internal/handler"
 	"data-insights/internal/middleware"
 	"data-insights/internal/router"
 	"data-insights/internal/service/alert"
@@ -28,7 +28,7 @@ import (
 // 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
 // notifier 也由 main 注入，routes.go 不读环境变量）。databaseURL 供内置示例
 // 数据集（R-79）反查应用自身数据库。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier) alert.Service {
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authSvc auth.Service) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -167,10 +167,11 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	// token. allowPAT=true here because both are self-service identity
 	// operations, not user-management; the PAT-forbidden guard lives on the
 	// token-management endpoints (#184).
-	authSvc := auth.NewService(db)
 	authHandler := handler.NewAuthHandler(authSvc)
 	authPublic := api.Group("/auth")
+	router.RegisterGetRoute(authPublic, "/bootstrap-status", authHandler.BootstrapStatus)
 	router.RegisterPostRoute(authPublic, "/register", authHandler.Register)
+	router.RegisterPostRoute(authPublic, "/recover-admin", authHandler.RecoverAdmin)
 	router.RegisterPostRoute(authPublic, "/login", authHandler.Login)
 	authProtected := api.Group("/auth")
 	authProtected.Use(middleware.Bearer(authSvc, true))

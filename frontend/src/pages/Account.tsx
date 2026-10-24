@@ -30,11 +30,16 @@ const AccountPage: React.FC = () => {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [pats, setPats] = useState<TokenInfo[]>([]);
   const [mode, setMode] = useState('login');
+  const [needsBootstrap, setNeedsBootstrap] = useState<boolean | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [never, setNever] = useState(false);
   const [created, setCreated] = useState<PATCreateResult | null>(null);
-  const [form] = Form.useForm<{ username: string; password: string }>();
+  const [form] = Form.useForm<{
+    username: string;
+    password: string;
+    bootstrap_token?: string;
+  }>();
   const [patForm] = Form.useForm<{ name: string }>();
 
   const loadPats = useCallback(async () => {
@@ -47,14 +52,28 @@ const AccountPage: React.FC = () => {
       .me()
       .then((r) => setUser(r.data.data))
       .catch(() => setUser(null));
+    authApi
+      .bootstrapStatus()
+      .then((r) => {
+        const needs = r.data.data?.needs_bootstrap === true;
+        setNeedsBootstrap(needs);
+        if (needs) setMode('register');
+      })
+      .catch(() => setNeedsBootstrap(false));
   }, []);
 
   const submitAuth = async () => {
     const v = await form.validateFields();
     setAuthLoading(true);
     try {
-      const fn = mode === 'register' ? authApi.register : authApi.login;
-      const r = await fn(v);
+      const r =
+        mode === 'register'
+          ? await authApi.register({
+              username: v.username,
+              password: v.password,
+              bootstrap_token: v.bootstrap_token ?? '',
+            })
+          : await authApi.login({ username: v.username, password: v.password });
       const res = r.data.data;
       setBearerToken(res.token);
       setUser(res.user);
@@ -140,7 +159,9 @@ const AccountPage: React.FC = () => {
             onChange={(v) => setMode(v as string)}
             options={[
               { label: intl.formatMessage({ id: 'account.login' }), value: 'login' },
-              { label: intl.formatMessage({ id: 'account.register' }), value: 'register' },
+              ...(needsBootstrap
+                ? [{ label: intl.formatMessage({ id: 'account.register' }), value: 'register' }]
+                : []),
             ]}
             style={{ marginBottom: 16 }}
           />
@@ -167,6 +188,16 @@ const AccountPage: React.FC = () => {
             >
               <Input.Password autoComplete="current-password" />
             </Form.Item>
+            {mode === 'register' && (
+              <Form.Item
+                name="bootstrap_token"
+                label={intl.formatMessage({ id: 'account.bootstrapToken' })}
+                extra={intl.formatMessage({ id: 'account.bootstrapHint' })}
+                rules={[{ required: true }]}
+              >
+                <Input autoComplete="off" />
+              </Form.Item>
+            )}
             <Button type="primary" block htmlType="submit" loading={authLoading}>
               {intl.formatMessage({
                 id: mode === 'register' ? 'account.register' : 'account.login',

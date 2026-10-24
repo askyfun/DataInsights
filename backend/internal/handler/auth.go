@@ -21,19 +21,56 @@ type authCredentialsIn struct {
 	Password string `json:"password" form:"-"`
 }
 
+type authRegisterIn struct {
+	Username       string `json:"username" form:"-"`
+	Password       string `json:"password" form:"-"`
+	BootstrapToken string `json:"bootstrap_token" form:"-"`
+}
+
+type bootstrapStatusOut struct {
+	NeedsBootstrap bool   `json:"needs_bootstrap"`
+	EnforceMode    string `json:"enforce_mode"`
+}
+
+type recoverAdminIn struct {
+	ResetToken  string `json:"reset_token" form:"-"`
+	NewPassword string `json:"new_password" form:"-"`
+}
+
 type authStatusOut struct {
 	Status string `json:"status"`
 }
 
-// Register creates the first user (admin) and returns a session token. Once an
-// admin exists the service refuses with 20200.
-func (h *AuthHandler) Register(req router.Request[authCredentialsIn], res *router.Response[*entity.AuthResult]) error {
+// Register creates the first administrator and returns a session token. It
+// requires the one-time bootstrap token; once any admin row exists it refuses
+// with 20200.
+func (h *AuthHandler) Register(req router.Request[authRegisterIn], res *router.Response[*entity.AuthResult]) error {
 	out, err := h.svc.Register(req.Ctx.Request.Context(), req.In.Username, req.In.Password,
-		req.Ctx.ClientIP(), req.Ctx.Request.UserAgent())
+		req.In.BootstrapToken, req.Ctx.ClientIP(), req.Ctx.Request.UserAgent())
 	if err != nil {
 		return err
 	}
 	res.Out = out
+	return nil
+}
+
+// BootstrapStatus lets the UI decide between first-run setup and login.
+func (h *AuthHandler) BootstrapStatus(req router.Request[struct{}], res *router.Response[*bootstrapStatusOut]) error {
+	needs, mode, err := h.svc.BootstrapStatus(req.Ctx.Request.Context())
+	if err != nil {
+		return err
+	}
+	res.Out = &bootstrapStatusOut{NeedsBootstrap: needs, EnforceMode: mode}
+	return nil
+}
+
+// RecoverAdmin resets the first active administrator's password with the
+// single-use ADMIN_RESET_TOKEN.
+func (h *AuthHandler) RecoverAdmin(req router.Request[recoverAdminIn], res *router.Response[*authStatusOut]) error {
+	if err := h.svc.RecoverAdmin(req.Ctx.Request.Context(), req.In.ResetToken, req.In.NewPassword); err != nil {
+		return err
+	}
+	res.Out = &authStatusOut{Status: "ok"}
 	return nil
 }
 

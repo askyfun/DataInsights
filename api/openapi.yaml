@@ -1303,21 +1303,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QueryRecordResponse'
+  /api/auth/bootstrap-status:
+    get:
+      tags:
+        - auth
+      summary: 是否需要首管引导（匿名）
+      description: >-
+        needs_bootstrap=true 仅当库中没有任何管理员行（含已禁用）。前端据此渲染初始化
+        而不是登录。enforce_mode 当前恒为 off：资源端点尚未强制 Bearer（R-92）。
+      operationId: getBootstrapStatus
+      responses:
+        '200':
+          description: 成功 data 为 BootstrapStatus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapStatusResponse'
   /api/auth/register:
     post:
       tags:
         - auth
-      summary: 注册首个管理员（引导式）
+      summary: 注册首个管理员（引导式，需一次性 bootstrap token）
       description: >-
-        仅当无存活用户时成功，该用户 role=admin；否则 20200。成功即签发 24h 会话
-        token（明文仅此一次回显）。R-82 #183。
+        仅当库中没有任何管理员行时成功，该用户 role=admin；否则 20200。必须携带启动日志
+        打印的一次性 bootstrap_token（TTL 30 分钟，建号成功即失效），缺失/过期/不匹配
+        返回 20200，文案与登录失败可区分。成功即签发 24h 会话 token（明文仅此一次回显）。
       operationId: registerUser
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthCredentialsRequest'
+              $ref: '#/components/schemas/AuthRegisterRequest'
       responses:
         '200':
           description: HTTP 恒 200；成功 data 为 AuthResult
@@ -1325,6 +1342,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResultResponse'
+  /api/auth/recover-admin:
+    post:
+      tags:
+        - auth
+      summary: 用 ADMIN_RESET_TOKEN 重置首管口令（匿名）
+      description: >-
+        ADMIN_RESET_TOKEN 为空时该功能关闭。token 单次有效：成功一次后同一 token 再次
+        调用返回 20200。成功会撤销该管理员的全部现存会话。
+      operationId: recoverAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecoverAdminRequest'
+      responses:
+        '200':
+          description: 成功 data 为 {status: ok}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
   /api/auth/login:
     post:
       tags:
@@ -1542,6 +1581,54 @@ components:
         username:
           type: string
         password:
+          type: string
+    AuthRegisterRequest:
+      type: object
+      required:
+        - username
+        - password
+        - bootstrap_token
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        bootstrap_token:
+          type: string
+          description: 启动日志打印的一次性 bootstrap token（TTL 30 分钟）。
+    BootstrapStatus:
+      type: object
+      required:
+        - needs_bootstrap
+        - enforce_mode
+      properties:
+        needs_bootstrap:
+          type: boolean
+        enforce_mode:
+          type: string
+          enum:
+            - 'off'
+          description: 资源端点是否强制 Bearer；当前恒为 off（R-92 引入开关）。
+    BootstrapStatusResponse:
+      description: GET /api/auth/bootstrap-status 响应：data 为 BootstrapStatus。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/BootstrapStatus'
+    RecoverAdminRequest:
+      type: object
+      required:
+        - reset_token
+        - new_password
+      properties:
+        reset_token:
+          type: string
+          description: 与 env ADMIN_RESET_TOKEN 相同的单次恢复令牌。
+        new_password:
           type: string
     AuthUser:
       type: object

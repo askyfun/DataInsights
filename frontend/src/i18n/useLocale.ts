@@ -16,7 +16,10 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'account.title': '账号设置',
     'account.login': '登录',
     'account.register': '注册',
-    'account.registerHint': '首个账号将成为系统管理员；管理员建立后注册即关闭。',
+    'account.registerHint':
+      '首个账号将成为系统管理员；需要启动日志里的一次性 BOOTSTRAP TOKEN，管理员建立后注册即关闭。',
+    'account.bootstrapToken': 'Bootstrap Token',
+    'account.bootstrapHint': '从服务启动日志中的「BOOTSTRAP TOKEN:」一行复制，30 分钟内有效。',
     'account.username': '用户名',
     'account.password': '密码',
     'account.logout': '退出登录',
@@ -581,7 +584,10 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'account.login': 'Sign in',
     'account.register': 'Register',
     'account.registerHint':
-      'The first account becomes the system admin; registration closes once an admin exists.',
+      'The first account becomes the system admin. Paste the one-time BOOTSTRAP TOKEN from the startup log; registration closes once an admin exists.',
+    'account.bootstrapToken': 'Bootstrap token',
+    'account.bootstrapHint':
+      'Copy the "BOOTSTRAP TOKEN:" line from the server startup log. It expires in 30 minutes.',
     'account.username': 'Username',
     'account.password': 'Password',
     'account.logout': 'Sign out',
