@@ -58,6 +58,15 @@ type Config struct {
 	ExtractDatasourceID int
 	// Alert 是指标预警（issue #155）的运行期配置：评估间隔 + SMTP 通知。
 	Alert AlertConfig
+	// Log 是日志运行期配置（R-96）：Level 为 LOG_LEVEL 原始值，
+	// 解析交给 logx.ParseLevel（非法值由调用方回落 info 并 warn 一次）。
+	Log LogConfig
+}
+
+// LogConfig 聚合日志相关环境变量。
+type LogConfig struct {
+	// Level 是 LOG_LEVEL 原始值（debug/info/warn/error）。
+	Level string
 }
 
 // AlertConfig 聚合预警模块的环境变量。SMTP 五项 + 收件人任何一项缺失都不拦启动：
@@ -208,6 +217,10 @@ func (c *Config) Load() error {
 	}
 	if v := os.Getenv("ALERT_NOTIFY_EMAIL"); v != "" {
 		c.Alert.NotifyEmails = v
+	}
+
+	if v := os.Getenv("LOG_LEVEL"); v != "" {
+		c.Log.Level = v
 	}
 
 	return nil

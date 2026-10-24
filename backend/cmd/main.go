@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"flag"
@@ -20,7 +19,9 @@ import (
 	"data-insights/internal/database"
 	"data-insights/internal/extract"
 	"data-insights/internal/keystore"
+	"data-insights/internal/logx"
 	"data-insights/internal/migration/columnids"
+	"data-insights/internal/middleware"
 	"data-insights/internal/response"
 	"data-insights/internal/service/alert"
 	"data-insights/internal/webui"
@@ -68,6 +69,14 @@ func main() {
 		slog.Error("Failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	// 结构化日志：JSON 到 stdout（多副本按行聚合采集），级别来自 LOG_LEVEL，
+	// 非法值回落 info 并 warn 一次。必须最先装配，其后的启动日志才走同一格式。
+	logLevel, levelOK := logx.ParseLevel(c.Log.Level)
+	if !levelOK {
+		slog.Warn("Invalid LOG_LEVEL, falling back to info", "value", c.Log.Level)
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
 	// 配置没有文件形式，连接串只能来自环境变量，所以这里必须显式兜住空值，
 	// 否则会退化成一个来自驱动层的、看不懂的连接失败。
@@ -125,16 +134,11 @@ func main() {
 	// CORS middleware
 	r.Use(corsMiddleware(c.CORS.AllowedOrigins))
 
-	// Request ID middleware
-	r.Use(requestIDMiddleware())
+	// Request ID middleware：采信/生成请求 id 并写入 context（统一键名见 response.RequestIDKey）。
+	r.Use(middleware.RequestID())
 
-	// Access log middleware
-	r.Use(func(c *gin.Context) {
-		start := time.Now()
-		c.Next()
-		duration := time.Since(start).Milliseconds()
-		slog.Info("access", "method", c.Request.Method, "path", c.Request.URL.Path, "duration_ms", duration, "client_ip", c.ClientIP())
-	})
+	// Access log middleware：每请求一行 INFO access；失败请求额外一行 ERROR（同 request_id 可配对）。
+	r.Use(middleware.AccessLog("dev"))
 
 	registerHealthRoute(r)
 
@@ -232,25 +236,6 @@ func registerHealthRoute(r *gin.Engine) {
 	r.GET("/health", func(c *gin.Context) {
 		response.Success(c, gin.H{"status": "ok"})
 	})
-}
-
-func requestIDMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		requestID := c.GetHeader("X-Request-ID")
-		if requestID == "" {
-			b := make([]byte, 16)
-			if _, err := rand.Read(b); err != nil {
-				slog.Error("generate request id failed", "error", err)
-				requestID = fmt.Sprintf("%d", time.Now().UnixNano())
-			} else {
-				requestID = hex.EncodeToString(b)
-			}
-			c.Request.Header.Set("X-Request-ID", requestID)
-		}
-		c.Header("X-Request-ID", requestID)
-		c.Set("requestID", requestID)
-		c.Next()
-	}
 }
 
 // corsMiddleware handles cross-origin requests. An empty allowlist allows every

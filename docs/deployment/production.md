@@ -16,6 +16,7 @@
 | `DATABASE_URL` | **必填**，缺失即启动失败。 |
 | `SECURITY_KEY` | **生产强烈建议显式设置**（64 位 hex，`openssl rand -hex 32`）。详见下文"安全实践"。 |
 | `PORT` | 按需；默认 23352。 |
+| `LOG_LEVEL` | 日志级别 `debug`/`info`/`warn`/`error`，默认 `info`；非法值回落 `info` 并在启动时告警一次。 |
 | `SENTRY_DSN` | 需要错误上报时设置（后端项目）。 |
 | `CORS_ALLOWED_ORIGINS` | 同源部署**无需设置**；仅前后端分离部署时按需填白名单。 |
 | `STATIC_DIR` | 单镜像内由镜像预设为 `/app/web`；留空则退化为纯 API。 |
@@ -44,7 +45,15 @@
 
 ## 4. 可观测与健康检查
 
-- **`GET /health`**：只证明**进程活着**，它**不探库**，不代表 `DATABASE_URL` 可连。要确认连通性，请打真实业务接口（如 `GET /api/datasets`），其错误串会直接印出连接目标。
+- **日志**：结构化 JSON、只写 **stdout**（不写本地文件），级别由 `LOG_LEVEL` 控制。每次请求一行 `access`；请求失败时额外一行 `ERROR msg="request failed"`——两行**同 `request_id` 配对**。
+- **多副本口径**：一次请求一个 `request_id`（响应头 `X-Request-ID` 与响应体 `trace` 同值），跨副本按 `request_id` 检索聚合即可还原整条链路；行内自带 `host` 与 `version` 标识来源副本。
+- **按 request_id 取一行失败日志**（`jq` 示例，容器 stdout 落到 `app.log` 时）：
+
+  ```bash
+  jq -c 'select(.request_id=="<响应里复制的 trace 值>")' app.log
+  ```
+
+- **`GET /health`**：只证明**进程活着**，它**不探库**，不代表 `DATABASE_URL` 可连。要确认连通性，请打真实业务接口（如 `GET /api/datasets`）；错误串中的连接串密码等机密已自动脱敏，可以安全粘贴到 issue。
 - **Sentry**：前后端是两个**独立项目**（`SENTRY_DSN` 与 `VITE_SENTRY_DSN`），可分别接入。
 - 镜像自带 `/health` 的 HEALTHCHECK。
 
