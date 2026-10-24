@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"reflect"
 
+	"data-insights/internal/logx"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -31,13 +33,34 @@ type Response struct {
 	Data  any    `json:"data"`
 }
 
-// 获取请求追踪 ID
+// RequestIDKey 是请求 id 在 gin context 里的唯一键名。requestID 中间件写、
+// getTraceID 与日志链路读——同口径常量消除「写 requestID / 读 request_id」
+// 的键名漂移（R-96 验收 1）。
+const RequestIDKey = "request_id"
+
+// bizCodeKey 记录本次请求最终写出的业务码，供 access 日志区分成败。
+const bizCodeKey = "bizCode"
+
+// 获取请求追踪 ID：优先读 context（requestID 中间件的写入口径），
+// 回落读入站头（覆盖未挂中间件的测试场景）。
 func getTraceID(c *gin.Context) string {
-	traceID := c.GetHeader("X-Request-ID")
-	if traceID == "" {
-		traceID = c.GetString("request_id")
+	if id := c.GetString(RequestIDKey); id != "" {
+		return id
 	}
-	return traceID
+	return c.GetHeader("X-Request-ID")
+}
+
+// BizCodeFrom 读取本次请求已写出的业务码；尚无错误响应时返回 0。
+func BizCodeFrom(c *gin.Context) int {
+	v, ok := c.Get(bizCodeKey)
+	if !ok {
+		return 0
+	}
+	code, ok := v.(int)
+	if !ok {
+		return 0
+	}
+	return code
 }
 
 // normalizeResponseData recursively normalizes successful or error payloads so collection fields
@@ -122,8 +145,9 @@ func normalizeReflectValue(value reflect.Value) reflect.Value {
 	}
 }
 
-// Success 成功响应
+// Success 成功响应。业务码同样记入 context，让 access 日志的成功行带 biz_code=20000。
 func Success(c *gin.Context, data any) {
+	c.Set(bizCodeKey, CodeSuccess)
 	c.JSON(http.StatusOK, Response{
 		Code:  CodeSuccess,
 		Msg:   "success",
@@ -134,6 +158,7 @@ func Success(c *gin.Context, data any) {
 
 // SuccessWithMsg 带自定义消息的成功响应
 func SuccessWithMsg(c *gin.Context, data any, msg string) {
+	c.Set(bizCodeKey, CodeSuccess)
 	c.JSON(http.StatusOK, Response{
 		Code:  CodeSuccess,
 		Msg:   msg,
@@ -142,11 +167,13 @@ func SuccessWithMsg(c *gin.Context, data any, msg string) {
 	})
 }
 
-// Error 错误响应
+// Error 错误响应。msg 统一经 logx.Redact 收口（连接串密码等机密不进响应体），
+// 业务码同时记入 context 供 access 日志产出「每次失败恰好一行 ERROR」（R-96 验收 2）。
 func Error(c *gin.Context, code int, msg string) {
+	c.Set(bizCodeKey, code)
 	c.JSON(http.StatusOK, Response{
 		Code:  code,
-		Msg:   msg,
+		Msg:   logx.Redact(msg),
 		Trace: getTraceID(c),
 		Data:  normalizeResponseData(nil),
 	})

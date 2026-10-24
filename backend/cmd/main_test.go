@@ -82,37 +82,6 @@ func TestSentryPanicPathReturns500(t *testing.T) {
 	})
 }
 
-func TestRequestIDMiddlewareGeneratesRandomID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(requestIDMiddleware())
-	r.GET("/ping", func(c *gin.Context) { c.Status(http.StatusOK) })
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ping", nil))
-
-	got := w.Header().Get("X-Request-ID")
-	if got == "" || got == "0000000000000000" {
-		t.Fatalf("expected random request id, got %q", got)
-	}
-}
-
-func TestRequestIDMiddlewarePreservesIncomingID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(requestIDMiddleware())
-	r.GET("/ping", func(c *gin.Context) { c.Status(http.StatusOK) })
-
-	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	req.Header.Set("X-Request-ID", "abc123")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if got := w.Header().Get("X-Request-ID"); got != "abc123" {
-		t.Fatalf("expected preserved id abc123, got %q", got)
-	}
-}
-
 func TestResolveSecurityKeyEnvTakesPriority(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {

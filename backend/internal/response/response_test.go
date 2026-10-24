@@ -91,3 +91,82 @@ func TestErrorUsesEmptyObjectData(t *testing.T) {
 		t.Fatalf("expected error data to be JSON object, got %T", payload["data"])
 	}
 }
+
+// newTraceRouter 挂上 requestID 中间件后注册一个会写统一信封的路由，
+// 模拟真实请求链路，供 trace 取值口径的用例使用。
+func newTraceRouter() (*gin.Engine, *httptest.ResponseRecorder) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		// 与 middleware.RequestID 同口径的最小复刻：写 context 键 + 响应头。
+		// 这里不复用 middleware 包，避免 response → middleware 的依赖倒置。
+		if id := c.GetHeader("X-Request-ID"); id != "" {
+			c.Set(RequestIDKey, id)
+		} else {
+			c.Set(RequestIDKey, "generated-test-id")
+		}
+		c.Header("X-Request-ID", c.GetString(RequestIDKey))
+		c.Next()
+	})
+	recorder := httptest.NewRecorder()
+	r.GET("/probe", func(c *gin.Context) { Success(c, gin.H{"ok": true}) })
+	return r, recorder
+}
+
+// TestTracePrefersContextOverHeader 钉住 R-96 验收 1：trace 的主取值口径是
+// context 键，入站头只是未挂中间件时的回落——「中间件把 id 写回入站头」的
+// 副作用被移除后，链路依然成立。
+func TestTracePrefersContextOverHeader(t *testing.T) {
+	r, w := newTraceRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set("X-Request-ID", "probe-123")
+	r.ServeHTTP(w, req)
+
+	payload := decodeRecorderBody(t, w)
+	if payload["trace"] != "probe-123" {
+		t.Fatalf("expected trace probe-123, got %v", payload["trace"])
+	}
+	if w.Header().Get("X-Request-ID") != "probe-123" {
+		t.Fatalf("response header must echo the request id")
+	}
+}
+
+// TestTraceFallsBackWhenMiddlewareMissing 未挂 requestID 中间件时（部分测试
+// 场景），getTraceID 回落读入站头，不为空。
+func TestTraceFallsBackWhenMiddlewareMissing(t *testing.T) {
+	ctx, recorder := newTestContext()
+	ctx.Request.Header.Set("X-Request-ID", "bare-handler-id")
+
+	Success(ctx, gin.H{})
+
+	payload := decodeRecorderBody(t, recorder)
+	if payload["trace"] != "bare-handler-id" {
+		t.Fatalf("expected header fallback trace, got %v", payload["trace"])
+	}
+}
+
+// TestErrorRedactsSensitiveMessage 钉住「写响应的错误文本经同一 helper 收口」：
+// 含连接串密码的错误信息在响应体里已脱敏。
+func TestErrorRedactsSensitiveMessage(t *testing.T) {
+	ctx, recorder := newTestContext()
+
+	Error(ctx, CodeInternalError, "connect failed: postgres://app:hunter2@db:5432/x")
+
+	payload := decodeRecorderBody(t, recorder)
+	if msg := payload["msg"].(string); msg != "connect failed: postgres://app:<redacted>@db:5432/x" {
+		t.Fatalf("expected redacted msg, got %q", msg)
+	}
+}
+
+// TestBizCodeFromRecordsLastError 供 access 日志读取的业务码应与最后写出的错误一致。
+func TestBizCodeFromRecordsLastError(t *testing.T) {
+	ctx, _ := newTestContext()
+	if got := BizCodeFrom(ctx); got != 0 {
+		t.Fatalf("expected 0 before any error, got %d", got)
+	}
+	Error(ctx, CodeNotFound, "missing")
+	if got := BizCodeFrom(ctx); got != CodeNotFound {
+		t.Fatalf("expected biz code %d, got %d", CodeNotFound, got)
+	}
+}
