@@ -12,7 +12,7 @@
 | 方式三：Docker Compose | 只要 Docker（含 Compose v2），零外部依赖 |
 | 方式四：从源码运行 | Docker；或本地开发所需的 Go 1.27 / Node 24 / pnpm / `air` + 一个可访问的 PostgreSQL（见[环境搭建](../developer-guide/dev-setup.md)） |
 
-⚠️ 本项目**无登录、无鉴权**，定位是单团队**内网**工具 —— 不要暴露到公网；放到真实环境前先看[生产部署](../deployment/production.md)。
+⚠️ Compose 默认**只监听本机**（端口映射到 `127.0.0.1`）；要从别的机器访问需显式设 `HOST_BIND=0.0.0.0`。平台当前对资源端点**没有强制认证** —— 对外暴露前先看[生产部署](../deployment/production.md)。
 
 前后端编译进**同一个镜像**，由**一个 Go 进程、一个端口（23352）**同时提供 API 与页面（没有 nginx）。
 
@@ -56,7 +56,8 @@ docker compose -f docker-compose.allinone.yml up -d
 - 默认用 `latest`，钉版本：`TAG=vX.Y.Z docker compose -f docker-compose.allinone.yml up -d`（版本号见 [Releases](https://github.com/askyfun/DataInsights/releases)）。
 - 数据存在命名卷 `postgres_data` 里：`down` 保留数据，`down -v` 才清空。
 - 变量覆盖优先级（高 → 低）：shell 环境变量 > 同目录 `.env` > 文件内默认值。
-- ⚠️ 库里用的是公开的演示密码 `insights123`，仅本地体验用。要用本机客户端连进去看表、换端口（`PORT`）、改数据库密码，都在该文件注释里标了位置。
+- ⚠️ 库里用的是公开的演示密码 `insights123`，仅本地体验用；数据库端口也只绑 `127.0.0.1`。要用本机客户端连进去看表、换端口（`PORT`）、改数据库密码，都在该文件注释里标了位置。
+- 应用与数据库端口**默认都只绑 `127.0.0.1`**。要在同网段共享，先改掉数据库演示口令，再显式设 `HOST_BIND=0.0.0.0`（见[配置字典](../user-guide/configuration.md)）。
 
 ## 5. 方式四：从源码运行
 
