@@ -41,6 +41,8 @@ docker compose -f docker-compose.allinone.yml up -d
 TAG=v1.0.0 docker compose -f docker-compose.allinone.yml up -d
 ```
 
+升级到新版本、备份与失败回滚的完整 runbook（`scripts/upgrade.sh` + 迁移顺序红线）见 [backup-restore.md](backup-restore.md)。
+
 - 零外部依赖：所有环境变量都有默认值，**不需要 `.env` 即可启动**。
 - 数据落在命名卷 `postgres_data`：`down` 保留，`down -v` 清空。
 - ⚠️ 库里是公开的演示密码 `insights123`，仅本地体验用；放到他人可达的主机上前先改密码（并同步改 app 的 `DATABASE_URL`），或换成外部数据库只跑 app。本项目**无登录、无鉴权**，不要暴露到公网 —— 见[生产部署](production.md)。
