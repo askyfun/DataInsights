@@ -376,7 +376,7 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
 |------|------|
 | ≥ 1920px | 三栏工作台按 Pro 宽度分配；列表页表格充分展开 |
 | 1280–1920px | 目标主战场。`.dr-page` padding 16，页头与卡片左右对齐 |
-| ≤ 767px | `.dr-page` padding → 12px；表格横向滚动；`.ant-layout-content` padding 12px；顶栏折叠为 Drawer 菜单 |
+| ≤ 767px | `.dr-page` padding → 12px；表格横向滚动；`.ant-layout-content` padding 12px；顶栏折叠为 Drawer 菜单；仪表盘进入**移动端阅览模式**（8.5）；图表构建页走既有的 `isMobile` 纵向堆叠分支（`?q=` 直链同享） |
 | ≤ 575px | 控件高度 → 28px；表单项纵向堆叠 |
 
 ### 8.2 交互可达性
@@ -398,6 +398,15 @@ antd 6 的 `Card.headerBg` 默认 `transparent`，卡头无边框时会完全融
 | 空 | 同上容器，`Empty` 用 `PRESENTED_IMAGE_SIMPLE` |
 | 错误 | 沿用 antd `message` 与 `Result`；错误色 `#ff4d4f` |
 | 恢复 | 各页保留"刷新"按钮 |
+
+### 8.5 仪表盘移动端阅览模式（issue #158）
+
+断点复用 8.1 的 767px（`lib/useIsMobile.ts` 是 JS 侧唯一判据，勿再散抄 `window.innerWidth`）：
+
+- **布局**：脱离 12 列栅格，按 placement 的 (y, x) 单列堆叠（`.dr-mobile-stack`）——即桌面栅格的视觉阅读序；图表块固定高 340px 代替栅格行数，文字块占序不画（与桌面同口径）。
+- **编辑入口收敛**：加块工具条、改名输入、保存按钮、块菜单/删除、页面标签的增删改拖（`DashboardPageTabs readOnly`）在窄屏全部不渲染；筛选器保留取值与算子（查询语义），隐藏 scope/配置/移除（`DashboardFilterBlock` 可选回调，缺省即不渲染）。
+- **恢复**：resize 回桌面宽度原样恢复栅格与编辑入口，会话内无状态丢失。
+- 图表构建页（含 `?q=` 直链）的窄屏形态由**既有**的 `isMobile` 纵向堆叠分支承担（本条不改）。
 
 **已执行的验收**：`npx tsc --noEmit` 通过；`biome check` 零问题；`vitest run` 27 文件 / 309 用例全通过（含新增的 5 条骨架契约用例）。
 **提议但未执行的验收**：真机逐状态目视（悬停/拖拽中/禁用、三种空态高度、1280/1440/1920 三档、移动端 Drawer）、对比度测量、色盲模拟。
