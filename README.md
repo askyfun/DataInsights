@@ -74,12 +74,12 @@ make dev              # 前端 23351 + 后端 23352，一起起
 |------|------|
 | [docs/getting-started/](docs/getting-started/) | 概览（核心概念 / 应用场景 / 对外路线）、快速开始 |
 | [docs/user-guide/](docs/user-guide/) | 配置与参数字典、功能指南 |
-| [docs/deployment/](docs/deployment/) | 容器部署（Docker / Compose）、发布流程、生产部署实践 |
+| [docs/deployment/](docs/deployment/) | 容器部署（Docker / Compose）、备份 / 升级 / 回滚 runbook、发布流程、生产部署实践 |
 | [docs/developer-guide/](docs/developer-guide/) | 架构与设计决策、API 文档、图表查询设计、排障、开发环境、贡献规范 |
 
 - 配置项字典：[docs/user-guide/configuration.md](docs/user-guide/configuration.md)
 - API 端点说明（契约事实源是 [`api/openapi.yaml`](api/openapi.yaml)）：[docs/developer-guide/api.md](docs/developer-guide/api.md)
-- 准备放到真实环境用：[docs/deployment/production.md](docs/deployment/production.md)
+- 准备放到真实环境用：[docs/deployment/production.md](docs/deployment/production.md)；升级前先看[备份与恢复](docs/deployment/backup-restore.md)（`scripts/backup.sh` / `scripts/upgrade.sh`）
 - 遇到问题：[docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md)
 
 ## 贡献
