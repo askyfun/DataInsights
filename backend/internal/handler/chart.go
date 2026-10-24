@@ -104,6 +104,8 @@ func (h *ChartHandler) Create(req router.Request[chartCreateIn], res *router.Res
 	if chart.Config == "" {
 		chart.Config = "{}"
 	}
+	// R-95（#220）：有已认证主体则带归属创建。
+	chart.OwnerID = principalOwnerID(req.Ctx)
 
 	result, err := h.svc.Create(req.Ctx.Request.Context(), chart)
 	if err != nil {

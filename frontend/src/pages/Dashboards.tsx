@@ -239,6 +239,14 @@ const DashboardsPage: React.FC = () => {
         text ? <Text type="secondary">{text}</Text> : <Text type="secondary">—</Text>,
     },
     {
+      // 创建人（R-95）：列表出口回填 owner_name，无归属（匿名/存量行）显示「—」。
+      title: intl.formatMessage({ id: 'common.owner' }),
+      dataIndex: 'owner_name',
+      key: 'owner_name',
+      render: (text: string | null) =>
+        text ? <Text type="secondary">{text}</Text> : <Text type="secondary">—</Text>,
+    },
+    {
       title: intl.formatMessage({ id: 'dashboard.chartBlocks' }),
       key: 'chartBlocks',
       width: 110,

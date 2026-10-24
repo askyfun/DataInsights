@@ -170,7 +170,7 @@ const (
 	badRequestEOF        = `{"code":20100,"msg":"EOF","trace":"","data":{}}`
 	internalErrorBoom    = `{"code":50000,"msg":"boom","trace":"","data":{}}`
 	notFoundEnvelope     = `{"code":20300,"msg":"datasource not found: sql: no rows in result set","trace":"","data":{}}`
-	entityGetJSON        = `{"id":7,"name":"pg","type":"postgresql","host":"localhost","port":5432,"database_name":"db","username":"user","created_at":"","updated_at":""}`
+	entityGetJSON        = `{"id":7,"name":"pg","type":"postgresql","host":"localhost","port":5432,"database_name":"db","username":"user","created_at":"","updated_at":"","owner_name":null}`
 )
 
 func errBoom() error { return errors.New("boom") }
@@ -204,7 +204,7 @@ func TestDatasourceList_ExplicitPaging(t *testing.T) {
 		},
 	})
 	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources?limit=2&offset=3", "")
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"items":[{"id":1,"name":"a","type":"postgresql","host":"","port":0,"database_name":"","username":"","created_at":"","updated_at":""}],"total":12}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"items":[{"id":1,"name":"a","type":"postgresql","host":"","port":0,"database_name":"","username":"","created_at":"","updated_at":"","owner_name":null}],"total":12}}`)
 	if got.Limit != 2 || got.Offset != 3 {
 		t.Errorf("expected limit=2 offset=3, got limit=%d offset=%d", got.Limit, got.Offset)
 	}
@@ -313,7 +313,7 @@ func TestDatasourceCreate_Success(t *testing.T) {
 	})
 	body := `{"name":"new","type":"mysql","host":"h","port":3306,"database_name":"d","username":"u","password":"p"}`
 	w := serve(newDatasourceTestRouter(h), http.MethodPost, "/api/datasources", body)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":9,"name":"new","type":"mysql","host":"h","port":3306,"database_name":"d","username":"u","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":9,"name":"new","type":"mysql","host":"h","port":3306,"database_name":"d","username":"u","created_at":"","updated_at":"","owner_name":null}}`)
 	if got == nil || got.Password != "p" || got.Type != "mysql" {
 		t.Fatalf("service received unexpected entity: %+v", got)
 	}
@@ -328,7 +328,7 @@ func TestDatasourceCreate_DefaultType(t *testing.T) {
 		},
 	})
 	w := serve(newDatasourceTestRouter(h), http.MethodPost, "/api/datasources", `{"name":"x"}`)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":0,"name":"x","type":"postgresql","host":"","port":0,"database_name":"","username":"","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":0,"name":"x","type":"postgresql","host":"","port":0,"database_name":"","username":"","created_at":"","updated_at":"","owner_name":null}}`)
 	if got == nil || got.Type != "postgresql" {
 		t.Fatalf("expected default type postgresql, got %+v", got)
 	}
@@ -389,7 +389,7 @@ func TestDatasourceUpdate_EmptyPasswordPassthrough(t *testing.T) {
 	})
 	body := `{"name":"upd","type":"postgresql","host":"h","port":5432,"database_name":"d","username":"u"}`
 	w := serve(newDatasourceTestRouter(h), http.MethodPut, "/api/datasources/3", body)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":3,"name":"upd","type":"postgresql","host":"h","port":5432,"database_name":"d","username":"u","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":3,"name":"upd","type":"postgresql","host":"h","port":5432,"database_name":"d","username":"u","created_at":"","updated_at":"","owner_name":null}}`)
 	// The handler forwards an omitted password as "" verbatim; preserving the
 	// stored value for an empty password is the service's contract.
 	if got == nil || got.ID != 3 || got.Password != "" {

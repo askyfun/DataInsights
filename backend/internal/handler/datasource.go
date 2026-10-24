@@ -188,6 +188,8 @@ func (h *DatasourceHandler) Create(req router.Request[datasourceCreateIn], res *
 		Username:     in.Username,
 		Password:     in.Password,
 	}
+	// R-95（#220）：有已认证主体则带归属创建。
+	ds.OwnerID = principalOwnerID(req.Ctx)
 
 	result, err := h.svc.Create(req.Ctx.Request.Context(), ds)
 	if err != nil {

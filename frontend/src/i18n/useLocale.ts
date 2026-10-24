@@ -55,6 +55,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'common.noData': '暂无数据',
     'common.success': '操作成功',
     'common.error': '操作失败',
+    'common.owner': '创建人',
     'errorBoundary.title': '页面出错了',
     'errorBoundary.subtitle': '发生了意外错误，请重试；若持续出现请刷新页面。',
     'errorBoundary.retry': '重试',
@@ -621,6 +622,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'common.noData': 'No Data',
     'common.success': 'Success',
     'common.error': 'Error',
+    'common.owner': 'Created By',
     'errorBoundary.title': 'Something went wrong',
     'errorBoundary.subtitle':
       'An unexpected error occurred. Please retry; refresh the page if it persists.',

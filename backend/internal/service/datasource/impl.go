@@ -147,7 +147,35 @@ func (s *datasourceService) List(ctx context.Context, opts listpage.Params) (lis
 	}
 	out.Items = toEntityList(datasources)
 	out.Total = total
+	// R-95（#220）：列表出口带创建人用户名（可空；匿名/存量行 owner_id=0 → null）。
+	if err := fillOwnerNames(ctx, s.db, datasources, out.Items); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+// fillOwnerNames 按行序把创建人用户名写进列表项：先按模型行收集非零 owner_id，
+// 一次 IN 查询取 bi_user.username，再按下标回填。模型行与实体项同序同长
+// （toEntityList 一一转换），owner_id=0/NULL 的行保持 nil。
+func fillOwnerNames(ctx context.Context, db bun.IDB, rows []model.Datasource, items []entity.Datasource) error {
+	ids := make([]int32, 0, len(rows))
+	for i := range rows {
+		if rows[i].OwnerID.Valid && rows[i].OwnerID.Int32 > 0 {
+			ids = append(ids, rows[i].OwnerID.Int32)
+		}
+	}
+	names, err := model.OwnerNames(ctx, db, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if i < len(rows) && rows[i].OwnerID.Valid {
+			if n, ok := names[rows[i].OwnerID.Int32]; ok {
+				items[i].OwnerName = &n
+			}
+		}
+	}
+	return nil
 }
 
 // GetByID returns a datasource by ID
@@ -169,8 +197,9 @@ func (s *datasourceService) Create(ctx context.Context, ds *entity.Datasource) (
 	// 此前 Create 两个时间戳都为空。对齐 dataset.Create：插入时显式打戳。
 	m.CreatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	m.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
-	// R-22 归属（#171）：L0 无账号，一律打系统占位 id；#183 落地后换成上下文里的真实用户。
-	m.OwnerID = sql.NullInt32{Int32: model.SystemOwnerID, Valid: true}
+	// R-22 归属（#171）+ R-95（#220）：handler 注入 principal 用户 id，匿名仍打
+	// 系统占位 0（口径不变）。
+	m.OwnerID = sql.NullInt32{Int32: model.ResolveOwnerID(ds.OwnerID), Valid: true}
 	if _, err := s.db.NewInsert().Model(m).Returning("*").Exec(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create datasource: %w", err)
 	}

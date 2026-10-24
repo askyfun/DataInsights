@@ -125,9 +125,12 @@ func (s *folderService) CreateFolder(ctx context.Context, in entity.DashboardFol
 	}
 	now := s.now()
 	m := &model.DashboardFolder{
-		ID:        id.String(),
-		Name:      in.Name,
-		ParentID:  parentID,
+		ID:       id.String(),
+		Name:     in.Name,
+		ParentID: parentID,
+		// R-95（#220）：此前文件夹创建路径不写归属（列留 NULL），现在与其它领域
+		// 对齐——handler 注入 principal 用户 id，匿名打系统占位 0。
+		OwnerID:   sql.NullInt32{Int32: model.ResolveOwnerID(in.OwnerID), Valid: true},
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

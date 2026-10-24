@@ -60,7 +60,11 @@ func TestMirrorEntityJSONTagParity(t *testing.T) {
 		subset      bool
 	}{
 		{"datasetQueryIn / entity.QueryConfig", datasetQueryIn{}, entity.QueryConfig{}, false},
-		{"chartCreateIn / entity.Chart", chartCreateIn{}, entity.Chart{}, false},
+		// chartCreateIn / entity.Chart 自 R-95（#220）起转为有意裁剪档：entity.Chart
+		// 新增了服务端只读的 owner_name（列表创建人回填，可空），它不属于 POST
+		// /api/charts 的请求体，镜像刻意不带（写了也会被 handler 丢弃）。其余
+		// json 字面仍须逐一保持镜像一致。
+		{"chartCreateIn / entity.Chart", chartCreateIn{}, entity.Chart{}, true},
 		{"chartQueryIn / entity.ChartQueryRequest", chartQueryIn{}, entity.ChartQueryRequest{}, false},
 		{"querySaveIn / entity.QueryRecordSaveRequest", querySaveIn{}, entity.QueryRecordSaveRequest{}, false},
 		{"dashboardCreateIn / entity.DashboardCreateRequest", dashboardCreateIn{}, entity.DashboardCreateRequest{}, false},

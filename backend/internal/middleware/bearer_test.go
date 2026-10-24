@@ -104,3 +104,54 @@ func TestBearer_InvalidTokenDenied(t *testing.T) {
 		t.Fatalf("invalid/expired/revoked token must be denied, got %q", out)
 	}
 }
+
+// ---- OptionalBearer（R-95, #220）：资源端点的可选认证 ----
+
+func newOptionalEngine() (*gin.Engine, *strings.Builder) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	body := &strings.Builder{}
+	r.GET("/open", OptionalBearer(&fakeAuth{reject: false}), func(c *gin.Context) {
+		if p, ok := PrincipalFrom(c); ok {
+			_, _ = body.WriteString(p.Username)
+		} else {
+			_, _ = body.WriteString("anonymous")
+		}
+		c.String(http.StatusOK, "ok")
+	})
+	return r, body
+}
+
+func doOptional(r *gin.Engine, header string) (int, string) {
+	req := httptest.NewRequest(http.MethodGet, "/open", nil)
+	if header != "" {
+		req.Header.Set("Authorization", header)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w.Code, w.Body.String()
+}
+
+func TestOptionalBearer_MissingHeader_AnonymousPasses(t *testing.T) {
+	r, body := newOptionalEngine()
+	code, out := doOptional(r, "")
+	if code != http.StatusOK || out != "ok" || body.String() != "anonymous" {
+		t.Fatalf("missing header must pass anonymously, got code=%d body=%q principal=%q", code, out, body.String())
+	}
+}
+
+func TestOptionalBearer_ValidToken_SetsPrincipal(t *testing.T) {
+	r, body := newOptionalEngine()
+	code, out := doOptional(r, "Bearer di_session_abcdef")
+	if code != http.StatusOK || out != "ok" || body.String() != "alice" {
+		t.Fatalf("valid token must set principal, got code=%d body=%q principal=%q", code, out, body.String())
+	}
+}
+
+func TestOptionalBearer_InvalidToken_FailsClosed(t *testing.T) {
+	r, _ := newOptionalEngine()
+	code, out := doOptional(r, "Bearer di_session_invalid")
+	if !strings.Contains(out, "20200") {
+		t.Fatalf("present-but-invalid token must fail closed 20200, got code=%d body=%q", code, out)
+	}
+}

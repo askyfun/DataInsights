@@ -4,8 +4,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/uptrace/bun"
 
-	"data-insights/internal/handler"
 	"data-insights/internal/extract"
+	"data-insights/internal/handler"
 	"data-insights/internal/middleware"
 	"data-insights/internal/router"
 	"data-insights/internal/service/alert"
@@ -70,6 +70,13 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 
 	// API routes
 	api := r.Group("/api")
+
+	// R-95（issue #220）：资源端点可选认证——无 Authorization 头保持匿名（L0 口径
+	// 不变），携带有效凭证则把 principal 注入上下文供 create 路径写 owner_id；
+	// 携带无效凭证 fail-closed 401。auth/token 端点在此之上再挂强制 Bearer。
+	// authSvc 提前到分组装配前，供 OptionalBearer 与 auth 路由共用。
+	authSvc := auth.NewService(db)
+	api.Use(middleware.OptionalBearer(authSvc))
 
 	// Datasource routes (generic router)
 	ds := api.Group("/datasources")
@@ -167,7 +174,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	// token. allowPAT=true here because both are self-service identity
 	// operations, not user-management; the PAT-forbidden guard lives on the
 	// token-management endpoints (#184).
-	authSvc := auth.NewService(db)
+	// authSvc 在上方 /api 分组装配处创建（OptionalBearer 共用）。
 	authHandler := handler.NewAuthHandler(authSvc)
 	authPublic := api.Group("/auth")
 	router.RegisterPostRoute(authPublic, "/register", authHandler.Register)

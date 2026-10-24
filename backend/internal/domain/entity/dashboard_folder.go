@@ -5,11 +5,11 @@ package entity
 // the backend never returns nested children, so a rename or a move touches one
 // row and no derived structure has to be rewritten.
 type DashboardFolder struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	ParentID *string `json:"parent_id"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	ParentID  *string `json:"parent_id"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
 // DashboardFolderCreateRequest is the business input of
@@ -19,6 +19,9 @@ type DashboardFolder struct {
 type DashboardFolderCreateRequest struct {
 	Name     string `json:"name"`
 	ParentID string `json:"parent_id"`
+	// OwnerID 是 R-95（#220）的归属注入位：handler 从已认证 principal 取值塞进
+	// 来，service 落库；匿名请求保持 0。json:"-" 不上 wire、不参与请求绑定。
+	OwnerID int `json:"-"`
 }
 
 // DashboardFolderUpdateRequest is the business input of

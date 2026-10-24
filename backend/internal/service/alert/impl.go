@@ -131,6 +131,9 @@ func (s *alertService) CreateRule(ctx context.Context, in entity.AlertRuleCreate
 		Operator:  string(in.Operator),
 		Threshold: in.Threshold,
 		Enabled:   true,
+		// R-95（#220）：此前预警规则创建路径不写归属（列留 NULL），现在与其它领域
+		// 对齐——handler 注入 principal 用户 id，匿名打系统占位 0。
+		OwnerID:   sql.NullInt32{Int32: model.ResolveOwnerID(in.OwnerID), Valid: true},
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
