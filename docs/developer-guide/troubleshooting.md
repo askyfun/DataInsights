@@ -49,7 +49,7 @@
 - **不设 `STATIC_DIR` = 纯 API 模式**：`/api/nope` 回 gin 默认 404（**不是** JSON 信封）。本地验证单进程形态用 `make serve`；⚠️ 若宿主已占用 23352，需换一个空闲端口。
 - ⚠️ **`preinstall` 钩子会让 Dockerfile 的依赖层失败**：`RUN pnpm install` 前必须已 COPY `frontend/scripts/only-pnpm.mjs` → 依赖层要一起 COPY `package.json` + `pnpm-lock.yaml` + `pnpm-workspace.yaml` + `scripts/`。漏 `scripts/` 会报 module not found，容易看错方向。
 - ⚠️ **后端连不上库时是"静默退出"、不留监听端口**：`dial tcp <host>: connect: host is down` 之后没有任何端口监听，极易误判成 "air / 端口占用"。定位手法：先 `lsof -nP -iTCP:23352 -sTCP:LISTEN` 看有没有进程；再前台跑后端拿真实退出码（macOS 无 `timeout`，用 `perl -e 'alarm 20; exec @ARGV' ./bin/server; echo EXIT=$?`）；`nc -z -G 5 <host> 5432` 区分"进程死了"还是"依赖没起来"。
-- ⚠️ **`GET /health` 是裸 handler、不碰数据库，永远 200，不能当"库连上了"的证据**。验证连通要打真实业务接口（如 `/api/datasets`），其错误串会直接印出 `user=... database=... host:port`，是确认实际连接目标最便宜的手段。⚠️ 联动陷阱：运行中的后端常是**旧产物**，旧二进制按旧契约解析新库数据会整片报错 —— 改完后端**先重建再 curl**。
+- ⚠️ **`GET /health` 是 liveness、不碰数据库，永远 200，不能当"库连上了"的证据**。验证连通改打 `GET /health/ready`（DB `SELECT 1` + 迁移水位 + 上传存储，失败返 503）。`/health/ready` 的消息刻意不含连接串；要确认实际连接目标，开 `HEALTH_DETAIL=1` 看 `/health/detail` 的数据库连通状态与耗时。⚠️ 联动陷阱：运行中的后端常是**旧产物**，旧二进制按旧契约解析新库数据会整片报错 —— 改完后端**先重建再 curl**。
 
 ## API 契约
 

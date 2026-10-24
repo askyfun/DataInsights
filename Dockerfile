@@ -50,6 +50,12 @@ RUN pnpm build
 # ---- 阶段 2：编译后端 ----
 FROM golang:1.27-alpine AS gobuild
 
+# 构建元数据：发布流水线传 tag 与 commit，`./server -version`、GET /version 与
+# /health/detail 都读这三个值。源码构建保持 dev/unknown，不声称假版本。
+ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=unknown
+
 WORKDIR /src
 
 COPY backend/go.mod backend/go.sum ./
@@ -60,7 +66,9 @@ COPY backend/ ./
 # CGO_ENABLED=0：运行阶段是 alpine，静态链接省掉 libc 依赖。
 # -s -w：去掉符号表与调试信息，二进制体积大致减半。
 # -trimpath：抹掉构建机路径，产物可复现。
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
+    -o /out/server ./cmd
 
 
 # ---- 阶段 3：运行 ----

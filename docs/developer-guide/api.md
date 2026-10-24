@@ -27,12 +27,13 @@
 | Auth 认证 | 4 | `/api/auth` |
 | Token PAT 管理 | 3 | `/api/tokens` |
 | QueryRecord 查询记录 | 2 | `/api/queries` |
-| Health 健康检查 | — | `/health` |
+| Health 运行状态 | — | `/health`、`/health/ready`、`/health/detail`、`/version` |
 
 所有 `/api` 路由经泛型路由 `router.RegisterXxxRoute[In, Out]` 注册（见
-`backend/cmd/routes.go`）。**3 个手工路由**不走泛型注册的统一绑定路径：
+`backend/cmd/routes.go`）。**手工路由**不走泛型注册的统一绑定路径：
 
-- `GET /health`：在 `cmd/main.go` 用裸 `r.GET` 注册，但响应仍是标准 Envelope；
+- `GET /health`、`GET /health/ready`、`GET /health/detail`、`GET /version`：在 `cmd/main.go`
+  用裸 `r.GET` 注册（探针不能被鉴权或 JSON 绑定挡住），但响应仍是标准 Envelope；
 - `POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`：本地文件上传，请求体是
   `multipart/form-data`，与泛型路由对 POST 一律 `ShouldBindJSON` 的语义不兼容，故循 `/health`
   先例以裸 `*gin.Context` handler 注册（见 `handler/dataset.go` 的 package 注释）。
@@ -114,8 +115,27 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 
 ### GET /health
 
-健康检查。恒 HTTP 200 + Envelope，`data = { "status": "ok" }`。
-注意：当前实现**不探库**——只证明进程活着，不代表 `DATABASE_URL` 可连。
+liveness 探针。恒 HTTP 200 + Envelope，`data = { "status": "ok" }`。
+**不探库、不含版本**——只证明进程活着，不代表 `DATABASE_URL` 可连。
+
+### GET /health/ready
+
+readiness 探针。实际检查数据库 `SELECT 1`（2s 超时）、迁移是否已到本二进制最新版本、
+上传存储是否可用。全部通过时 HTTP 200 + `data = { "status": "ready" }`；
+否则 **HTTP 503**（本项目「HTTP 恒 200」约定的唯一显式例外）+ 通用 Envelope，
+消息只说明哪一项不满足，不含连接串或底层错误原文。
+
+### GET /health/detail
+
+运行详情。仅 `HEALTH_DETAIL=1|true|on` 时开启；关闭时 **HTTP 404**。
+`data` 含 `version / commit / build_time / started_at / uptime_seconds /
+database_connected / database_ping_ms / migration_version / migrations_up_to_date /
+drivers / sentry_enabled / auth_enforce`，绝不包含连接串、host、库名、用户名或口令。
+
+### GET /version
+
+版本信息。`data = { "version", "commit", "build_time" }`，由构建参数注入
+（源码构建为 `dev` / `unknown`）；前端页脚与排障共用这一来源，不再写死版本。
 
 ## 3. Datasource 数据源（11 个端点）
 

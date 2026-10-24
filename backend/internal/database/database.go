@@ -1,9 +1,11 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"math"
 
 	"data-insights/migrations"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -49,4 +51,49 @@ func RunMigrations(db *bun.DB) error {
 
 	slog.Info("Migrations completed successfully")
 	return nil
+}
+
+// CurrentMigrationVersion returns the highest applied goose migration version.
+// Unlike goose.GetDBVersion it only reads the bookkeeping table, so a readiness
+// probe never creates or mutates it.
+func CurrentMigrationVersion(ctx context.Context, db *sql.DB) (int64, error) {
+	var version sql.NullInt64
+	err := db.QueryRowContext(ctx,
+		`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = true`).Scan(&version)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read migration version: %w", err)
+	}
+	if !version.Valid {
+		return 0, nil
+	}
+	return version.Int64, nil
+}
+
+// LatestMigrationVersion returns the highest migration version embedded in the
+// binary — the version a fully migrated database should be at.
+func LatestMigrationVersion() (int64, error) {
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("postgres"); err != nil {
+		return 0, fmt.Errorf("failed to set goose dialect: %w", err)
+	}
+	embedded, err := goose.CollectMigrations(migrationsDir, 0, math.MaxInt64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to collect migrations: %w", err)
+	}
+	return embedded[len(embedded)-1].Version, nil
+}
+
+// MigrationsUpToDate reports whether the database has applied every migration
+// embedded in this binary. A database ahead of the binary counts as up to date
+// (rolling downgrades are a separate decision, not a readiness failure).
+func MigrationsUpToDate(ctx context.Context, db *sql.DB) (current int64, upToDate bool, err error) {
+	current, err = CurrentMigrationVersion(ctx, db)
+	if err != nil {
+		return 0, false, err
+	}
+	latest, err := LatestMigrationVersion()
+	if err != nil {
+		return current, false, err
+	}
+	return current, current >= latest, nil
 }

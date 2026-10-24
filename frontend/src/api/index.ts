@@ -765,4 +765,17 @@ export const tokensApi = {
   revoke: (id: number) => apiClient.delete<ApiResponse<{ status: string }>>(`/api/tokens/${id}`),
 };
 
+// --- 运行状态（R-100 #225）---
+// 产品版本由构建时注入后端，前端只读、不再写死。类型按 Envelope 契约手写：
+// 与 auth/token 同理，`make api-gen` 前端半步当前不可用（见 AGENTS.md）。
+export interface VersionInfo {
+  version: string;
+  commit: string;
+  build_time: string;
+}
+
+export const systemApi = {
+  getVersion: () => apiClient.get<ApiResponse<VersionInfo>>('/version'),
+};
+
 export default apiClient;

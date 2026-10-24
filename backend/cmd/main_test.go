@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"data-insights/internal/config"
 	"data-insights/internal/keystore"
@@ -22,7 +25,7 @@ import (
 func TestHealthRouteUsesUnifiedResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	registerHealthRoute(router)
+	registerHealthRoutes(router, &healthController{startedAt: time.Now()})
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -164,5 +167,180 @@ func TestResolveSecurityKeyMalformedEnvRejected(t *testing.T) {
 	c.Security.SecurityKey = "zzzz"
 	if _, err := resolveSecurityKey(context.Background(), c, db); err == nil {
 		t.Fatalf("expected error for malformed key, got nil")
+	}
+}
+
+// --- R-100（issue #225）：版本可见与三级健康检查 ---
+
+func getHealthRoute(t *testing.T, h *healthController, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	registerHealthRoutes(router, h)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+	return recorder
+}
+
+func okHealthController() *healthController {
+	return &healthController{
+		startedAt: time.Now().Add(-time.Minute),
+		dbPing:    func(context.Context) error { return nil },
+		migrationStatus: func(context.Context) (int64, bool, error) {
+			return 12, true, nil
+		},
+		extractReady: func() bool { return true },
+	}
+}
+
+func TestVersionReportKeepsFourFieldsWithoutDatabase(t *testing.T) {
+	out := versionReport("")
+	for _, want := range []string{"version: ", "commit: ", "build_time: ", "migration_version: unknown"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("version report missing %q:\n%s", want, out)
+		}
+	}
+	if lines := strings.Count(out, "\n"); lines != 4 {
+		t.Fatalf("expected exactly 4 lines, got %d:\n%s", lines, out)
+	}
+}
+
+func TestVersionRouteExposesBuildMetadata(t *testing.T) {
+	recorder := getHealthRoute(t, okHealthController(), "/version")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	var payload struct {
+		Code int `json:"code"`
+		Data struct {
+			Version   string `json:"version"`
+			Commit    string `json:"commit"`
+			BuildTime string `json:"build_time"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Code != response.CodeSuccess {
+		t.Fatalf("expected success code, got %d", payload.Code)
+	}
+	if payload.Data.Version != version || payload.Data.Commit != commit || payload.Data.BuildTime != buildTime {
+		t.Fatalf("unexpected build metadata: %+v", payload.Data)
+	}
+}
+
+func TestHealthReadyReturns200WhenAllChecksPass(t *testing.T) {
+	recorder := getHealthRoute(t, okHealthController(), "/health/ready")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"status":"ready"`) {
+		t.Fatalf("expected ready payload, got %s", recorder.Body.String())
+	}
+}
+
+func TestHealthReadyReturns503WhenDatabaseUnreachable(t *testing.T) {
+	h := okHealthController()
+	h.dbPing = func(context.Context) error {
+		return errors.New("dial tcp 10.0.0.12:5432: connection refused")
+	}
+
+	// liveness 不受影响：库挂了 /health 仍然 200 且不碰库。
+	if live := getHealthRoute(t, h, "/health"); live.Code != http.StatusOK {
+		t.Fatalf("expected liveness 200 with db down, got %d", live.Code)
+	}
+
+	recorder := getHealthRoute(t, h, "/health/ready")
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "database unreachable") {
+		t.Fatalf("expected database reason, got %s", recorder.Body.String())
+	}
+}
+
+func TestHealthReadyReturns503WhenMigrationsPending(t *testing.T) {
+	h := okHealthController()
+	h.migrationStatus = func(context.Context) (int64, bool, error) { return 11, false, nil }
+
+	recorder := getHealthRoute(t, h, "/health/ready")
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "migrations pending") {
+		t.Fatalf("expected migrations reason, got %s", recorder.Body.String())
+	}
+}
+
+func TestHealthReadyReturns503WhenUploadStorageUnavailable(t *testing.T) {
+	h := okHealthController()
+	h.extractReady = func() bool { return false }
+
+	recorder := getHealthRoute(t, h, "/health/ready")
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "upload storage unavailable") {
+		t.Fatalf("expected upload storage reason, got %s", recorder.Body.String())
+	}
+}
+
+func TestHealthReadyDoesNotEchoConnectionDetails(t *testing.T) {
+	h := okHealthController()
+	h.dbPing = func(context.Context) error {
+		return errors.New("failed to connect: postgres://user:pw@10.0.0.12:5432/insights")
+	}
+
+	recorder := getHealthRoute(t, h, "/health/ready")
+	if strings.Contains(recorder.Body.String(), "postgres://") {
+		t.Fatalf("readiness body leaks the connection string: %s", recorder.Body.String())
+	}
+}
+
+func TestHealthDetailReturns404WhenDisabled(t *testing.T) {
+	h := okHealthController()
+	h.detailEnabled = false
+
+	recorder := getHealthRoute(t, h, "/health/detail")
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when HEALTH_DETAIL is off, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestHealthDetailExposesRuntimeStateWithoutSecrets(t *testing.T) {
+	h := okHealthController()
+	h.detailEnabled = true
+	h.sentryEnabled = true
+	h.driverCount = 4
+	// 底层错误里带连接串；详情端点只报「连不上」这一事实，绝不复述原文。
+	h.dbPing = func(context.Context) error {
+		return errors.New("postgres://user:pw@10.0.0.12:5432/insights: connection refused")
+	}
+
+	recorder := getHealthRoute(t, h, "/health/detail")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "postgres://") || strings.Contains(recorder.Body.String(), "insights:") {
+		t.Fatalf("detail body leaks connection details: %s", recorder.Body.String())
+	}
+
+	var payload struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{
+		"version", "commit", "build_time", "started_at", "uptime_seconds",
+		"database_connected", "database_ping_ms", "migration_version",
+		"migrations_up_to_date", "drivers", "sentry_enabled", "auth_enforce",
+	} {
+		if _, ok := payload.Data[key]; !ok {
+			t.Fatalf("detail payload missing %q: %v", key, payload.Data)
+		}
+	}
+	if payload.Data["database_connected"] != false {
+		t.Fatalf("expected database_connected=false, got %v", payload.Data["database_connected"])
 	}
 }

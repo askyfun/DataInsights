@@ -70,8 +70,10 @@
 ```bash
 make docker-up                              # 等同 image-smoke 的构建 + 启动
 docker compose logs -f                      # 看启动日志
-curl -fsS http://localhost:23352/health     # 探活
-curl -fsS http://localhost:23352/ | head    # 首页由同一进程提供
+curl -fsS http://localhost:23352/health        # liveness：只证明进程活着
+curl -fsS http://localhost:23352/health/ready  # readiness：库 + 迁移 + 上传存储（失败 503）
+curl -fsS http://localhost:23352/version       # 版本可见：确认跑的是刚发布的那版
+curl -fsS http://localhost:23352/ | head       # 首页由同一进程提供
 ```
 
 ## 6. 失败处置

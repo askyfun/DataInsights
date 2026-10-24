@@ -152,6 +152,18 @@ func Error(c *gin.Context, code int, msg string) {
 	})
 }
 
+// ErrorWithHTTPStatus 以非 200 的 HTTP 状态码写出统一信封。
+// 目前唯一的用途是就绪探针的 503：它是本项目「HTTP 恒 200」约定里唯一被文档化的例外
+// （见 api/openapi.yaml 与 docs/deployment/production.md），不要用它表达业务错误。
+func ErrorWithHTTPStatus(c *gin.Context, httpStatus, code int, msg string) {
+	c.JSON(httpStatus, Response{
+		Code:  code,
+		Msg:   msg,
+		Trace: getTraceID(c),
+		Data:  normalizeResponseData(nil),
+	})
+}
+
 // ErrorWithData 带数据的错误响应
 func ErrorWithData(c *gin.Context, code int, msg string, data any) {
 	c.JSON(http.StatusOK, Response{

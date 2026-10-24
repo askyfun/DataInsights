@@ -12,12 +12,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"data-insights/internal/config"
 	"data-insights/internal/database"
+	"data-insights/internal/datasource"
 	"data-insights/internal/extract"
 	"data-insights/internal/keystore"
 	"data-insights/internal/migration/columnids"
@@ -30,9 +32,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// 构建元数据。发布镜像通过 -ldflags "-X main.version=… -X main.commit=…" 注入；
+// 源码构建保持 "dev"/"unknown"，让 -version 与 /version 不会声称一个假版本。
+var (
+	version   = "dev"
+	commit    = "dev"
+	buildTime = "unknown"
+)
+
 func main() {
 	var envFile string
 	flag.StringVar(&envFile, "env", "", "the .env file (default: probe ./.env then ../.env)")
+
+	// -version 只读，必须在 Load() 之前处理：它要能在没有 DATABASE_URL、
+	// 甚至没有数据库的机器上回答「这个二进制是什么」。
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "打印版本信息（version/commit/build_time/migration_version）并退出")
 
 	// 一次性数据迁移开关：列引用从「列名」反写为「列的稳定 id」。
 	// 默认 dry-run，需显式 -apply 才写库。
@@ -61,6 +76,11 @@ func main() {
 	}
 	if loadedEnv != "" {
 		slog.Info("Loaded env file", "path", loadedEnv)
+	}
+
+	if showVersion {
+		fmt.Print(versionReport(os.Getenv("DATABASE_URL")))
+		return
 	}
 
 	c := &config.Config{}
@@ -136,15 +156,26 @@ func main() {
 		slog.Info("access", "method", c.Request.Method, "path", c.Request.URL.Path, "duration_ms", duration, "client_ip", c.ClientIP())
 	})
 
-	registerHealthRoute(r)
-
 	// 抽取存储装配（R-85 / issue #201）：EXTRACT_DATASOURCE_ID 显式配了就用它；
 	// 没配则自举出「复用应用自身 PostgreSQL」的隐藏数据源，让本地文件上传开箱可用。
-	// 必须在路由装配前完成——extract 数据源 id 是各service 的构造参数。
+	// 必须在路由装配前完成——extract 数据源 id 是各service 的构造参数，
+	// 也是 /health/ready 的判据之一。
 	extractGuard := extract.Resolve(context.Background(), extract.SelfProvisioner{
 		DB:           db.DB,
 		DatabaseURL:  c.Database.Url,
 		ConfiguredID: c.ExtractDatasourceID,
+	})
+
+	registerHealthRoutes(r, &healthController{
+		startedAt:     time.Now(),
+		detailEnabled: c.HealthDetail,
+		sentryEnabled: sentryActive,
+		driverCount:   len(datasource.SupportedDriverTypes()),
+		dbPing:        db.DB.PingContext,
+		migrationStatus: func(ctx context.Context) (int64, bool, error) {
+			return database.MigrationsUpToDate(ctx, db.DB)
+		},
+		extractReady: extractGuard.Enabled,
 	})
 
 	// 预警邮件通知：SMTP_HOST 未配置传 nil（评估照常跑，触发记录说明未通知）。
@@ -226,12 +257,131 @@ func newEmailNotifier(cfg config.AlertConfig) alert.Notifier {
 	})
 }
 
-// registerHealthRoute registers the health check endpoint through the unified response wrapper so
-// even non-/api operational endpoints follow the same JSON envelope and null-safety contract.
-func registerHealthRoute(r *gin.Engine) {
+// healthController 承载就绪/详情探针与版本端点。依赖都以函数注入，
+// 让「库不可达」「迁移落后」「存储未就绪」这些分支能在单测里直接构造。
+type healthController struct {
+	startedAt     time.Time
+	detailEnabled bool
+	sentryEnabled bool
+	driverCount   int
+	dbPing        func(ctx context.Context) error
+	// migrationStatus 返回当前迁移版本与「是否已到本二进制的最新版本」。
+	migrationStatus func(ctx context.Context) (int64, bool, error)
+	// extractReady 报告上传存储是否可用；nil 视为不检查。
+	extractReady func() bool
+}
+
+// registerHealthRoutes registers the operational endpoints through the unified
+// response wrapper so even non-/api endpoints follow the same JSON envelope and
+// null-safety contract.
+//
+// /health 的 liveness 语义刻意不加料：恒 200、不碰库、不含版本，既有
+// HEALTHCHECK/编排不受影响。依赖联通性归 /health/ready。
+func registerHealthRoutes(r *gin.Engine, h *healthController) {
 	r.GET("/health", func(c *gin.Context) {
 		response.Success(c, gin.H{"status": "ok"})
 	})
+	r.GET("/health/ready", h.handleReady)
+	r.GET("/health/detail", h.handleDetail)
+	r.GET("/version", func(c *gin.Context) {
+		response.Success(c, gin.H{
+			"version":    version,
+			"commit":     commit,
+			"build_time": buildTime,
+		})
+	})
+}
+
+// handleReady 是唯一以非 200 表达失败的端点：探针需要 HTTP 状态码这一档信号，
+// 而不是去解析信封。响应体不含任何底层错误原文（连接串会带 host/库名/口令）。
+func (h *healthController) handleReady(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+
+	if h.dbPing != nil {
+		if err := h.dbPing(ctx); err != nil {
+			response.ErrorWithHTTPStatus(c, http.StatusServiceUnavailable,
+				response.CodeInternalError, "not ready: database unreachable")
+			return
+		}
+	}
+	if h.migrationStatus != nil {
+		if _, upToDate, err := h.migrationStatus(ctx); err != nil || !upToDate {
+			response.ErrorWithHTTPStatus(c, http.StatusServiceUnavailable,
+				response.CodeInternalError, "not ready: database migrations pending")
+			return
+		}
+	}
+	if h.extractReady != nil && !h.extractReady() {
+		response.ErrorWithHTTPStatus(c, http.StatusServiceUnavailable,
+			response.CodeInternalError, "not ready: upload storage unavailable")
+		return
+	}
+
+	response.Success(c, gin.H{"status": "ready"})
+}
+
+// handleDetail 只在 HEALTH_DETAIL 开启时存在；关闭时 404 而非 403，
+// 不向扫描者确认「这里有个只是被关掉的端点」。
+func (h *healthController) handleDetail(c *gin.Context) {
+	if !h.detailEnabled {
+		response.ErrorWithHTTPStatus(c, http.StatusNotFound, response.CodeNotFound, "not found")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+
+	dbConnected, dbPingMs := false, int64(-1)
+	if h.dbPing != nil {
+		start := time.Now()
+		if err := h.dbPing(ctx); err == nil {
+			dbConnected, dbPingMs = true, time.Since(start).Milliseconds()
+		}
+	}
+	migrationVersion, migrationsUpToDate := int64(-1), false
+	if h.migrationStatus != nil {
+		if current, upToDate, err := h.migrationStatus(ctx); err == nil {
+			migrationVersion, migrationsUpToDate = current, upToDate
+		}
+	}
+
+	response.Success(c, gin.H{
+		"version":               version,
+		"commit":                commit,
+		"build_time":            buildTime,
+		"started_at":            h.startedAt.UTC().Format(time.RFC3339),
+		"uptime_seconds":        int64(time.Since(h.startedAt).Seconds()),
+		"database_connected":    dbConnected,
+		"database_ping_ms":      dbPingMs,
+		"migration_version":     migrationVersion,
+		"migrations_up_to_date": migrationsUpToDate,
+		"drivers":               h.driverCount,
+		"sentry_enabled":        h.sentryEnabled,
+		"auth_enforce":          authEnforceMode(),
+	})
+}
+
+// authEnforceMode 报告生效中的鉴权强制档位。端点级强制（AUTH_ENFORCE=off|shadow|on）
+// 尚未落地，所以生效值确实是 off；此字段先占位，等 R-92 实现后改读 config。
+func authEnforceMode() string { return "off" }
+
+// versionReport 打印四行构建/运行信息。migration_version 需要连库；读不到时
+// 保留 unknown 而不是让 -version 失败——查版本不该被一个坏连接串拦住。
+func versionReport(databaseURL string) string {
+	migrationVersion := "unknown"
+	if databaseURL != "" {
+		if sqldb, err := sql.Open("pgx", databaseURL); err == nil {
+			defer sqldb.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if current, err := database.CurrentMigrationVersion(ctx, sqldb); err == nil {
+				migrationVersion = strconv.FormatInt(current, 10)
+			}
+		}
+	}
+	return fmt.Sprintf("version: %s\ncommit: %s\nbuild_time: %s\nmigration_version: %s\n",
+		version, commit, buildTime, migrationVersion)
 }
 
 func requestIDMiddleware() gin.HandlerFunc {

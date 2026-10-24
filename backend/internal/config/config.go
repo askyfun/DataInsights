@@ -56,6 +56,10 @@ type Config struct {
 	// 所以本地文件上传开箱可用。只有自举失败才会真正没有存储——那时上传入口置灰，
 	// 而平台其余部分照常（抽取存储是旁路能力，不该让整个进程起不来）。
 	ExtractDatasourceID int
+	// HealthDetail 开启 GET /health/detail（版本、迁移水位、依赖耗时等）。
+	// 默认关闭且关闭时返回 404：详情里刻意不含连接串/host/库名，但它仍是
+	// 一份内部拓扑的侧面画像，不该在公网部署上默认暴露。
+	HealthDetail bool
 	// Alert 是指标预警（issue #155）的运行期配置：评估间隔 + SMTP 通知。
 	Alert AlertConfig
 }
@@ -167,6 +171,13 @@ func (c *Config) Load() error {
 			return fmt.Errorf("invalid EXTRACT_DATASOURCE_ID %q: must be a non-negative integer", v)
 		}
 		c.ExtractDatasourceID = id
+	}
+
+	// HEALTH_DETAIL 只认显式开启值："1" / "true" / "on"。其他任何取值（含拼写错误）
+	// 都按关闭处理——这是一个暴露面的开关，错了应该少暴露而不是多暴露。
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("HEALTH_DETAIL"))) {
+	case "1", "true", "on":
+		c.HealthDetail = true
 	}
 
 	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {

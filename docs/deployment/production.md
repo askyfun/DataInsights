@@ -44,9 +44,14 @@
 
 ## 4. 可观测与健康检查
 
-- **`GET /health`**：只证明**进程活着**，它**不探库**，不代表 `DATABASE_URL` 可连。要确认连通性，请打真实业务接口（如 `GET /api/datasets`），其错误串会直接印出连接目标。
+三级语义，别混用：
+
+- **`GET /health`（liveness）**：只证明**进程活着**。恒 HTTP 200、不碰数据库、不含版本；镜像的 HEALTHCHECK 与编排的重启判据都用它。
+- **`GET /health/ready`（readiness）**：实际探依赖——数据库 `SELECT 1`（2s 超时）、迁移是否已到本二进制的最新版本、上传存储是否可用。任一项不满足返回 **HTTP 503**（本项目「HTTP 恒 200」约定的唯一显式例外，响应体仍是统一 Envelope）。**升级后的就绪判据用它**；503 时**不要**据此重启容器（库抖一下就重启反而制造故障）。
+- **`GET /health/detail`（诊断）**：仅 `HEALTH_DETAIL=1|true|on` 时开启，返回版本、commit、构建时间、启动时间、uptime、迁移水位、数据库连通耗时、驱动数量、Sentry 是否启用与鉴权档位。开关关闭时返回 **404**（不确认端点存在）；无论开关如何都不返回连接串、host、库名、用户名或口令。
+- **`GET /version`**：构建时注入的产品版本 / commit / 构建时间，页脚与排障共用这一来源。
 - **Sentry**：前后端是两个**独立项目**（`SENTRY_DSN` 与 `VITE_SENTRY_DSN`），可分别接入。
-- 镜像自带 `/health` 的 HEALTHCHECK。
+- 镜像自带 `/health` 的 HEALTHCHECK；发布镜像通过 `VERSION` / `COMMIT` / `BUILD_TIME` 构建参数注入版本。
 
 ## 5. 缓存与静态托管
 
