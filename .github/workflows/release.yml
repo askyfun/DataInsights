@@ -169,6 +169,10 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: 记录构建时间
+        id: buildmeta
+        run: echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: 构建镜像（仅本机架构，供冒烟用）
         uses: docker/build-push-action@v6
         with:
@@ -178,6 +182,9 @@ jobs:
           tags: ${{ env.IMAGE }}:smoke
           build-args: |
             VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }}
+            VERSION=${{ inputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.buildmeta.outputs.time }}
           # 与下面的多架构推送共用同一份 gha 缓存，第二遍构建只需补差集。
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -235,6 +242,10 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
+      - name: 记录构建时间
+        id: buildmeta
+        run: echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: 登录 Docker Hub
         uses: docker/login-action@v3
         with:
@@ -254,6 +265,8 @@ jobs:
             org.opencontainers.image.description=拖拽式 BI 可视化分析平台
             org.opencontainers.image.url=https://github.com/askyfun/DataInsights
             org.opencontainers.image.documentation=https://github.com/askyfun/DataInsights/blob/master/docs/deployment/docker.md
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: 构建并推送（linux/amd64 + linux/arm64）
         uses: docker/build-push-action@v6
@@ -265,6 +278,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }}
+            VERSION=${{ inputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.buildmeta.outputs.time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           # 关掉 provenance/SBOM 附带清单：让推上去的就是一个干净的多架构 manifest，

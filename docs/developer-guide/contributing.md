@@ -178,7 +178,8 @@ func (h *DatasetHandler) List(req router.Request[datasetListIn], res *router.Res
 - **handler-local In 镜像与 entity 的 `json` tag 一致性**由 `backend/internal/handler/contract_parity_test.go`
   反射守卫；entity 不带 `form:"-"` 会重新引入 query 参数污染注入面，故 In 用 handler-local 镜像。
 
-**3 个手工注册例外**（无法套信封，仍用裸 `gin` 写法）：`/health`（`cmd/main.go` 用裸 `r.GET` + `response.Success`）、
+**手工注册例外**（仍然统一用 Envelope，只是不走泛型绑定）：`/health`、`/health/ready`、`/health/detail`、`/version`
+（`cmd/main.go` 用裸 `r.GET` + `response.*`，探针不能被鉴权或 JSON 绑定挡住）、
 `POST /api/datasets/import`（本地文件上传，新建数据集）与 `POST /api/datasets/:id/replace`（本地文件上传，替换已有数据集）——
 后两者是 multipart，绑定与泛型路由的 `ShouldBindJSON` 语义不兼容，循 `/health` 先例在 `cmd/routes.go` 以裸 `*gin.Context` handler 注册
 （依据：`backend/internal/handler/dataset.go` 的 package 注释）。

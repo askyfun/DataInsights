@@ -15,6 +15,11 @@ info:
     （20000 成功，20100–20500 客户端/业务错误，50000 服务端内部错误）。
 
     data 在错误或无数据时统一归一化为空对象 `{}` / 空数组 `[]`，不会出现 null。
+
+    ## 契约版本
+
+    `info.version` 是**契约版本**，不是产品版本。产品版本（构建时注入）见
+    `GET /version` 与 `GET /health/detail`。
   version: 0.1.0
 servers:
   - url: http://localhost:23352
@@ -46,8 +51,10 @@ paths:
     get:
       tags:
         - health
-      summary: 健康检查
-      description: 样例端点，验证统一响应 Envelope 的契约建模。
+      summary: 健康检查（liveness）
+      description: |
+        只证明进程活着：恒 200、不碰数据库、不含版本信息。
+        依赖联通性看 `/health/ready`，运行详情看 `/health/detail`。
       operationId: getHealth
       responses:
         '200':
@@ -56,6 +63,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /health/ready:
+    get:
+      tags:
+        - health
+      summary: 就绪探针（数据库 / 迁移水位 / 上传存储）
+      description: |
+        实际探依赖：数据库 `SELECT 1`（2s 超时）、迁移是否已到本二进制的最新版本、
+        上传存储是否可用。任一项不满足返回 **HTTP 503** —— 这是本项目「HTTP 恒 200」
+        约定的唯一显式例外（探针需要状态码这一档信号）；响应体仍是统一 Envelope，
+        消息只说明哪一项不满足，不含连接串 / host / 库名 / 口令。
+      operationId: getHealthReady
+      responses:
+        '200':
+          description: 全部依赖就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReadyResponse'
+        '503':
+          description: 依赖未就绪（HTTP 503 是就绪探针的显式例外）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /health/detail:
+    get:
+      tags:
+        - health
+      summary: 运行详情（需 HEALTH_DETAIL 开启）
+      description: |
+        `HEALTH_DETAIL=1|true|on` 时返回版本、构建时间、启动时间、uptime、迁移水位、
+        数据库连通耗时、驱动数量、Sentry 启用状态与鉴权档位。开关关闭时返回
+        **HTTP 404**（不是 403：不向扫描者确认端点存在）。
+        响应绝不包含连接串、host、库名、用户名或口令。
+      operationId: getHealthDetail
+      responses:
+        '200':
+          description: 运行详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDetailResponse'
+        '404':
+          description: HEALTH_DETAIL 未开启
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /version:
+    get:
+      tags:
+        - health
+      summary: 版本信息
+      description: 返回构建时注入的产品版本、commit 与构建时间；页脚等 UI 的唯一来源。
+      operationId: getVersion
+      responses:
+        '200':
+          description: 版本信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
   /api/datasources:
     get:
       tags:
@@ -1736,6 +1805,115 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/HealthData'
+    HealthReadyData:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: ready
+    HealthReadyResponse:
+      description: GET /health/ready 成功响应（失败时 HTTP 503 + 通用 Envelope）。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/HealthReadyData'
+    HealthDetailData:
+      type: object
+      description: 运行详情；刻意不含连接串、host、库名、用户名与口令。
+      required:
+        - version
+        - commit
+        - build_time
+        - started_at
+        - uptime_seconds
+        - database_connected
+        - database_ping_ms
+        - migration_version
+        - migrations_up_to_date
+        - drivers
+        - sentry_enabled
+        - auth_enforce
+      properties:
+        version:
+          type: string
+          example: v0.4.0
+        commit:
+          type: string
+          example: 3f667dd
+        build_time:
+          type: string
+          example: '2026-10-24T12:00:00Z'
+        started_at:
+          type: string
+          format: date-time
+        uptime_seconds:
+          type: integer
+          format: int64
+        database_connected:
+          type: boolean
+        database_ping_ms:
+          type: integer
+          format: int64
+          description: 数据库连通耗时；不可达时为 -1。
+        migration_version:
+          type: integer
+          format: int64
+          description: 已应用的最高迁移版本；读取失败时为 -1。
+        migrations_up_to_date:
+          type: boolean
+        drivers:
+          type: integer
+          description: 本构建支持的数据库方言数量。
+        sentry_enabled:
+          type: boolean
+        auth_enforce:
+          type: string
+          enum:
+            - off
+            - shadow
+            - on
+    HealthDetailResponse:
+      description: GET /health/detail 响应（HEALTH_DETAIL 未开启时 HTTP 404）。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/HealthDetailData'
+    VersionData:
+      type: object
+      required:
+        - version
+        - commit
+        - build_time
+      properties:
+        version:
+          type: string
+          example: v0.4.0
+        commit:
+          type: string
+          example: 3f667dd
+        build_time:
+          type: string
+          example: '2026-10-24T12:00:00Z'
+    VersionResponse:
+      description: GET /version 响应：Envelope 特化 data 为 VersionData。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/VersionData'
     OkData:
       type: object
       description: 删除/测试连接等无业务负载端点的成功负载。

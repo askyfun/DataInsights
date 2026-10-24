@@ -362,3 +362,35 @@ func TestListenHostIsNotConfigurable(t *testing.T) {
 		t.Errorf("listen host must stay %q, got %q", ListenHost, cfg.Host)
 	}
 }
+
+// TestLoadHealthDetail 验证详情端点开关只认显式开启值：
+// 留空、"0"、拼写错误一律按关闭处理（暴露面开关错了应少暴露，而不是多暴露）。
+func TestLoadHealthDetail(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{"", false},
+		{"0", false},
+		{"false", false},
+		{"enabled", false},
+		{"1", true},
+		{"true", true},
+		{"TRUE", true},
+		{"on", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("HEALTH_DETAIL", tc.raw)
+
+			cfg := &Config{}
+			if err := cfg.Load(); err != nil {
+				t.Fatalf("failed to load config: %v", err)
+			}
+			if cfg.HealthDetail != tc.want {
+				t.Fatalf("HEALTH_DETAIL=%q: expected %v, got %v", tc.raw, tc.want, cfg.HealthDetail)
+			}
+		})
+	}
+}

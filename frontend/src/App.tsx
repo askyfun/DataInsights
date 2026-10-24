@@ -14,6 +14,7 @@ import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import { systemApi } from './api';
 import LoadingPlaceholder from './components/LoadingPlaceholder';
 import { useLocale } from './i18n/useLocale';
 import { type ThemeMode, useTheme } from './lib/theme';
@@ -45,7 +46,25 @@ const App: React.FC = () => {
   ];
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [backendVersion, setBackendVersion] = useState('');
   const location = useLocation();
+
+  // 版本串只有后端一个来源（构建时注入），页脚不写死产品版本。
+  useEffect(() => {
+    let cancelled = false;
+    systemApi
+      .getVersion()
+      .then((res) => {
+        if (!cancelled) setBackendVersion(res.data.data.version);
+      })
+      .catch((err: unknown) => {
+        // 版本探测失败不影响使用，页脚只保留版权行；留一行日志便于排障。
+        console.debug('failed to load backend version', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -263,7 +282,8 @@ const App: React.FC = () => {
           padding: '16px',
         }}
       >
-        Data Insights ©2026 Created with React + Ant Design
+        Data Insights{backendVersion ? ` · ${backendVersion}` : ''} ©2026 Created with React + Ant
+        Design
       </Footer>
     </Layout>
   );

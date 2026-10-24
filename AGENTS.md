@@ -25,7 +25,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 | Domain | `backend/internal/domain/entity/` | 领域实体类型 |
 | Query | `backend/internal/query/` | SQL 构造唯一出口：AST + bun_builder（结构化查询）+ raw.go（原始 SQL 构造） |
 | Model | `backend/internal/model/` | 数据库模型（bun ORM） |
-| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：58 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
+| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：58 个 API 端点经此注册；另有 6 个手工注册的运维/上传端点：`/health`、`/health/ready`、`/health/detail`、`/version` 与两个上传端点，见下） |
 | WebUI | `backend/internal/webui/` | 前端构建产物的托管与路径分流（挂在 gin 的 `NoRoute` 上）：命中磁盘文件就返回，未命中回落 `index.html`，保留前缀回 JSON 404 |
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
 | Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `SECURITY_KEY`） |

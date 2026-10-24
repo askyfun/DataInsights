@@ -81,6 +81,12 @@ type Connection interface {
 	Capabilities(ctx context.Context) (*DialectCapabilities, error)
 }
 
+// SupportedDriverTypes lists the datasource dialects this build can connect to.
+// It is the single source for both NewDriver and operational introspection.
+func SupportedDriverTypes() []DriverType {
+	return []DriverType{DriverPostgreSQL, DriverClickHouse, DriverMySQL, DriverStarRocks}
+}
+
 // NewDriver creates a new driver instance based on the driver type
 func NewDriver(driverType DriverType) (Driver, error) {
 	switch driverType {
