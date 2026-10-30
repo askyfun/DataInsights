@@ -15,7 +15,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"PORT", "DATABASE_URL", "SECURITY_KEY", "SENTRY_DSN", "STATIC_DIR", "CORS_ALLOWED_ORIGINS",
-		"EXTRACT_DATASOURCE_ID",
+		"EXTRACT_DATASOURCE_ID", "APP_ENV",
 	} {
 		t.Setenv(name, "")
 	}
@@ -58,6 +58,10 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.Security.SecurityKey != "" || cfg.Sentry.Dsn != "" || len(cfg.CORS.AllowedOrigins) != 0 {
 		t.Errorf("expected optional fields to stay empty, got %+v", cfg)
+	}
+	// APP_ENV 未设置时 Sentry.Environment 必须是 production（R-98 验收 6）。
+	if cfg.Sentry.Environment != defaultAppEnv {
+		t.Errorf("expected default app env %q, got %q", defaultAppEnv, cfg.Sentry.Environment)
 	}
 }
 
@@ -319,6 +323,7 @@ func TestEnvVarNamesAreStable(t *testing.T) {
 	t.Setenv("STATIC_DIR", "/tmp/literal-web")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://literal.example")
 	t.Setenv("EXTRACT_DATASOURCE_ID", "9")
+	t.Setenv("APP_ENV", "staging")
 
 	cfg := &Config{}
 	if err := cfg.Load(); err != nil {
@@ -345,6 +350,9 @@ func TestEnvVarNamesAreStable(t *testing.T) {
 	}
 	if cfg.ExtractDatasourceID != 9 {
 		t.Errorf("EXTRACT_DATASOURCE_ID not honored, got %d", cfg.ExtractDatasourceID)
+	}
+	if cfg.Sentry.Environment != "staging" {
+		t.Errorf("APP_ENV not honored, got %q", cfg.Sentry.Environment)
 	}
 }
 

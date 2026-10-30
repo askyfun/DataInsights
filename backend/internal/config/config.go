@@ -91,7 +91,13 @@ type SecurityConfig struct {
 
 type SentryConfig struct {
 	Dsn string
+	// Environment 是上报事件的 environment 标签（R-98），来自 APP_ENV；
+	// 缺省 defaultAppEnv（production），空值不会出现。
+	Environment string
 }
+
+// defaultAppEnv 是未设置 APP_ENV 时的运行环境标识。
+const defaultAppEnv = "production"
 
 type CORSConfig struct {
 	AllowedOrigins []string
@@ -155,6 +161,12 @@ func (c *Config) Load() error {
 
 	if v := os.Getenv("SENTRY_DSN"); v != "" {
 		c.Sentry.Dsn = v
+	}
+
+	// APP_ENV 只作为监控事件的 environment 标签（R-98），留空等同 production。
+	c.Sentry.Environment = defaultAppEnv
+	if v := os.Getenv("APP_ENV"); v != "" {
+		c.Sentry.Environment = v
 	}
 
 	if v := os.Getenv("STATIC_DIR"); v != "" {

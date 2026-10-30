@@ -29,6 +29,10 @@ type Response struct {
 	Msg   string `json:"msg"`
 	Trace string `json:"trace"`
 	Data  any    `json:"data"`
+	// ErrorID 是可反查的错误编号（R-97 格式 DI-<biz>-<8hex>）。仅在生成它的
+	// 错误路径（当前为 panic 兜底信封，R-98）上非空，其余响应经 omitempty 保持
+	// 与历史契约完全一致。
+	ErrorID string `json:"error_id,omitempty"`
 }
 
 // 获取请求追踪 ID
@@ -149,6 +153,18 @@ func Error(c *gin.Context, code int, msg string) {
 		Msg:   msg,
 		Trace: getTraceID(c),
 		Data:  normalizeResponseData(nil),
+	})
+}
+
+// ErrorWithID 带错误编号的错误响应（R-98 panic 兜底信封使用；error_id 空串时
+// 退化为普通 Error 信封，omitempty 保证不出现在 JSON 里）。
+func ErrorWithID(c *gin.Context, code int, msg string, errorID string) {
+	c.JSON(http.StatusOK, Response{
+		Code:    code,
+		Msg:     msg,
+		Trace:   getTraceID(c),
+		Data:    normalizeResponseData(nil),
+		ErrorID: errorID,
 	})
 }
 

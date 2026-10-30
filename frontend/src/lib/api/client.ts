@@ -35,10 +35,18 @@ export class ApiClientError extends Error {
   requestId?: string;
   /** 是否因超时失败（error.code === 'ECONNABORTED'） */
   timedOut?: boolean;
+  /** 后端生成的错误编号（DI-<biz>-<8hex>，R-98）；仅 panic 信封等路径携带 */
+  errorId?: string;
 
   constructor(
     message: string,
-    opts: { code?: number; status?: number; requestId?: string; timedOut?: boolean } = {}
+    opts: {
+      code?: number;
+      status?: number;
+      requestId?: string;
+      timedOut?: boolean;
+      errorId?: string;
+    } = {}
   ) {
     super(message);
     this.name = 'ApiClientError';
@@ -46,6 +54,7 @@ export class ApiClientError extends Error {
     this.status = opts.status;
     this.requestId = opts.requestId;
     this.timedOut = opts.timedOut;
+    this.errorId = opts.errorId;
   }
 }
 
@@ -208,13 +217,25 @@ function createApiClient(baseURL: string): AxiosInstance {
   // 统一弹窗会导致同一失败被提示两次。
   client.interceptors.response.use(
     (response: AxiosResponse<ApiResponse>) => {
-      const { code, msg } = response.data || {};
+      const { code, msg, error_id } = response.data || {};
 
       if (code !== undefined && code !== API_SUCCESS_CODE) {
         console.error(`API Error [${code}]: ${msg}`);
+        // 业务码错误统一上报（R-98 验收 7）：带 biz_code / request_id / error_id /
+        // 路由，与后端日志按 request_id 对账。Sentry 未初始化时是 no-op。
+        Sentry.captureMessage(`API Error [${code}]: ${msg || `API Error: ${code}`}`, {
+          level: 'error',
+          tags: {
+            biz_code: String(code),
+            request_id: (response.config.headers?.['X-Request-ID'] as string | undefined) ?? '',
+            error_id: error_id ?? '',
+            route: window.location.pathname,
+          },
+        });
         throw new ApiClientError(msg || `API Error: ${code}`, {
           code,
           requestId: response.config.headers?.['X-Request-ID'] as string | undefined,
+          errorId: error_id,
         });
       }
 
@@ -252,12 +273,22 @@ function createApiClient(baseURL: string): AxiosInstance {
         error.response?.data?.message ||
         error.message ||
         'An error occurred';
+      const errorId = error.response?.data?.error_id;
       console.error('API Error:', errorMsg);
 
-      // Report non-2xx responses to Sentry
+      // Report non-2xx responses to Sentry（panic 兜底外的 HTTP 层错误；
+      // panic 信封是 HTTP 200 + code 50000，走上方业务码分支）
       if (status && status >= 400) {
         Sentry.captureMessage(
-          `API Error: ${error.response?.config?.method?.toUpperCase()} ${error.response?.config?.url} returned ${status}: ${errorMsg}`
+          `API Error: ${error.response?.config?.method?.toUpperCase()} ${error.response?.config?.url} returned ${status}: ${errorMsg}`,
+          {
+            level: 'error',
+            tags: {
+              request_id: (config?.headers?.['X-Request-ID'] as string | undefined) ?? '',
+              error_id: errorId ?? '',
+              route: window.location.pathname,
+            },
+          }
         );
       }
 
@@ -267,6 +298,7 @@ function createApiClient(baseURL: string): AxiosInstance {
         status,
         requestId: config?.headers?.['X-Request-ID'] as string | undefined,
         timedOut: error.code === 'ECONNABORTED',
+        errorId,
       });
     }
   );

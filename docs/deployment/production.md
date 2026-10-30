@@ -45,7 +45,7 @@
 ## 4. 可观测与健康检查
 
 - **`GET /health`**：只证明**进程活着**，它**不探库**，不代表 `DATABASE_URL` 可连。要确认连通性，请打真实业务接口（如 `GET /api/datasets`），其错误串会直接印出连接目标。
-- **Sentry**：前后端是两个**独立项目**（`SENTRY_DSN` 与 `VITE_SENTRY_DSN`），可分别接入。
+- **Sentry**：前后端是两个**独立项目**（`SENTRY_DSN` 与 `VITE_SENTRY_DSN`），可分别接入。后端开启后（R-98）只上报业务码 50000/20500 与 panic；4xx 业务码只进本地日志不上报，事件出站前统一脱敏（连接串密码 / Bearer / PAT / API key 替换为 `<redacted>`）。`APP_ENV`（缺省 `production`）作为事件的 environment 标签。这套「限类 + 脱敏 + 采样」口径就是为了避免账单失控——放量前先在控制台核对事件量，必要时用 Sentry 侧采样率兜底。
 - 镜像自带 `/health` 的 HEALTHCHECK。
 
 ## 5. 缓存与静态托管

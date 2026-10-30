@@ -11,9 +11,11 @@ import (
 
 	"data-insights/internal/config"
 	"data-insights/internal/keystore"
+	"data-insights/internal/monitor"
 	"data-insights/internal/response"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 )
 
@@ -48,38 +50,76 @@ func TestHealthRouteUsesUnifiedResponse(t *testing.T) {
 	}
 }
 
-// TestSentryPanicPathReturns500 验证 panic 场景不会变成 200 空响应：
-// sentrygin 默认吞 panic，生产配置必须 Repanic: true 让 panic 穿透到外层
-// gin Recovery（gin.Default()），从而返回 500。
-func TestSentryPanicPathReturns500(t *testing.T) {
+// TestSentryPanicPathReturnsEnvelope 验证 panic 场景返回标准信封（R-98 验收 5）：
+// sentrygin 以 Repanic: true 捕获后重新抛出，monitor.Recovery 在最外层接住，
+// 返回 HTTP 200 + code 50000 + error_id 的统一信封——消灭「200 空 body / 500
+// 空 body」两种非信封形态。
+func TestSentryPanicPathReturnsEnvelope(t *testing.T) {
 	t.Run("sentrygin mounted with repanic", func(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
-		r.Use(gin.Recovery()) // 模拟 gin.Default() 的外层 Recovery
-		r.Use(newSentryginMiddleware())
+		r.Use(monitor.Recovery())
+		r.Use(newSentryginMiddleware()) // Repanic: true，panic 穿透到 Recovery
 		r.GET("/boom", func(c *gin.Context) { panic("boom") })
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/boom", nil))
 
-		if w.Code != http.StatusInternalServerError {
-			t.Fatalf("expected 500 after panic, got %d", w.Code)
-		}
+		assertPanicEnvelope(t, w)
 	})
 
 	t.Run("sentry not active, sentrygin not mounted", func(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
-		r.Use(gin.Recovery())
+		r.Use(monitor.Recovery())
 		r.GET("/boom", func(c *gin.Context) { panic("boom") })
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/boom", nil))
 
-		if w.Code != http.StatusInternalServerError {
-			t.Fatalf("expected 500 after panic, got %d", w.Code)
-		}
+		assertPanicEnvelope(t, w)
 	})
+}
+
+// assertPanicEnvelope 断言响应是带 error_id 的 50000 信封且 HTTP 200。
+func assertPanicEnvelope(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 envelope, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Code    int    `json:"code"`
+		Msg     string `json:"msg"`
+		ErrorID string `json:"error_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	if payload.Code != response.CodeInternalError {
+		t.Fatalf("expected code %d, got %d", response.CodeInternalError, payload.Code)
+	}
+	if payload.ErrorID == "" {
+		t.Fatalf("expected error_id in panic envelope, got none: %s", w.Body.String())
+	}
+}
+
+// TestInitSentryEmptyDSNIsNoop 钉死「未配置即无副作用」（R-98 验收 8）：
+// SENTRY_DSN 留空时 initSentry 返回 false，不初始化 SDK。
+func TestInitSentryEmptyDSNIsNoop(t *testing.T) {
+	if initSentry("", "") {
+		t.Fatalf("empty DSN must return false")
+	}
+}
+
+// TestInitSentryValidDSNActivates 验证合法 DSN 时初始化成功且携带 environment。
+func TestInitSentryValidDSNActivates(t *testing.T) {
+	if !initSentry("https://test@example.com/1", "staging") {
+		t.Fatalf("valid DSN must return true")
+	}
+	// 还原为无 client 的全局 hub，避免污染其他用例。
+	if err := sentry.Init(sentry.ClientOptions{}); err != nil {
+		t.Fatalf("reset sentry: %v", err)
+	}
 }
 
 func TestRequestIDMiddlewareGeneratesRandomID(t *testing.T) {

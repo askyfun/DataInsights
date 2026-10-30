@@ -1716,6 +1716,11 @@ components:
         trace:
           type: string
           description: 请求追踪 ID（X-Request-ID）
+        error_id:
+          type: string
+          description: >-
+            可反查的错误编号（格式 DI-<biz_code>-<8位hex>，R-97 词表）。可选：仅在生成它的
+            错误路径（当前为 panic 兜底信封，R-98）上出现，其余响应不带此字段。
         data:
           description: 业务数据；错误或无数据时为空对象 {}，不为 null
     HealthData:
