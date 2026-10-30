@@ -32,7 +32,8 @@ cp .env.example .env    # 然后按需修改
 | `DATABASE_URL` | **是** | — | PostgreSQL 连接串。缺失时启动 fail-fast 并打印变量名，不会退化成驱动层看不懂的连接失败。 |
 | `PORT` | 否 | `23352` | HTTP 监听端口。监听地址固定 `0.0.0.0`，**不提供**覆盖。 |
 | `SECURITY_KEY` | 否 | 首启随机生成 | 数据源密码 AES-256-GCM 的加密密钥（64 位 hex）。**留空 = 系统首次启动随机生成（32 字节）并持久化到数据库**，重启 / 容器重建复用同一把，保证已加密密码始终可解；显式配置时环境变量优先。**生产强烈建议显式设置**。 |
-| `SENTRY_DSN` | 否 | 空 | 后端 Sentry DSN，留空 = 关闭上报。 |
+| `SENTRY_DSN` | 否 | 空 | 后端 Sentry DSN，留空 = 关闭上报。开启后（R-98）只上报业务码 50000/20500 与 panic 两类事件，4xx 业务码只进日志；事件出站前经统一脱敏（连接串密码 / `password=` / Bearer / PAT / `sk-` 密钥替换为 `<redacted>`）。 |
+| `APP_ENV` | 否 | `production` | Sentry 事件的 `environment` 标签（R-98）。留空等同 `production`；改值需重启。 |
 | `CORS_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔白名单；**留空 = 放开所有来源**（平台 API 无登录态，CORS 不构成安全边界）。填非空白名单则只回显名单内来源，供将来引入认证后收紧。 |
 | `STATIC_DIR` | 否 | 空 | 前端构建产物目录。设置后本进程一并托管页面（未命中回落 `index.html`）；**留空 = 只提供 API**（本地开发默认形态，页面走 Vite dev server）。目录配错即启动失败。 |
 | `EXTRACT_DATASOURCE_ID` | 否 | 自举 | 本地文件上传（CSV/XLSX）的落库位置。**留空即可用**——平台会自动复用 `DATABASE_URL` 指向的应用自身 PostgreSQL 作为上传存储（见下方「上传存储怎么定的」）。填一个数据源 id 则改用它作为存储。无论哪种，该数据源都不再是普通数据源：列表隐藏、不能被常规数据集引用；上传表以 `di_extract_<datasetId>` 命名。 |

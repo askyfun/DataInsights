@@ -717,6 +717,8 @@ export interface components {
             trace: string;
             /** @description 业务数据；错误或无数据时为空对象 {}，不为 null */
             data: unknown;
+            /** @description 可反查的错误编号（DI-<biz>-<8hex>，R-98）；仅在生成它的错误路径（当前为 panic 兜底信封）上出现 */
+            error_id?: string;
         };
         HealthData: {
             /** @example ok */

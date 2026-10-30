@@ -21,7 +21,9 @@ import (
 	"data-insights/internal/extract"
 	"data-insights/internal/keystore"
 	"data-insights/internal/migration/columnids"
+	"data-insights/internal/monitor"
 	"data-insights/internal/response"
+	"data-insights/internal/router"
 	"data-insights/internal/service/alert"
 	"data-insights/internal/webui"
 
@@ -77,8 +79,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	sentryActive := initSentry(c.Sentry.Dsn)
+	sentryActive := initSentry(c.Sentry.Dsn, c.Sentry.Environment)
 	if sentryActive {
+		// 统一错误出口的上报钩子（R-98）：只上报 50000/20500，panic 由
+		// sentrygin(Repanic) 单独捕获，同一失败只会产生一个事件。
+		router.SetErrorReporter(monitor.NewErrorReporter())
 		defer sentry.Flush(2 * time.Second)
 	}
 
@@ -116,17 +121,24 @@ func main() {
 	}
 
 	gin.SetMode(gin.ReleaseMode)
-	r := gin.Default()
+	// gin.New() 而非 gin.Default()：panic 兜底必须是「信封 + error_id」（monitor.Recovery），
+	// 不能再用 gin.Default() 自带的裸 500 空 body Recovery（R-98 验收 5）。Logger 保留原行为。
+	r := gin.New()
+	r.Use(gin.Logger())
+	// panic 兜底最外层：接住 sentrygin Repanic 抛回的 panic，返回带 error_id 的标准信封。
+	r.Use(monitor.Recovery())
+
+	// Request ID middleware 必须先于 sentrygin：Sentry 事件经 monitor.ScopeTags
+	// 关联 request_id，而 sentrygin 建立请求 hub 后才挂得上 tag。
+	r.Use(requestIDMiddleware())
 
 	if sentryActive {
 		r.Use(newSentryginMiddleware())
+		r.Use(monitor.ScopeTags())
 	}
 
 	// CORS middleware
 	r.Use(corsMiddleware(c.CORS.AllowedOrigins))
-
-	// Request ID middleware
-	r.Use(requestIDMiddleware())
 
 	// Access log middleware
 	r.Use(func(c *gin.Context) {
@@ -303,15 +315,23 @@ func newSentryginMiddleware() gin.HandlerFunc {
 // SDK is active. An empty DSN skips initialization entirely so tests and local
 // development run without any Sentry side effects; an initialization failure is
 // logged but does not stop the server (monitoring must not block serving).
-func initSentry(dsn string) bool {
+// Release/Environment：Release 取 R-100 注入的版本串（未合入前留空，不阻塞初始化）；
+// Environment 来自 APP_ENV（config 已保证缺省 production）。BeforeSend 走
+// monitor.RedactBeforeSend 把事件里的机密经 logx.Redact 收口后才出站。
+func initSentry(dsn, environment string) bool {
 	if dsn == "" {
 		return false
 	}
-	if err := sentry.Init(sentry.ClientOptions{Dsn: dsn}); err != nil {
+	if err := sentry.Init(sentry.ClientOptions{
+		Dsn:         dsn,
+		Release:     "",
+		Environment: environment,
+		BeforeSend:  monitor.RedactBeforeSend,
+	}); err != nil {
 		slog.Error("Failed to initialize Sentry, continuing without it", "error", err)
 		return false
 	}
-	slog.Info("Sentry initialized")
+	slog.Info("Sentry initialized", "environment", environment)
 	return true
 }
 
