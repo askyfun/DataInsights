@@ -1252,6 +1252,9 @@ type Envelope struct {
 
 	// Trace 请求追踪 ID（X-Request-ID）
 	Trace string `json:"trace"`
+
+	// ErrorID 错误编号 DI-<业务码>-<8位大写hex>，仅错误响应携带（omitempty）；供用户复制报障（issue #222 R-97）
+	ErrorID string `json:"error_id,omitempty"`
 }
 
 // FieldDistribution 字段值分布（entity.FieldDistribution）；distribution 恒为数组。

@@ -35,6 +35,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GridLayout, type Layout, useContainerWidth, verticalCompactor } from 'react-grid-layout';
 import { useIntl } from 'react-intl';
 import { useNavigate, useParams } from 'react-router-dom';
+import { notifyApiError } from '@/lib/describeApiError';
 import 'react-grid-layout/css/styles.css';
 
 import {
@@ -250,12 +251,11 @@ const DashboardEditor: React.FC = () => {
         }
         setResults(map);
       } catch (error: any) {
-        message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+        notifyApiError(error, intl, message);
       } finally {
         setQuerying(false);
       }
     },
-    // message 实例跨渲染稳定（antd 内部 useMemo([], …)），进依赖数组不会引起循环。
     [intl, message]
   );
 
@@ -1092,7 +1092,7 @@ const DashboardEditor: React.FC = () => {
       // persistedIdsRef 刚在上面刷过，所以这次会把（刚保存的）筛选器与联动一并下发。
       await queryWithState(id, doc.widgets, filterValues, activePageId, activeLinkages);
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     } finally {
       setSaving(false);
     }

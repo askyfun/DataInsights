@@ -25,6 +25,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, useNavigate } from 'react-router-dom';
+import { notifyApiError } from '@/lib/describeApiError';
 import { Datasource, DatasourceFormData, DatasourceType, datasourcesApi, ListQuery } from '../api';
 import { ListSearch, sortOrderOf, useDebouncedValue, useServerList } from '../components/listPage';
 import ModalFooter from '../components/ModalFooter';
@@ -81,7 +82,7 @@ const DatasourcePage: React.FC = () => {
       setEditingId(null);
       list.reload();
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     } finally {
       setSubmitLoading(false);
     }
@@ -102,7 +103,7 @@ const DatasourcePage: React.FC = () => {
       });
       message.success(intl.formatMessage({ id: 'datasource.connectionSuccess' }));
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'datasource.connectionFailed' }));
+      notifyApiError(error, intl, message);
     } finally {
       setTestLoading(false);
     }
@@ -114,7 +115,7 @@ const DatasourcePage: React.FC = () => {
       list.reload();
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     }
   };
 

@@ -48,7 +48,9 @@ import {
 } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useSearchParams } from 'react-router-dom';
+import { notifyApiError } from '@/lib/describeApiError';
 import {
   Chart,
   type ChartDataResponse,
@@ -1941,6 +1943,7 @@ const QueryStatusBadge: React.FC<{
  * 主要逻辑：同步 store 状态、处理字段拖放、并在拖拽期间渲染 overlay 预览。
  */
 const ChartBuilder: React.FC = () => {
+  const intl = useIntl();
   // 无障碍（issue #67）：dnd-kit 的 DragOverlay 回落动画走 Web Animations API，
   // CSS 的 !important 压不住它，只能按系统开关显式关闭（见下方 DragOverlay 的 dropAnimation）。
   const reducedMotion = usePrefersReducedMotion();
@@ -3291,8 +3294,8 @@ const ChartBuilder: React.FC = () => {
         message.success('图表保存成功');
         setEditingChartId(newChart.id);
       }
-    } catch (error: any) {
-      message.error(error.message || '保存失败');
+    } catch (error: unknown) {
+      notifyApiError(error, intl, message);
     }
   };
 
