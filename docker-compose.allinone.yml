@@ -1,7 +1,8 @@
 # Data Insights 一键体验（Docker Hub 发布镜像 + PostgreSQL）
 #
-# ⚠️ 本项目**无登录、无鉴权**，定位是单团队**内网**工具：不要把这个端口暴露到公网。
-#    下面的 PostgreSQL 用的是公开的演示密码，仅本地体验用。
+# ⚠️ 平台已具备账号体系，但 AUTH_ENFORCE=off（默认）时资源端点仍可匿名访问：
+#    对外暴露务必设 AUTH_ENFORCE=on（见 docs/user-guide/configuration.md「鉴权开放口径」）。
+#    且不要把这个端口暴露到公网；下面的 PostgreSQL 用的是公开的演示密码，仅本地体验用。
 #
 # 用法：
 #   docker compose -f docker-compose.allinone.yml up -d

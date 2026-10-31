@@ -33,7 +33,7 @@ make build-frontend      # 构建 (tsc + vite build)
 | `PORT` | HTTP 监听端口，内置默认 `23352`。 |
 | `SECURITY_KEY` | 数据源密码 AES-256-GCM 加密密钥，64 位 hex。**留空 = 系统首次启动随机生成（32 字节）并持久化到数据库 `bi_setting` 表**，重启/容器重建复用同一把，保证已加密密码始终可解；显式配置时环境变量优先。 |
 | `SENTRY_DSN` | 后端 Sentry DSN，留空 = 关闭上报（前端是独立的 `VITE_SENTRY_DSN`）。 |
-| `CORS_ALLOWED_ORIGINS` | 逗号分隔白名单；**留空 = 放开所有来源**（平台 API 无登录态，CORS 不构成安全边界）。 |
+| `CORS_ALLOWED_ORIGINS` | 逗号分隔白名单；**留空 = 放开所有来源**（Bearer 不由浏览器自动携带，CORS 不构成安全边界）。 |
 | `STATIC_DIR` | 前端构建产物目录；设置后本进程一并托管页面（未命中回落 `index.html`），**留空 = 只提供 API**（本地开发默认形态，页面走 Vite dev server）。目录配错（读不到 `index.html`）进程启动即失败。 |
 
 监听地址固定 `0.0.0.0`，**不提供**环境变量覆盖（容器场景下它是唯一合理值；端口可配、地址不可）。

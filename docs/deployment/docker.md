@@ -43,7 +43,7 @@ TAG=v1.0.0 docker compose -f docker-compose.allinone.yml up -d
 
 - 零外部依赖：所有环境变量都有默认值，**不需要 `.env` 即可启动**。
 - 数据落在命名卷 `postgres_data`：`down` 保留，`down -v` 清空。
-- ⚠️ 库里是公开的演示密码 `insights123`，仅本地体验用；放到他人可达的主机上前先改密码（并同步改 app 的 `DATABASE_URL`），或换成外部数据库只跑 app。本项目**无登录、无鉴权**，不要暴露到公网 —— 见[生产部署](production.md)。
+- ⚠️ 库里是公开的演示密码 `insights123`，仅本地体验用；放到他人可达的主机上前先改密码（并同步改 app 的 `DATABASE_URL`），或换成外部数据库只跑 app。平台已具备账号体系，但 `AUTH_ENFORCE=off`（默认）时资源端点仍可匿名访问——**对外暴露务必设 `AUTH_ENFORCE=on`**，不要暴露到公网 —— 见[生产部署](production.md)与[第一次启动](../getting-started/first-run.md)。
 - 变量覆盖优先级（高 → 低）：① shell 环境变量；② 同目录 `.env`（compose 自动读来做插值）；③ 文件内默认值。
 - 容器内监听端口与宿主机映射端口一致，由 `PORT` 统一控制。
 
