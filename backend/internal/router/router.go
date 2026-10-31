@@ -68,7 +68,8 @@ func RegisterRoute[In, Out any](
 				response.Error(c, bizErr.Code, bizErr.Message)
 				return
 			}
-			response.InternalError(c, err.Error())
+			// 内部原文（dial tcp / sql: 等）不进响应体，只进日志（R-99）。
+			response.InternalErrorErr(c, err)
 			return
 		}
 

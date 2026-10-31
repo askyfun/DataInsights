@@ -79,7 +79,8 @@ func (h *DatasetHandler) Get(req router.Request[datasetPathIn], res *router.Resp
 
 	ds, err := h.svc.GetByID(req.Ctx.Request.Context(), id)
 	if err != nil {
-		return router.NewBusinessError(response.CodeNotFound, err.Error())
+		// service 区分 20300（不存在，固定文案）与真实 DB 故障（50000）；透传（R-99）。
+		return err
 	}
 	res.Out = ds
 	return nil
@@ -183,7 +184,8 @@ func (h *DatasetHandler) Update(req router.Request[datasetUpdateIn], res *router
 	// the merge base below.
 	existing, err := h.svc.GetByID(req.Ctx.Request.Context(), id)
 	if err != nil {
-		return router.NewBusinessError(response.CodeNotFound, err.Error())
+		// service 区分 20300（不存在，固定文案）与真实 DB 故障（50000）；透传（R-99）。
+		return err
 	}
 
 	in := req.In
@@ -378,7 +380,7 @@ func respondServiceError(c *gin.Context, err error) {
 		response.Error(c, bizErr.Code, bizErr.Message)
 		return
 	}
-	response.InternalError(c, err.Error())
+	response.InternalErrorErr(c, err)
 }
 
 // readUpload pulls the multipart "file" field out of the request and loads it
@@ -393,13 +395,13 @@ func readUpload(c *gin.Context) (dataset.ImportRequest, bool) {
 	}
 	src, err := fileHeader.Open()
 	if err != nil {
-		response.InternalError(c, err.Error())
+		response.InternalErrorErr(c, err)
 		return dataset.ImportRequest{}, false
 	}
 	defer src.Close()
 	data, err := io.ReadAll(src)
 	if err != nil {
-		response.InternalError(c, err.Error())
+		response.InternalErrorErr(c, err)
 		return dataset.ImportRequest{}, false
 	}
 	return dataset.ImportRequest{

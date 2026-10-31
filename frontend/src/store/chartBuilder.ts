@@ -1,6 +1,8 @@
 import { arrayMove } from '@dnd-kit/sortable';
 import { message } from 'antd';
 import type { StateCreator } from 'zustand';
+import { getInitialLocale, messages } from '@/i18n/useLocale';
+import { resolveApiErrorMessage } from '@/lib/api/errorHint';
 import { isNumericType, normalizeDataType } from '@/lib/dataTypes';
 import {
   ChartDataResponse,
@@ -734,8 +736,10 @@ export const createChartBuilderSlice: StateCreator<AppState, [], [], ChartBuilde
       if (seq !== chartQuerySeq) return false;
       console.error('Chart query failed:', error);
       // 查询失败必须对用户可见：后端 400（如空筛选字段）此前被静默吞掉，
-      // 预览直接变空而没有任何提示。
-      message.error(error.message || '图表查询失败');
+      // 预览直接变空而没有任何提示。R-99：错误信封带稳定 hint_key 时
+      // 优先渲染词典文案（数据源连不上 / 查询失败 / 配置无效分档），
+      // 未识别 key 由 resolveApiErrorMessage 回落 msg。
+      message.error(resolveApiErrorMessage(error, messages[getInitialLocale()]) || '图表查询失败');
       set({ chartData: [], chartQueryResponse: null, chartDataLoading: false });
       return false;
     }

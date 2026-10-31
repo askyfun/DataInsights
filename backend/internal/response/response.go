@@ -23,12 +23,14 @@ const (
 	CodeInternalError = 50000 // 服务端内部错误
 )
 
-// Response 统一响应结构
+// Response 统一响应结构。Error 只在错误响应上出现，携带稳定标识增量
+// （见 errcode.go，R-99）：成功响应与旧客户端完全不受影响。
 type Response struct {
-	Code  int    `json:"code"`
-	Msg   string `json:"msg"`
-	Trace string `json:"trace"`
-	Data  any    `json:"data"`
+	Code  int          `json:"code"`
+	Msg   string       `json:"msg"`
+	Trace string       `json:"trace"`
+	Data  any          `json:"data"`
+	Error *ErrorDetail `json:"error,omitempty"`
 }
 
 // 获取请求追踪 ID
@@ -142,14 +144,10 @@ func SuccessWithMsg(c *gin.Context, data any, msg string) {
 	})
 }
 
-// Error 错误响应
+// Error 错误响应。error.id 总是生成；code/hint_key 按整数码的保守映射
+// （stableByBizCode）补齐，未分类整数码不带稳定码。
 func Error(c *gin.Context, code int, msg string) {
-	c.JSON(http.StatusOK, Response{
-		Code:  code,
-		Msg:   msg,
-		Trace: getTraceID(c),
-		Data:  normalizeResponseData(nil),
-	})
+	writeError(c, code, msg, newErrorDetail(code))
 }
 
 // ErrorWithData 带数据的错误响应
@@ -159,6 +157,7 @@ func ErrorWithData(c *gin.Context, code int, msg string, data any) {
 		Msg:   msg,
 		Trace: getTraceID(c),
 		Data:  normalizeResponseData(data),
+		Error: newErrorDetail(code),
 	})
 }
 
@@ -187,7 +186,8 @@ func ThirdPartyError(c *gin.Context, msg string) {
 	Error(c, CodeThirdPartyErr, msg)
 }
 
-// InternalError 服务端内部错误
+// InternalError 服务端内部错误（msg 应为通用兜底文案，内部原文走
+// InternalErrorErr 进日志；保留此签名供尚无 err 对象的调用点）。
 func InternalError(c *gin.Context, msg string) {
 	Error(c, CodeInternalError, msg)
 }

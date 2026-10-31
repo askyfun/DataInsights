@@ -64,7 +64,9 @@ func (h *ChartHandler) Get(req router.Request[chartPathIn], res *router.Response
 
 	chart, err := h.svc.GetByID(req.Ctx.Request.Context(), id)
 	if err != nil {
-		return router.NewBusinessError(response.CodeNotFound, err.Error())
+		// service 已区分 20300（不存在，固定文案）与真实 DB 故障（上抛走
+		// 50000），这里透传；err.Error() 不再进 msg（R-99）。
+		return err
 	}
 	res.Out = chart
 	return nil

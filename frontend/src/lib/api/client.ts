@@ -35,10 +35,24 @@ export class ApiClientError extends Error {
   requestId?: string;
   /** 是否因超时失败（error.code === 'ECONNABORTED'） */
   timedOut?: boolean;
+  /** 信封 error.code（R-99 字符串稳定码）；未稳定分类时为 undefined */
+  stableCode?: string;
+  /** 信封 error.hint_key（i18n 词典键）；分支判断请用 stableCode */
+  hintKey?: string;
+  /** 信封 error.id（每次出错唯一），报障与日志对账 */
+  errorId?: string;
 
   constructor(
     message: string,
-    opts: { code?: number; status?: number; requestId?: string; timedOut?: boolean } = {}
+    opts: {
+      code?: number;
+      status?: number;
+      requestId?: string;
+      timedOut?: boolean;
+      stableCode?: string;
+      hintKey?: string;
+      errorId?: string;
+    } = {}
   ) {
     super(message);
     this.name = 'ApiClientError';
@@ -46,6 +60,9 @@ export class ApiClientError extends Error {
     this.status = opts.status;
     this.requestId = opts.requestId;
     this.timedOut = opts.timedOut;
+    this.stableCode = opts.stableCode;
+    this.hintKey = opts.hintKey;
+    this.errorId = opts.errorId;
   }
 }
 
@@ -208,13 +225,16 @@ function createApiClient(baseURL: string): AxiosInstance {
   // 统一弹窗会导致同一失败被提示两次。
   client.interceptors.response.use(
     (response: AxiosResponse<ApiResponse>) => {
-      const { code, msg } = response.data || {};
+      const { code, msg, error } = response.data || {};
 
       if (code !== undefined && code !== API_SUCCESS_CODE) {
         console.error(`API Error [${code}]: ${msg}`);
         throw new ApiClientError(msg || `API Error: ${code}`, {
           code,
           requestId: response.config.headers?.['X-Request-ID'] as string | undefined,
+          stableCode: error?.code,
+          hintKey: error?.hint_key,
+          errorId: error?.id,
         });
       }
 
@@ -263,10 +283,15 @@ function createApiClient(baseURL: string): AxiosInstance {
 
       // 细粒度错误（issue #99）：统一包成 ApiClientError，保留 status/业务码/请求 id。
       // 调用方普遍只读 error.message（instanceof Error），包一层不破坏既有判断。
+      // R-99：HTTP 层错误也透传信封 error{id, code, hint_key}（如有）。
+      const envelopeError = error.response?.data?.error;
       throw new ApiClientError(errorMsg, {
         status,
         requestId: config?.headers?.['X-Request-ID'] as string | undefined,
         timedOut: error.code === 'ECONNABORTED',
+        stableCode: envelopeError?.code,
+        hintKey: envelopeError?.hint_key,
+        errorId: envelopeError?.id,
       });
     }
   );

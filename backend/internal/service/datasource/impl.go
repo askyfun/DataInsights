@@ -3,6 +3,7 @@ package datasource
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -154,7 +155,11 @@ func (s *datasourceService) List(ctx context.Context, opts listpage.Params) (lis
 func (s *datasourceService) GetByID(ctx context.Context, id int) (*entity.Datasource, error) {
 	ds := &model.Datasource{ID: id}
 	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
-		return nil, fmt.Errorf("datasource not found: %w", err)
+		// 不存在 → 20300 固定文案；真实 DB 故障上抛走 50000（R-99：原文只进日志）。
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, router.NewBusinessError(response.CodeNotFound, "datasource not found")
+		}
+		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 	return toEntity(ds), nil
 }

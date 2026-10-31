@@ -569,8 +569,23 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'alert.notifyStatus': '通知状态',
     'alert.notified': '已通知',
     'alert.notNotified': '未通知',
+
+    // 稳定错误码文案（R-99，issue #224）：键与后端 hint_key 一一对应，
+    // 由 errorCodes.json 三方一致性测试守卫；渲染走 resolveApiErrorMessage。
+    'errors.auth.unauthenticated': '登录状态已失效，请重新登录',
+    'errors.auth.forbidden': '您没有权限执行该操作',
+    'errors.datasource.unreachable': '数据源连接失败，请检查数据源配置或网络',
+    'errors.query.execution_failed': '查询执行失败，请调整查询条件后重试',
+    'errors.config.invalid': '配置无效，请检查相关设置',
   },
   'en-US': {
+    // 稳定错误码文案（R-99）：与 zh-CN 段的 errors.* 键一一对应。
+    'errors.auth.unauthenticated': 'Your session has expired, please sign in again',
+    'errors.auth.forbidden': "You don't have permission to perform this action",
+    'errors.datasource.unreachable':
+      'Failed to connect to the data source, please check its configuration or network',
+    'errors.query.execution_failed': 'Query execution failed, please adjust the query and retry',
+    'errors.config.invalid': 'Invalid configuration, please check the related settings',
     'nav.dashboard': 'Dashboard',
     'nav.charts': 'Charts',
     'nav.chartBuilder': 'Analysis',
@@ -1185,4 +1200,4 @@ export const useLocale = () => {
   return { locale, setLocale, t, messages: messages[locale] };
 };
 
-export { cache, messages };
+export { cache, getInitialLocale, messages };

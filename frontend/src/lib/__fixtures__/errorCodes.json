@@ -1,0 +1,14 @@
+{
+  "comment": "R-99（issue #224）稳定错误码三方一致性的共读用例表：后端 response 包常量、前端 useLocale errors.* 词典、docs/developer-guide/api.md §1.3 稳定码表、api/openapi.yaml 的 ErrorDetail.code 枚举各自与它对表，任一不一致对应测试红。bizCode 是信封整数 code（旧码不改义；三个 50000 档稳定码只区分原因、不改整码）。",
+  "codes": [
+    { "bizCode": 20200, "stable": "UNAUTHENTICATED", "hintKey": "errors.auth.unauthenticated" },
+    { "bizCode": 20201, "stable": "FORBIDDEN", "hintKey": "errors.auth.forbidden" },
+    {
+      "bizCode": 50000,
+      "stable": "DATASOURCE_UNREACHABLE",
+      "hintKey": "errors.datasource.unreachable"
+    },
+    { "bizCode": 50000, "stable": "QUERY_EXEC_FAILED", "hintKey": "errors.query.execution_failed" },
+    { "bizCode": 50000, "stable": "INVALID_CONFIG", "hintKey": "errors.config.invalid" }
+  ]
+}
