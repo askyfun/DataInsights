@@ -3,6 +3,16 @@
 > 本文件记录**已合入 `master`** 的对外变更。v0.2.0 及更早版本的发布说明见 GitHub Releases。
 > 尚未发布的段落是**草稿**，发版时按实际 tag 改写。
 
+## [未发布]
+
+### 升级须知
+
+- **无需手工迁移**：goose 启动时自动推进版本化迁移（本批次新增第 00013 号一层：管理员标记与用户名全局唯一约束；若同批实现层对版本号重排，以最终合入为准）。
+- 本版新增的默认值全部**非破坏性**：`AUTH_ENFORCE` 默认 `off`（资源端点维持匿名可访问）、`LOG_LEVEL` 默认 `info`、`HEALTH_DETAIL` 默认关闭、登录限流默认 10 次/分钟——不配置任何新变量，行为与旧版一致。
+- ⚠️ **行为变更（compose 默认只绑环回）**：`docker-compose.allinone.yml` 的 app 端口与 PostgreSQL 端口默认只绑 `127.0.0.1`；此前从其它机器访问本机部署的，升级后会连不上——显式设 `HOST_BIND=0.0.0.0` 放开 app 端口（数据库端口始终只绑环回）。
+- **「登录了但资源仍匿名」的收口说明**：账号体系与 `AUTH_ENFORCE` 开关是两件事。默认 `off` 时资源端点仍对匿名开放，登录只是获得身份；对外暴露务必设 `on`。「哪些端点强制 Bearer、哪些仍匿名」的逐项清单见[配置字典](docs/user-guide/configuration.md)的「鉴权开放口径」。
+- 新增环境变量（`AUTH_ENFORCE` / `AUTH_RATE_LIMIT_PER_MINUTE` / `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_RESET_TOKEN` / `LOG_LEVEL` / `HEALTH_DETAIL` / `HOST_BIND`）已全部补进[配置字典](docs/user-guide/configuration.md)与 `.env.example`；首次启动向导与管理员恢复通道见[第一次启动](docs/getting-started/first-run.md)。
+
 ## [0.3.1] - 2026-10-18
 
 ### 升级须知

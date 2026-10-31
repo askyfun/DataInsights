@@ -12,7 +12,7 @@
 | 方式三：Docker Compose | 只要 Docker（含 Compose v2），零外部依赖 |
 | 方式四：从源码运行 | Docker；或本地开发所需的 Go 1.27 / Node 24 / pnpm / `air` + 一个可访问的 PostgreSQL（见[环境搭建](../developer-guide/dev-setup.md)） |
 
-⚠️ 本项目**无登录、无鉴权**，定位是单团队**内网**工具 —— 不要暴露到公网；放到真实环境前先看[生产部署](../deployment/production.md)。
+平台已具备账号体系：首次启动会引导建立管理员（见[第一次启动](first-run.md)）。`AUTH_ENFORCE=off`（默认）时资源端点仍可匿名访问，**对外暴露务必设 `AUTH_ENFORCE=on`** 并先看[生产部署](../deployment/production.md)；鉴权开放口径逐项清单见[配置字典](../user-guide/configuration.md)。
 
 前后端编译进**同一个镜像**，由**一个 Go 进程、一个端口（23352）**同时提供 API 与页面（没有 nginx）。
 

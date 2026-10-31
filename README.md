@@ -68,6 +68,16 @@ make dev              # 前端 23351 + 后端 23352，一起起
 > 四种方式的完整步骤与「连上第一个数据源 → 建数据集 → 拖图」：[docs/getting-started/quick-start.md](docs/getting-started/quick-start.md)
 > 本地环境准备（工具链、数据库、逐条命令）：[docs/developer-guide/dev-setup.md](docs/developer-guide/dev-setup.md)
 
+## 第一次启动会发生什么
+
+1. 访问 `http://<主机>:23352`，首次启动会引导你**建立管理员**：一次性 bootstrap token 在部署日志里（`docker logs data-insights | grep BOOTSTRAP`，30 分钟有效）；无头部署可改用 `ADMIN_USERNAME` + `ADMIN_PASSWORD` 环境变量直接建号。
+2. 登录后按需三选一：**加载内置示例数据集**、**上传 CSV/Excel**、或**连接外部数据库**建数据集。
+3. 把字段拖进槽位，**即时出图**；保存后复制地址栏短码即可分享。
+4. 加同事：管理员在「账号」页建号 / 重置口令 / 禁用。
+5. 默认 `AUTH_ENFORCE=off`，资源端点对匿名开放——**对外暴露务必设 `on`**。备份 / 升级 / 回滚的运维手册随 R-102 批次提供（`docs/deployment/backup-restore.md`），当前先见 [生产部署](docs/deployment/production.md)。
+
+详细向导（含忘记口令的恢复通道）：[docs/getting-started/first-run.md](docs/getting-started/first-run.md)
+
 ## 文档导航
 
 | 区域 | 内容 |

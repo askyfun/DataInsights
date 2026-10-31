@@ -33,7 +33,7 @@ cp .env.example .env    # 然后按需修改
 | `PORT` | 否 | `23352` | HTTP 监听端口。监听地址固定 `0.0.0.0`，**不提供**覆盖。 |
 | `SECURITY_KEY` | 否 | 首启随机生成 | 数据源密码 AES-256-GCM 的加密密钥（64 位 hex）。**留空 = 系统首次启动随机生成（32 字节）并持久化到数据库**，重启 / 容器重建复用同一把，保证已加密密码始终可解；显式配置时环境变量优先。**生产强烈建议显式设置**。 |
 | `SENTRY_DSN` | 否 | 空 | 后端 Sentry DSN，留空 = 关闭上报。 |
-| `CORS_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔白名单；**留空 = 放开所有来源**（平台 API 无登录态，CORS 不构成安全边界）。填非空白名单则只回显名单内来源，供将来引入认证后收紧。 |
+| `CORS_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔白名单；**留空 = 放开所有来源**。Bearer 令牌不会由浏览器自动携带，CORS 不构成安全边界——真正的访问面由 `AUTH_ENFORCE` 控制（见下文「鉴权开放口径」与[第一次启动](../getting-started/first-run.md)）。填非空白名单则只回显名单内来源。 |
 | `STATIC_DIR` | 否 | 空 | 前端构建产物目录。设置后本进程一并托管页面（未命中回落 `index.html`）；**留空 = 只提供 API**（本地开发默认形态，页面走 Vite dev server）。目录配错即启动失败。 |
 | `EXTRACT_DATASOURCE_ID` | 否 | 自举 | 本地文件上传（CSV/XLSX）的落库位置。**留空即可用**——平台会自动复用 `DATABASE_URL` 指向的应用自身 PostgreSQL 作为上传存储（见下方「上传存储怎么定的」）。填一个数据源 id 则改用它作为存储。无论哪种，该数据源都不再是普通数据源：列表隐藏、不能被常规数据集引用；上传表以 `di_extract_<datasetId>` 命名。 |
 | `ALERT_EVAL_INTERVAL` | 否 | `300` | 指标预警评估的轮询间隔（秒）。非法值（非整数 / 小于 1）**不 fail-fast**：回退 300 并打 warning。评估器是进程内常驻 goroutine，随主进程退出。 |
@@ -43,10 +43,36 @@ cp .env.example .env    # 然后按需修改
 | `SMTP_PASSWORD` | 否 | 空 | SMTP 认证密码。 |
 | `SMTP_FROM` | 否 | 空 | 发件人地址。配了 `SMTP_HOST` 但此项或收件人为空时，通知失败并在 `notify_error` 留档（不会静默）。 |
 | `ALERT_NOTIFY_EMAIL` | 否 | 空 | 预警邮件收件人，逗号分隔多个。与 `SMTP_FROM` 同时非空才会真正发送。 |
+| `AUTH_ENFORCE` | 否 | `off` | 资源端点强制鉴权三态：`off`（默认，资源端点匿名可访问）/ `shadow`（照常解析令牌但**不改变任何响应**，只记一条 `auth_would_deny` 告警日志，用于发现存量裸奔脚本 / MCP 客户端 / 监控探针）/ `on`（写操作与敏感读全部要求有效 Bearer，PAT 同样可用）。启动日志打印当前模式；改 env 重启即回滚，无 schema 变更。逐项开放口径见下方「鉴权开放口径」。 |
+| `AUTH_RATE_LIMIT_PER_MINUTE` | 否 | `10` | 登录 / 注册端点按**来源 IP** 每分钟允许的尝试次数。留空 = 内置默认。反代场景需正确设置 `X-Forwarded-For` 的信任边界（见[生产部署](../deployment/production.md)）。 |
+| `ADMIN_USERNAME` | 否 | 空 | 首管无头创建的用户名。**必须与 `ADMIN_PASSWORD` 同时设置**；仅在库中还没有管理员时生效（幂等，已有管理员时不改动），设置后启动不再打印 bootstrap token。见[第一次启动](../getting-started/first-run.md)。 |
+| `ADMIN_PASSWORD` | 否 | 空 | 与 `ADMIN_USERNAME` 配对的首管口令。注意：写进 env 意味着它会出现在 `docker inspect` / `compose config`，生产建议用 Secret 注入。 |
+| `ADMIN_RESET_TOKEN` | 否 | 空 | 管理员口令恢复令牌。**留空 = 关闭恢复通道**；非空时 `POST /api/auth/recover-admin` 可用一次性令牌重置首个有效管理员口令并撤销其全部现存会话。token 单次有效，成功后请更换环境变量值（不用时清空）。 |
+| `LOG_LEVEL` | 否 | `info` | 日志级别 `debug` / `info` / `warn` / `error`；非法值回落 `info` 并在启动时告警一次。日志为结构化 JSON、只写 stdout（不写本地文件）。 |
+| `HEALTH_DETAIL` | 否 | 空 | 设 `1` / `true` / `on` 开启 `GET /health/detail`（版本、构建/启动时间、uptime、迁移水位、DB 耗时、驱动数）。未开启时该端点返回 404；`GET /health`、`/health/ready`、`/version` 不受此开关限制。 |
 | `VITE_API_BASE_URL` | 否 | 空 | 前端 API 基础地址。未配置时：生产构建自动同源、开发回退 `http://<当前访问主机名>:23352`。**仅前后端分开部署时**才需配成非空绝对地址。 |
 | `VITE_SENTRY_DSN` | 否 | 空 | 前端 Sentry DSN。留空 = 完全跳过 `Sentry.init`，不打点也不上报。 |
 
 > 前端 API 基础地址的**唯一来源**是代码里的 `resolveApiBaseURL`（前端 `lib/api/client.ts`），`VITE_API_BASE_URL` 只是它读取的环境变量。
+
+> ⚠️ **同批发布说明**：`AUTH_ENFORCE`（R-92，issue #217）与 `AUTH_RATE_LIMIT_PER_MINUTE`（R-87，issue #203）随对应实现**同批发布**；若你运行的版本早于该批次，设置这两个变量不会有任何效果（启动日志也不会打印 enforce 模式）。
+
+### 3.1 鉴权开放口径：哪些端点强制 Bearer、哪些仍匿名
+
+「登录了 ≠ 资源已受保护」是本平台刻意的渐进策略：会话与 PAT 管理端点**一直**强制鉴权，而资源端点的强制与否则由 `AUTH_ENFORCE` 控制。逐项口径如下（与 R-92 的路由分类守卫测试同源——该测试遍历 gin 注册表，任何未分类的 `/api` 路由都会让测试失败）：
+
+| 端点 | `off`（默认） | `on` |
+|------|--------------|------|
+| `POST /api/auth/login` / `register`、`GET /api/auth/bootstrap-status` / `config`、`POST /api/auth/recover-admin` | 匿名 | 匿名（**永久白名单**，用例钉死不随重构漂移） |
+| `GET /api/queries/{q}`（`?q=` 分享直链） | 匿名 | 匿名（**永久白名单**） |
+| `GET /health`、`/health/ready`、`/health/detail`、`GET /version`、静态资源 | 匿名 | 匿名（**永久白名单**，探针不能被鉴权挡住） |
+| `GET /api/auth/me`、`POST/GET/DELETE /api/tokens`（会话与 PAT 管理） | 需 Bearer | 需 Bearer（现状即已强制） |
+| datasource / dataset / chart / dashboard / dashboard-folder / alert / queryrecord 的**写操作**（POST/PUT/DELETE）、`POST /api/datasets/import`、`POST /api/datasets/:id/replace`、取数与敏感读（`charts/:id/data`、`*_query`） | **匿名可访问** | 需 Bearer（`allowPAT=true`，机器访问不受影响） |
+| 元数据读（`tables` / `columns` / `preview` / `field-distribution`） | **匿名可访问** | 需 Bearer |
+
+- `shadow` 模式对上表的响应**零改变**，只在日志里记「本应拒绝」——用于切 `on` 之前盘点存量脚本。
+- 能力探测：`GET /api/auth/config`（匿名）返回 `{enforce_mode, needs_bootstrap}`，前端据此渲染提示条。
+- 多副本切 `on` 的升级顺序与回滚口径见[生产部署](../deployment/production.md)。
 
 ## 4. 本地文件上传（CSV / XLSX）
 
