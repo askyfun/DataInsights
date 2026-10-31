@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -148,14 +149,27 @@ func serve(r *gin.Engine, method, target, body string) *httptest.ResponseRecorde
 	return w
 }
 
+// errorIDJSONRe 匹配信封里的 error_id 字段（issue #222 R-97）：DI-<业务码>-<8位大写hex>。
+var errorIDJSONRe = regexp.MustCompile(`"error_id":"(DI-\d{5}-[0-9A-F]{8})",`)
+
 // assertBody compares the full JSON response body byte-for-byte (ignoring a
 // possible trailing newline), pinning the exact envelope contract
 // {code, msg, trace, data} the datasource handlers currently emit.
+// error_id 每次随机生成，从逐字节比对中剥出单独校验：错误信封必须携带
+// 形状合法的编号，成功信封必须不带。
 func assertBody(t *testing.T, w *httptest.ResponseRecorder, want string) {
 	t.Helper()
 	got := strings.TrimSpace(w.Body.String())
-	if got != want {
-		t.Fatalf("response body mismatch:\n got: %s\nwant: %s", got, want)
+	isError := !strings.Contains(got, `"code":20000`)
+	if isError && !errorIDJSONRe.MatchString(got) {
+		t.Fatalf("error envelope must carry a well-formed error_id, got: %s", got)
+	}
+	stripped := got
+	if m := errorIDJSONRe.FindString(got); m != "" {
+		stripped = strings.Replace(got, m, "", 1)
+	}
+	if stripped != want {
+		t.Fatalf("response body mismatch:\n got: %s\nwant: %s", stripped, want)
 	}
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected HTTP status 200 (unified envelope), got %d", w.Code)

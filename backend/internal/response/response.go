@@ -1,8 +1,14 @@
 package response
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"reflect"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,10 +31,40 @@ const (
 
 // Response 统一响应结构
 type Response struct {
-	Code  int    `json:"code"`
-	Msg   string `json:"msg"`
-	Trace string `json:"trace"`
-	Data  any    `json:"data"`
+	Code    int    `json:"code"`
+	Msg     string `json:"msg"`
+	Trace   string `json:"trace"`
+	ErrorID string `json:"error_id,omitempty"`
+	Data    any    `json:"data"`
+}
+
+// newErrorID 生成可复制报障的错误编号：`DI-<业务码>-<8位大写hex>`（如 DI-50000-3F7A2C9B）。
+// 只用于报障对账，不承载随机性之外的语义；每次错误响应都不同，可反查方式是拿编号
+// 去后端日志里 grep（同一编号会出现在 ERROR 日志行中）。issue #222（R-97）。
+func newErrorID(code int) string {
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		// crypto/rand 失败极罕见；退化为时间纳秒兜底，保证编号始终存在。
+		return fmt.Sprintf("DI-%d-T%08X", code, uint64(time.Now().UnixNano())&0xFFFFFFFF)
+	}
+	return fmt.Sprintf("DI-%d-%s", code, strings.ToUpper(hex.EncodeToString(buf)))
+}
+
+// writeError 是所有错误响应的唯一出口：生成 error_id、存进 gin 上下文
+// （供 R-96 access 日志 / R-98 Sentry tag 同源取用）、打一行 ERROR 日志、写响应。
+func writeError(c *gin.Context, code int, msg string, data any) {
+	id := newErrorID(code)
+	trace := getTraceID(c)
+	c.Set("error_id", id)
+	// R-96（issue #221）的 access 日志合入后，ERROR 行应从这里取 error_id 保持同源。
+	slog.Error("request failed", "error_id", id, "code", code, "msg", msg, "request_id", trace)
+	c.JSON(http.StatusOK, Response{
+		Code:    code,
+		Msg:     msg,
+		Trace:   trace,
+		ErrorID: id,
+		Data:    normalizeResponseData(data),
+	})
 }
 
 // 获取请求追踪 ID
@@ -144,22 +180,12 @@ func SuccessWithMsg(c *gin.Context, data any, msg string) {
 
 // Error 错误响应
 func Error(c *gin.Context, code int, msg string) {
-	c.JSON(http.StatusOK, Response{
-		Code:  code,
-		Msg:   msg,
-		Trace: getTraceID(c),
-		Data:  normalizeResponseData(nil),
-	})
+	writeError(c, code, msg, nil)
 }
 
 // ErrorWithData 带数据的错误响应
 func ErrorWithData(c *gin.Context, code int, msg string, data any) {
-	c.JSON(http.StatusOK, Response{
-		Code:  code,
-		Msg:   msg,
-		Trace: getTraceID(c),
-		Data:  normalizeResponseData(data),
-	})
+	writeError(c, code, msg, data)
 }
 
 // BadRequest 请求参数错误

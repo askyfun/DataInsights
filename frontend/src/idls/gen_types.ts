@@ -715,6 +715,8 @@ export interface components {
             msg: string;
             /** @description 请求追踪 ID（X-Request-ID） */
             trace: string;
+            /** @description 错误编号 `DI-<业务码>-<8位大写hex>`（如 DI-50000-3F7A2C9B），仅错误响应携带；供用户复制报障。 */
+            error_id?: string;
             /** @description 业务数据；错误或无数据时为空对象 {}，不为 null */
             data: unknown;
         };

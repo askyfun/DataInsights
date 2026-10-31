@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dashboard, DashboardFolder } from '../../api';
 import { messages } from '../../i18n/useLocale';
 import type { ApiResponse } from '../../lib/api/client';
+import { ApiClientError } from '../../lib/api/client';
 import DashboardsPage from '../../pages/Dashboards';
 
 vi.mock('../../api', () => ({
@@ -286,8 +287,14 @@ describe('仪表盘列表页', () => {
   it('删除非空文件夹：后端 20400 的文案原样念给用户', async () => {
     mockList();
     mockFolderGetAll.mockResolvedValue(envelope(folders));
-    // 后端消息里带着「还剩几项」，前端不做转译，直接进 message.error。
-    mockFolderRemove.mockRejectedValue(new Error('文件夹下还有 1 个仪表盘，请先移动或删除它们'));
+    // 后端消息里带着「还剩几项」，前端不做转译，原样念给用户。
+    // mock 用生产的错误形态（拦截器统一包成 ApiClientError，业务码 20400 → business 档）。
+    mockFolderRemove.mockRejectedValue(
+      new ApiClientError('文件夹下还有 1 个仪表盘，请先移动或删除它们', {
+        code: 20400,
+        online: true,
+      })
+    );
 
     renderPage();
     await waitFor(() => expect(screen.getByText('经营分析')).toBeInTheDocument());

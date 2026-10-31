@@ -25,6 +25,41 @@ export type ApiResponse<T = unknown> = Omit<components['schemas']['Envelope'], '
   data: T;
 };
 
+// ---- 失败分型（issue #222 R-97）：六档失败各自有确定的处置预期 ----
+// offline：断网（无请求发出，**没有编号**，不能给假线索）；timeout：超时（可缩范围重试）；
+// network：网络层失败；server：服务端错误（可带编号报障）；business：业务码错误（后端拒绝）；
+// canceled：请求被取消（静默，不提示）。
+export type ErrorKind = 'offline' | 'timeout' | 'network' | 'server' | 'business' | 'canceled';
+
+export interface ErrorKindInput {
+  /** axios error.code（ECONNABORTED / ERR_NETWORK / ERR_CANCELED） */
+  axiosCode?: string;
+  /** 是否因超时失败（ECONNABORTED） */
+  timedOut?: boolean;
+  /** HTTP 状态码（收到响应但非 2xx） */
+  status?: number;
+  /** 后端信封业务码（HTTP 200 + code !== 20000，或 4xx 信封） */
+  code?: number;
+  /** navigator.onLine 的取值，由拦截器传入（纯函数不摸浏览器） */
+  online?: boolean;
+}
+
+/**
+ * 纯函数：把一次失败的原始信号映射为六档之一。判定顺序即语义优先级：
+ * 取消 → 断网（断网时即使报超时也不给「超时可重试」的假线索）→ 超时 → 网络层 →
+ * 业务码 → HTTP 状态 → 兜底 network（有 error 没有任何信号 = 连接层失败）。
+ * 表驱动单测见 __tests__/describeApiError.test.ts。
+ */
+export function resolveErrorKind(input: ErrorKindInput): ErrorKind {
+  if (input.axiosCode === 'ERR_CANCELED') return 'canceled';
+  if (input.online === false) return 'offline';
+  if (input.timedOut || input.axiosCode === 'ECONNABORTED') return 'timeout';
+  if (input.axiosCode === 'ERR_NETWORK') return 'network';
+  if (input.code !== undefined) return 'business';
+  if (input.status !== undefined) return 'server';
+  return 'network';
+}
+
 // ---- 细粒度错误（issue #99）：业务码 / HTTP 状态 / 请求 id 一处可查 ----
 export class ApiClientError extends Error {
   /** 后端业务码（信封 code），HTTP 层错误时为 undefined */
@@ -35,10 +70,22 @@ export class ApiClientError extends Error {
   requestId?: string;
   /** 是否因超时失败（error.code === 'ECONNABORTED'） */
   timedOut?: boolean;
+  /** 后端错误编号（信封 error_id，如 DI-50000-3F7A2C9B），复制报障用（issue #222） */
+  errorId?: string;
+  /** 失败分型（六档之一），构造时由 resolveErrorKind 算出 */
+  kind: ErrorKind;
 
   constructor(
     message: string,
-    opts: { code?: number; status?: number; requestId?: string; timedOut?: boolean } = {}
+    opts: {
+      code?: number;
+      status?: number;
+      requestId?: string;
+      timedOut?: boolean;
+      errorId?: string;
+      axiosCode?: string;
+      online?: boolean;
+    } = {}
   ) {
     super(message);
     this.name = 'ApiClientError';
@@ -46,6 +93,14 @@ export class ApiClientError extends Error {
     this.status = opts.status;
     this.requestId = opts.requestId;
     this.timedOut = opts.timedOut;
+    this.errorId = opts.errorId;
+    this.kind = resolveErrorKind({
+      axiosCode: opts.axiosCode,
+      timedOut: opts.timedOut,
+      status: opts.status,
+      code: opts.code,
+      online: opts.online,
+    });
   }
 }
 
@@ -214,7 +269,9 @@ function createApiClient(baseURL: string): AxiosInstance {
         console.error(`API Error [${code}]: ${msg}`);
         throw new ApiClientError(msg || `API Error: ${code}`, {
           code,
+          errorId: response.data?.error_id,
           requestId: response.config.headers?.['X-Request-ID'] as string | undefined,
+          online: navigator.onLine,
         });
       }
 
@@ -263,10 +320,14 @@ function createApiClient(baseURL: string): AxiosInstance {
 
       // 细粒度错误（issue #99）：统一包成 ApiClientError，保留 status/业务码/请求 id。
       // 调用方普遍只读 error.message（instanceof Error），包一层不破坏既有判断。
+      // R-97（issue #222）：透传信封 error_id 与原始 axios code，供失败分型与复制报障。
       throw new ApiClientError(errorMsg, {
         status,
         requestId: config?.headers?.['X-Request-ID'] as string | undefined,
         timedOut: error.code === 'ECONNABORTED',
+        errorId: error.response?.data?.error_id,
+        axiosCode: error.code,
+        online: navigator.onLine,
       });
     }
   );

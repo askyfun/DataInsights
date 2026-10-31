@@ -1716,6 +1716,9 @@ components:
         trace:
           type: string
           description: 请求追踪 ID（X-Request-ID）
+        error_id:
+          type: string
+          description: 错误编号 `DI-<业务码>-<8位大写hex>`（如 DI-50000-3F7A2C9B），仅错误响应携带（成功信封 omitempty 不出现）；供用户复制报障，可拿编号到后端 ERROR 日志反查。见 issue #222（R-97）。
         data:
           description: 业务数据；错误或无数据时为空对象 {}，不为 null
     HealthData:
