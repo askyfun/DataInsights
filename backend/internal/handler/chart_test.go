@@ -2,12 +2,12 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"testing"
 
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/listpage"
+	"data-insights/internal/response"
 	"data-insights/internal/router"
 	"data-insights/internal/service/chart"
 
@@ -100,7 +100,7 @@ func newChartTestRouter(h *ChartHandler) *gin.Engine {
 }
 
 const (
-	notFoundChart  = `{"code":20300,"msg":"chart not found: sql: no rows in result set","trace":"","data":{}}`
+	notFoundChart  = `{"code":20300,"msg":"chart not found","trace":"","data":{},"error":{"id":""}}`
 	chartFoundJSON = `{"id":7,"name":"c","dataset_id":3,"chart_type":"line","config":"{}","created_at":"","updated_at":""}`
 )
 
@@ -216,7 +216,8 @@ func TestChartGet_Found(t *testing.T) {
 func TestChartGet_NotFound(t *testing.T) {
 	h := NewChartHandler(&mockChartService{
 		getByIDFunc: func(_ context.Context, _ int) (*entity.Chart, error) {
-			return nil, errors.New("chart not found: sql: no rows in result set")
+			// 与真实 service 对齐：不存在 → 20300 固定文案（R-99：sql: 原文只进日志）。
+			return nil, router.NewBusinessError(response.CodeNotFound, "chart not found")
 		},
 	})
 	w := serve(newChartTestRouter(h), http.MethodGet, "/api/charts/999", "")

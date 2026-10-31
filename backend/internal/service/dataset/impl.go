@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -148,11 +149,15 @@ func (s *datasetService) List(ctx context.Context, opts ListOptions) (listpage.R
 	return out, nil
 }
 
-// GetByID returns a dataset by ID
+// GetByID returns a dataset by ID. 不存在返回 20300 业务错误（msg 固定文案，
+// R-99：内部原文不进响应）；真实 DB 故障原样上抛走 50000。
 func (s *datasetService) GetByID(ctx context.Context, id int) (*entity.Dataset, error) {
 	ds := &model.Dataset{ID: id}
 	if err := s.db.NewSelect().Model(ds).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
-		return nil, fmt.Errorf("dataset not found: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, router.NewBusinessError(response.CodeNotFound, "dataset not found")
+		}
+		return nil, fmt.Errorf("failed to get dataset: %w", err)
 	}
 	return toDatasetEntity(ds), nil
 }
@@ -615,7 +620,10 @@ func (s *datasetService) dial(ctx context.Context, ds *model.Datasource, passwor
 
 	conn, err := driver.Connect(ctx, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
+		// 数据集预览/查询同样要区分「连不上」与「配置错」（R-99，与 chart.dial 同口径）。
+		return nil, response.WrapCode(
+			fmt.Errorf("failed to connect: %w", err),
+			response.StableDatasourceUnreachable, response.HintDatasourceUnreachable)
 	}
 	return conn, nil
 }

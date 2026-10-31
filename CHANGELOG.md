@@ -3,6 +3,21 @@
 > 本文件记录**已合入 `master`** 的对外变更。v0.2.0 及更早版本的发布说明见 GitHub Releases。
 > 尚未发布的段落是**草稿**，发版时按实际 tag 改写。
 
+## [Unreleased]
+
+### 新增（API 契约增量，向后兼容）
+
+- **稳定错误码与文案分离（R-99，issue #224）**：错误响应信封新增 `error: { id, code?, hint_key? }`
+  （成功响应无 `error` 字段，旧客户端不受影响）。`id` 为每次出错的 uuid v7（报障与日志对账）；
+  `code` 是字符串稳定标识；`hint_key` 供前端 i18n 渲染。**对外承诺：新增码 = minor，
+  码义变更 = major；分支判断请用 `error.code`，不要匹配 `msg`。** 首批稳定码：
+  `UNAUTHENTICATED`（20200）、`FORBIDDEN`（新增整码 **20201**，原 20200 中「登录了但没权限」
+  的场景——PAT 访问管理端点——改走 20201）、`DATASOURCE_UNREACHABLE` / `QUERY_EXEC_FAILED` /
+  `INVALID_CONFIG`（均挂在 50000 上，只区分原因不改整码）。未分类错误不带 `error.code`。
+- **内部错误原文退出响应**：`50000` 的 `msg` 一律为通用兜底文案（"internal server error"），
+  真实原因（`dial tcp`、`sql:` 等）只进服务端日志并与 `error.id` 对账；资源不存在（`20300`）
+  的 `msg` 也改为固定文案（如 `chart not found`）。
+
 ## [0.3.1] - 2026-10-18
 
 ### 升级须知

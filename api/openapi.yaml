@@ -10,7 +10,8 @@ info:
 
     ## 响应契约
     所有端点（含 /health）HTTP 状态码恒为 200；业务结果由响应体 Envelope 表达：
-    `{ code, msg, trace, data }`。code 枚举与
+    `{ code, msg, trace, data }`（错误响应另有 `error: { id, code, hint_key }`，
+    见 ErrorDetail）。code 枚举与
     `backend/internal/response/response.go` 的常量一一对应
     （20000 成功，20100–20500 客户端/业务错误，50000 服务端内部错误）。
 
@@ -1687,6 +1688,7 @@ components:
         - 20000
         - 20100
         - 20200
+        - 20201
         - 20300
         - 20400
         - 20500
@@ -1695,6 +1697,7 @@ components:
         - CodeSuccess
         - CodeBadRequest
         - CodeUnauthorized
+        - CodeForbidden
         - CodeNotFound
         - CodeBusinessError
         - CodeThirdPartyErr
@@ -1718,6 +1721,38 @@ components:
           description: 请求追踪 ID（X-Request-ID）
         data:
           description: 业务数据；错误或无数据时为空对象 {}，不为 null
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+    ErrorDetail:
+      type: object
+      description: |
+        错误响应的稳定标识增量（R-99），只在错误响应上出现（成功无 error 字段）。
+        id 每次出错生成；code/hint_key 只在可稳定分类时给出——分支判断只用
+        error.code，不得匹配 msg。对外承诺：新增码 = minor，码义变更 = major。
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          description: 本次错误唯一标识（uuid v7），用于报障与日志对账
+        code:
+          type: string
+          description: 字符串稳定错误码；缺省表示该错误尚未稳定分类
+          enum:
+            - UNAUTHENTICATED
+            - FORBIDDEN
+            - DATASOURCE_UNREACHABLE
+            - QUERY_EXEC_FAILED
+            - INVALID_CONFIG
+          x-enum-varnames:
+            - StableUnauthenticated
+            - StableForbidden
+            - StableDatasourceUnreachable
+            - StableQueryExecFailed
+            - StableInvalidConfig
+        hint_key:
+          type: string
+          description: 前端 i18n 词典键（如 errors.datasource.unreachable），不是终端用户文案
     HealthData:
       type: object
       required:

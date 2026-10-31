@@ -84,8 +84,9 @@ func TestBearer_SessionAlwaysAllowed(t *testing.T) {
 func TestBearer_PATDeniedOnUserManagement(t *testing.T) {
 	r, _ := newEngine(false, false)
 	_, out := do(r, "Bearer di_pat_abcdef")
-	if !strings.Contains(out, "20200") {
-		t.Fatalf("PAT must be refused when allowPAT=false, got %q", out)
+	// R-99：登录了但没权限 → 20201/FORBIDDEN，与未认证（20200）分档。
+	if !strings.Contains(out, `"code":20201`) || !strings.Contains(out, "FORBIDDEN") {
+		t.Fatalf("PAT must be refused as 20201/FORBIDDEN when allowPAT=false, got %q", out)
 	}
 }
 
@@ -100,7 +101,8 @@ func TestBearer_PATAllowedWherePermitted(t *testing.T) {
 func TestBearer_InvalidTokenDenied(t *testing.T) {
 	r, _ := newEngine(true, false)
 	_, out := do(r, "Bearer di_pat_invalid")
-	if !strings.Contains(out, "20200") {
-		t.Fatalf("invalid/expired/revoked token must be denied, got %q", out)
+	// R-99：未认证稳定码随 20200 一并下发（UNAUTHENTICATED）。
+	if !strings.Contains(out, `"code":20200`) || !strings.Contains(out, "UNAUTHENTICATED") {
+		t.Fatalf("invalid/expired/revoked token must be denied as UNAUTHENTICATED, got %q", out)
 	}
 }

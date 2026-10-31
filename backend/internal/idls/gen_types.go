@@ -218,6 +218,7 @@ func (e OkDataStatus) Valid() bool {
 const (
 	CodeBadRequest    ResponseCode = 20100
 	CodeBusinessError ResponseCode = 20400
+	CodeForbidden     ResponseCode = 20201
 	CodeInternalError ResponseCode = 50000
 	CodeNotFound      ResponseCode = 20300
 	CodeSuccess       ResponseCode = 20000
@@ -231,6 +232,8 @@ func (e ResponseCode) Valid() bool {
 	case CodeBadRequest:
 		return true
 	case CodeBusinessError:
+		return true
+	case CodeForbidden:
 		return true
 	case CodeInternalError:
 		return true
@@ -1247,11 +1250,56 @@ type Envelope struct {
 	// Data 业务数据；错误或无数据时为空对象 {}，不为 null
 	Data interface{} `json:"data"`
 
+	// Error 错误响应的稳定标识增量（R-99），只在错误响应上出现
+	Error *ErrorDetail `json:"error,omitempty"`
+
 	// Msg 提示消息；成功为 "success"，错误为可读错误描述
 	Msg string `json:"msg"`
 
 	// Trace 请求追踪 ID（X-Request-ID）
 	Trace string `json:"trace"`
+}
+
+// ErrorDetailCode 字符串稳定错误码；缺省表示该错误尚未稳定分类。
+type ErrorDetailCode string
+
+// Defines values for ErrorDetailCode.
+const (	StableDatasourceUnreachable ErrorDetailCode = "DATASOURCE_UNREACHABLE"
+	StableForbidden             ErrorDetailCode = "FORBIDDEN"
+	StableInvalidConfig         ErrorDetailCode = "INVALID_CONFIG"
+	StableQueryExecFailed       ErrorDetailCode = "QUERY_EXEC_FAILED"
+	StableUnauthenticated       ErrorDetailCode = "UNAUTHENTICATED"
+)
+
+// Valid indicates whether the value is a known member of the ErrorDetailCode enum.
+func (e ErrorDetailCode) Valid() bool {
+	switch e {
+	case StableDatasourceUnreachable:
+		return true
+	case StableForbidden:
+		return true
+	case StableInvalidConfig:
+		return true
+	case StableQueryExecFailed:
+		return true
+	case StableUnauthenticated:
+		return true
+	default:
+		return false
+	}
+}
+
+// ErrorDetail 错误响应的稳定标识增量（R-99）：id 每次出错生成；
+// code/hint_key 只在可稳定分类时给出，分支判断只用 error.code。
+type ErrorDetail struct {
+	// Code 字符串稳定错误码；缺省表示该错误尚未稳定分类
+	Code ErrorDetailCode `json:"code,omitempty"`
+
+	// HintKey 前端 i18n 词典键（如 errors.datasource.unreachable），不是终端用户文案
+	HintKey string `json:"hint_key,omitempty"`
+
+	// Id 本次错误唯一标识（uuid v7），用于报障与日志对账
+	Id string `json:"id"`
 }
 
 // FieldDistribution 字段值分布（entity.FieldDistribution）；distribution 恒为数组。

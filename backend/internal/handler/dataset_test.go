@@ -2,12 +2,12 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"testing"
 
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/listpage"
+	"data-insights/internal/response"
 	"data-insights/internal/router"
 	"data-insights/internal/service/dataset"
 
@@ -139,7 +139,7 @@ func newDatasetTestRouter(h *DatasetHandler) *gin.Engine {
 // tags; *string fields serialize as null when unset.
 const (
 	datasetGetJSON = `{"id":4,"name":"sales","datasource_id":2,"table_name":"orders","query_sql":null,"query_type":"table","mode":"direct","accelerate_config":null,"description":null,"tags":"[]","refresh_strategy":null,"preview_data":null,"quality_rules":"[]","columns":"[]","shard_enabled":false,"shard_keys":"","created_at":"","updated_at":""}`
-	notFoundDS     = `{"code":20300,"msg":"dataset not found: sql: no rows in result set","trace":"","data":{}}`
+	notFoundDS     = `{"code":20300,"msg":"dataset not found","trace":"","data":{},"error":{"id":""}}`
 )
 
 func testDataset() *entity.Dataset {
@@ -280,7 +280,8 @@ func TestDatasetGet_Found(t *testing.T) {
 func TestDatasetGet_NotFound(t *testing.T) {
 	h := NewDatasetHandler(&mockDatasetService{
 		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
-			return nil, errors.New("dataset not found: sql: no rows in result set")
+			// 与真实 service 对齐：不存在 → 20300 固定文案（R-99：原文只进日志）。
+			return nil, router.NewBusinessError(response.CodeNotFound, "dataset not found")
 		},
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodGet, "/api/datasets/999", "")
@@ -561,7 +562,8 @@ func TestDatasetUpdate_NotFound(t *testing.T) {
 	// the Get mapping (gate via GetByID before service.Update).
 	h := NewDatasetHandler(&mockDatasetService{
 		getByIDFunc: func(_ context.Context, _ int) (*entity.Dataset, error) {
-			return nil, errors.New("dataset not found: sql: no rows in result set")
+			// 与真实 service 对齐：不存在 → 20300 固定文案（R-99：原文只进日志）。
+			return nil, router.NewBusinessError(response.CodeNotFound, "dataset not found")
 		},
 		updateFunc: func(_ context.Context, _ *entity.Dataset) (*entity.Dataset, error) {
 			t.Fatal("Update must not run for an unknown id")

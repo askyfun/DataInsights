@@ -103,7 +103,7 @@ const (
 	dashLayout       = `{"version":1,"widgets":[]}`
 	dashLayoutJSON   = `{\"version\":1,\"widgets\":[]}`
 	dashFoundJSON    = `{"id":"` + dashID + `","name":"月度经营总览","description":null,"layout_json":"` + dashLayoutJSON + `","status":"draft","folder_id":null,"created_at":"","updated_at":""}`
-	dashNotFound     = `{"code":20300,"msg":"dashboard not found","trace":"","data":{}}`
+	dashNotFound     = `{"code":20300,"msg":"dashboard not found","trace":"","data":{},"error":{"id":""}}`
 	dashBadLayout    = `{"code":20100,"msg":"layout_json 必须是合法 JSON","trace":"","data":{}}`
 	refEmptyEnvelope = `{"code":20000,"msg":"success","trace":"","data":{"count":0,"dashboards":[]}}`
 )
@@ -607,5 +607,6 @@ func TestDashboardQuery_NotWired(t *testing.T) {
 		},
 	})
 	w := serve(newDashboardTestRouter(h), http.MethodPost, "/api/dashboards/"+dashID+"/query", `{}`)
-	assertBody(t, w, `{"code":50000,"msg":"图表取数服务未接线","trace":"","data":{}}`)
+	// BusinessError 的 msg 是确定性业务文案（非内部原文），保留；error.id 随机。
+	assertBody(t, w, `{"code":50000,"msg":"图表取数服务未接线","trace":"","data":{},"error":{"id":""}}`)
 }

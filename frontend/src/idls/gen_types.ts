@@ -707,7 +707,7 @@ export interface components {
          * @description 业务状态码，与 backend/internal/response/response.go 常量一一对应。
          * @enum {integer}
          */
-        ResponseCode: 20000 | 20100 | 20200 | 20300 | 20400 | 20500 | 50000;
+        ResponseCode: 20000 | 20100 | 20200 | 20201 | 20300 | 20400 | 20500 | 50000;
         /** @description 统一响应封装；HTTP 状态码恒为 200，业务状态由 code 表达。 */
         Envelope: {
             code: components["schemas"]["ResponseCode"];
@@ -717,6 +717,25 @@ export interface components {
             trace: string;
             /** @description 业务数据；错误或无数据时为空对象 {}，不为 null */
             data: unknown;
+            /**
+             * @description 错误响应的稳定标识增量（R-99），只在错误响应上出现
+             */
+            error?: components["schemas"]["ErrorDetail"];
+        };
+        /**
+         * @description 错误响应的稳定标识增量（R-99）：id 每次出错生成；code/hint_key
+         * 只在可稳定分类时给出，分支判断只用 error.code，不得匹配 msg。
+         */
+        ErrorDetail: {
+            /**
+             * @description 字符串稳定错误码；缺省表示该错误尚未稳定分类
+             * @enum {string}
+             */
+            code?: "UNAUTHENTICATED" | "FORBIDDEN" | "DATASOURCE_UNREACHABLE" | "QUERY_EXEC_FAILED" | "INVALID_CONFIG";
+            /** @description 前端 i18n 词典键（如 errors.datasource.unreachable），不是终端用户文案 */
+            hint_key?: string;
+            /** @description 本次错误唯一标识（uuid v7），用于报障与日志对账 */
+            id: string;
         };
         HealthData: {
             /** @example ok */

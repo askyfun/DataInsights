@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
 	"data-insights/internal/domain/entity"
 	"data-insights/internal/listpage"
+	"data-insights/internal/response"
 	"data-insights/internal/router"
 	"data-insights/internal/service/datasource"
 
@@ -148,12 +150,26 @@ func serve(r *gin.Engine, method, target, body string) *httptest.ResponseRecorde
 	return w
 }
 
+// errIDRe 匹配错误信封的 error.id（uuid v7，每次随机，无法 byte-for-byte）。
+var errIDRe = regexp.MustCompile(`"error":\{"id":"[^"]*"\}`)
+
+// errFieldRe 匹配整个 error 字段（含前导逗号），用于 want 未声明 error 时剥除。
+var errFieldRe = regexp.MustCompile(`,"error":\{"[^}]*\}`)
+
 // assertBody compares the full JSON response body byte-for-byte (ignoring a
 // possible trailing newline), pinning the exact envelope contract
-// {code, msg, trace, data} the datasource handlers currently emit.
+// {code, msg, trace, data} the handlers currently emit.
+// R-99：错误响应新增 error{id}。want 里写 `"error":{"id":""}` 即钉死 error
+// 契约（id 两侧规范化）；want 未写 error 时从 got 剥掉再比——error 存在性
+// 与 id 形态由 response 包专项测试覆盖，这里不重复。
 func assertBody(t *testing.T, w *httptest.ResponseRecorder, want string) {
 	t.Helper()
 	got := strings.TrimSpace(w.Body.String())
+	if !strings.Contains(want, `"error"`) {
+		got = errFieldRe.ReplaceAllString(got, "")
+	}
+	got = errIDRe.ReplaceAllString(got, `"error":{"id":"UUID"}`)
+	want = errIDRe.ReplaceAllString(want, `"error":{"id":"UUID"}`)
 	if got != want {
 		t.Fatalf("response body mismatch:\n got: %s\nwant: %s", got, want)
 	}
@@ -168,8 +184,9 @@ const (
 	okEnvelopeStatus     = `{"code":20000,"msg":"success","trace":"","data":{"status":"ok"}}`
 	badRequestInvalidID  = `{"code":20100,"msg":"invalid id","trace":"","data":{}}`
 	badRequestEOF        = `{"code":20100,"msg":"EOF","trace":"","data":{}}`
-	internalErrorBoom    = `{"code":50000,"msg":"boom","trace":"","data":{}}`
-	notFoundEnvelope     = `{"code":20300,"msg":"datasource not found: sql: no rows in result set","trace":"","data":{}}`
+	// R-99：内部错误 msg 统一兜底文案，原文只进日志；error.id 随机（helper 规范化）。
+	internalErrorBoom    = `{"code":50000,"msg":"internal server error","trace":"","data":{},"error":{"id":""}}`
+	notFoundEnvelope     = `{"code":20300,"msg":"datasource not found","trace":"","data":{},"error":{"id":""}}`
 	entityGetJSON        = `{"id":7,"name":"pg","type":"postgresql","host":"localhost","port":5432,"database_name":"db","username":"user","created_at":"","updated_at":""}`
 )
 
@@ -287,7 +304,8 @@ func TestDatasourceGet_Found(t *testing.T) {
 func TestDatasourceGet_NotFound(t *testing.T) {
 	h := NewDatasourceHandler(&mockDatasourceService{
 		getByIDFunc: func(_ context.Context, _ int) (*entity.Datasource, error) {
-			return nil, errors.New("datasource not found: sql: no rows in result set")
+			// 与真实 service 对齐：不存在 → 20300 固定文案（R-99：原文只进日志）。
+			return nil, router.NewBusinessError(response.CodeNotFound, "datasource not found")
 		},
 	})
 	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources/999", "")
@@ -800,7 +818,8 @@ func TestDatasourceGetTableData_NonPrimaryKeySortFieldMapsTo50000(t *testing.T) 
 		},
 	})
 	w := serve(newDatasourceTestRouter(h), http.MethodGet, "/api/datasources/1/tables/orders/data?sort_field=notes", "")
-	assertBody(t, w, `{"code":50000,"msg":"sort field must be a primary key column: notes","trace":"","data":{}}`)
+	// service 的 fmt.Errorf 走 router fallback：msg 兜底，原文只进日志（R-99）。
+	assertBody(t, w, `{"code":50000,"msg":"internal server error","trace":"","data":{},"error":{"id":""}}`)
 }
 
 func TestDatasourceGetTableData_GarbagePagingStillSucceeds(t *testing.T) {

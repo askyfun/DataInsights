@@ -33,6 +33,7 @@ func Bearer(svc auth.Service, allowPAT bool) gin.HandlerFunc {
 		if err != nil {
 			// Verify surfaces auth failures as router.BusinessError (code 20200);
 			// anything else is an internal error → fail closed as unauthorized.
+			// 20200 经 Error 的保守映射携带 UNAUTHENTICATED（R-99）。
 			if be, ok := err.(router.BusinessError); ok {
 				response.Error(c, be.Code, be.Message)
 			} else {
@@ -42,7 +43,9 @@ func Bearer(svc auth.Service, allowPAT bool) gin.HandlerFunc {
 			return
 		}
 		if !allowPAT && principal.Kind == "pat" {
-			response.Unauthorized(c, "个人访问令牌不允许访问该端点")
+			// 机器 token 访问人类端点是「登录了但没权限」：走 20201/FORBIDDEN，
+			// 与未认证（20200）分档，前端据此提示「无权限」而不是弹登录。
+			response.Forbidden(c, "personal access tokens are not allowed on this endpoint")
 			c.Abort()
 			return
 		}

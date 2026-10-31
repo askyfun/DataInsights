@@ -56,6 +56,7 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 | msg | string | 成功为 `"success"`，错误为可读描述（不保证稳定，勿用于程序判断） |
 | trace | string | 请求追踪 ID，回显 `X-Request-ID` |
 | data | object / array | 业务负载；**错误或无数据时归一化为 `{}` / `[]`，绝不为 null** |
+| error | object | **仅错误响应**：`{ id, code?, hint_key? }` 稳定标识增量（R-99），见 1.3.1 |
 
 集合字段红线：数组无数据返回 `[]`、对象无数据返回 `{}`，禁止 `null`。
 
@@ -67,11 +68,30 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 |------|------|------|--------------|
 | 20000 | CodeSuccess | 成功 | — |
 | 20100 | CodeBadRequest | 请求参数错误（含绑定失败、非法 id/短码） | 请求参数有误，请检查输入 |
-| 20200 | CodeUnauthorized | 认证/授权错误（Bearer 校验失败、口令错误、注册已关闭、PAT 被拒于管理端点——当前仅 auth/tokens 端点会产生，见 10/11 节） | 登录状态已失效 |
+| 20200 | CodeUnauthorized | 未认证（Bearer 校验失败、口令错误、注册已关闭——当前仅 auth/tokens 端点会产生，见 10/11 节） | 登录状态已失效 |
+| 20201 | CodeForbidden | 越权：已认证但无权限（PAT 被拒于管理端点；#202/R-92 的守卫同样走它） | 无权限执行该操作 |
 | 20300 | CodeNotFound | 资源不存在 | 请求的资源不存在 |
 | 20400 | CodeBusinessError | 业务逻辑错误（如资源被引用不可删） | 操作失败，请稍后重试 |
 | 20500 | CodeThirdPartyErr | 第三方服务错误 | 服务暂时不可用 |
 | 50000 | CodeInternalError | 服务端内部错误（含取数执行失败） | 服务器内部错误 |
+
+内部错误的 `msg` 一律是通用兜底文案（如 "internal server error"）；真实原因（`dial tcp`、
+`sql:` 等）只进服务端日志，与 `error.id` 对账——响应体中不得出现。
+
+#### 1.3.1 稳定错误码（error.code）
+
+R-99：旧整数 `code` 不改义；需要区分原因时读 `error.code`（字符串稳定标识）。
+**对外承诺：新增码 = minor，码义变更 = major；分支判断请用 `error.code`，不要匹配 `msg`。**
+`error.id` 每次出错生成（uuid v7），供报障与日志对账；`hint_key` 是前端 i18n 词典键，
+不是终端用户文案。首批只拆最疼的 5 个（50000 一码多义，未分类错误不带 `error.code`）：
+
+| error.code | 整数码 | hint_key | 映射自 |
+|------------|--------|----------|--------|
+| `UNAUTHENTICATED` | 20200 | `errors.auth.unauthenticated` | Bearer 校验失败 / 口令错误 |
+| `FORBIDDEN` | 20201 | `errors.auth.forbidden` | PAT 访问管理端点 / 守卫拒绝 |
+| `DATASOURCE_UNREACHABLE` | 50000 | `errors.datasource.unreachable` | 图表取数时数据源连接失败 |
+| `QUERY_EXEC_FAILED` | 50000 | `errors.query.execution_failed` | 查询执行失败（SQL 报错 / 超时） |
+| `INVALID_CONFIG` | 50000 | `errors.config.invalid` | 驱动类型不支持 / 数据集无有效取数来源 |
 
 ### 1.4 请求 / 响应头
 
@@ -389,7 +409,7 @@ expires_at / expired / hit_count`）。
 
 ## 11. Token PAT 管理（3 个端点）
 
-三个端点全挂 `Bearer(allowPAT=false)`：**用户管理操作，仅限人类会话**——机器令牌在此 20200「个人访问令牌不允许访问该端点」（防机器令牌自我提权，issue #184 验收 3）。
+三个端点全挂 `Bearer(allowPAT=false)`：**用户管理操作，仅限人类会话**——机器令牌在此 **20201（FORBIDDEN）**"personal access tokens are not allowed on this endpoint"（防机器令牌自我提权，issue #184 验收 3；R-99 起与未认证 20200 分档）。
 
 实体 `TokenInfo = {id, name, prefix, created_at, last_used_at, last_used_ip, last_used_ua, expires_at, revoked}`——**绝不含哈希或明文**；`expires_at` 空串 = 不过期。
 
