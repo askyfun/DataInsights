@@ -1,6 +1,6 @@
 # Docs AGENTS.md
 
-> 最后更新：2026-09-26
+> 最后更新：2026-11-06
 
 本目录是 Data Insights 的**入库文档**（随代码版本化），按**四区**组织：新手入门、用户指南、部署指南、开发者指南。本文件是本目录的索引与维护规则。
 
@@ -29,6 +29,7 @@
 | `user-guide/features.md` | 核心功能使用说明（含「为什么做」） | 新增 / 调整面向用户的功能时 |
 | `deployment/docker.md` | 容器镜像（发布镜像与本地构建两条路）、Compose、镜像构建细节 | 镜像形态、Compose、镜像来源或构建细节变化时 |
 | `deployment/release.md` | 发布流程（打 tag、推 Docker Hub 镜像、建 Release）与失败处置 | 发布工作流、镜像命名/架构、Secrets 或版本号规则变化时 |
+| `deployment/release-readiness.md` | 单版本发版就绪判据（当前为 V0.4.0）：条目总表 + 实机签核清单，配 `scripts/release-gate-v0.4.0.sh` 的静态半程 | 该版本的条目合入/增删时；换版本要重写或改名 |
 | `deployment/production.md` | 生产环境部署实践 | 部署形态、安全实践或可观测性变化时 |
 | `developer-guide/architecture.md` | 系统架构 + 关键设计决策 | 新增分层 / 目录、查询链路、部署形态或关键决策变更时 |
 | `developer-guide/api.md` | API 接口文档（叙述性视图；契约事实源是 `../api/openapi.yaml`） | 新增或修改端点时，与 `../api/openapi.yaml` 同步更新 |
