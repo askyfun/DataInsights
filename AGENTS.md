@@ -336,6 +336,7 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 | [docs/user-guide/features.md](docs/user-guide/features.md) | 核心功能使用说明（含「为什么做这个功能」） |
 | [docs/deployment/docker.md](docs/deployment/docker.md) | 容器镜像（发布镜像 / 本地构建）、Docker Compose |
 | [docs/deployment/release.md](docs/deployment/release.md) | 发布流程（打 tag + 推镜像到 Docker Hub + 建 Release） |
+| [docs/deployment/release-readiness.md](docs/deployment/release-readiness.md) | 单版本发版就绪判据（当前 V0.4.0）+ `scripts/release-gate-v0.4.0.sh` 静态闸 |
 | [docs/deployment/production.md](docs/deployment/production.md) | 生产环境部署实践 |
 | [docs/developer-guide/architecture.md](docs/developer-guide/architecture.md) | 系统架构 + 关键设计决策 |
 | [docs/developer-guide/api.md](docs/developer-guide/api.md) | API 接口文档（叙述性视图；契约事实源是 api/openapi.yaml） |
