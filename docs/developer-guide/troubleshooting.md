@@ -66,7 +66,7 @@
 
 - **不真删**：5 张业务表用 `deleted_at` 软删，**显式级联 + 同一事务**，`deleted_at` 不出 JSON；查询记录表 (`bi_query`) **永不物理删**。
 - ⚠️ **级联软删的子查询故意不带 `deleted_at IS NULL`**（父行刚软删，加过滤会断链）——最易被"顺手优化"改错。已在代码现场注释：`service/dataset/impl.go`、`service/datasource/impl.go`。
-- **`owner_id` / `tenant_id`**：目前只加字段、不加鉴权；仅 `bi_query` 已带列，其余 4 张业务表待账号体系阶段补齐。**CORS 默认放开所有来源是有意为之**（无登录态，不构成安全边界）→ 别"顺手收紧"。
+- **`owner_id` / `tenant_id`**：目前只加字段、不加鉴权；仅 `bi_query` 已带列，其余 4 张业务表待资源级归属（R-95，issue #220）补齐。**CORS 默认放开所有来源是有意为之**（Bearer 不由浏览器自动携带，不构成安全边界）→ 别"顺手收紧"；访问面的开关是 `AUTH_ENFORCE`（见[配置字典](../user-guide/configuration.md)）。
 - **PG 部分索引谓词必须 IMMUTABLE** → `WHERE expires_at > now()` 这类谓词建不出索引；**键不能选谓词列**（键恒 NULL 会退化成常量）。
 - **不引入后台定时任务**。⚠️ 原"进程内有界队列"**未落地**：`bi_query` 落库实为**前端查询成功后同步 POST**，**别再按队列方案改**。
 - ⚠️ **bun upsert 两个致命坑**（代码现场：`service/queryrecord/impl.go` + 哨兵测试）：

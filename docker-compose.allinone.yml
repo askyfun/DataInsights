@@ -2,7 +2,9 @@
 #
 # ⚠️ 默认只监听本机（127.0.0.1）。要从别的机器访问，必须显式设置 HOST_BIND=0.0.0.0，
 #    并先改掉下面的 PostgreSQL 演示口令、按 docs/deployment/production.md 收紧访问面。
-#    平台当前对资源端点没有强制认证，不要把端口直接暴露到公网。
+# ⚠️ 平台已具备账号体系，但 AUTH_ENFORCE=off（默认）时资源端点仍可匿名访问：
+#    对外暴露务必设 AUTH_ENFORCE=on（见 docs/user-guide/configuration.md「鉴权开放口径」）。
+#    不要把端口直接暴露到公网；下面的 PostgreSQL 用的是公开的演示密码，仅本地体验用。
 #
 # 用法：
 #   docker compose -f docker-compose.allinone.yml up -d

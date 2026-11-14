@@ -71,7 +71,7 @@ Monorepo 结构，包含前端 (React/TypeScript) 和后端 (Go)。核心功能�
 ## 关键约束
 
 1. **配置**: **只有环境变量**（无配置文件）。优先级 内置默认值 < 仓库根 `.env` 文件 < 真实系统环境变量；`DATABASE_URL` 必填，缺失即启动失败
-2. **CORS**: 默认放开所有来源（平台 API 无登录态，CORS 不构成安全边界；同源部署本就不产生跨域请求）；`CORS_ALLOWED_ORIGINS` 填非空白名单可收紧
+2. **CORS**: 默认放开所有来源（Bearer 不由浏览器自动携带，CORS 不构成安全边界；同源部署本就不产生跨域请求）；`CORS_ALLOWED_ORIGINS` 填非空白名单可收紧。资源端点的强制鉴权由 `AUTH_ENFORCE`（off/shadow/on，默认 off）控制，见[配置字典](../user-guide/configuration.md)
 3. **API 基础URL**: 未配置 `VITE_API_BASE_URL` 时生产构建自动同源、开发回退 `http://<当前主机名>:23352`；配置非空绝对地址仅用于前后端分开部署；唯一来源是 `frontend/src/lib/api/client.ts`
 4. **前端端口**: Vite 开发服务器默认 23351；生产是单镜像单端口 23352（Go 同时提供 API 与静态页面）
 5. **静态托管**: `backend/internal/webui` 挂在 gin 的 `NoRoute` 上 —— 命中文件就返回，未命中回落 `index.html`，`/api`、`/mcp`、`/health` 保留前缀一律 JSON 404。`STATIC_DIR` 留空时后端退化为纯 API 服务

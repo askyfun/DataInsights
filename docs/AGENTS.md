@@ -25,6 +25,7 @@
 |------|------|----------|
 | `getting-started/overview.md` | 核心概念、应用场景与对外 roadmap | 产品定位、核心概念或对外路线调整时 |
 | `getting-started/quick-start.md` | 极简上手（四条部署路径的完整步骤：预览站 / 单条 Docker / Compose / 源码） | 上手路径、镜像来源或前置条件变化时 |
+| `getting-started/first-run.md` | 第一次启动向导（管理员 bootstrap 两条路径 / 加同事 / 忘记口令的恢复通道 / 刷新掉登录等口径） | 身份与门禁批次（R-91~R-93）行为或恢复通道语义变化时 |
 | `user-guide/configuration.md` | 配置与参数字典 | 环境变量、默认值或配置优先级变化时 |
 | `user-guide/features.md` | 核心功能使用说明（含「为什么做」） | 新增 / 调整面向用户的功能时 |
 | `deployment/docker.md` | 容器镜像（发布镜像与本地构建两条路）、Compose、镜像构建细节 | 镜像形态、Compose、镜像来源或构建细节变化时 |
