@@ -16,6 +16,7 @@ import (
 	"tablewave/internal/service/datasource"
 	"tablewave/internal/service/queryrecord"
 	"tablewave/internal/service/sample"
+	"tablewave/internal/config"
 )
 
 // SetupRoutes configures all routes.
@@ -28,7 +29,7 @@ import (
 // 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
 // notifier 也由 main 注入，routes.go 不读环境变量）。databaseURL 供内置示例
 // 数据集（R-79）反查应用自身数据库。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier) alert.Service {
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authCfg config.AuthConfig) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -168,7 +169,9 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	// token. allowPAT=true here because both are self-service identity
 	// operations, not user-management; the PAT-forbidden guard lives on the
 	// token-management endpoints (#184).
-	authSvc := auth.NewService(db)
+	authSvc := auth.NewService(db, auth.GuardOptions{
+		RatePerMinute: authCfg.RateLimitPerMinute,
+	})
 	authHandler := handler.NewAuthHandler(authSvc)
 	authPublic := api.Group("/auth")
 	router.RegisterPostRoute(authPublic, "/register", authHandler.Register)
