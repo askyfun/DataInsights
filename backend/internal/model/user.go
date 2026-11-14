@@ -19,11 +19,14 @@ type User struct {
 
 	ID           int          `bun:"id,pk,autoincrement"`
 	Username     string       `bun:"username,notnull"`
+	DisplayName  string       `bun:"display_name,notnull"`
 	PasswordHash string       `bun:"password_hash,notnull"`
 	Role         string       `bun:"role,notnull"`
 	CreatedAt    time.Time    `bun:"created_at,notnull"`
 	UpdatedAt    time.Time    `bun:"updated_at,notnull"`
 	DeletedAt    sql.NullTime `bun:"deleted_at,nullzero"`
+	// DisabledAt 非空即禁用（issue #202）。禁用不软删：账号仍在列表里可再启用。
+	DisabledAt sql.NullTime `bun:"disabled_at,nullzero"`
 }
 
 // TableName satisfies bun's table naming.

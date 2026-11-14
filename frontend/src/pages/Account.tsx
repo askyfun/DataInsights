@@ -20,6 +20,7 @@ import { useIntl } from 'react-intl';
 import { type ApiUser, authApi, type PATCreateResult, type TokenInfo, tokensApi } from '../api';
 import PageHeader from '../components/PageHeader';
 import { ApiClientError, setBearerToken } from '../lib/api/client';
+import { setSessionUser } from '../lib/authSession';
 
 const { Paragraph, Text } = Typography;
 
@@ -45,8 +46,14 @@ const AccountPage: React.FC = () => {
   useEffect(() => {
     authApi
       .me()
-      .then((r) => setUser(r.data.data))
-      .catch(() => setUser(null));
+      .then((r) => {
+        setUser(r.data.data);
+        setSessionUser(r.data.data);
+      })
+      .catch(() => {
+        setUser(null);
+        setSessionUser(null);
+      });
   }, []);
 
   const submitAuth = async () => {
@@ -58,6 +65,7 @@ const AccountPage: React.FC = () => {
       const res = r.data.data;
       setBearerToken(res.token);
       setUser(res.user);
+      setSessionUser(res.user);
       message.success(intl.formatMessage({ id: 'account.welcome' }, { name: res.user.username }));
       await loadPats();
     } catch (e) {
@@ -83,6 +91,7 @@ const AccountPage: React.FC = () => {
     }
     setBearerToken('');
     setUser(null);
+    setSessionUser(null);
     setPats([]);
   };
 
