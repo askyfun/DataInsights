@@ -4,7 +4,7 @@ import { type ReactNode, StrictMode } from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueryRecord } from '../../api';
-import { chartsApi, datasetsApi, queriesApi } from '../../api';
+import { chartsApi, datasetsApi, datasourcesApi, queriesApi } from '../../api';
 import type { ApiResponse } from '../../lib/api/client';
 import type { ChartConfigDocument } from '../../lib/chartConfigSchema';
 import ChartBuilder from '../../pages/ChartBuilder';
@@ -84,6 +84,12 @@ vi.mock('../../api', async (importOriginal) => {
       getAll: vi.fn(),
       getColumns: vi.fn(),
     },
+    // R-78：图型门控会按数据集查询方言能力，必须打桩，否则落到真实 axios
+    // 产生 Network Error 污染 console.error 断言。
+    datasourcesApi: {
+      ...actual.datasourcesApi,
+      getCapabilities: vi.fn(),
+    },
     chartsApi: {
       ...actual.chartsApi,
       getById: vi.fn(),
@@ -103,6 +109,7 @@ vi.mock('../../api', async (importOriginal) => {
 
 const mockGetDatasets = vi.mocked(datasetsApi.getAll);
 const mockGetColumns = vi.mocked(datasetsApi.getColumns);
+const mockGetCapabilities = vi.mocked(datasourcesApi.getCapabilities);
 const mockGetChartById = vi.mocked(chartsApi.getById);
 const mockExecuteChartQuery = vi.mocked(chartsApi.executeChartQuery);
 const mockUpdateChart = vi.mocked(chartsApi.update);
@@ -196,6 +203,22 @@ describe('ChartBuilder', () => {
     vi.clearAllMocks();
     echartsOptionCapture.current = null;
     resetChartBuilderState();
+
+    // 默认按 PostgreSQL 能力（全图型可用）；门控用例在各自测试里改桩。
+    mockGetCapabilities.mockResolvedValue(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          dialect: 'postgresql',
+          supports_grouping_sets: true,
+          supports_percentile_cont: true,
+          supports_window_functions: true,
+          percentile_strategy: 'percentile_cont',
+        },
+      })
+    );
 
     mockGetDatasets.mockResolvedValue(
       mockAxiosResponse({
@@ -2053,5 +2076,38 @@ describe('ChartBuilder 地址栏即分享', () => {
     });
     // 重复请求会污染 hit_count 这个真实指标，双挂载不该让它翻倍
     expect(mockGetQueryRecord).toHaveBeenCalledTimes(1);
+  });
+
+  // R-78：方言能力门控——入口可见但置灰，其余图型不受影响。
+  it('数据源不支持百分位时箱线图置灰，能力未知时不门控', async () => {
+    mockGetCapabilities.mockResolvedValueOnce(
+      mockAxiosResponse({
+        code: 20000,
+        msg: 'ok',
+        trace: '',
+        data: {
+          dialect: 'mysql',
+          supports_grouping_sets: false,
+          supports_percentile_cont: false,
+          supports_window_functions: false,
+          percentile_strategy: 'unsupported',
+        },
+      })
+    );
+    const { unmount } = renderNewChartBuilder();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-type-boxplot')).toBeDisabled();
+    });
+    expect(screen.getByTestId('chart-type-bar')).not.toBeDisabled();
+    expect(mockGetCapabilities).toHaveBeenCalledWith(1);
+    unmount();
+
+    // 请求失败 → 能力未知 → 按现状放开（不误伤）。
+    mockGetCapabilities.mockRejectedValueOnce(new Error('probe failed'));
+    renderNewChartBuilder();
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-type-boxplot')).not.toBeDisabled();
+    });
   });
 });

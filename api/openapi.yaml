@@ -216,6 +216,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TableListResponse'
+  /api/datasources/{id}/capabilities:
+    get:
+      tags:
+        - datasources
+      summary: 读取数据源的方言能力
+      description: |
+        返回该连接方言的查询能力（R-78）。探针是懒加载、按连接缓存的只读探测，
+        不产生新数据；前端据此把当前方言不支持的图型置灰并说明原因。
+        {id} 非法 → 20100；连接或探针失败 → 50000。
+      operationId: getDatasourceCapabilities
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasourceCapabilitiesResponse'
   /api/datasources/{id}/tables/{table}/columns:
     get:
       tags:
@@ -2366,6 +2385,40 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/TableInfo'
+    DatasourceCapabilities:
+      type: object
+      description: >-
+        方言能力投影（entity.DatasourceCapabilities）。dialect 为数据源驱动类型名
+        （postgresql / mysql / clickhouse / starrocks）；percentile_strategy 取值
+        percentile_cont | percentile_cont_args_first | quantilesExactInclusive |
+        window_ntile | unsupported。
+      required:
+        - dialect
+        - supports_grouping_sets
+        - supports_percentile_cont
+        - supports_window_functions
+        - percentile_strategy
+      properties:
+        dialect:
+          type: string
+        supports_grouping_sets:
+          type: boolean
+        supports_percentile_cont:
+          type: boolean
+        supports_window_functions:
+          type: boolean
+        percentile_strategy:
+          type: string
+    DatasourceCapabilitiesResponse:
+      description: GET /api/datasources/{id}/capabilities 响应：data 为 DatasourceCapabilities。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/DatasourceCapabilities'
     ColumnListResponse:
       description: GET /api/datasources/{id}/tables/{table}/columns 响应：data 为 ColumnInfo 数组。
       allOf:

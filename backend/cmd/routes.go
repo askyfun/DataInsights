@@ -80,6 +80,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	router.RegisterDeleteRoute(ds, "/:id", datasourceHandler.Delete)
 	router.RegisterPostRoute(ds, "/test", datasourceHandler.TestConnection)
 	router.RegisterGetRoute(ds, "/:id/tables", datasourceHandler.GetTables)
+	router.RegisterGetRoute(ds, "/:id/capabilities", datasourceHandler.GetCapabilities)
 	router.RegisterGetRoute(ds, "/:id/tables/:table/columns", datasourceHandler.GetColumns)
 	router.RegisterGetRoute(ds, "/:id/tables/:table/data", datasourceHandler.GetTableData)
 	router.RegisterPostRoute(ds, "/:id/preview", datasourceHandler.Preview)
