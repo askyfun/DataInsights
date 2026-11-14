@@ -34,6 +34,8 @@ export interface DashboardPageTabsProps {
   activePageId: string;
   /** 只剩一页时不允许删除：盘必须至少有一页，否则「添加图表」无处安放。 */
   canRemove: boolean;
+  /** 只读（移动端阅览模式）：只保留点击切换页面，隐藏新增 / 改名 / 复制 / 删除 / 拖拽。 */
+  readOnly?: boolean;
   onActivate: (pageId: string) => void;
   onAdd: () => void;
   onRename: (pageId: string, name: string) => void;
@@ -47,6 +49,8 @@ interface PageTabProps {
   page: DashboardPage;
   active: boolean;
   canRemove: boolean;
+  /** 只读（移动端阅览）：隐藏拖拽把手 / ⋮ 菜单，禁用双击改名，只保留点击切换。 */
+  readOnly?: boolean;
   onActivate: () => void;
   onRename: (name: string) => void;
   onDuplicate: () => void;
@@ -63,6 +67,7 @@ const PageTab: React.FC<PageTabProps> = ({
   page,
   active,
   canRemove,
+  readOnly,
   onActivate,
   onRename,
   onDuplicate,
@@ -144,16 +149,18 @@ const PageTab: React.FC<PageTabProps> = ({
         background: active ? 'var(--dr-accent-soft, rgba(22,119,255,0.08))' : 'transparent',
       }}
     >
-      <Button
-        type="text"
-        size="small"
-        icon={<HolderOutlined />}
-        aria-label={intl.formatMessage({ id: 'dashboard.pageDrag' })}
-        data-testid="dashboard-page-drag"
-        style={{ cursor: 'grab', color: 'var(--dr-text-3, rgba(0,0,0,0.45))' }}
-        {...attributes}
-        {...listeners}
-      />
+      {!readOnly && (
+        <Button
+          type="text"
+          size="small"
+          icon={<HolderOutlined />}
+          aria-label={intl.formatMessage({ id: 'dashboard.pageDrag' })}
+          data-testid="dashboard-page-drag"
+          style={{ cursor: 'grab', color: 'var(--dr-text-3, rgba(0,0,0,0.45))' }}
+          {...attributes}
+          {...listeners}
+        />
+      )}
       {editing ? (
         <Input
           ref={inputRef}
@@ -176,7 +183,7 @@ const PageTab: React.FC<PageTabProps> = ({
           type="button"
           data-testid="dashboard-page-label"
           onClick={onActivate}
-          onDoubleClick={() => setEditing(true)}
+          onDoubleClick={readOnly ? undefined : () => setEditing(true)}
           style={{
             cursor: 'pointer',
             padding: '0 4px',
@@ -208,16 +215,18 @@ const PageTab: React.FC<PageTabProps> = ({
         带着上一轮的文档快照去执行（浏览器验收里表现为「删一页却少了两页」）。
         卸载面板即断掉这条陈旧引用的路径。
       */}
-      <Dropdown menu={menu} trigger={['click']} destroyOnHidden>
-        <Button
-          type="text"
-          size="small"
-          icon={<MoreOutlined />}
-          aria-label={intl.formatMessage({ id: 'dashboard.pageActions' })}
-          data-testid="dashboard-page-actions"
-          onClick={(event) => event.stopPropagation()}
-        />
-      </Dropdown>
+      {!readOnly && (
+        <Dropdown menu={menu} trigger={['click']} destroyOnHidden>
+          <Button
+            type="text"
+            size="small"
+            icon={<MoreOutlined />}
+            aria-label={intl.formatMessage({ id: 'dashboard.pageActions' })}
+            data-testid="dashboard-page-actions"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </Dropdown>
+      )}
     </div>
   );
 };
@@ -232,6 +241,7 @@ const DashboardPageTabs: React.FC<DashboardPageTabsProps> = ({
   pages,
   activePageId,
   canRemove,
+  readOnly,
   onActivate,
   onAdd,
   onRename,
@@ -279,6 +289,7 @@ const DashboardPageTabs: React.FC<DashboardPageTabsProps> = ({
                 page={page}
                 active={page.id === activePageId}
                 canRemove={canRemove}
+                readOnly={readOnly}
                 onActivate={() => onActivate(page.id)}
                 onRename={(name) => onRename(page.id, name)}
                 onDuplicate={() => onDuplicate(page.id)}
@@ -288,16 +299,18 @@ const DashboardPageTabs: React.FC<DashboardPageTabsProps> = ({
           </Space>
         </SortableContext>
       </DndContext>
-      <Button
-        type="text"
-        size="small"
-        icon={<PlusOutlined />}
-        data-testid="dashboard-page-add"
-        onClick={onAdd}
-      >
-        {intl.formatMessage({ id: 'dashboard.pageAdd' })}
-      </Button>
-      {!canRemove && (
+      {!readOnly && (
+        <Button
+          type="text"
+          size="small"
+          icon={<PlusOutlined />}
+          data-testid="dashboard-page-add"
+          onClick={onAdd}
+        >
+          {intl.formatMessage({ id: 'dashboard.pageAdd' })}
+        </Button>
+      )}
+      {!readOnly && !canRemove && (
         <Text type="secondary" style={{ fontSize: 12 }}>
           {intl.formatMessage({ id: 'dashboard.pageLastHint' })}
         </Text>
