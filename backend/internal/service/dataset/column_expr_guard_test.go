@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"data-insights/internal/domain/entity"
+	"tablewave/internal/domain/entity"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/uptrace/bun"

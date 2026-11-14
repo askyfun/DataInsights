@@ -12,14 +12,14 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/crypto"
+	"tablewave/internal/crypto"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
-	"data-insights/internal/query"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
+	"tablewave/internal/query"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 )
 
 // stubConnection 测试连接替身，用于占位、验证 close，以及在 GetData 的
@@ -176,6 +176,75 @@ func TestChartServiceQuery_TableRequestCompatibility(t *testing.T) {
 	}
 	if result.SelectSQL == "" || result.CountSQL == "" {
 		t.Fatalf("expected select/count sql to be forwarded, got select=%q count=%q", result.SelectSQL, result.CountSQL)
+	}
+	// R-20 诊断：非能力门控图型仍给方言/耗时，但 capabilities 必须缺省。
+	if result.Diagnostics == nil {
+		t.Fatal("expected diagnostics to be populated")
+	}
+	if result.Diagnostics.DatasourceType != "postgresql" || result.Diagnostics.Dialect != "postgresql" {
+		t.Fatalf("unexpected diagnostics source/dialect: %+v", result.Diagnostics)
+	}
+	if result.Diagnostics.DurationMs < 0 {
+		t.Fatalf("expected non-negative duration, got %d", result.Diagnostics.DurationMs)
+	}
+	if result.Diagnostics.Capabilities != nil {
+		t.Fatalf("expected no capabilities for non-gated query, got %+v", result.Diagnostics.Capabilities)
+	}
+}
+
+// TestChartServiceQuery_DiagnosticsCarryCapabilities 验证能力门控分支读到的
+// 方言能力进入诊断快照，且原始数据源类型与 SQL 方言分别保留（StarRocks→mysql）。
+func TestChartServiceQuery_DiagnosticsCarryCapabilities(t *testing.T) {
+	executor := &stubExecutor{
+		result: query.ExecutorResult{
+			Data: &query.PivotResponse{Columns: []string{"region"}, Data: []map[string]any{{"region": "华东"}}},
+			GeneratedSQL: query.GeneratedSQL{
+				Select: "SELECT ...",
+			},
+			Capabilities: &datasource.DialectCapabilities{
+				SupportsGroupingSets:    false,
+				SupportsPercentileCont:  true,
+				SupportsWindowFunctions: true,
+				PercentileStrategy:      "percentile_cont",
+			},
+		},
+	}
+
+	service := NewService(nil).(*chartService)
+	service.getDatasetModelFn = func(ctx context.Context, id int) (*model.Dataset, error) {
+		return &model.Dataset{ID: id, DatasourceID: 1, QueryType: "table"}, nil
+	}
+	service.getDatasourceModelFn = func(ctx context.Context, id int) (*model.Datasource, error) {
+		return &model.Datasource{ID: id, Type: "starrocks"}, nil
+	}
+	service.connectFn = func(ctx context.Context, ds *model.Datasource) (datasource.Connection, error) {
+		return &stubConnection{}, nil
+	}
+	service.executorFactory = func(conn datasource.Connection, dataset *model.Dataset, ds *model.Datasource) queryExecutor {
+		return executor
+	}
+
+	result, err := service.Query(context.Background(), &entity.ChartQueryRequest{DatasetID: 1, ChartType: "pivot"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	diagnostics := result.Diagnostics
+	if diagnostics == nil {
+		t.Fatal("expected diagnostics to be populated")
+	}
+	if diagnostics.DatasourceType != "starrocks" || diagnostics.Dialect != "mysql" {
+		t.Fatalf("expected starrocks source with mysql dialect, got %+v", diagnostics)
+	}
+	caps := diagnostics.Capabilities
+	if caps == nil {
+		t.Fatal("expected capabilities snapshot")
+	}
+	if caps.SupportsGroupingSets || !caps.SupportsPercentileCont || !caps.SupportsWindowFunctions {
+		t.Fatalf("unexpected capability booleans: %+v", caps)
+	}
+	if caps.PercentileStrategy != "percentile_cont" {
+		t.Fatalf("unexpected percentile strategy: %q", caps.PercentileStrategy)
 	}
 }
 
@@ -1155,5 +1224,105 @@ func TestChartDataQueryFromConfig_PercentFormatNeedsTotal(t *testing.T) {
 				t.Fatalf("expected no show_total, got %+v", req.QueryOptions)
 			}
 		})
+	}
+}
+
+// --- 动态维度/指标（issue #134）：观看侧选择只作用于本次取数 ---
+
+// dynamicSlotChart 是一份带候选集的 v2 配置：维度 b-0 默认 region、候选 city；
+// 指标 b-1 默认 amount、候选 qty。
+func dynamicSlotChart() *model.Chart {
+	return &model.Chart{ID: 7, DatasetID: 10, ChartType: "bar", Config: `{"version":2,"chartType":"bar","query":{
+		"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","fieldId":"region","candidates":["city"]}]}],
+		"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-1","fieldId":"amount","candidates":["qty"]}]}],
+		"filters":[]},"fieldMeta":{},"style":{},"queryOptions":{}}`}
+}
+
+func TestChartDataQueryFromConfigWithSelections_SwitchesCandidate(t *testing.T) {
+	chart := dynamicSlotChart()
+
+	req, ok, err := chartDataQueryFromConfigWithSelections(chart, []entity.ChartFieldSelection{
+		{BindingID: "b-0", FieldID: "city"},
+		{BindingID: "b-1", FieldID: "qty"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(req.Dims) != 1 || req.Dims[0] != "city" {
+		t.Fatalf("dims = %v, want [city]", req.Dims)
+	}
+	if len(req.Metrics) != 1 || req.Metrics[0].Field != "qty" {
+		t.Fatalf("metrics = %+v, want field qty", req.Metrics)
+	}
+	// 默认值不被改写：选择只活在本次请求里。
+	if chart.Config == "" || !strings.Contains(chart.Config, `"fieldId":"region","candidates":["city"]`) {
+		t.Fatalf("chart config must stay untouched: %s", chart.Config)
+	}
+}
+
+// 选中默认列本身是 no-op（不是错误）：候选集不含默认列，但选择它就是「不切换」。
+func TestChartDataQueryFromConfigWithSelections_DefaultIsNoop(t *testing.T) {
+	req, ok, err := chartDataQueryFromConfigWithSelections(dynamicSlotChart(), []entity.ChartFieldSelection{
+		{BindingID: "b-0", FieldID: "region"},
+	})
+	if err != nil || !ok {
+		t.Fatalf("expected ok, got ok=%v err=%v", ok, err)
+	}
+	if len(req.Dims) != 1 || req.Dims[0] != "region" {
+		t.Fatalf("dims = %v, want [region]", req.Dims)
+	}
+}
+
+// 候选集之外的列必须显式报错：否则前端一个过期/篡改的 selection 会静默换成
+// 任意列，绕开「只允许候选互为维度」的产品约束。
+func TestChartDataQueryFromConfigWithSelections_RejectsNonCandidate(t *testing.T) {
+	_, _, err := chartDataQueryFromConfigWithSelections(dynamicSlotChart(), []entity.ChartFieldSelection{
+		{BindingID: "b-0", FieldID: "amount"},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-candidate selection")
+	}
+	if !strings.Contains(err.Error(), "not a candidate") {
+		t.Fatalf("error should explain candidate constraint, got %v", err)
+	}
+}
+
+// 找不到 bindingId 的选择被忽略：作者可能已经删掉该槽位，过期会话不该让整块失败。
+func TestChartDataQueryFromConfigWithSelections_IgnoresUnknownBinding(t *testing.T) {
+	req, ok, err := chartDataQueryFromConfigWithSelections(dynamicSlotChart(), []entity.ChartFieldSelection{
+		{BindingID: "b-404", FieldID: "city"},
+	})
+	if err != nil || !ok {
+		t.Fatalf("expected ok, got ok=%v err=%v", ok, err)
+	}
+	if len(req.Dims) != 1 || req.Dims[0] != "region" {
+		t.Fatalf("dims = %v, want default [region]", req.Dims)
+	}
+}
+
+// v1 文档没有 bindingId：带选择时显式报错，而不是「切换了却没反应」。
+func TestChartDataQueryFromConfigWithSelections_RejectsV1(t *testing.T) {
+	chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "bar", Config: `{"chartType":"bar","query":{"dimensionGroups":[{"id":"dims","fields":["region"]}],"metricGroups":[{"id":"values","fields":["amount"]}],"filters":[]},"fieldMeta":{}}`}
+	_, _, err := chartDataQueryFromConfigWithSelections(chart, []entity.ChartFieldSelection{
+		{BindingID: "b-0", FieldID: "city"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not v2") {
+		t.Fatalf("expected v2 requirement error, got %v", err)
+	}
+}
+
+// 无选择时与 chartDataQueryFromConfig 完全等价。
+func TestChartDataQueryFromConfigWithSelections_EmptyMatchesBase(t *testing.T) {
+	chart := dynamicSlotChart()
+	base, baseOK := chartDataQueryFromConfig(chart)
+	got, ok, err := chartDataQueryFromConfigWithSelections(chart, nil)
+	if err != nil || ok != baseOK {
+		t.Fatalf("expected parity, got ok=%v err=%v", ok, err)
+	}
+	if !reflect.DeepEqual(got, base) {
+		t.Fatalf("empty selections changed request:\n got %+v\nwant %+v", got, base)
 	}
 }

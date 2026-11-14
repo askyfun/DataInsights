@@ -8,7 +8,7 @@
 
 ### 1.1 Docker Hub 侧
 
-1. 在 Docker Hub 建一个仓库：命名空间 `kzzhr`、名称 `datainsights`（即镜像 `kzzhr/datainsights`）。首次推送通常也会自动创建，显式建一个更稳。
+1. 在 Docker Hub 建一个仓库：命名空间 `kzzhr`、名称 `tablewave`（即镜像 `kzzhr/tablewave`）。首次推送通常也会自动创建，显式建一个更稳。
 2. 生成访问令牌：**Account Settings → Personal access tokens → Generate new token**，权限选 **Read & Write**。
    ⚠️ 用令牌，不要用登录密码 —— Docker Hub 已不支持密码推送，且令牌可单独吊销。
 
@@ -36,6 +36,9 @@
    （标题写作 `## [<不带 v 的版本号>]`），不再需要手工粘贴；抽不到才回落成 commit 标题清单，
    并在日志里留一条 `::warning::`。所以发版前**务必**先把 `CHANGELOG.md` 里该小节的水位行
    （`## [x.y.z] - 未发布（草稿）`）改成正式日期：未定稿状态会被标题行守卫直接拦红（见 §8）。
+7. 若该版本登记了「发版就绪判据」，先跑它的静态闸再点 Run：V0.4.0 见
+   [发版就绪判据](release-readiness.md) 与 `bash scripts/release-gate-v0.4.0.sh`。
+   判据没齐套就发版，等于把一个主题不成立的版本推给外部用户。
 
 ## 3. 版本号规则
 
@@ -61,7 +64,7 @@
 
 - git tag `<version>`（指向本次运行的 commit）
 - GitHub Release `<version>`，说明里带 `docker pull` / compose 的直接命令
-- Docker Hub `kzzhr/datainsights:<version>`（正式版额外多一个 `latest`），同时支持 amd64 与 arm64
+- Docker Hub `kzzhr/tablewave:<version>`（正式版额外多一个 `latest`），同时支持 amd64 与 arm64
 
 ## 5. 先本地验一遍（可选）
 

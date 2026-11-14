@@ -37,6 +37,9 @@ export type Datasource = Omit<G['Datasource'], 'type'> & {
   type: DatasourceType;
 };
 
+// R-78：方言能力投影，dialect 与 Datasource.type 同一口径。
+export type DatasourceCapabilities = G['DatasourceCapabilities'];
+
 export interface DatasourceFormData {
   name: string;
   type: DatasourceType;
@@ -248,10 +251,26 @@ export function isPivotV2Payload(x: unknown): x is PivotResponseV2 {
   );
 }
 
+// 查询诊断（issue #182 / openapi ChartQueryDiagnostics）：执行元信息。生成物
+// （gen_types.ts）早于该字段，故在这里补薄层；字段与契约逐一对应。
+export type ChartQueryCapabilities = {
+  supports_grouping_sets: boolean;
+  supports_percentile_cont: boolean;
+  supports_window_functions: boolean;
+  percentile_strategy: string;
+};
+export type ChartQueryDiagnostics = {
+  datasource_type: string;
+  dialect: string;
+  duration_ms: number;
+  capabilities?: ChartQueryCapabilities;
+};
+
 // NOT G['ChartQueryResponse'] (that is the Envelope wrapper): the bare wire
 // payload is G['ChartDataResult'], with data narrowed from unknown to the union.
 export type ChartQueryResponse = Omit<G['ChartDataResult'], 'data'> & {
   data: ChartDataResponse;
+  diagnostics?: ChartQueryDiagnostics;
 };
 
 // 查询记录（地址栏即分享）。spec 的信封类型来自生成 schema，但 document 字段要
@@ -296,8 +315,17 @@ export type DashboardQueryLinkage = {
   value: unknown[];
 };
 
+// 动态维度/指标的观看侧选择（issue #134）：只带「哪块图的哪个槽位切到了哪一列」，
+// 列与槽位的关系由后端在该图表的 config 里校验（必须是默认列或候选列）。
+export type DashboardQuerySelection = {
+  widgetId: string;
+  bindingId: string;
+  fieldId: string;
+};
+
 export type DashboardQueryRequest = G['DashboardQueryRequest'] & {
   linkages?: DashboardQueryLinkage[];
+  selections?: DashboardQuerySelection[];
 };
 // 注意命名陷阱：这里取的是**单块结果**（DashboardQueryResult 是 block schema），
 // 接口的 Envelope 同名类型是 G['DashboardQueryResponse']（见文件头迁移规则）。
@@ -348,6 +376,13 @@ export const datasourcesApi = {
 
   getTables: (id: number): Promise<AxiosResponse<ApiResponse<TableInfo[]>>> => {
     return apiClient.get<ApiResponse<TableInfo[]>>(`/api/datasources/${id}/tables`);
+  },
+
+  // R-78：方言能力（懒探针，只读）——用于图型选择的边界说明。
+  getCapabilities: (id: number): Promise<AxiosResponse<ApiResponse<DatasourceCapabilities>>> => {
+    return apiClient.get<ApiResponse<DatasourceCapabilities>>(
+      `/api/datasources/${id}/capabilities`
+    );
   },
 
   getTableColumns: (

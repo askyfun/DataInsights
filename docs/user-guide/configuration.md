@@ -34,6 +34,7 @@ cp .env.example .env    # 然后按需修改
 | `SECURITY_KEY` | 否 | 首启随机生成 | 数据源密码 AES-256-GCM 的加密密钥（64 位 hex）。**留空 = 系统首次启动随机生成（32 字节）并持久化到数据库**，重启 / 容器重建复用同一把，保证已加密密码始终可解；显式配置时环境变量优先。**生产强烈建议显式设置**。 |
 | `SENTRY_DSN` | 否 | 空 | 后端 Sentry DSN，留空 = 关闭上报。 |
 | `CORS_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔白名单；**留空 = 放开所有来源**（平台 API 无登录态，CORS 不构成安全边界）。填非空白名单则只回显名单内来源，供将来引入认证后收紧。 |
+| `HOST_BIND` | 否 | `127.0.0.1` | **仅 docker compose 层生效**（后端进程不读）：app 端口在宿主机上的绑定地址。默认只监听本机；内网共享时设 `0.0.0.0`，并先改掉 compose 里的 PostgreSQL 演示口令、按[生产部署](../deployment/production.md)收紧访问面。数据库端口固定只绑 `127.0.0.1`，不受此变量影响。 |
 | `STATIC_DIR` | 否 | 空 | 前端构建产物目录。设置后本进程一并托管页面（未命中回落 `index.html`）；**留空 = 只提供 API**（本地开发默认形态，页面走 Vite dev server）。目录配错即启动失败。 |
 | `HEALTH_DETAIL` | 否 | 关闭 | 开启 `GET /health/detail`（版本 / 迁移水位 / DB 耗时 / 驱动数 / Sentry 与鉴权档位）。只认 `1` / `true` / `on`（大小写不敏感），其他取值或留空一律按关闭处理；关闭时该端点返回 **404**。详情不含连接串 / host / 库名 / 口令，但仍建议只在需要排障时打开。**改完需重启**。 |
 | `EXTRACT_DATASOURCE_ID` | 否 | 自举 | 本地文件上传（CSV/XLSX）的落库位置。**留空即可用**——平台会自动复用 `DATABASE_URL` 指向的应用自身 PostgreSQL 作为上传存储（见下方「上传存储怎么定的」）。填一个数据源 id 则改用它作为存储。无论哪种，该数据源都不再是普通数据源：列表隐藏、不能被常规数据集引用；上传表以 `di_extract_<datasetId>` 命名。 |
@@ -44,6 +45,7 @@ cp .env.example .env    # 然后按需修改
 | `SMTP_PASSWORD` | 否 | 空 | SMTP 认证密码。 |
 | `SMTP_FROM` | 否 | 空 | 发件人地址。配了 `SMTP_HOST` 但此项或收件人为空时，通知失败并在 `notify_error` 留档（不会静默）。 |
 | `ALERT_NOTIFY_EMAIL` | 否 | 空 | 预警邮件收件人，逗号分隔多个。与 `SMTP_FROM` 同时非空才会真正发送。 |
+| `AUTH_RATE_LIMIT_PER_MINUTE` | 否 | `10` | 认证端点防护（issue #203）：同一来源 IP 每分钟允许的登录/注册请求数。仅作用于 `/api/auth/login` 与 `/api/auth/register`。用户名维度另有「连续失败 5 次锁定 300 秒」的内置策略（不可配）。非法值（非整数 / 小于 1）**不 fail-fast**：回退 10 并打 warning。**分布式部署（多副本）时各副本独立计数**，实际阈值 = 本值 × 副本数。 |
 | `VITE_API_BASE_URL` | 否 | 空 | 前端 API 基础地址。未配置时：生产构建自动同源、开发回退 `http://<当前访问主机名>:23352`。**仅前后端分开部署时**才需配成非空绝对地址。 |
 | `VITE_SENTRY_DSN` | 否 | 空 | 前端 Sentry DSN。留空 = 完全跳过 `Sentry.init`，不打点也不上报。 |
 
@@ -57,7 +59,7 @@ cp .env.example .env    # 然后按需修改
 
 | `EXTRACT_DATASOURCE_ID` | 行为 |
 |------------------------|------|
-| 留空（默认） | 复用 `DATABASE_URL` 指向的**应用自身 PostgreSQL**。首次启动时平台自动落一条内部数据源行（名字形如 `data-insights internal storage (upload files)`，在数据源列表里被隐藏），并把它的 id 记进 `bi_setting` 供后续启动复用。 |
+| 留空（默认） | 复用 `DATABASE_URL` 指向的**应用自身 PostgreSQL**。首次启动时平台自动落一条内部数据源行（名字形如 `tablewave internal storage (upload files)`，在数据源列表里被隐藏），并把它的 id 记进 `bi_setting` 供后续启动复用。 |
 | 填某个数据源 id | 用它作为存储。适合希望上传数据与平台元数据**分库存放**的部署。 |
 
 几个要点：

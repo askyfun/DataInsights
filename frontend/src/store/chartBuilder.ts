@@ -100,6 +100,11 @@ export interface ChartBuilderSlice {
   setMetricUnits: (units: Record<string, string>) => void;
   setMetricFormat: (bindingId: string, format: string) => void;
   setMetricFormats: (formats: Record<string, string>) => void;
+  /**
+   * 设置某个绑定的动态维度/指标候选列（issue #134）：candidates 不含默认列，
+   * 空数组 = 取消动态槽位。命中 bindingId 的绑定就地替换，其余绑定对象保持原引用。
+   */
+  setBindingCandidates: (bindingId: string, candidates: string[]) => void;
   setChartStyle: (style: Partial<ChartStyleConfig>) => void;
   setChartStyleState: (style: ChartStyleConfig) => void;
   setChartQueryOptionsState: (options: ChartQueryOptions) => void;
@@ -674,6 +679,33 @@ export const createChartBuilderSlice: StateCreator<AppState, [], [], ChartBuilde
 
   setMetricFormats: (formats: Record<string, string>) => {
     set({ metricFormats: formats });
+  },
+
+  setBindingCandidates: (bindingId: string, candidates: string[]) => {
+    set((state) => {
+      const update = (groups: QueryConfig['dimensionGroups']) =>
+        groups.map((group) => ({
+          ...group,
+          bindings: group.bindings.map((binding) => {
+            if (binding.bindingId !== bindingId) {
+              return binding;
+            }
+            if (candidates.length === 0) {
+              const rest = { ...binding };
+              delete rest.candidates;
+              return rest;
+            }
+            return { ...binding, candidates: [...candidates] };
+          }),
+        }));
+      return {
+        queryConfig: {
+          ...state.queryConfig,
+          dimensionGroups: update(state.queryConfig.dimensionGroups),
+          metricGroups: update(state.queryConfig.metricGroups),
+        },
+      };
+    });
   },
 
   setChartStyle: (style: Partial<ChartStyleConfig>) => {

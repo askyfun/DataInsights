@@ -9,8 +9,8 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
 )
 
 // R-22 归属（#171）：Create 必须把 owner_id 写进 INSERT（打占位 id）；Update 走整行

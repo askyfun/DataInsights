@@ -1,5 +1,5 @@
 {
-  "name": "data-insights-frontend",
+  "name": "tablewave-frontend",
   "private": true,
   "version": "0.3.1",
   "packageManager": "pnpm@12.4.2",

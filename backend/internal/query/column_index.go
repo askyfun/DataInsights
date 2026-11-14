@@ -3,7 +3,7 @@ package query
 import (
 	"fmt"
 
-	"data-insights/internal/expr"
+	"tablewave/internal/expr"
 )
 
 // 列索引：把 bi_dataset.columns（JSON 文档）编译成查询期需要的三张表。

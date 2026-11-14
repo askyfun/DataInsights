@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"data-insights/internal/crypto"
-	"data-insights/internal/datasource"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
+	"tablewave/internal/crypto"
+	"tablewave/internal/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/uptrace/bun"
