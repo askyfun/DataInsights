@@ -18,6 +18,10 @@ type GeneratedSQL struct {
 type ExecutorResult struct {
 	Data interface{} `json:"data"`
 	GeneratedSQL
+	// Capabilities 是本次执行实际读过的方言能力（见 R-20 诊断）：只有走能力门控的
+	// 分支填充（pivot 的 GROUPING SETS 选择、boxplot / percentile 前置门），其余为
+	// nil——诊断面板据此区分「门控放行」与「本次图型不依赖可选能力」。
+	Capabilities *datasource.DialectCapabilities `json:"-"`
 }
 
 // Executor 查询执行器
@@ -44,6 +48,9 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 	}
 
 	dialect := ParseDialect(e.datasource.Type)
+
+	// 本次执行实际读过的方言能力（诊断用，见 ExecutorResult.Capabilities）。
+	var gatedCaps *datasource.DialectCapabilities
 
 	qb := NewQueryBuilder()
 	qb.WithColumnMappings(e.dataset.Columns)
@@ -118,6 +125,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 			slog.Error("pivot: capabilities probe failed", "error", err)
 			return ExecutorResult{}, fmt.Errorf("capabilities probe failed: %v", err)
 		}
+		gatedCaps = caps
 		if rowDims, colDims, ok := resolvePivotSlots(req.Dims, ast); ok {
 			var pivotSQL string
 			var pivotArgs []any
@@ -143,6 +151,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 				GeneratedSQL: GeneratedSQL{
 					Select: pivotSQL,
 				},
+				Capabilities: gatedCaps,
 			}, nil
 		}
 	}
@@ -173,6 +182,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		if perr != nil {
 			return ExecutorResult{}, fmt.Errorf("percentile capability probe failed: %w", perr)
 		}
+		gatedCaps = pcaps
 		if cerr := CheckPercentileSupport(pcaps); cerr != nil {
 			return ExecutorResult{}, cerr
 		}
@@ -266,6 +276,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 					Select: sql,
 					Count:  countSQL,
 				},
+				Capabilities: gatedCaps,
 			}, nil
 		}
 
@@ -285,6 +296,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 				Select: sql,
 				Count:  countSQL,
 			},
+			Capabilities: gatedCaps,
 		}, nil
 	}
 
@@ -338,6 +350,7 @@ func (e *Executor) Execute(ctx context.Context, req *ChartQueryRequest) (Executo
 		GeneratedSQL: GeneratedSQL{
 			Select: sql,
 		},
+		Capabilities: gatedCaps,
 	}, nil
 }
 
@@ -563,6 +576,7 @@ func (e *Executor) executeBoxplot(
 		return ExecutorResult{
 			Data:         empty,
 			GeneratedSQL: GeneratedSQL{Select: statsSQL},
+			Capabilities: caps,
 		}, nil
 	}
 
@@ -599,6 +613,7 @@ func (e *Executor) executeBoxplot(
 	return ExecutorResult{
 		Data:         resp,
 		GeneratedSQL: GeneratedSQL{Select: statsSQL},
+		Capabilities: caps,
 	}, nil
 }
 
