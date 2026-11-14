@@ -24,6 +24,7 @@ const AlertsPage = lazy(() => import('./pages/Alerts'));
 const ChartBuilder = lazy(() => import('./pages/ChartBuilder'));
 const ChartsPage = lazy(() => import('./pages/Charts'));
 const DashboardEditor = lazy(() => import('./pages/DashboardEditor'));
+const DashboardScreen = lazy(() => import('./pages/DashboardScreen'));
 const DashboardsPage = lazy(() => import('./pages/Dashboards'));
 const DatasetPage = lazy(() => import('./pages/Dataset'));
 const DatasetDetail = lazy(() => import('./pages/DatasetDetail'));
@@ -250,6 +251,7 @@ const App: React.FC = () => {
                 {/* 首页即仪表盘列表（导航项 nav.dashboard 一直指向 /）。 */}
                 <Route path="/" element={<DashboardsPage />} />
                 <Route path="/dashboards/:id" element={<DashboardEditor />} />
+                <Route path="/dashboards/:id/screen" element={<DashboardScreen />} />
                 <Route path="/datasources" element={<DatasourcePage />} />
                 <Route path="/datasources/:id" element={<DatasourceDetailPage />} />
                 <Route path="/datasets" element={<DatasetPage />} />

@@ -4,6 +4,7 @@ import {
   CloseOutlined,
   DashboardOutlined,
   DeleteOutlined,
+  ExpandOutlined,
   MoreOutlined,
   PlusOutlined,
   PushpinOutlined,
@@ -1405,6 +1406,15 @@ const DashboardEditor: React.FC = () => {
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
               {intl.formatMessage({ id: 'dashboard.back' })}
             </Button>
+            {id && (
+              <Button
+                icon={<ExpandOutlined />}
+                data-testid="dashboard-screen-entry"
+                onClick={() => navigate(`/dashboards/${id}/screen`)}
+              >
+                {intl.formatMessage({ id: 'dashboard.toScreen' })}
+              </Button>
+            )}
             {Object.keys(activeLinkages).length > 0 && (
               <Button
                 icon={<ClearOutlined />}
