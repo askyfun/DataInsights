@@ -16,16 +16,16 @@ import (
 	"syscall"
 	"time"
 
-	"data-insights/internal/config"
-	"data-insights/internal/database"
-	"data-insights/internal/extract"
-	"data-insights/internal/keystore"
-	"data-insights/internal/migration/columnids"
-	"data-insights/internal/monitor"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/alert"
-	"data-insights/internal/webui"
+	"tablewave/internal/config"
+	"tablewave/internal/database"
+	"tablewave/internal/extract"
+	"tablewave/internal/keystore"
+	"tablewave/internal/migration/columnids"
+	"tablewave/internal/monitor"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/alert"
+	"tablewave/internal/webui"
 
 	"github.com/getsentry/sentry-go"
 	sentrygin "github.com/getsentry/sentry-go/gin"
@@ -160,7 +160,7 @@ func main() {
 	})
 
 	// 预警邮件通知：SMTP_HOST 未配置传 nil（评估照常跑，触发记录说明未通知）。
-	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, c.Database.Url, newEmailNotifier(c.Alert))
+	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, c.Database.Url, newEmailNotifier(c.Alert), c.Auth)
 
 	// 预警评估器：后台 goroutine 定时轮询，随主进程退出（evalCancel）而结束。
 	evalCtx, evalCancel := context.WithCancel(context.Background())

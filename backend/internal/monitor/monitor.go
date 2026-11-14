@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"data-insights/internal/logx"
-	"data-insights/internal/middleware"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/logx"
+	"tablewave/internal/middleware"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"

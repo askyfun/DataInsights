@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
