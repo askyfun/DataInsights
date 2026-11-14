@@ -538,3 +538,82 @@ h5.ant-typography {
   --dr-border-strong: #434343;
   --dr-surface: #1f1f1f;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   数字大屏播放器 · pages/DashboardScreen.tsx
+
+   大屏是深色全屏、无操作栏的只读播放视图（issue #159）。布局：
+     .screen-root   全屏深色画布（强制 data-theme=dark）
+     .screen-toolbar 最小化顶栏（返回 + 页面指示/状态），不遮挡画布
+     .screen-viewport 播放视口（占满剩余高度，fit 等比缩放画布居中）
+     .screen-canvas  transform 缩放的 1920×1080 画布（letterbox 黑边）
+   ───────────────────────────────────────────────────────────────────────────── */
+.screen-root {
+  position: fixed;
+  inset: 0;
+  background: #0a0a0a;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 1000;
+}
+
+.screen-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #141414;
+  border-bottom: 1px solid #303030;
+  flex: 0 0 auto;
+  min-height: 48px;
+}
+
+.screen-status {
+  color: #8c95a1;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.screen-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 等比缩放画布：1920×1080 设计尺寸经 transform scale 落到视口。 */
+.screen-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: #101010;
+  overflow: hidden;
+}
+
+.screen-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dr-text-3);
+}
+
+.screen-querying {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.screen-widget-state {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  overflow: hidden;
+  background: var(--dr-sunken);
+  border-radius: 4px;
+}
