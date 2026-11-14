@@ -169,11 +169,16 @@ func fillOwnerNames(ctx context.Context, db bun.IDB, rows []model.Chart, items [
 	return nil
 }
 
-// GetByID returns a chart by ID
+// GetByID returns a chart by ID. 不存在返回 20300 业务错误（msg 固定文案，
+// R-99：内部原文不进响应）；真实 DB 故障原样上抛走 50000。
+
 func (s *chartService) GetByID(ctx context.Context, id int) (*entity.Chart, error) {
 	chart := &model.Chart{ID: id}
 	if err := s.db.NewSelect().Model(chart).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
-		return nil, fmt.Errorf("chart not found: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, router.NewBusinessError(response.CodeNotFound, "chart not found")
+		}
+		return nil, fmt.Errorf("failed to get chart: %w", err)
 	}
 	return toChartEntity(chart), nil
 }
@@ -301,12 +306,16 @@ func (s *chartService) getData(
 	}
 	source := getPlannerSource(dataset)
 	if source == "" {
-		return entity.ChartDataResult{}, fmt.Errorf("dataset has no valid query_sql or table_name")
+		return entity.ChartDataResult{}, response.WrapCode(
+			fmt.Errorf("dataset has no valid query_sql or table_name"),
+			response.StableInvalidConfig, response.HintInvalidConfig)
 	}
 	dataSQL := query.WrapPreviewSQL(source, getPlannerSourceType(dataset), 100)
 	result, err := conn.Execute(ctx, dataSQL)
 	if err != nil {
-		return entity.ChartDataResult{}, fmt.Errorf("query failed: %w", err)
+		return entity.ChartDataResult{}, response.WrapCode(
+			fmt.Errorf("query failed: %w", err),
+			response.StableQueryExecFailed, response.HintQueryExecFailed)
 	}
 
 	return entity.ChartDataResult{Data: result.Rows}, nil
@@ -434,7 +443,15 @@ func (s *chartService) executeQueryOnConn(
 	result, err := executor.Execute(ctx, queryReq)
 	durationMs := time.Since(startedAt).Milliseconds()
 	if err != nil {
-		return entity.ChartDataResult{}, fmt.Errorf("query execution failed: %w", err)
+		// 业务错误（如算子不支持 → 400）原样上抛；其余一律按执行失败
+		// 打 QUERY_EXEC_FAILED（R-99），不吞 400 分类。
+		var bizErr router.BusinessError
+		if errors.As(err, &bizErr) {
+			return entity.ChartDataResult{}, err
+		}
+		return entity.ChartDataResult{}, response.WrapCode(
+			fmt.Errorf("query execution failed: %w", err),
+			response.StableQueryExecFailed, response.HintQueryExecFailed)
 	}
 
 	return entity.ChartDataResult{
@@ -989,7 +1006,10 @@ func buildQuerySpecFromEntityRequestV2(req *entity.ChartQueryRequest) *query.Que
 func (s *chartService) getChartModel(ctx context.Context, id int) (*model.Chart, error) {
 	chart := &model.Chart{ID: id}
 	if err := s.db.NewSelect().Model(chart).WherePK().Where("deleted_at IS NULL").Scan(ctx); err != nil {
-		return nil, fmt.Errorf("chart not found: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, router.NewBusinessError(response.CodeNotFound, "chart not found")
+		}
+		return nil, fmt.Errorf("failed to get chart: %w", err)
 	}
 	return chart, nil
 }
@@ -1038,7 +1058,11 @@ func (s *chartService) SetExtractGuard(g extract.Guard) {
 func (s *chartService) dial(ctx context.Context, ds *model.Datasource, password string) (datasource.Connection, error) {
 	driver, err := datasource.NewDriver(datasource.DriverType(ds.Type))
 	if err != nil {
-		return nil, fmt.Errorf("unsupported driver type: %s", ds.Type)
+		// 配置性错误（驱动类型非法）→ INVALID_CONFIG；连接不上（网络/凭据）→
+		// DATASOURCE_UNREACHABLE。稳定码经错误链由响应层写进信封（R-99）。
+		return nil, response.WrapCode(
+			fmt.Errorf("unsupported driver type: %s", ds.Type),
+			response.StableInvalidConfig, response.HintInvalidConfig)
 	}
 
 	config := datasource.ConnectionConfig{
@@ -1054,7 +1078,9 @@ func (s *chartService) dial(ctx context.Context, ds *model.Datasource, password 
 
 	conn, err := driver.Connect(ctx, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
+		return nil, response.WrapCode(
+			fmt.Errorf("failed to connect: %w", err),
+			response.StableDatasourceUnreachable, response.HintDatasourceUnreachable)
 	}
 	return conn, nil
 }

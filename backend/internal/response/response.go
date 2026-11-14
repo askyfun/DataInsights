@@ -17,9 +17,6 @@ const (
 	// 4xx 客户端错误
 	CodeBadRequest   = 20100 // 请求参数错误
 	CodeUnauthorized = 20200 // 未认证：没登录 / 凭据失效
-	// CodeForbidden 已认证但无权限。与 20200 分开，前端才能决定「去登录」
-	// 还是「提示无权限」（issue #202；字符串码 FORBIDDEN，整数码 20202 与 #224 对齐）。
-	CodeForbidden = 20202 // 越权
 	// CodeRateLimited 认证端点限流/锁定（issue #203；HTTP 语义对应 429）。
 	CodeRateLimited = 20201
 
@@ -31,12 +28,14 @@ const (
 	CodeInternalError = 50000 // 服务端内部错误
 )
 
-// Response 统一响应结构
+// Response 统一响应结构。Error 只在错误响应上出现，携带稳定标识增量
+// （见 errcode.go，R-99）：成功响应与旧客户端完全不受影响。
 type Response struct {
-	Code  int    `json:"code"`
-	Msg   string `json:"msg"`
-	Trace string `json:"trace"`
-	Data  any    `json:"data"`
+	Code  int          `json:"code"`
+	Msg   string       `json:"msg"`
+	Trace string       `json:"trace"`
+	Data  any          `json:"data"`
+	Error *ErrorDetail `json:"error,omitempty"`
 }
 
 // RequestIDKey 是请求 id 在 gin context 里的唯一键名。requestID 中间件写、
@@ -173,16 +172,12 @@ func SuccessWithMsg(c *gin.Context, data any, msg string) {
 	})
 }
 
-// Error 错误响应。msg 统一经 logx.Redact 收口（连接串密码等机密不进响应体），
-// 业务码同时记入 context 供 access 日志产出「每次失败恰好一行 ERROR」（R-96 验收 2）。
+// Error 错误响应。msg 经 logx.Redact 收口；业务码记入 context 供 access 日志；
+// 同时产出 error.id/code/hint_key（R-99）。
 func Error(c *gin.Context, code int, msg string) {
 	c.Set(bizCodeKey, code)
-	c.JSON(http.StatusOK, Response{
-		Code:  code,
-		Msg:   logx.Redact(msg),
-		Trace: getTraceID(c),
-		Data:  normalizeResponseData(nil),
-	})
+	writeError(c, code, logx.Redact(msg), newErrorDetail(code))
+
 }
 
 // ErrorWithData 带数据的错误响应
@@ -192,6 +187,7 @@ func ErrorWithData(c *gin.Context, code int, msg string, data any) {
 		Msg:   msg,
 		Trace: getTraceID(c),
 		Data:  normalizeResponseData(data),
+		Error: newErrorDetail(code),
 	})
 }
 
@@ -203,11 +199,6 @@ func BadRequest(c *gin.Context, msg string) {
 // Unauthorized 未授权
 func Unauthorized(c *gin.Context, msg string) {
 	Error(c, CodeUnauthorized, msg)
-}
-
-// Forbidden 已认证但无权限
-func Forbidden(c *gin.Context, msg string) {
-	Error(c, CodeForbidden, msg)
 }
 
 // NotFound 资源不存在
@@ -225,7 +216,8 @@ func ThirdPartyError(c *gin.Context, msg string) {
 	Error(c, CodeThirdPartyErr, msg)
 }
 
-// InternalError 服务端内部错误
+// InternalError 服务端内部错误（msg 应为通用兜底文案，内部原文走
+// InternalErrorErr 进日志；保留此签名供尚无 err 对象的调用点）。
 func InternalError(c *gin.Context, msg string) {
 	Error(c, CodeInternalError, msg)
 }

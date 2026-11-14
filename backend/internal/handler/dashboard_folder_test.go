@@ -80,7 +80,7 @@ const (
 	folderChildID  = "0198f2c3-4d5e-7a6b-8c9d-0e1f2a3b4c5f"
 	folderRootJSON = `{"id":"` + folderID + `","name":"经营分析","parent_id":null,"created_at":"","updated_at":""}`
 	folderKidJSON  = `{"id":"` + folderChildID + `","name":"周报","parent_id":"` + folderID + `","created_at":"","updated_at":""}`
-	folderNotFound = `{"code":20300,"msg":"dashboard folder not found","trace":"","data":{}}`
+	folderNotFound = `{"code":20300,"msg":"dashboard folder not found","trace":"","data":{},"error":{"id":""}}`
 	folderNotEmpty = `{"code":20400,"msg":"文件夹下还有 2 个仪表盘，请先移动或删除它们","trace":"","data":{}}`
 )
 

@@ -152,7 +152,8 @@ func (h *DatasourceHandler) Get(req router.Request[datasourcePathIn], res *route
 
 	ds, err := h.svc.GetByID(req.Ctx.Request.Context(), id)
 	if err != nil {
-		return router.NewBusinessError(response.CodeNotFound, err.Error())
+		// service 区分 20300（不存在，固定文案）与真实 DB 故障（50000）；透传（R-99）。
+		return err
 	}
 	res.Out = ds
 	return nil

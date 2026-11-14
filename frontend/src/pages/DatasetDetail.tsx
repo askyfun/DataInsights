@@ -39,6 +39,9 @@ import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import { normalizeDataType } from '../lib/dataTypes';
 import { validateExpr } from '../lib/expr';
+import { getInitialLocale, messages } from '../i18n/useLocale';
+import { resolveApiErrorMessage } from '../lib/api/errorHint';
+
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
@@ -120,7 +123,10 @@ const DatasetDetailPage: React.FC = () => {
       const response = await datasetsApi.getPreview(datasetId);
       setPreview(response.data.data);
     } catch (error: any) {
-      message.error(error.message || 'Failed to load preview');
+      // R-99：数据源连不上等场景按 hint_key 渲染分档文案，未识别回落 msg。
+      message.error(
+        resolveApiErrorMessage(error, messages[getInitialLocale()]) || 'Failed to load preview'
+      );
     } finally {
       setPreviewLoading(false);
     }

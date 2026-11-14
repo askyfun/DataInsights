@@ -100,10 +100,11 @@ const (
 	dashID = "0198f2c3-4d5e-7a6b-8c9d-0e1f2a3b4c5d"
 	// dashLayout 是内存/请求体里的原形态；dashLayoutJSON 是嵌进期望响应字符串时
 	// 的转义形态（内嵌双引号必须转义）。
-	dashLayout       = `{"version":1,"widgets":[]}`
-	dashLayoutJSON   = `{\"version\":1,\"widgets\":[]}`
-	dashFoundJSON    = `{"id":"` + dashID + `","name":"月度经营总览","description":null,"layout_json":"` + dashLayoutJSON + `","status":"draft","folder_id":null,"created_at":"","updated_at":"","owner_name":null}`
-	dashNotFound     = `{"code":20300,"msg":"dashboard not found","trace":"","data":{}}`
+	dashLayout     = `{"version":1,"widgets":[]}`
+	dashLayoutJSON = `{\"version\":1,\"widgets\":[]}`
+	dashFoundJSON  = `{"id":"` + dashID + `","name":"月度经营总览","description":null,"layout_json":"` + dashLayoutJSON + `","status":"draft","folder_id":null,"created_at":"","updated_at":"","owner_name":null}`
+	dashNotFound   = `{"code":20300,"msg":"dashboard not found","trace":"","data":{},"error":{"id":""}}`
+
 	dashBadLayout    = `{"code":20100,"msg":"layout_json 必须是合法 JSON","trace":"","data":{}}`
 	refEmptyEnvelope = `{"code":20000,"msg":"success","trace":"","data":{"count":0,"dashboards":[]}}`
 )
@@ -607,5 +608,6 @@ func TestDashboardQuery_NotWired(t *testing.T) {
 		},
 	})
 	w := serve(newDashboardTestRouter(h), http.MethodPost, "/api/dashboards/"+dashID+"/query", `{}`)
-	assertBody(t, w, `{"code":50000,"msg":"图表取数服务未接线","trace":"","data":{}}`)
+	// BusinessError 的 msg 是确定性业务文案（非内部原文），保留；error.id 随机。
+	assertBody(t, w, `{"code":50000,"msg":"图表取数服务未接线","trace":"","data":{},"error":{"id":""}}`)
 }

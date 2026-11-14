@@ -33,6 +33,7 @@ func Bearer(svc auth.Service, allowPAT bool) gin.HandlerFunc {
 		if err != nil {
 			// Verify surfaces auth failures as router.BusinessError (code 20200);
 			// anything else is an internal error → fail closed as unauthorized.
+			// 20200 经 Error 的保守映射携带 UNAUTHENTICATED（R-99）。
 			if be, ok := err.(router.BusinessError); ok {
 				response.Error(c, be.Code, be.Message)
 			} else {
@@ -72,6 +73,7 @@ func OptionalBearer(svc auth.Service) gin.HandlerFunc {
 			} else {
 				response.Unauthorized(c, "authentication failed")
 			}
+
 			c.Abort()
 			return
 		}

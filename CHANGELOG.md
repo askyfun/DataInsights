@@ -13,6 +13,7 @@
 - **「登录了但资源仍匿名」的收口说明**：账号体系与 `AUTH_ENFORCE` 开关是两件事。默认 `off` 时资源端点仍对匿名开放，登录只是获得身份；对外暴露务必设 `on`。「哪些端点强制 Bearer、哪些仍匿名」的逐项清单见[配置字典](docs/user-guide/configuration.md)的「鉴权开放口径」。
 - 新增环境变量（`AUTH_ENFORCE` / `AUTH_RATE_LIMIT_PER_MINUTE` / `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_RESET_TOKEN` / `LOG_LEVEL` / `HEALTH_DETAIL` / `HOST_BIND`）已全部补进[配置字典](docs/user-guide/configuration.md)与 `.env.example`；首次启动向导与管理员恢复通道见[第一次启动](docs/getting-started/first-run.md)。
 
+
 ## [0.3.1] - 2026-10-18
 
 ### 升级须知
