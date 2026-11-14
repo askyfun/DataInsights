@@ -9,8 +9,8 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
 )
 
 func chartOwnerCapture(record *[]string) sqlmock.QueryMatcherFunc {

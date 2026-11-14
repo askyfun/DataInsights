@@ -3,7 +3,7 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 
-	"data-insights/internal/middleware"
+	"tablewave/internal/middleware"
 )
 
 // principalOwnerID reads the authenticated principal off the request context

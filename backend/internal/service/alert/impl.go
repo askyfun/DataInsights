@@ -17,10 +17,10 @@ import (
 	"fmt"
 	"time"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"

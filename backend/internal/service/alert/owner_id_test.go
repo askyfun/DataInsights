@@ -7,7 +7,7 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
-	"data-insights/internal/domain/entity"
+	"tablewave/internal/domain/entity"
 )
 
 // R-95（#220）：预警规则的创建路径此前不写归属（owner_id 列留 NULL），现在必须

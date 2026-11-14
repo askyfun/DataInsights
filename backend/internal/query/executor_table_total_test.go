@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
+	"tablewave/internal/datasource"
 )
 
 // tableTotalConnection 按 SQL 内容把三类查询分流到不同结果集：

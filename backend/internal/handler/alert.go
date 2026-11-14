@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/router"
-	"data-insights/internal/service/alert"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/router"
+	"tablewave/internal/service/alert"
 )
 
 // AlertHandler handles the metric alert HTTP surface (issue #155): rule CRUD

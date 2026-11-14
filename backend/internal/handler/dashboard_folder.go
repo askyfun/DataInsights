@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/router"
-	"data-insights/internal/service/dashboard"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/router"
+	"tablewave/internal/service/dashboard"
 )
 
 // DashboardFolderHandler handles the dashboard archive folder HTTP surface: the

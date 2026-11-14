@@ -9,8 +9,8 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
 )
 
 // newDatasetServiceWithMockDB 构造一个只带 sqlmock 库的 service，返回记录语句的切片。

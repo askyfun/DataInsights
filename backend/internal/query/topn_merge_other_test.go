@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/model"
+	"tablewave/internal/datasource"
+	"tablewave/internal/model"
 )
 
 // ---------------------------------------------------------------------------

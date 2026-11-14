@@ -17,6 +17,7 @@ const CHART_TYPES: ChartType[] = [
   'funnel',
   'radar',
   'boxplot',
+  'waterfall',
 ];
 
 const FIELD_IDS = ['field-0', 'field-1', 'field-2'];

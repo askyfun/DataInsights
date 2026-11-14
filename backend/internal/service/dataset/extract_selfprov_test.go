@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/extract"
-	"data-insights/internal/model"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/extract"
+	"tablewave/internal/model"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/uptrace/bun"
@@ -59,7 +59,7 @@ func withWorkingDatasource(s *datasetService, id int) *recordingConn {
 			return nil, errNoSuchDatasource
 		}
 		return &model.Datasource{
-			ID: got, Name: "data-insights internal storage", Type: "postgresql",
+			ID: got, Name: "tablewave internal storage", Type: "postgresql",
 			Host: "127.0.0.1", Port: 5432, DatabaseName: "insights", Username: "insights",
 		}, nil
 	}

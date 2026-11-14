@@ -40,6 +40,14 @@ type ChartQueryRequest struct {
 	QueryOptions map[string]any `json:"query_options,omitempty"`
 }
 
+// ChartFieldSelection 是观看侧对一块动态槽位的本次选择（issue #134）：把某个
+// binding 的生效列换成 bindings[].candidates 里的另一列。它只作用于本次取数，
+// 绝不写回 bi_chart.config —— 图表的默认选中项仍是 binding.fieldId。
+type ChartFieldSelection struct {
+	BindingID string `json:"bindingId"`
+	FieldID   string `json:"fieldId"`
+}
+
 // DimensionGroupIn v2 协议的维度槽位组（json tag 与 query.DimensionGroup 一致）。
 // 注意与 FieldGroup（dataset.go，持久化 config 解析用）是完全不同的结构。
 type DimensionGroupIn struct {
@@ -89,7 +97,29 @@ type Pagination struct {
 
 // ChartDataResult represents chart data result
 type ChartDataResult struct {
-	Data      interface{} `json:"data"`
-	SelectSQL string      `json:"select_sql,omitempty"`
-	CountSQL  string      `json:"count_sql,omitempty"`
+	Data        interface{}            `json:"data"`
+	SelectSQL   string                 `json:"select_sql,omitempty"`
+	CountSQL    string                 `json:"count_sql,omitempty"`
+	Diagnostics *ChartQueryDiagnostics `json:"diagnostics,omitempty"`
+}
+
+// ChartQueryDiagnostics 是一次图表查询的执行元信息（R-20 / issue #182）。
+// 只读诊断口径，不携带任何可执行入口（路线图 N2：不做自由 SQL 工作台）。
+type ChartQueryDiagnostics struct {
+	// DatasourceType 是数据源记录的原始类型（postgresql/mysql/clickhouse/starrocks）；
+	// Dialect 是 SQL 生成实际使用的方言（StarRocks 走 MySQL 方言）。
+	DatasourceType string `json:"datasource_type"`
+	Dialect        string `json:"dialect"`
+	DurationMs     int64  `json:"duration_ms"`
+	// Capabilities 只在本次执行真的读过方言能力时给出（pivot 选择分组集 builder、
+	// boxplot / percentile 前置门）；nil 表示本次图型未触发能力门控。
+	Capabilities *ChartQueryCapabilities `json:"capabilities,omitempty"`
+}
+
+// ChartQueryCapabilities 是诊断面板显示的能力门控快照。
+type ChartQueryCapabilities struct {
+	SupportsGroupingSets    bool   `json:"supports_grouping_sets"`
+	SupportsPercentileCont  bool   `json:"supports_percentile_cont"`
+	SupportsWindowFunctions bool   `json:"supports_window_functions"`
+	PercentileStrategy      string `json:"percentile_strategy"`
 }

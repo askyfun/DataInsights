@@ -7,16 +7,16 @@ import (
 	"math"
 	"time"
 
-	"data-insights/internal/crypto"
-	"data-insights/internal/database"
-	"data-insights/internal/datasource"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/extract"
-	"data-insights/internal/listpage"
-	"data-insights/internal/model"
-	"data-insights/internal/query"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/crypto"
+	"tablewave/internal/database"
+	"tablewave/internal/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/extract"
+	"tablewave/internal/listpage"
+	"tablewave/internal/model"
+	"tablewave/internal/query"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 
 	"github.com/uptrace/bun"
 )
@@ -36,6 +36,9 @@ type Service interface {
 	// Schema operations
 	GetTables(ctx context.Context, id int) ([]entity.TableInfo, error)
 	GetColumns(ctx context.Context, id int, tableName string) ([]entity.ColumnInfo, error)
+	// GetCapabilities probes (and caches at the driver level) the dialect
+	// capabilities of a datasource, used by the UI to explain gated charts.
+	GetCapabilities(ctx context.Context, id int) (*entity.DatasourceCapabilities, error)
 
 	// Preview operations
 	Preview(ctx context.Context, id int, tableName, querySQL, queryType string) (*entity.PreviewResult, error)
@@ -342,6 +345,39 @@ func (s *datasourceService) GetColumns(ctx context.Context, id int, tableName st
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 	return toColumnInfoList(columns), nil
+}
+
+// GetCapabilities returns the dialect capabilities of a datasource. The probe
+// itself is lazy and cached per connection inside the driver; this method only
+// connects, asks, and projects onto the wire shape. Sample datasources are not
+// rejected: capability probing is read-only and the sample data path benefits
+// from the same explanation as any PostgreSQL connection.
+func (s *datasourceService) GetCapabilities(ctx context.Context, id int) (*entity.DatasourceCapabilities, error) {
+	ds, err := s.getDatasourceModelFn(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := s.connectFn(ctx, ds)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	caps, err := conn.Capabilities(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to probe capabilities: %w", err)
+	}
+	if caps == nil {
+		return nil, fmt.Errorf("capabilities unavailable for dialect %s", ds.Type)
+	}
+	return &entity.DatasourceCapabilities{
+		Dialect:                 ds.Type,
+		SupportsGroupingSets:    caps.SupportsGroupingSets,
+		SupportsPercentileCont:  caps.SupportsPercentileCont,
+		SupportsWindowFunctions: caps.SupportsWindowFunctions,
+		PercentileStrategy:      caps.PercentileStrategy,
+	}, nil
 }
 
 // Preview returns preview data from a datasource

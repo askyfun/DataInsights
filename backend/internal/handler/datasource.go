@@ -1,7 +1,7 @@
-// Package handler contains the Data Insights HTTP handlers.
+// Package handler contains the TableWave HTTP handlers.
 //
 // Batch 2 migration pattern — converting a handler to the generic router
-// (data-insights/internal/router). The datasource handlers in this file are the
+// (tablewave/internal/router). The datasource handlers in this file are the
 // project-wide reference; copy this pattern for the dataset/chart/share
 // domains. Hard rule: zero observable behavior change. The exact response
 // bodies are pinned byte-for-byte by datasource_test.go (envelope
@@ -83,11 +83,11 @@ package handler
 import (
 	"strconv"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/listpage"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/listpage"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/datasource"
 )
 
 // DatasourceHandler handles datasource HTTP requests
@@ -300,6 +300,21 @@ func (h *DatasourceHandler) GetTables(req router.Request[datasourcePathIn], res 
 		return err
 	}
 	res.Out = tables
+	return nil
+}
+
+// GetCapabilities handles GET /api/datasources/:id/capabilities
+func (h *DatasourceHandler) GetCapabilities(req router.Request[datasourcePathIn], res *router.Response[*entity.DatasourceCapabilities]) error {
+	id, err := strconv.Atoi(req.Ctx.Param("id"))
+	if err != nil {
+		return router.NewBusinessError(response.CodeBadRequest, "invalid id")
+	}
+
+	caps, err := h.svc.GetCapabilities(req.Ctx.Request.Context(), id)
+	if err != nil {
+		return err
+	}
+	res.Out = caps
 	return nil
 }
 

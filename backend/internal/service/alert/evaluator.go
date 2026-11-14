@@ -21,10 +21,10 @@ import (
 	"strconv"
 	"time"
 
-	"data-insights/internal/database"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
-	"data-insights/internal/query"
+	"tablewave/internal/database"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
+	"tablewave/internal/query"
 
 	"github.com/uptrace/bun"
 )

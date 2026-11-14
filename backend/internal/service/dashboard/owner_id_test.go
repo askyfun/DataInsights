@@ -7,7 +7,7 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
-	"data-insights/internal/domain/entity"
+	"tablewave/internal/domain/entity"
 )
 
 // R-95（#220）：dashboard / dashboard-folder 的创建路径此前连占位 0 都不写

@@ -4,18 +4,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/uptrace/bun"
 
-	"data-insights/internal/extract"
-	"data-insights/internal/handler"
-	"data-insights/internal/middleware"
-	"data-insights/internal/router"
-	"data-insights/internal/service/alert"
-	"data-insights/internal/service/auth"
-	"data-insights/internal/service/chart"
-	"data-insights/internal/service/dashboard"
-	"data-insights/internal/service/dataset"
-	"data-insights/internal/service/datasource"
-	"data-insights/internal/service/queryrecord"
-	"data-insights/internal/service/sample"
+	"tablewave/internal/config"
+	"tablewave/internal/extract"
+	"tablewave/internal/handler"
+	"tablewave/internal/middleware"
+	"tablewave/internal/router"
+	"tablewave/internal/service/alert"
+	"tablewave/internal/service/auth"
+	"tablewave/internal/service/chart"
+	"tablewave/internal/service/dashboard"
+	"tablewave/internal/service/dataset"
+	"tablewave/internal/service/datasource"
+	"tablewave/internal/service/queryrecord"
+	"tablewave/internal/service/sample"
 )
 
 // SetupRoutes configures all routes.
@@ -28,7 +29,7 @@ import (
 // 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
 // notifier 也由 main 注入，routes.go 不读环境变量）。databaseURL 供内置示例
 // 数据集（R-79）反查应用自身数据库。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier) alert.Service {
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authCfg config.AuthConfig) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -75,7 +76,9 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	// 不变），携带有效凭证则把 principal 注入上下文供 create 路径写 owner_id；
 	// 携带无效凭证 fail-closed 401。auth/token 端点在此之上再挂强制 Bearer。
 	// authSvc 提前到分组装配前，供 OptionalBearer 与 auth 路由共用。
-	authSvc := auth.NewService(db)
+	authSvc := auth.NewService(db, auth.GuardOptions{
+		RatePerMinute: authCfg.RateLimitPerMinute,
+	})
 	api.Use(middleware.OptionalBearer(authSvc))
 
 	// Datasource routes (generic router)
@@ -87,6 +90,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	router.RegisterDeleteRoute(ds, "/:id", datasourceHandler.Delete)
 	router.RegisterPostRoute(ds, "/test", datasourceHandler.TestConnection)
 	router.RegisterGetRoute(ds, "/:id/tables", datasourceHandler.GetTables)
+	router.RegisterGetRoute(ds, "/:id/capabilities", datasourceHandler.GetCapabilities)
 	router.RegisterGetRoute(ds, "/:id/tables/:table/columns", datasourceHandler.GetColumns)
 	router.RegisterGetRoute(ds, "/:id/tables/:table/data", datasourceHandler.GetTableData)
 	router.RegisterPostRoute(ds, "/:id/preview", datasourceHandler.Preview)
@@ -175,6 +179,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	// operations, not user-management; the PAT-forbidden guard lives on the
 	// token-management endpoints (#184).
 	// authSvc 在上方 /api 分组装配处创建（OptionalBearer 共用）。
+
 	authHandler := handler.NewAuthHandler(authSvc)
 	authPublic := api.Group("/auth")
 	router.RegisterPostRoute(authPublic, "/register", authHandler.Register)
