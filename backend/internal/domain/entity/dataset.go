@@ -33,6 +33,18 @@ type DatasetColumn struct {
 	TypeConfig TypeConfig `json:"type_config"`
 	Comment    string     `json:"comment"`
 	Role       string     `json:"role"` // "dimension" or "metric"
+	// Hierarchy 是维度层级定义（issue #136）：当前列在某个层级里的上一级/下一级。
+	// 层级是列 ID 之间的有序链（省份→城市→区县），随 bi_dataset.columns JSON 文档
+	// 持久化（列 ID 是权威引用，无独立表、无迁移）。nil 表示该列不参与任何层级。
+	Hierarchy *ColumnHierarchy `json:"hierarchy,omitempty"`
+}
+
+// ColumnHierarchy 表达某列在层级链中的邻居（列 ID 引用，非列名）。
+type ColumnHierarchy struct {
+	// ParentID 是当前列的上一级列 ID（上钻目标）；空串表示这是层级根。
+	ParentID string `json:"parent_id,omitempty"`
+	// NextID 是当前列的下一级列 ID（下钻目标）；空串表示这是层级叶子（不可再下钻）。
+	NextID string `json:"next_id,omitempty"`
 }
 
 // TypeConfig holds type-specific configuration

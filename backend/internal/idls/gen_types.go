@@ -998,6 +998,18 @@ type DatasetColumn struct {
 
 	// TypeConfig 类型相关配置（entity.TypeConfig）。
 	TypeConfig TypeConfig `json:"type_config"`
+
+	// Hierarchy 维度层级定义（issue #136）：当前列在某个层级里的上一级/下一级列 id。随 bi_dataset.columns JSON 文档持久化；缺失表示该列不参与任何层级。
+	Hierarchy *ColumnHierarchy `json:"hierarchy,omitempty"`
+}
+
+// ColumnHierarchy 维度层级：列 ID 之间的有序链（省份→城市→区县）。
+type ColumnHierarchy struct {
+	// NextId 下一级列 id（下钻目标）；空串 = 层级叶子（不可再下钻）。
+	NextId string `json:"next_id,omitempty"`
+
+	// ParentId 上一级列 id（上钻目标）；空串 = 层级根。
+	ParentId string `json:"parent_id,omitempty"`
 }
 
 // DatasetColumnType 统一规范数据类型（8 类，与后端 model.StandardDataTypes 对齐）。 历史词 number/json/unknown 由后端归一为 float/map/string，不再出现。

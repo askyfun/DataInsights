@@ -966,6 +966,15 @@ export interface components {
             comment: string;
             /** @description "dimension" 或 "metric"。 */
             role: string;
+            /** @description 维度层级定义（issue #136）：当前列在某个层级里的上一级/下一级列 id。随 bi_dataset.columns JSON 文档持久化；缺失表示该列不参与任何层级。 */
+            hierarchy?: components["schemas"]["ColumnHierarchy"];
+        };
+        /** @description 维度层级：列 ID 之间的有序链（省份→城市→区县）。 */
+        ColumnHierarchy: {
+            /** @description 上一级列 id（上钻目标）；空串 = 层级根。 */
+            parent_id?: string;
+            /** @description 下一级列 id（下钻目标）；空串 = 层级叶子（不可再下钻）。 */
+            next_id?: string;
         };
         /** @description 类型相关配置（entity.TypeConfig）。 */
         TypeConfig: {

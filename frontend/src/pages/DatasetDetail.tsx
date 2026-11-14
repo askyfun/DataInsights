@@ -150,6 +150,28 @@ const DatasetDetailPage: React.FC = () => {
     setColumns((prev) => prev.map((col) => (col.id === id ? { ...col, name } : col)));
   };
 
+  // 层级邻居引用（issue #136）：parent_id/next_id 存的是**列 id**，非列名（列名可变）。
+  // 空串 = 无上一级/无下一级（层级根/叶子哨兵），与后端校验的「空串合法」同口径。
+  const handleColumnHierarchyChange = (
+    id: string,
+    kind: 'parent_id' | 'next_id',
+    targetId: string
+  ) => {
+    setColumns((prev) =>
+      prev.map((col) =>
+        col.id === id
+          ? {
+              ...col,
+              hierarchy: {
+                ...(col.hierarchy ?? {}),
+                [kind]: targetId || undefined,
+              },
+            }
+          : col
+      )
+    );
+  };
+
   const handleSaveColumns = async () => {
     // 列名是可变展示名，但会作为 SQL 输出别名与响应负载键使用，同名无法区分。
     const trimmed = columns.map((col) => ({ ...col, name: col.name.trim() }));
@@ -405,6 +427,39 @@ const DatasetDetailPage: React.FC = () => {
           }}
         />
       ),
+    },
+    {
+      // 维度层级（issue #136）：把列串成「上一级 → 本列 → 下一级」的有序链，
+      // 供图表下钻使用。只对 dimension 列有意义（metric 列无需层级），但保留可编辑
+      // 以支持将来把列改成维度时层级随之生效。
+      title: intl.formatMessage({ id: 'field.hierarchy' }),
+      key: 'hierarchy',
+      width: 220,
+      render: (_: unknown, record: DatasetColumn) => {
+        const options = columnsManagementTableData.filter((c) => c.id !== record.id);
+        const pick = (kind: 'parent_id' | 'next_id') => (
+          <Select
+            size="small"
+            style={{ width: 96 }}
+            value={record.hierarchy?.[kind] ?? ''}
+            placeholder="—"
+            allowClear
+            onChange={(value: string | undefined) =>
+              handleColumnHierarchyChange(record.id, kind, value ?? '')
+            }
+            options={options.map((c) => ({ label: c.name, value: c.id }))}
+          />
+        );
+        return (
+          <Space size={6}>
+            {pick('parent_id')}
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              →
+            </Text>
+            {pick('next_id')}
+          </Space>
+        );
+      },
     },
     {
       title: intl.formatMessage({ id: 'field.expression' }),
