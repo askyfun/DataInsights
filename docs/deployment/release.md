@@ -8,7 +8,7 @@
 
 ### 1.1 Docker Hub 侧
 
-1. 在 Docker Hub 建一个仓库：命名空间 `kzzhr`、名称 `datainsights`（即镜像 `kzzhr/datainsights`）。首次推送通常也会自动创建，显式建一个更稳。
+1. 在 Docker Hub 建一个仓库：命名空间 `kzzhr`、名称 `tablewave`（即镜像 `kzzhr/tablewave`）。首次推送通常也会自动创建，显式建一个更稳。
 2. 生成访问令牌：**Account Settings → Personal access tokens → Generate new token**，权限选 **Read & Write**。
    ⚠️ 用令牌，不要用登录密码 —— Docker Hub 已不支持密码推送，且令牌可单独吊销。
 
@@ -61,7 +61,7 @@
 
 - git tag `<version>`（指向本次运行的 commit）
 - GitHub Release `<version>`，说明里带 `docker pull` / compose 的直接命令
-- Docker Hub `kzzhr/datainsights:<version>`（正式版额外多一个 `latest`），同时支持 amd64 与 arm64
+- Docker Hub `kzzhr/tablewave:<version>`（正式版额外多一个 `latest`），同时支持 amd64 与 arm64
 
 ## 5. 先本地验一遍（可选）
 

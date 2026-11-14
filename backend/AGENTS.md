@@ -1,6 +1,6 @@
 # Backend AGENTS.md
 
-Go 后端服务，提供 Data Insights 平台的 REST API。
+Go 后端服务，提供 TableWave 平台的 REST API。
 
 ## 技术栈
 

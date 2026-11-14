@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
+	"tablewave/internal/datasource"
 )
 
 // datasourceCapsStub 让 boxplot 的 percentile 分支可达（策略取 PG 的 percentile_cont）。

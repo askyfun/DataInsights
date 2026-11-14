@@ -13,7 +13,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"golang.org/x/crypto/bcrypt"
 
-	"data-insights/internal/router"
+	"tablewave/internal/router"
 )
 
 // --- pure token primitives ---

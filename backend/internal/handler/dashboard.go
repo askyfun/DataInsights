@@ -3,11 +3,11 @@ package handler
 import (
 	"strconv"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/listpage"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/dashboard"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/listpage"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/dashboard"
 
 	"github.com/google/uuid"
 )

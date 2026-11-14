@@ -12,8 +12,8 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/response"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/response"
 )
 
 // ---------------------------------------------------------------------------

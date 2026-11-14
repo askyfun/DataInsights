@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/middleware"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/auth"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/middleware"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/auth"
 )
 
 // AuthHandler serves the R-82 account endpoints (issue #183): bootstrap

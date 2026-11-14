@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"math"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/model"
+	"tablewave/internal/datasource"
+	"tablewave/internal/model"
 )
 
 type GeneratedSQL struct {

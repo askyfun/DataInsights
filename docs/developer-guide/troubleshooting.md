@@ -23,7 +23,7 @@
 ## 版本与依赖
 
 - 钉死版本：Go 1.27.1（`go` 指令写全补丁号）· pnpm 12.4.2 · Node 24（**刻意不升 26**）· antd 6.6.4 · biome 2.5.14。升 biome **必须**同步 `biome.json` 的 `$schema`，否则报 `deserialize`。
-- 产品名为 **Data Insights**；历史名 `dataray` 有意保留在少数标识符与默认名里（例如业务库默认名 `dataray_data`），改名时别顺手清掉。
+- 产品名为 **TableWave**；业务库默认名已统一为 `tablewave_data`。历史代号 `dataray` 仅存于少量历史文档文件名（如 `roadmap-dataray-*`），不再作为默认库名使用。
 - ⚠️ pnpm 12 会把 **pnpm 自己**写进 lock（每份 lock 多约 158 行），且首次 install 有一次 supply-chain 校验（可能持续数分钟）—— **默认行为，不是异常**。
 - ⚠️ **清孤儿依赖**：lock 未变时 `pnpm install` 会返回 `Already up to date`，`--force` / `pnpm prune` 都无效。**正解 = 删掉状态文件再 install**：`rm -f node_modules/.modules.yaml node_modules/.pnpm-workspace-state-v1.json && pnpm install`。判定某包是否孤儿用 `pnpm why <pkg>@<ver>` —— 孤儿是**完全静默**的，须配对照组。
 - `idls/gen_types.*` 不含 `info.title` → 改 title 不必 `make api-gen`；改 **description** 会漂进生成物 → **必须重跑**。

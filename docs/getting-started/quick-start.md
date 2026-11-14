@@ -25,35 +25,35 @@
 从 Docker Hub 拉取已发布镜像，不需要克隆仓库、不需要构建：
 
 ```bash
-docker run -d --name data-insights -p 23352:23352 \
+docker run -d --name tablewave -p 23352:23352 \
   -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
-  kzzhr/datainsights:latest
+  kzzhr/tablewave:latest
 ```
 
 - **`DATABASE_URL` 是唯一必填项**，其余环境变量都有默认值；`SECURITY_KEY` 留空会由系统首次启动时随机生成并持久化到数据库。
 - ⚠️ 命令里的 `user:password@your-db-host` 是**占位串**。它非空，所以能通过「缺 `DATABASE_URL` 就退出」的启动检查，但容器连不上库 —— 症状是「起来了，但建数据源时连不通」。请换成你自己的连接串（参数含义见[配置项字典](../user-guide/configuration.md)）。
-- 镜像 tag 与 [GitHub Releases](https://github.com/askyfun/DataInsights/releases) 的版本号一一对应：从 Releases 页挑一个版本号，把 `kzzhr/datainsights:vX.Y.Z` 里的 `X.Y.Z` 换成它。生产环境钉住版本，不要跟着 `latest` 漂。
-- 镜像支持 `linux/amd64` 与 `linux/arm64`；`docker pull kzzhr/datainsights:latest` 可先单独拉取。
-- 启动后访问 <http://localhost:23352>，看日志：`docker logs -f data-insights`。
+- 镜像 tag 与 [GitHub Releases](https://github.com/askyfun/TableWave/releases) 的版本号一一对应：从 Releases 页挑一个版本号，把 `kzzhr/tablewave:vX.Y.Z` 里的 `X.Y.Z` 换成它。生产环境钉住版本，不要跟着 `latest` 漂。
+- 镜像支持 `linux/amd64` 与 `linux/arm64`；`docker pull kzzhr/tablewave:latest` 可先单独拉取。
+- 启动后访问 <http://localhost:23352>，看日志：`docker logs -f tablewave`。
 
 想用 `.env` 文件传参（需要在本地先有仓库：`cp .env.example .env` 再按需修改）：
 
 ```bash
-docker run -d -p 23352:23352 --env-file .env --name data-insights kzzhr/datainsights:latest
+docker run -d -p 23352:23352 --env-file .env --name tablewave kzzhr/tablewave:latest
 ```
 
 ## 4. 方式三：Docker Compose 一键起全套
 
-[`docker-compose.allinone.yml`](../../docker-compose.allinone.yml) 把 Data Insights 与 PostgreSQL 一起拉起来，零外部依赖：
+[`docker-compose.allinone.yml`](../../docker-compose.allinone.yml) 把 TableWave 与 PostgreSQL 一起拉起来，零外部依赖：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.allinone.yml
+curl -fsSLO https://raw.githubusercontent.com/askyfun/TableWave/master/docker-compose.allinone.yml
 docker compose -f docker-compose.allinone.yml up -d
 ```
 
 若本地已有仓库，直接 `docker compose -f docker-compose.allinone.yml up -d` 即可（不必再下载）。
 
-- 默认用 `latest`，钉版本：`TAG=vX.Y.Z docker compose -f docker-compose.allinone.yml up -d`（版本号见 [Releases](https://github.com/askyfun/DataInsights/releases)）。
+- 默认用 `latest`，钉版本：`TAG=vX.Y.Z docker compose -f docker-compose.allinone.yml up -d`（版本号见 [Releases](https://github.com/askyfun/TableWave/releases)）。
 - 数据存在命名卷 `postgres_data` 里：`down` 保留数据，`down -v` 才清空。
 - 变量覆盖优先级（高 → 低）：shell 环境变量 > 同目录 `.env` > 文件内默认值。
 - ⚠️ 库里用的是公开的演示密码 `insights123`，仅本地体验用。要用本机客户端连进去看表、换端口（`PORT`）、改数据库密码，都在该文件注释里标了位置。
@@ -61,8 +61,8 @@ docker compose -f docker-compose.allinone.yml up -d
 ## 5. 方式四：从源码运行
 
 ```bash
-git clone https://github.com/askyfun/DataInsights.git
-cd DataInsights
+git clone https://github.com/askyfun/TableWave.git
+cd TableWave
 
 make install         # 装前后端依赖（只用 pnpm）
 make dev             # 前端 23351 + 后端 23352，一起起
@@ -71,10 +71,10 @@ make dev             # 前端 23351 + 后端 23352，一起起
 - 只用 Dockerfile 手工构建与运行（自备 PostgreSQL，见[容器部署](../deployment/docker.md)）：
 
 ```bash
-docker build -t data-insights .   # 构建上下文 = 仓库根目录
+docker build -t tablewave .   # 构建上下文 = 仓库根目录
 docker run -d -p 23352:23352 \
   -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
-  --name data-insights data-insights
+  --name tablewave tablewave
 ```
 
 日常改代码走开发模式（前端 23351 + 后端 23352，均带热重载）：

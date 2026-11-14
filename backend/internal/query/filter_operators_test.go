@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/domain/entity"
+	"tablewave/internal/domain/entity"
 )
 
 // 双端共读用例（issue #204）：同一份用例表也被

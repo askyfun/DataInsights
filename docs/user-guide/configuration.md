@@ -56,7 +56,7 @@ cp .env.example .env    # 然后按需修改
 
 | `EXTRACT_DATASOURCE_ID` | 行为 |
 |------------------------|------|
-| 留空（默认） | 复用 `DATABASE_URL` 指向的**应用自身 PostgreSQL**。首次启动时平台自动落一条内部数据源行（名字形如 `data-insights internal storage (upload files)`，在数据源列表里被隐藏），并把它的 id 记进 `bi_setting` 供后续启动复用。 |
+| 留空（默认） | 复用 `DATABASE_URL` 指向的**应用自身 PostgreSQL**。首次启动时平台自动落一条内部数据源行（名字形如 `tablewave internal storage (upload files)`，在数据源列表里被隐藏），并把它的 id 记进 `bi_setting` 供后续启动复用。 |
 | 填某个数据源 id | 用它作为存储。适合希望上传数据与平台元数据**分库存放**的部署。 |
 
 几个要点：

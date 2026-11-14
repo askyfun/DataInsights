@@ -1,4 +1,4 @@
-module data-insights
+module tablewave
 
 go 1.27.1
 

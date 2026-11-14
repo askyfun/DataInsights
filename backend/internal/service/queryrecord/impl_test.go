@@ -17,10 +17,10 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/idcodec"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/idcodec"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 )
 
 const (

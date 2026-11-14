@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"sync"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 )
 
 // chartDataProvider 是 service/chart 的窄接口：本包只需要「查一块图表的元信息」与

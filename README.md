@@ -1,4 +1,8 @@
-# Data Insights
+# TableWave
+
+**Data Intelligence Platform**
+
+> Turn Data into Insights.
 
 拖拽式 BI 可视化分析平台 —— 连上数据源、建好数据集，把字段拖进槽位即时出图，并能一键分享（地址栏短码直链）、拼装仪表盘。
 
@@ -26,17 +30,17 @@
 前后端编译进**同一个镜像**，由一个进程、一个端口同时提供 API 与页面（没有 nginx）。直接拉现成镜像，不用克隆仓库、不用构建：
 
 ```bash
-docker run -d --name data-insights -p 23352:23352 \
+docker run -d --name tablewave -p 23352:23352 \
   -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
-  kzzhr/datainsights:latest
+  kzzhr/tablewave:latest
 ```
 
 ### 方式三：Docker Compose 一键起全套（含 PostgreSQL）
 
-一条命令把 Data Insights 与 PostgreSQL 一起拉起来，不用自己准备数据库：
+一条命令把 TableWave 与 PostgreSQL 一起拉起来，不用自己准备数据库：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.allinone.yml
+curl -fsSLO https://raw.githubusercontent.com/askyfun/TableWave/master/docker-compose.allinone.yml
 docker compose -f docker-compose.allinone.yml up -d
 ```
 
@@ -46,17 +50,17 @@ docker compose -f docker-compose.allinone.yml up -d
 - **生产环境**建议换成外部高可用 PostgreSQL，只跑 app 一个容器即可：
 
 ```bash
-docker run -d --name data-insights \
+docker run -d --name tablewave \
   -p 23352:23352 \
   -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
-  kzzhr/datainsights:latest
+  kzzhr/tablewave:latest
 ```
 
 ### 方式四：从源码运行
 
 ```bash
-git clone https://github.com/askyfun/DataInsights.git
-cd DataInsights
+git clone https://github.com/askyfun/TableWave.git
+cd TableWave
 
 make install          # 装前后端依赖（只用 pnpm）
 make dev              # 前端 23351 + 后端 23352，一起起

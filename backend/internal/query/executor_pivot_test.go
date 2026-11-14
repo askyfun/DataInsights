@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/model"
+	"tablewave/internal/datasource"
+	"tablewave/internal/model"
 )
 
 // pivotMockConnection 是可配置 Capabilities 的 Connection mock：

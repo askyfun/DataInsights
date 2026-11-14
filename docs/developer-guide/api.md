@@ -1,4 +1,4 @@
-# Data Insights API 接口文档
+# TableWave API 接口文档
 
 > 最后更新：2026-10-17
 

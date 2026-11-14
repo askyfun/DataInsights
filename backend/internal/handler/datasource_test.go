@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/listpage"
-	"data-insights/internal/router"
-	"data-insights/internal/service/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/listpage"
+	"tablewave/internal/router"
+	"tablewave/internal/service/datasource"
 
 	"github.com/gin-gonic/gin"
 )

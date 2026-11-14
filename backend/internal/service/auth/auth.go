@@ -22,11 +22,11 @@ import (
 	"github.com/uptrace/bun"
 	"golang.org/x/crypto/bcrypt"
 
-	"data-insights/internal/database"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/database"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 )
 
 // sessionTokenTTL is the 24h lifetime of a human session token (#183/#184).

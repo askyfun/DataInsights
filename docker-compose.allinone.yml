@@ -1,4 +1,4 @@
-# Data Insights 一键体验（Docker Hub 发布镜像 + PostgreSQL）
+# TableWave 一键体验（Docker Hub 发布镜像 + PostgreSQL）
 #
 # ⚠️ 本项目**无登录、无鉴权**，定位是单团队**内网**工具：不要把这个端口暴露到公网。
 #    下面的 PostgreSQL 用的是公开的演示密码，仅本地体验用。
@@ -19,7 +19,7 @@
 services:
   postgres:
     image: postgres:18-alpine
-    container_name: data-insights-postgres
+    container_name: tablewave-postgres
     environment:
       POSTGRES_USER: insights
       POSTGRES_PASSWORD: insights123
@@ -39,8 +39,8 @@ services:
 
   app:
     # TAG 不设则用 latest。镜像支持 linux/amd64 与 linux/arm64。
-    image: kzzhr/datainsights:${TAG:-latest}
-    container_name: data-insights-app
+    image: kzzhr/tablewave:${TAG:-latest}
+    container_name: tablewave-app
     # 后端不读任何配置文件，所有配置都从环境变量进来。以下变量可三种方式覆盖
     # （优先级高 → 低）：① shell 环境变量；② 同目录 .env；③ 本文件里的默认值。
     environment:

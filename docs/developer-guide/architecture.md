@@ -1,4 +1,4 @@
-# Data Insights 架构文档
+# TableWave 架构文档
 
 > 最后更新：2026-10-17
 > 图表查询链路的完整设计（契约模型、SQL 生成、处理器分派台账）见同目录的 `chart-query-design.md`。

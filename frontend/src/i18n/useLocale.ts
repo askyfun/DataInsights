@@ -449,8 +449,8 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'field.metricGroup': '指标组 {index}',
     'app.skipToContent': '跳转到主要内容',
     'app.openMenu': '打开菜单',
-    'app.footer': 'Data Insights ©2026 使用 React + Ant Design 构建',
-    'home.welcome': '欢迎使用 Data Insights',
+    'app.footer': 'TableWave ©2026 使用 React + Ant Design 构建',
+    'home.welcome': '欢迎使用 TableWave',
     // 仪表盘：列表页 + 画布页（两 locale 的 key 集合与顺序必须一致，由
     // __tests__/i18n/messages.test.ts 守卫）。
     'dashboard.manage': '把现成图表拼成一页',
@@ -1024,8 +1024,8 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'field.metricGroup': 'Metric Group {index}',
     'app.skipToContent': 'Skip to main content',
     'app.openMenu': 'Open menu',
-    'app.footer': 'Data Insights ©2026 Created with React + Ant Design',
-    'home.welcome': 'Welcome to Data Insights',
+    'app.footer': 'TableWave ©2026 Created with React + Ant Design',
+    'home.welcome': 'Welcome to TableWave',
     'dashboard.manage': 'Compose existing charts into one page',
     'dashboard.add': 'New Dashboard',
     'dashboard.name': 'Name',
