@@ -109,6 +109,7 @@ const resetChartBuilderState = (): void => {
 const renderChartBuilder = () => {
   return render(
     <IntlProvider locale="en" messages={messages['en-US']}>
+
       <MemoryRouter initialEntries={['/chart-builder?edit=1&datasetId=1']}>
         <Routes>
           <Route path="/chart-builder" element={<ChartBuilder />} />

@@ -11,6 +11,7 @@ import { App, Button, Card, Layout, Popconfirm, Space, Table, Tag, Typography } 
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
+import { notifyApiError } from '@/lib/describeApiError';
 import {
   type Dashboard,
   type DashboardFolder,
@@ -71,7 +72,7 @@ const DashboardsPage: React.FC = () => {
       setDashboards(dashboardsResponse.data.data.items ?? []);
       setFolders(foldersResponse.data.data ?? []);
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     } finally {
       setLoading(false);
     }
@@ -88,9 +89,9 @@ const DashboardsPage: React.FC = () => {
 
   useEffect(() => {
     if (list.error) {
-      message.error(list.error);
+      notifyApiError(list.error, intl, message);
     }
-  }, [list.error, message]);
+  }, [list.error, intl, message]);
 
   // 选夹 = 服务端 folder_id 过滤；根视图不过滤（与第一阶段「根显示全部」口径一致）。
   useEffect(() => {
@@ -109,7 +110,7 @@ const DashboardsPage: React.FC = () => {
       });
       navigate(`/dashboards/${response.data.data.id}`);
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     }
   };
 
@@ -119,7 +120,7 @@ const DashboardsPage: React.FC = () => {
       message.success(intl.formatMessage({ id: 'common.success' }));
       refreshAll();
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     }
   };
 
@@ -133,7 +134,7 @@ const DashboardsPage: React.FC = () => {
         refreshAll();
         return true;
       } catch (error: any) {
-        message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+        notifyApiError(error, intl, message);
         return false;
       }
     },
@@ -149,7 +150,7 @@ const DashboardsPage: React.FC = () => {
         refreshAll();
         return true;
       } catch (error: any) {
-        message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+        notifyApiError(error, intl, message);
         return false;
       }
     },
@@ -169,7 +170,7 @@ const DashboardsPage: React.FC = () => {
         refreshAll();
       } catch (error: any) {
         // 「非空不可删」是后端 20400，消息里带着还剩几项，直接念给用户。
-        message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+        notifyApiError(error, intl, message);
       }
     },
     [refreshAll, intl, message, selection]
@@ -188,7 +189,7 @@ const DashboardsPage: React.FC = () => {
         refreshAll();
       } catch (error: any) {
         setDashboards(previous); // 失败就把拖过去的那一格还原，别留下假象
-        message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+        notifyApiError(error, intl, message);
       }
     },
     [dashboards, refreshAll, intl, message]
@@ -205,7 +206,7 @@ const DashboardsPage: React.FC = () => {
         refreshAll();
       } catch (error: any) {
         setFolders(previous);
-        message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+        notifyApiError(error, intl, message);
       }
     },
     [refreshAll, folders, intl, message]

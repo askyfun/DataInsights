@@ -34,6 +34,7 @@ import * as echarts from 'echarts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, useNavigate } from 'react-router-dom';
+import { notifyApiError } from '@/lib/describeApiError';
 import type { DataType } from '../api';
 import {
   ColumnInfo,
@@ -226,7 +227,7 @@ const DatasetPage: React.FC = () => {
       // 跳转到数据集详情页
       navigate(`/datasets/${newDataset.id}`);
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     } finally {
       setSubmitLoading(false);
     }
@@ -309,7 +310,7 @@ const DatasetPage: React.FC = () => {
       if (error.errorFields) {
         return;
       }
-      message.error(error.message || intl.formatMessage({ id: 'virtualField.saveFailed' }));
+      notifyApiError(error, intl, message);
     } finally {
       setSavingColumns(false);
     }
@@ -420,7 +421,7 @@ const DatasetPage: React.FC = () => {
         const response = await datasourcesApi.getTables(datasourceId);
         setTables(response.data.data || []);
       } catch (error: any) {
-        message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+        notifyApiError(error, intl, message);
         setTables([]);
       } finally {
         setTablesLoading(false);
@@ -559,7 +560,7 @@ const DatasetPage: React.FC = () => {
       list.reload();
       message.success(intl.formatMessage({ id: 'common.success' }));
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     }
   };
 
@@ -602,7 +603,7 @@ const DatasetPage: React.FC = () => {
         navigate(`/chart-builder?datasetId=${orders.id}`);
       }
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'sample.error' }));
+      notifyApiError(error, intl, message);
     } finally {
       setSampleLoading(false);
     }
@@ -615,7 +616,7 @@ const DatasetPage: React.FC = () => {
       const response = await sampleDatasetApi.dismiss();
       setSampleStatus(response.data.data);
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'sample.error' }));
+      notifyApiError(error, intl, message);
     } finally {
       setSampleLoading(false);
     }
@@ -630,7 +631,7 @@ const DatasetPage: React.FC = () => {
       list.reload();
       message.success(intl.formatMessage({ id: 'sample.removed' }));
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'sample.error' }));
+      notifyApiError(error, intl, message);
     } finally {
       setSampleLoading(false);
     }
@@ -682,7 +683,7 @@ const DatasetPage: React.FC = () => {
       setQueryType('table');
       list.reload();
     } catch (error: any) {
-      message.error(error.message || intl.formatMessage({ id: 'common.error' }));
+      notifyApiError(error, intl, message);
     } finally {
       setSubmitLoading(false);
     }

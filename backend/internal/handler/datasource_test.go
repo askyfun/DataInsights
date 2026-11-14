@@ -177,10 +177,12 @@ func assertBody(t *testing.T, w *httptest.ResponseRecorder, want string) {
 	if !strings.Contains(want, `"error"`) {
 		got = errFieldRe.ReplaceAllString(got, "")
 	}
+	got = regexp.MustCompile(`"error_id":"[^"]*",?`).ReplaceAllString(got, "")
 	got = errIDRe.ReplaceAllString(got, `"error":{"id":"UUID"}`)
 	want = errIDRe.ReplaceAllString(want, `"error":{"id":"UUID"}`)
 	if got != want {
 		t.Fatalf("response body mismatch:\n got: %s\nwant: %s", got, want)
+
 	}
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected HTTP status 200 (unified envelope), got %d", w.Code)

@@ -1,8 +1,13 @@
 package response
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
+	"time"
 
 	"tablewave/internal/logx"
 
@@ -192,6 +197,7 @@ func ErrorWithHTTPStatus(c *gin.Context, httpStatus, code int, msg string) {
 		Trace: getTraceID(c),
 		Data:  normalizeResponseData(nil),
 	})
+
 }
 
 // ErrorWithID 带错误编号的错误响应（R-98 panic 兜底信封使用；error_id 空串时
@@ -215,6 +221,7 @@ func ErrorWithData(c *gin.Context, code int, msg string, data any) {
 		Data:  normalizeResponseData(data),
 		Error: newErrorDetail(code),
 	})
+
 }
 
 // BadRequest 请求参数错误
@@ -270,4 +277,13 @@ func SuccessWithPage(c *gin.Context, items any, total int64, page, pageSize int)
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	})
+}
+
+// newErrorID 生成可复制报障的错误编号 DI-<业务码>-<8位大写hex>（R-97）。
+func newErrorID(code int) string {
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("DI-%d-T%08X", code, uint64(time.Now().UnixNano())&0xFFFFFFFF)
+	}
+	return fmt.Sprintf("DI-%d-%s", code, strings.ToUpper(hex.EncodeToString(buf)))
 }

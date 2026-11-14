@@ -1,9 +1,14 @@
 package response
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 
 	"tablewave/internal/query"
@@ -168,5 +173,6 @@ func TestBizCodeFromRecordsLastError(t *testing.T) {
 	Error(ctx, CodeNotFound, "missing")
 	if got := BizCodeFrom(ctx); got != CodeNotFound {
 		t.Fatalf("expected biz code %d, got %d", CodeNotFound, got)
+
 	}
 }
