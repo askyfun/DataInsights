@@ -55,8 +55,9 @@
   ```
 
 - **`GET /health`**：只证明**进程活着**，它**不探库**，不代表 `DATABASE_URL` 可连。要确认连通性，请打真实业务接口（如 `GET /api/datasets`）；错误串中的连接串密码等机密已自动脱敏，可以安全粘贴到 issue。
+
 - **Sentry**：前后端是两个**独立项目**（`SENTRY_DSN` 与 `VITE_SENTRY_DSN`），可分别接入。
-- 镜像自带 `/health` 的 HEALTHCHECK。
+- 镜像自带 `/health` 的 HEALTHCHECK；发布镜像通过 `VERSION` / `COMMIT` / `BUILD_TIME` 构建参数注入版本。
 
 ## 5. 缓存与静态托管
 

@@ -15,7 +15,8 @@ import { Button, Drawer, Layout, Menu, Select, Space, Typography } from 'antd';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { authApi } from './api';
+import { authApi, systemApi } from './api';
+
 import LoadingPlaceholder from './components/LoadingPlaceholder';
 import { useLocale } from './i18n/useLocale';
 import { setSessionUser, useSessionUser } from './lib/authSession';
@@ -51,6 +52,7 @@ const App: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const me = useSessionUser();
+  const [backendVersion, setBackendVersion] = useState('');
   const location = useLocation();
 
   // 会话 token 只在内存里：刷新后 me() 失败即视为未登录，用户管理入口一并收起。
@@ -59,6 +61,24 @@ const App: React.FC = () => {
       .me()
       .then((r) => setSessionUser(r.data.data))
       .catch(() => setSessionUser(null));
+  }, []);
+
+  // 版本串只有后端一个来源（构建时注入），页脚不写死产品版本。
+  useEffect(() => {
+    let cancelled = false;
+    systemApi
+      .getVersion()
+      .then((res) => {
+        if (!cancelled) setBackendVersion(res.data.data.version);
+      })
+      .catch((err: unknown) => {
+        // 版本探测失败不影响使用，页脚只保留版权行；留一行日志便于排障。
+        console.debug('failed to load backend version', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+
   }, []);
 
   useEffect(() => {
@@ -302,7 +322,8 @@ const App: React.FC = () => {
           padding: '16px',
         }}
       >
-        TableWave ©2026 Created with React + Ant Design
+        TableWave{backendVersion ? ` · ${backendVersion}` : ''} ©2026 Created with React + Ant
+        Design
       </Footer>
     </Layout>
   );

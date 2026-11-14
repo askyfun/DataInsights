@@ -183,6 +183,7 @@ func (h *DatasetHandler) List(req router.Request[datasetListIn], res *router.Res
 `POST /api/charts/export`（图表导出，成功响应是文件流）——后三者绑定语义与泛型路由不兼容，循 `/health` 先例在 `cmd/routes.go`
 以裸 `*gin.Context` handler 注册（依据：`backend/internal/handler/dataset.go` / `chart.go` 的注释）。
 
+
 ### 数据库模型 (bun ORM)
 
 ```go
