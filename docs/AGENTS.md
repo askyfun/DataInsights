@@ -30,6 +30,7 @@
 | `deployment/docker.md` | 容器镜像（发布镜像与本地构建两条路）、Compose、镜像构建细节 | 镜像形态、Compose、镜像来源或构建细节变化时 |
 | `deployment/release.md` | 发布流程（打 tag、推 Docker Hub 镜像、建 Release）与失败处置 | 发布工作流、镜像命名/架构、Secrets 或版本号规则变化时 |
 | `deployment/production.md` | 生产环境部署实践 | 部署形态、安全实践或可观测性变化时 |
+| `deployment/backup-restore.md` | 备份 / 恢复 / 升级回滚 runbook（`backup.sh` / `upgrade.sh`，含迁移顺序红线） | 备份恢复命令、脚本行为或迁移顺序说明变化时 |
 | `developer-guide/architecture.md` | 系统架构 + 关键设计决策 | 新增分层 / 目录、查询链路、部署形态或关键决策变更时 |
 | `developer-guide/api.md` | API 接口文档（叙述性视图；契约事实源是 `../api/openapi.yaml`） | 新增或修改端点时，与 `../api/openapi.yaml` 同步更新 |
 | `developer-guide/chart-query-design.md` | 图表查询链路设计（契约模型 / SQL 生成 / 处理器） | 图表配置文档结构、查询协议或可视化语义变更时 |
