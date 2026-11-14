@@ -3,11 +3,11 @@ package handler
 import (
 	"strconv"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/listpage"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/dashboard"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/listpage"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/dashboard"
 
 	"github.com/google/uuid"
 )
@@ -208,9 +208,10 @@ func (h *DashboardHandler) ListChartReferences(req router.Request[chartPathIn], 
 // datasetQueryIn does with entity.Filter: they are pure data with no binding
 // tags of their own to worry about.
 type dashboardQueryIn struct {
-	PageID   string                         `json:"page_id" form:"-"`
-	Filters  []entity.DashboardQueryFilter  `json:"filters" form:"-"`
-	Linkages []entity.DashboardQueryLinkage `json:"linkages" form:"-"`
+	PageID     string                           `json:"page_id" form:"-"`
+	Filters    []entity.DashboardQueryFilter    `json:"filters" form:"-"`
+	Linkages   []entity.DashboardQueryLinkage   `json:"linkages" form:"-"`
+	Selections []entity.DashboardQuerySelection `json:"selections" form:"-"`
 }
 
 // Query handles POST /api/dashboards/:id/query: the dashboard's batch fetch.
@@ -226,9 +227,10 @@ func (h *DashboardHandler) Query(
 	}
 
 	result, err := h.svc.Query(req.Ctx.Request.Context(), id, entity.DashboardQueryRequest{
-		PageID:   req.In.PageID,
-		Filters:  req.In.Filters,
-		Linkages: req.In.Linkages,
+		PageID:     req.In.PageID,
+		Filters:    req.In.Filters,
+		Linkages:   req.In.Linkages,
+		Selections: req.In.Selections,
 	})
 	if err != nil {
 		return err

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"data-insights/internal/query"
+	"tablewave/internal/query"
 
 	"github.com/gin-gonic/gin"
 )

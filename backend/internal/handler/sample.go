@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"data-insights/internal/router"
-	"data-insights/internal/service/sample"
+	"tablewave/internal/router"
+	"tablewave/internal/service/sample"
 )
 
 // SampleHandler exposes the built-in sample dataset (R-79 / issue #174).

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/model"
+	"tablewave/internal/model"
 )
 
 // --- ParseDialect 显式映射 ---

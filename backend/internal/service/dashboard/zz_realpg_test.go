@@ -11,7 +11,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/domain/entity"
+	"tablewave/internal/domain/entity"
 )
 
 // zz_ 前缀是本仓库的探针约定（留工作区、不入库，见 docs/developer-guide/troubleshooting.md 的

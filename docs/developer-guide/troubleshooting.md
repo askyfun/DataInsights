@@ -23,7 +23,7 @@
 ## 版本与依赖
 
 - 钉死版本：Go 1.27.1（`go` 指令写全补丁号）· pnpm 12.4.2 · Node 24（**刻意不升 26**）· antd 6.6.4 · biome 2.5.14。升 biome **必须**同步 `biome.json` 的 `$schema`，否则报 `deserialize`。
-- 产品名为 **Data Insights**；历史名 `dataray` 有意保留在少数标识符与默认名里（例如业务库默认名 `dataray_data`），改名时别顺手清掉。
+- 产品名为 **TableWave**；业务库默认名已统一为 `tablewave_data`。历史代号 `dataray` 仅存于少量历史文档文件名（如 `roadmap-dataray-*`），不再作为默认库名使用。
 - ⚠️ pnpm 12 会把 **pnpm 自己**写进 lock（每份 lock 多约 158 行），且首次 install 有一次 supply-chain 校验（可能持续数分钟）—— **默认行为，不是异常**。
 - ⚠️ **清孤儿依赖**：lock 未变时 `pnpm install` 会返回 `Already up to date`，`--force` / `pnpm prune` 都无效。**正解 = 删掉状态文件再 install**：`rm -f node_modules/.modules.yaml node_modules/.pnpm-workspace-state-v1.json && pnpm install`。判定某包是否孤儿用 `pnpm why <pkg>@<ver>` —— 孤儿是**完全静默**的，须配对照组。
 - `idls/gen_types.*` 不含 `info.title` → 改 title 不必 `make api-gen`；改 **description** 会漂进生成物 → **必须重跑**。
@@ -87,7 +87,7 @@
 
 ## 图表槽位
 
-- **内置 13 种图型**（`chartDefinitions.ts` 与 `backend/internal/query/types.go` 双端一致）；**图型中文名的唯一来源 = `chartDefinitions[type].label`**。
+- **内置 14 种图型**（`chartDefinitions.ts` 与 `backend/internal/query/types.go` 双端一致）；**图型中文名的唯一来源 = `chartDefinitions[type].label`**。
 - **已下线槽位** `color_group` / `series_group`（某次决策后下线）；后端 `SlotColorGroup` / `SlotSeriesGroup` 常量与归槽分支**刻意保留**，**勿当死代码删**。
 - **字段组有两套口径，别混**：`getActiveFieldGroups` 按定义槽位 `slice` 裁剪；`normalizeQueryConfigForChartType` 按 `minGroups` 补齐并把溢出组绑定**搬进**同类型保留组——不搬运则透视表切表格会**静默丢列维度**。**v2 wire 触发** = combo 双轴指标槽位 ∨ 具名维度槽位。⚠️ `maxFields` 是**纯声明、无校验** → **不要为满足它丢字段**。
 - **过滤**（`FilterDropZone.tsx`）是**图型无关的公共行，不写进 `chartDefinitions.fieldGroups`**；多条件恒「且」；同字段可重复加入（`>=` + `<=` 即区间）；条件存**列名**。

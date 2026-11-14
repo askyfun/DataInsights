@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"data-insights/internal/response"
-	"data-insights/internal/service/auth"
+	"tablewave/internal/response"
+	"tablewave/internal/service/auth"
 
 	"github.com/gin-gonic/gin"
 )

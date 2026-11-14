@@ -3,9 +3,9 @@ package handler
 import (
 	"encoding/json"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/router"
-	"data-insights/internal/service/queryrecord"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/router"
+	"tablewave/internal/service/queryrecord"
 )
 
 // QueryHandler handles query-record HTTP requests (R-08' 落库 / R-30' 寻址).

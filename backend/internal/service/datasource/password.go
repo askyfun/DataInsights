@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"data-insights/internal/crypto"
-	"data-insights/internal/model"
+	"tablewave/internal/crypto"
+	"tablewave/internal/model"
 
 	"github.com/uptrace/bun"
 )

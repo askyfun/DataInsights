@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"data-insights/internal/domain/entity"
+	"tablewave/internal/domain/entity"
 )
 
 // DatasetQueryLimitMax 是「维度去重取数」的服务端唯一值硬上限。

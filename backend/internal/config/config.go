@@ -61,6 +61,8 @@ type Config struct {
 	// Log 是日志运行期配置（R-96）：Level 为 LOG_LEVEL 原始值，
 	// 解析交给 logx.ParseLevel（非法值由调用方回落 info 并 warn 一次）。
 	Log LogConfig
+	// Auth 是认证端点防护（issue #203）的运行期配置。
+	Auth AuthConfig
 }
 
 // LogConfig 聚合日志相关环境变量。
@@ -83,11 +85,20 @@ type AlertConfig struct {
 	NotifyEmails string
 }
 
+// AuthConfig 聚合认证端点防护（issue #203）的环境变量。
+// 零值 = 未设置，消费方回退内置默认值（遵循「空串等同未设置」约定）。
+type AuthConfig struct {
+	// RateLimitPerMinute 是同一来源 IP 每分钟允许的认证请求数，默认 defaultAuthRateLimitPerMinute。
+	RateLimitPerMinute int
+}
+
 const (
 	// defaultAlertEvalInterval 是未设置 ALERT_EVAL_INTERVAL 时的轮询秒数（5 分钟）。
 	defaultAlertEvalInterval = 300
 	// defaultAlertSMTPPort 是未设置 SMTP_PORT 时的提交端口（587 = STARTTLS 语义）。
 	defaultAlertSMTPPort = "587"
+	// defaultAuthRateLimitPerMinute 是未设置 AUTH_RATE_LIMIT_PER_MINUTE 时的默认值。
+	defaultAuthRateLimitPerMinute = 10
 )
 
 type DatabaseConfig struct {
@@ -221,6 +232,20 @@ func (c *Config) Load() error {
 
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		c.Log.Level = v
+	}
+
+	// 认证端点限流（issue #203）：非法值不 fail-fast（防护是安全增强，配置错误不该
+	// 拦住整个服务启动），回退默认值并打日志。
+	c.Auth.RateLimitPerMinute = defaultAuthRateLimitPerMinute
+	if v := os.Getenv("AUTH_RATE_LIMIT_PER_MINUTE"); v != "" {
+		rpm, err := strconv.Atoi(v)
+		if err != nil || rpm < 1 {
+			slog.Warn("invalid AUTH_RATE_LIMIT_PER_MINUTE, falling back to default",
+				"value", v, "default", defaultAuthRateLimitPerMinute)
+		} else {
+			c.Auth.RateLimitPerMinute = rpm
+		}
+
 	}
 
 	return nil

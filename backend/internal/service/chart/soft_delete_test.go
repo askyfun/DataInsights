@@ -9,8 +9,8 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/listpage"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/listpage"
 )
 
 // chartCaptureMatcher 记录实际执行的 SQL，同时保留默认 regexp 匹配语义。

@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"data-insights/internal/response"
+	"tablewave/internal/response"
 
 	"github.com/gin-gonic/gin"
 )

@@ -31,7 +31,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/expr"
+	"tablewave/internal/expr"
 )
 
 // zzTrimmedText 是「闸后落到 SQL 里的形态」：调用方（datasetService.UpdateColumns /

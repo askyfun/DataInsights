@@ -125,16 +125,31 @@ type DashboardQueryLinkage struct {
 	Value          []any  `json:"value"`
 }
 
+// DashboardQuerySelection 是观看侧对某块图表动态维度/指标槽位的当前选择
+// （POST /api/dashboards/{id}/query 请求体的一项，issue #134）。widgetId 定位到
+// 布局里的图表块，bindingId 定位到该图表 config 里的绑定实例，fieldId 是
+// bindings[].candidates 里的候选列 id。后端只认候选集内的列（见
+// service/chart 的 applyFieldSelections），并且只作用于本次取数。
+type DashboardQuerySelection struct {
+	WidgetID  string `json:"widgetId"`
+	BindingID string `json:"bindingId"`
+	FieldID   string `json:"fieldId"`
+}
+
 // DashboardQueryRequest 是批量取数端点的请求体（PRD §6.3）。前端只下发筛选器与联动的
 // 当前值，不解析 chart config、不下发合并结果：筛选合并是后端单点逻辑（可测）。
 //
 // PageID 是多页面文档（layout_json v2）的「当前激活页」：非空时只取该页的图表块，
 // 外加任意页里 scope=all 的筛选器（见 service/dashboard 的 projectLayout）。
 // 省略或空串 = 不按页收窄，退回单页时代的「整盘取数」语义。
+//
+// Selections 是动态维度/指标的观看侧选择（issue #134）：没出现的槽位 = 用图表配置里
+// 的默认字段。
 type DashboardQueryRequest struct {
-	PageID   string                  `json:"page_id"`
-	Filters  []DashboardQueryFilter  `json:"filters"`
-	Linkages []DashboardQueryLinkage `json:"linkages"`
+	PageID     string                    `json:"page_id"`
+	Filters    []DashboardQueryFilter    `json:"filters"`
+	Linkages   []DashboardQueryLinkage   `json:"linkages"`
+	Selections []DashboardQuerySelection `json:"selections"`
 }
 
 // DashboardQueryBlock 是单块的取数结果。Data 为 nil 时 JSON 输出 null（与
