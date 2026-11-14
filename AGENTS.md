@@ -53,7 +53,7 @@ frontend/src/
 ├── pages/         # 页面组件
 ├── components/    # 可复用组件（日期筛选器在 components/DateFilter/，过滤弹窗在 components/ChartBuilder/，盘底部页面标签条在 components/DashboardPageTabs/）
 ├── idls/          # API 类型定义（现仅 gen_types.ts 生成物；Batch 2 已删除手写 chart/dataset/datasource/share.ts）
-├── lib/           # 工具库（API 客户端在 lib/api/client.ts；图表配置 schema 在 lib/chartConfigSchema.ts；日期筛选语义在 lib/dateFilter.ts）
+├── lib/           # 工具库（API 客户端在 lib/api/client.ts；图表配置 schema 在 lib/chartConfigSchema.ts；日期筛选语义在 lib/dateFilter.ts；表达式白名单 TS 镜像在 lib/expr.ts，与后端 internal/expr 共读 `__fixtures__/exprCases.json`，改语法必须两边同时改）
 ├── i18n/          # 国际化
 └── styles/        # 全局样式
 ```

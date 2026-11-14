@@ -19,6 +19,7 @@ frontend/src/
 │   ├── api/client.ts     # 持有唯一 axios 实例（baseURL 由 resolveApiBaseURL 决定）+ get/post/put/del 泛型辅助
 │   ├── chartConfigSchema.ts  # bi_chart.config 的 version:2 文档 schema + migrateChartConfig（旧结构加载时自动迁移）
 │   ├── dateFilter.ts     # 日期筛选语义单一事实源（纯逻辑、零 UI 依赖；语义细节见根 AGENTS.md「日期筛选」）
+│   ├── expr.ts           # 表达式白名单的 TS 镜像（编辑器即时反馈；权威仍在后端 internal/expr，双端共读 __fixtures__/exprCases.json）
 │   ├── dashboardFilterValue.ts  # 盘级筛选器取值下发契约（按算子分流 value 形状）
 │   ├── dashboardFolderTree.ts # 仪表盘文件夹组树与落点判定的纯逻辑（零 React 依赖）
 │   ├── dashboardLayoutSchema.ts # 仪表盘 layout schema（filter widget 的 binding.column 是列 ID）
