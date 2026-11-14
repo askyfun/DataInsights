@@ -12,9 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/auth"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/auth"
 )
 
 // PrincipalKey / RawTokenKey are the gin context keys the middleware writes and
@@ -43,7 +43,7 @@ func Bearer(svc auth.Service, allowPAT bool) gin.HandlerFunc {
 			return
 		}
 		if !allowPAT && principal.Kind == "pat" {
-			// 机器 token 访问人类端点是「登录了但没权限」：走 20201/FORBIDDEN，
+			// 机器 token 访问人类端点是「登录了但没权限」：走 20202/FORBIDDEN，
 			// 与未认证（20200）分档，前端据此提示「无权限」而不是弹登录。
 			response.Forbidden(c, "personal access tokens are not allowed on this endpoint")
 			c.Abort()

@@ -3,7 +3,7 @@ package router
 import (
 	"net/http"
 
-	"data-insights/internal/response"
+	"tablewave/internal/response"
 
 	"github.com/gin-gonic/gin"
 )

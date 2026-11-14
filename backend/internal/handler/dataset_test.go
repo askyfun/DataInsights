@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"testing"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/listpage"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/dataset"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/listpage"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/dataset"
 
 	"github.com/gin-gonic/gin"
 )

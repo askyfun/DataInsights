@@ -1,4 +1,4 @@
-# Data Insights API 接口文档
+# TableWave API 接口文档
 
 > 最后更新：2026-10-17
 
@@ -13,7 +13,7 @@
 
 ## 1. 通用规范
 
-### 1.1 端点清单（58 个泛型路由端点 + 3 个手工路由）
+### 1.1 端点清单（59 个泛型路由端点 + 3 个手工路由）
 
 | 领域 | 端点数 | 前缀 |
 |------|--------|------|
@@ -69,7 +69,8 @@ HTTP 状态码恒为 200，业务结果由响应体 Envelope 表达：
 | 20000 | CodeSuccess | 成功 | — |
 | 20100 | CodeBadRequest | 请求参数错误（含绑定失败、非法 id/短码） | 请求参数有误，请检查输入 |
 | 20200 | CodeUnauthorized | 未认证（Bearer 校验失败、口令错误、注册已关闭——当前仅 auth/tokens 端点会产生，见 10/11 节） | 登录状态已失效 |
-| 20201 | CodeForbidden | 越权：已认证但无权限（PAT 被拒于管理端点；#202/R-92 的守卫同样走它） | 无权限执行该操作 |
+| 20201 | CodeRateLimited | 认证端点限流/锁定（issue #203；HTTP 语义对应 429，信封码独立以便前端区分） | 操作过于频繁，请稍后再试 |
+| 20202 | CodeForbidden | 越权：已认证但无权限（PAT 被拒于管理端点；#202/R-92 的守卫同样走它） | 无权限执行该操作 |
 | 20300 | CodeNotFound | 资源不存在 | 请求的资源不存在 |
 | 20400 | CodeBusinessError | 业务逻辑错误（如资源被引用不可删） | 操作失败，请稍后重试 |
 | 20500 | CodeThirdPartyErr | 第三方服务错误 | 服务暂时不可用 |
@@ -88,7 +89,7 @@ R-99：旧整数 `code` 不改义；需要区分原因时读 `error.code`（字�
 | error.code | 整数码 | hint_key | 映射自 |
 |------------|--------|----------|--------|
 | `UNAUTHENTICATED` | 20200 | `errors.auth.unauthenticated` | Bearer 校验失败 / 口令错误 |
-| `FORBIDDEN` | 20201 | `errors.auth.forbidden` | PAT 访问管理端点 / 守卫拒绝 |
+| `FORBIDDEN` | 20202 | `errors.auth.forbidden` | PAT 访问管理端点 / 守卫拒绝 |
 | `DATASOURCE_UNREACHABLE` | 50000 | `errors.datasource.unreachable` | 图表取数时数据源连接失败 |
 | `QUERY_EXEC_FAILED` | 50000 | `errors.query.execution_failed` | 查询执行失败（SQL 报错 / 超时） |
 | `INVALID_CONFIG` | 50000 | `errors.config.invalid` | 驱动类型不支持 / 数据集无有效取数来源 |
@@ -137,7 +138,7 @@ R-99：旧整数 `code` 不改义；需要区分原因时读 `error.code`（字�
 健康检查。恒 HTTP 200 + Envelope，`data = { "status": "ok" }`。
 注意：当前实现**不探库**——只证明进程活着，不代表 `DATABASE_URL` 可连。
 
-## 3. Datasource 数据源（11 个端点）
+## 3. Datasource 数据源（12 个端点）
 
 响应实体 `Datasource`：`id / name / type / host / port / database_name / username / created_at / updated_at`。
 
@@ -159,6 +160,7 @@ R-99：旧整数 `code` 不改义；需要区分原因时读 `error.code`（字�
 | 9 | `GET /api/datasources/{id}/tables/{table}/data` | 分页读表数据（`page`/`page_size`/`sort_field`/`sort_order`）。**`sort_field` 必须是主键列之一**，否则 50000；`sort_order` 大小写不敏感匹配 desc，其余归一为 ASC。响应 `TableDataResult`：`columns / data / total / primary_keys / page / page_size` |
 | 10 | `POST /api/datasources/{id}/preview` | 预览表或 SQL 结果，固定前 10 行。请求体 `query_type: "table" | "sql"` 决定用 `table_name` 还是 `query_sql`（二选一，后端不强校验）。响应 `PreviewResult`：`columns / data` |
 | 11 | `POST /api/datasources/{id}/field-distribution` | 字段值分布。`field_name` 必填（缺失 20100）；`limit` ≤0 或 >50 归一为 20。响应 `FieldDistribution`：`field_name / total_count / unique_count / distribution[]`，每项 `{value, count, percentage}`（percentage 两位小数） |
+| 12 | `GET /api/datasources/{id}/capabilities` | 方言能力（R-78）。只读懒探针，返回 `dialect` 与 `supports_grouping_sets / supports_percentile_cont / supports_window_functions / percentile_strategy`；前端据此置灰不支持的图型。连接/探针失败 → 50000（前端按「能力未知」放开，不置灰） |
 
 ## 4. Dataset 数据集（9 个端点）
 
@@ -409,7 +411,7 @@ expires_at / expired / hit_count`）。
 
 ## 11. Token PAT 管理（3 个端点）
 
-三个端点全挂 `Bearer(allowPAT=false)`：**用户管理操作，仅限人类会话**——机器令牌在此 **20201（FORBIDDEN）**"personal access tokens are not allowed on this endpoint"（防机器令牌自我提权，issue #184 验收 3；R-99 起与未认证 20200 分档）。
+三个端点全挂 `Bearer(allowPAT=false)`：**用户管理操作，仅限人类会话**——机器令牌在此 **20202（FORBIDDEN）**"personal access tokens are not allowed on this endpoint"（防机器令牌自我提权，issue #184 验收 3；R-99 起与未认证 20200 分档）。
 
 实体 `TokenInfo = {id, name, prefix, created_at, last_used_at, last_used_ip, last_used_ua, expires_at, revoked}`——**绝不含哈希或明文**；`expires_at` 空串 = 不过期。
 

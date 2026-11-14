@@ -9,10 +9,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/auth"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/auth"
 )
 
 // fakeAuth returns a principal whose Kind mirrors the token's kind marker, so a
@@ -84,9 +84,9 @@ func TestBearer_SessionAlwaysAllowed(t *testing.T) {
 func TestBearer_PATDeniedOnUserManagement(t *testing.T) {
 	r, _ := newEngine(false, false)
 	_, out := do(r, "Bearer di_pat_abcdef")
-	// R-99：登录了但没权限 → 20201/FORBIDDEN，与未认证（20200）分档。
-	if !strings.Contains(out, `"code":20201`) || !strings.Contains(out, "FORBIDDEN") {
-		t.Fatalf("PAT must be refused as 20201/FORBIDDEN when allowPAT=false, got %q", out)
+	// R-99：登录了但没权限 → 20202/FORBIDDEN，与未认证（20200）分档。
+	if !strings.Contains(out, `"code":20202`) || !strings.Contains(out, "FORBIDDEN") {
+		t.Fatalf("PAT must be refused as 20202/FORBIDDEN when allowPAT=false, got %q", out)
 	}
 }
 

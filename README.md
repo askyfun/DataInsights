@@ -1,4 +1,8 @@
-# Data Insights
+# TableWave
+
+**Data Intelligence Platform**
+
+> Turn Data into Insights.
 
 拖拽式 BI 可视化分析平台 —— 连上数据源、建好数据集，把字段拖进槽位即时出图，并能一键分享（地址栏短码直链）、拼装仪表盘。
 
@@ -6,7 +10,7 @@
 
 - **数据源管理** — PostgreSQL / MySQL / ClickHouse / StarRocks 四种数据库连接配置与连接测试
 - **数据集管理** — 物理表 / 自定义 SQL / **本地文件上传**（`.csv`、`.xlsx`）三种模式，列为维度 / 指标并带稳定 id
-- **拖拽式图表构建** — 拖字段即时出图，内置 **13 种图表类型**（表格 / 透视 / KPI / 柱 / 折线 / 面积 / 组合双轴 / 饼 / 漏斗 / 雷达 / 散点 / 直方图 / 箱线）
+- **拖拽式图表构建** — 拖字段即时出图，内置 **14 种图表类型**（表格 / 透视 / KPI / 柱 / 折线 / 面积 / 组合双轴 / 瀑布 / 饼 / 漏斗 / 雷达 / 散点 / 直方图 / 箱线）
 - **仪表盘** — 12 列栅格布局，**多页面（底部标签页）**，图表块 / 文本块 / 盘级筛选器（可设为「本页」或「全部页面」）/ 查询容器，一次请求多块联动取数；支持**归档文件夹**整理
 - **查询记录** — 每次查询落库（内容 hash 去重）并生成短码直链（不可变快照），"地址栏即分享"
 - **指标预警** — 绑定图表指标设置阈值规则，后台定时评估，触发历史可追溯（可选 SMTP 邮件通知）
@@ -26,17 +30,17 @@
 前后端编译进**同一个镜像**，由一个进程、一个端口同时提供 API 与页面（没有 nginx）。直接拉现成镜像，不用克隆仓库、不用构建：
 
 ```bash
-docker run -d --name data-insights -p 23352:23352 \
+docker run -d --name tablewave -p 23352:23352 \
   -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
-  kzzhr/datainsights:latest
+  kzzhr/tablewave:latest
 ```
 
 ### 方式三：Docker Compose 一键起全套（含 PostgreSQL）
 
-一条命令把 Data Insights 与 PostgreSQL 一起拉起来，不用自己准备数据库：
+一条命令把 TableWave 与 PostgreSQL 一起拉起来，不用自己准备数据库：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.allinone.yml
+curl -fsSLO https://raw.githubusercontent.com/askyfun/TableWave/master/docker-compose.allinone.yml
 docker compose -f docker-compose.allinone.yml up -d
 ```
 
@@ -46,17 +50,17 @@ docker compose -f docker-compose.allinone.yml up -d
 - **生产环境**建议换成外部高可用 PostgreSQL，只跑 app 一个容器即可：
 
 ```bash
-docker run -d --name data-insights \
+docker run -d --name tablewave \
   -p 23352:23352 \
   -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
-  kzzhr/datainsights:latest
+  kzzhr/tablewave:latest
 ```
 
 ### 方式四：从源码运行
 
 ```bash
-git clone https://github.com/askyfun/DataInsights.git
-cd DataInsights
+git clone https://github.com/askyfun/TableWave.git
+cd TableWave
 
 make install          # 装前后端依赖（只用 pnpm）
 make dev              # 前端 23351 + 后端 23352，一起起
@@ -74,12 +78,12 @@ make dev              # 前端 23351 + 后端 23352，一起起
 |------|------|
 | [docs/getting-started/](docs/getting-started/) | 概览（核心概念 / 应用场景 / 对外路线）、快速开始 |
 | [docs/user-guide/](docs/user-guide/) | 配置与参数字典、功能指南 |
-| [docs/deployment/](docs/deployment/) | 容器部署（Docker / Compose）、发布流程、生产部署实践 |
+| [docs/deployment/](docs/deployment/) | 容器部署（Docker / Compose）、备份 / 升级 / 回滚 runbook、发布流程、生产部署实践 |
 | [docs/developer-guide/](docs/developer-guide/) | 架构与设计决策、API 文档、图表查询设计、排障、开发环境、贡献规范 |
 
 - 配置项字典：[docs/user-guide/configuration.md](docs/user-guide/configuration.md)
 - API 端点说明（契约事实源是 [`api/openapi.yaml`](api/openapi.yaml)）：[docs/developer-guide/api.md](docs/developer-guide/api.md)
-- 准备放到真实环境用：[docs/deployment/production.md](docs/deployment/production.md)
+- 准备放到真实环境用：[docs/deployment/production.md](docs/deployment/production.md)；升级前先看[备份与恢复](docs/deployment/backup-restore.md)（`scripts/backup.sh` / `scripts/upgrade.sh`）
 - 遇到问题：[docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md)
 
 ## 贡献

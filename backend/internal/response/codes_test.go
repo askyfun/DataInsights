@@ -69,7 +69,7 @@ func TestStableCodesMatchFixture(t *testing.T) {
 			t.Errorf("stable %q: Go hint %q != fixture %q", c.Stable, hint, c.HintKey)
 		}
 	}
-	// bizCode 映射：20200/20201 在 stableByBizCode；三个 50000 档不在。
+	// bizCode 映射：20200/20202 在 stableByBizCode；三个 50000 档不在。
 	for _, c := range f.Codes {
 		_, mapped := stableByBizCode[c.BizCode]
 		if c.BizCode == CodeUnauthorized || c.BizCode == CodeForbidden {
@@ -80,13 +80,13 @@ func TestStableCodesMatchFixture(t *testing.T) {
 			t.Errorf("biz %d must NOT map in stableByBizCode (uncoded 50000 family)", c.BizCode)
 		}
 	}
-	if CodeForbidden != 20201 {
-		t.Errorf("CodeForbidden = %d, want 20201", CodeForbidden)
+	if CodeForbidden != 20202 {
+		t.Errorf("CodeForbidden = %d, want 20202", CodeForbidden)
 	}
 }
 
 // TestStableCodesMatchOpenapi 解析 openapi.yaml 的 ErrorDetail.code 枚举与
-// ResponseCode enum（须含 20201）。用正则抽 enum 块，避免引入 yaml 依赖。
+// ResponseCode enum（须含 20201 限流与 20202 越权）。用正则抽 enum 块，避免引入 yaml 依赖。
 func TestStableCodesMatchOpenapi(t *testing.T) {
 	raw, err := os.ReadFile(openapiPath)
 	if err != nil {
@@ -125,7 +125,10 @@ func TestStableCodesMatchOpenapi(t *testing.T) {
 	}
 
 	if !strings.Contains(spec, "        - 20201") {
-		t.Error("ResponseCode enum must include 20201 (CodeForbidden)")
+		t.Error("ResponseCode enum must include 20201 (CodeRateLimited)")
+	}
+	if !strings.Contains(spec, "        - 20202") {
+		t.Error("ResponseCode enum must include 20202 (CodeForbidden)")
 	}
 }
 

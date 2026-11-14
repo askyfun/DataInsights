@@ -1,10 +1,10 @@
-# Data Insights API 契约（单一权威来源）
+# TableWave API 契约（单一权威来源）
 #
 # 修改接口时：先改本文件 → `make api-gen` 双端重新生成 → 双端消费生成物。
 # 禁止直接编辑生成物（backend/internal/idls/gen_types.go、frontend/src/idls/gen_types.ts）。
 openapi: 3.0.3
 info:
-  title: Data Insights API
+  title: TableWave API
   description: |
     拖拽式 BI 可视化分析平台 API。
 
@@ -217,6 +217,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TableListResponse'
+  /api/datasources/{id}/capabilities:
+    get:
+      tags:
+        - datasources
+      summary: 读取数据源的方言能力
+      description: |
+        返回该连接方言的查询能力（R-78）。探针是懒加载、按连接缓存的只读探测，
+        不产生新数据；前端据此把当前方言不支持的图型置灰并说明原因。
+        {id} 非法 → 20100；连接或探针失败 → 50000。
+      operationId: getDatasourceCapabilities
+      parameters:
+        - $ref: '#/components/parameters/DatasourceId'
+      responses:
+        '200':
+          description: HTTP 恒 200；业务结果由 Envelope.code 表达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasourceCapabilitiesResponse'
   /api/datasources/{id}/tables/{table}/columns:
     get:
       tags:
@@ -789,10 +808,11 @@ paths:
         v1/v2 两种协议）：spec_version 缺失或 !=2 时走 v1 平铺协议（dims/metrics，
         形状同 ChartQueryRequest）；spec_version=2 时走 v2 槽位协议
         （dimension_groups/metric_groups，槽位名与 binding_id 保留进查询 AST）。
-        成功 data 为 ChartDataResult：{ data, select_sql, count_sql }，其中 data 的
+        成功 data 为 ChartDataResult：{ data, select_sql, count_sql, diagnostics }，其中 data 的
         形状由 chart_type 决定（table/pie/axis/scatter 四族，另加 pivot，详见
         ChartDataResult 描述）。select_sql 成功时恒返回；count_sql 仅 table +
-        pagination 分支返回。执行失败统一 Envelope.code = 50000。
+        pagination 分支返回；diagnostics 为执行元信息（方言 / 耗时 / 能力门控）。
+        执行失败统一 Envelope.code = 50000。
       operationId: queryChart
       requestBody:
         required: true
@@ -1689,6 +1709,7 @@ components:
         - 20100
         - 20200
         - 20201
+        - 20202
         - 20300
         - 20400
         - 20500
@@ -1697,6 +1718,7 @@ components:
         - CodeSuccess
         - CodeBadRequest
         - CodeUnauthorized
+        - CodeRateLimited
         - CodeForbidden
         - CodeNotFound
         - CodeBusinessError
@@ -2401,6 +2423,40 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/TableInfo'
+    DatasourceCapabilities:
+      type: object
+      description: >-
+        方言能力投影（entity.DatasourceCapabilities）。dialect 为数据源驱动类型名
+        （postgresql / mysql / clickhouse / starrocks）；percentile_strategy 取值
+        percentile_cont | percentile_cont_args_first | quantilesExactInclusive |
+        window_ntile | unsupported。
+      required:
+        - dialect
+        - supports_grouping_sets
+        - supports_percentile_cont
+        - supports_window_functions
+        - percentile_strategy
+      properties:
+        dialect:
+          type: string
+        supports_grouping_sets:
+          type: boolean
+        supports_percentile_cont:
+          type: boolean
+        supports_window_functions:
+          type: boolean
+        percentile_strategy:
+          type: string
+    DatasourceCapabilitiesResponse:
+      description: GET /api/datasources/{id}/capabilities 响应：data 为 DatasourceCapabilities。
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/DatasourceCapabilities'
     ColumnListResponse:
       description: GET /api/datasources/{id}/tables/{table}/columns 响应：data 为 ColumnInfo 数组。
       allOf:
@@ -2531,8 +2587,9 @@ components:
           type: string
           description: >-
             后端不做强校验、落库什么返回什么。查询层已知取值：table / bar / line /
-            pie / area / scatter / pivot；未知值按 axis 处理器回退
-            （query.GetProcessor default 分支）。
+            pie / area / scatter / pivot / waterfall；未知值按 axis 处理器回退
+            （query.GetProcessor default 分支）。waterfall 与 bar 同构（返回
+            ChartAxisResponse），增减分解由前端渲染层计算。
         config:
           type: string
           description: 图表配置的 JSON 字符串；创建/更新为空时后端写 "{}"。
@@ -2751,7 +2808,7 @@ components:
     ChartDataResult:
       type: object
       description: >-
-        POST /api/charts/query 的业务负载（entity.ChartDataResult，chart.go:39-43）。
+        POST /api/charts/query 的业务负载（entity.ChartDataResult）。
         data 为查询处理器输出，是按 chart_type 判别的五形状（契约上 oneOf 语义、
         未生成 union 类型：data 为无类型 schema，成员见下方各 Chart*Response
         schema；pie/scatter/table 成员间存在结构重叠，消费方以 chart_type 为准，
@@ -2776,6 +2833,60 @@ components:
           description: >-
             生成的计数 SQL；仅 chart_type=table 且携带 pagination 分支返回
             （executor.Execute 的 count 查询路径），其余形状缺省。
+        diagnostics:
+          $ref: '#/components/schemas/ChartQueryDiagnostics'
+    ChartQueryDiagnostics:
+      type: object
+      description: >-
+        一次查询的执行元信息（R-20 / issue #182）：只读诊断口径，不提供任何可执行
+        入口（路线图 N2：不做自由 SQL 工作台）。图表构建器的「查询诊断」弹窗消费它，
+        与 select_sql 一起展示「做了什么、怎么跑的」；仪表盘取数走同一条执行链，
+        响应里的 ChartDataResult 也携带该字段。
+      required:
+        - datasource_type
+        - dialect
+        - duration_ms
+      properties:
+        datasource_type:
+          type: string
+          description: >-
+            数据源记录的原始类型（postgresql / mysql / clickhouse / starrocks）。
+        dialect:
+          type: string
+          description: >-
+            SQL 生成实际使用的方言（query.ParseDialect 的产物）：mysql /
+            postgresql / clickhouse。StarRocks 走 mysql。
+        duration_ms:
+          type: integer
+          format: int64
+          description: >-
+            SQL 生成 + 执行的耗时（毫秒），在 query.Executor.Execute 前后计时，
+            不含网络往返与响应加工。
+        capabilities:
+          $ref: '#/components/schemas/ChartQueryCapabilities'
+    ChartQueryCapabilities:
+      type: object
+      description: >-
+        本次执行实际读到的方言能力快照。只有走能力门控的分支（pivot 的
+        GROUPING SETS 选择、boxplot / percentile 前置门）才返回；缺省表示本次
+        图型不依赖可选方言能力。
+      required:
+        - supports_grouping_sets
+        - supports_percentile_cont
+        - supports_window_functions
+        - percentile_strategy
+      properties:
+        supports_grouping_sets:
+          type: boolean
+        supports_percentile_cont:
+          type: boolean
+        supports_window_functions:
+          type: boolean
+        percentile_strategy:
+          type: string
+          description: >-
+            percentile 实现策略：percentile_cont / percentile_cont_args_first /
+            quantilesExactInclusive / window_ntile / unsupported。
     ChartTableResponse:
       type: object
       description: table 图表响应（query.TableResponse）。
@@ -3900,6 +4011,30 @@ components:
             被点击数据项的维度取值；空数组等同于未激活。单值 → eq，多值 → in
             （与盘级筛选器同一条「按值个数收形」的规则）。
           items: {}
+    DashboardQuerySelection:
+      type: object
+      description: >-
+        POST /api/dashboards/{id}/query 的动态维度/指标当前选择（issue #134）。
+        观看者在图表切换器里选了哪个候选列，就下发哪一条；没出现的槽位一律用图表配置
+        里的默认字段。选择只作用于本次取数，绝不写回 bi_chart.config。
+      required:
+        - widgetId
+        - bindingId
+        - fieldId
+      properties:
+        widgetId:
+          type: string
+          description: 图表块 widgetId（对应布局里 type=chart 的块）。
+        bindingId:
+          type: string
+          description: >-
+            图表 config 里该槽位的 bindingId（与 fieldMeta 的键同域）。找不到对应绑定的
+            选择被忽略（作者可能已删掉该槽位）。
+        fieldId:
+          type: string
+          description: >-
+            目标列的稳定 id（DatasetColumn.id）。必须等于该 binding 的默认 fieldId，或落在
+            bindings[].candidates 内；越界选择让该块返回 error 状态，不做静默换列。
     DashboardQueryRequest:
       type: object
       description: >-
@@ -3922,6 +4057,13 @@ components:
             已激活的图表联动（issue #143）。同一来源只应出现一次；未点击的来源不要下发。
           items:
             $ref: '#/components/schemas/DashboardQueryLinkage'
+        selections:
+          type: array
+          description: >-
+            动态维度/指标的观看侧选择（issue #134）。同一槽位只应出现一次；用默认字段的
+            槽位不要下发。
+          items:
+            $ref: '#/components/schemas/DashboardQuerySelection'
     DashboardQueryResult:
       type: object
       description: 单块取数结果（PRD §6.3）。单块失败不整盘失败。

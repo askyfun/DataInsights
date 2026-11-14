@@ -19,8 +19,8 @@ import (
 //
 // 首批只拆最疼的 5 个（不做 50000 的全量拆分）：未分类错误只带 id。
 
-// CodeForbidden 越权业务码：登录了但没权限（20200 保留给未认证）。
-const CodeForbidden = 20201
+// CodeForbidden 越权业务码：登录了但没权限（20200 保留给未认证，20201 已被限流占用）。
+const CodeForbidden = 20202
 
 // 字符串稳定码（对外契约，与 api.md §1.3、frontend errorCodes.json、
 // api/openapi.yaml 的 ErrorDetail.code 枚举四方一致，由一致性测试守卫）。
@@ -46,7 +46,7 @@ const (
 const internalFallbackMsg = "internal server error"
 
 // stableByBizCode 整数码 → 稳定码的保守映射：只收语义单一的整数码
-// （20200 未认证 / 20201 越权）。50000 一码多义，只有产生源头显式
+// （20200 未认证 / 20202 越权）。50000 一码多义，只有产生源头显式
 // WrapCode 标注过的错误才携带稳定码，未分类错误不填 code。
 var stableByBizCode = map[int]struct {
 	Stable string
@@ -122,7 +122,7 @@ func ErrorCoded(c *gin.Context, bizCode int, stable, hint, msg string) {
 	writeError(c, bizCode, msg, detail)
 }
 
-// Forbidden 越权（20201 + FORBIDDEN）。登录了但没权限；未认证请用 20200。
+// Forbidden 越权（20202 + FORBIDDEN）。登录了但没权限；未认证请用 20200。
 func Forbidden(c *gin.Context, msg string) {
 	ErrorCoded(c, CodeForbidden, StableForbidden, HintForbidden, msg)
 }

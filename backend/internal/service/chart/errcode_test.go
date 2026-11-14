@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 )
 
 // R-99（issue #224）稳定码映射用例：每个稳定码至少一条，断言「映射自哪种

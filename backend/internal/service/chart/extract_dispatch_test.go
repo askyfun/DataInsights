@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
 )
 
 // TestQueryDispatchesExtractMode 钉死抽取数据集的查询路径（#138 落地灌数后）：

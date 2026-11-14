@@ -218,9 +218,10 @@ func (e OkDataStatus) Valid() bool {
 const (
 	CodeBadRequest    ResponseCode = 20100
 	CodeBusinessError ResponseCode = 20400
-	CodeForbidden     ResponseCode = 20201
+	CodeForbidden     ResponseCode = 20202
 	CodeInternalError ResponseCode = 50000
 	CodeNotFound      ResponseCode = 20300
+	CodeRateLimited   ResponseCode = 20201
 	CodeSuccess       ResponseCode = 20000
 	CodeThirdPartyErr ResponseCode = 20500
 	CodeUnauthorized  ResponseCode = 20200
@@ -238,6 +239,8 @@ func (e ResponseCode) Valid() bool {
 	case CodeInternalError:
 		return true
 	case CodeNotFound:
+		return true
+	case CodeRateLimited:
 		return true
 	case CodeSuccess:
 		return true
@@ -1264,7 +1267,8 @@ type Envelope struct {
 type ErrorDetailCode string
 
 // Defines values for ErrorDetailCode.
-const (	StableDatasourceUnreachable ErrorDetailCode = "DATASOURCE_UNREACHABLE"
+const (
+	StableDatasourceUnreachable ErrorDetailCode = "DATASOURCE_UNREACHABLE"
 	StableForbidden             ErrorDetailCode = "FORBIDDEN"
 	StableInvalidConfig         ErrorDetailCode = "INVALID_CONFIG"
 	StableQueryExecFailed       ErrorDetailCode = "QUERY_EXEC_FAILED"

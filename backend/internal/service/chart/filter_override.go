@@ -1,6 +1,6 @@
 package chart
 
-import "data-insights/internal/domain/entity"
+import "tablewave/internal/domain/entity"
 
 // applyFilterOverrides implements the dashboard filter merge (PRD §8.3, D5–D7).
 //

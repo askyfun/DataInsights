@@ -21,7 +21,7 @@ func newTestCtx(t *testing.T) (*gin.Context, *httptest.ResponseRecorder) {
 }
 
 // TestErrorEnvelopeCarriesDetail R-99 信封增量：错误响应必有 error.id；
-// 20200/20201 经保守映射自动携带稳定码；其余整数码只有 id。
+// 20200/20202 经保守映射自动携带稳定码；其余整数码只有 id。
 func TestErrorEnvelopeCarriesDetail(t *testing.T) {
 	c, w := newTestCtx(t)
 	Error(c, CodeUnauthorized, "bad token")
@@ -33,11 +33,11 @@ func TestErrorEnvelopeCarriesDetail(t *testing.T) {
 	assertNotContainsStr(t, w.Body.String(), `"hint_key"`)
 }
 
-// TestForbiddenEnvelope 20201/FORBIDDEN：登录了但没权限，与 20200 分档。
+// TestForbiddenEnvelope 20202/FORBIDDEN：登录了但没权限，与 20200 分档。
 func TestForbiddenEnvelope(t *testing.T) {
 	c, w := newTestCtx(t)
 	Forbidden(c, "denied")
-	assertContains(t, w.Body.String(), `"code":20201`, StableForbidden, HintForbidden)
+	assertContains(t, w.Body.String(), `"code":20202`, StableForbidden, HintForbidden)
 }
 
 // TestInternalErrorErrStripsOriginalText 内部原文只进日志不进响应体；
