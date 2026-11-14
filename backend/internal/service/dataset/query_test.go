@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
+	"tablewave/internal/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
 )
 
 // 本文件覆盖 POST /api/datasets/:id/query（datasetService.Query）的 SQL 构造契约。

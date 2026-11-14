@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/extract"
-	"data-insights/internal/listpage"
+	"tablewave/internal/extract"
+	"tablewave/internal/listpage"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/uptrace/bun"

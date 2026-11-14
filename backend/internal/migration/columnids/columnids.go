@@ -25,8 +25,8 @@ import (
 	"fmt"
 	"strings"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/service/dataset"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/service/dataset"
 
 	"github.com/uptrace/bun"
 )

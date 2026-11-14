@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
 )
 
 // Notifier 是一次触发的通知出口。实现必须**同步**返回（评估器按结果写
@@ -63,7 +63,7 @@ func (n *EmailNotifier) Notify(ctx context.Context, rule *ruleView, value, thres
 	}
 
 	addr := net.JoinHostPort(n.cfg.Host, n.cfg.Port)
-	subject := fmt.Sprintf("[Data Insights] 预警触发：%s", rule.Name)
+	subject := fmt.Sprintf("[TableWave] 预警触发：%s", rule.Name)
 	body := fmt.Sprintf("预警规则「%s」触发：\n\n指标 %s 的值 %s %s 阈值 %s。\n\n触发时间：%s",
 		rule.Name, rule.Metric,
 		strconv.FormatFloat(value, 'f', -1, 64),

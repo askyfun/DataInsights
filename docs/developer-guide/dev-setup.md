@@ -1,4 +1,4 @@
-# Data Insights 环境搭建
+# TableWave 环境搭建
 
 > 最后更新：2026-09-26
 
@@ -79,7 +79,7 @@ go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
 单镜像单进程：前后端编译进**一个镜像**，由**一个 Go 进程、一个端口（23352）**同时提供 API 与页面。首次构建约 5-10 分钟。
 
 ```bash
-make docker-build   # 构建镜像（等价 docker build -t data-insights .）
+make docker-build   # 构建镜像（等价 docker build -t tablewave .）
 make docker-up      # 启动（compose：PostgreSQL + app，自动 --build）
 make docker-logs    # 查看日志
 make docker-down    # 停止服务
@@ -91,15 +91,15 @@ make dev            # 本地开发 (使用 air 热重载)
 直接用 Docker（不经过 compose，需要自备 PostgreSQL）：
 
 ```bash
-docker build -t data-insights .
+docker build -t tablewave .
 
 # DATABASE_URL 是唯一必填项
 docker run -d -p 23352:23352 \
   -e DATABASE_URL=postgres://user:password@your-db-host:5432/dbname?sslmode=disable \
-  --name data-insights data-insights
+  --name tablewave tablewave
 
 # 或通过 .env 文件传入（cp .env.example .env 后按需修改）
-docker run -d -p 23352:23352 --env-file .env --name data-insights data-insights
+docker run -d -p 23352:23352 --env-file .env --name tablewave tablewave
 ```
 
 `Dockerfile` 分三个阶段：`node:24-alpine` 构建前端产物 → `golang:1.27-alpine` 编译后端 →

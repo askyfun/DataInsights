@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"data-insights/internal/model"
+	"tablewave/internal/model"
 )
 
 // 日期筛选意图在**取数时**被现算（而不是用保存时写下的快照）。
