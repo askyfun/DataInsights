@@ -126,7 +126,14 @@ func zzNormSentinel(s string) string {
 }
 
 // buildAllPositions 把所有「本该过 safeIdentifier」的位置都填成 v，返回 SQL 文本拼接。
+//
+// 聚合实参位（Metrics / MetricExprs 的 FieldExpr）**不是**标识符位：它走
+// safeAggArg 的表达式围栏，合法表达式（如 `temp_max - temp_min`、`0%0`）本就该
+// 原样内插。把它也填成 v 等于拿标识符白名单去要求表达式，fuzz 抓到 `0%0` 即是
+// 这一类假阳性（`%` 是围栏语法里的取模）。表达式围栏自身的判据由
+// FuzzZZExprNoCommentSequence / FuzzZZExprArgSubset 负责，本目标只验证标识符位。
 func buildAllPositions(d DialectType, v string) string {
+	const exprArg = "a"
 	ast := &QueryAST{
 		Source:     v,
 		SourceType: SourceTypeTable,
@@ -135,11 +142,11 @@ func buildAllPositions(d DialectType, v string) string {
 			{Field: v, FieldExpr: v, Alias: v},
 		},
 		Metrics: []MetricExpr{
-			{Field: v, FieldExpr: v, Agg: AggSum, Alias: v},
-			{Field: v, FieldExpr: v, Agg: AggCountDistinct, Alias: v},
-			{Field: v, FieldExpr: v, Agg: AggMedian, Alias: v},
+			{Field: v, FieldExpr: exprArg, Agg: AggSum, Alias: v},
+			{Field: v, FieldExpr: exprArg, Agg: AggCountDistinct, Alias: v},
+			{Field: v, FieldExpr: exprArg, Agg: AggMedian, Alias: v},
 		},
-		MetricExprs: []MetricPlanExpr{{Field: v, FieldExpr: v, Agg: AggSum, Alias: v}},
+		MetricExprs: []MetricPlanExpr{{Field: v, FieldExpr: exprArg, Agg: AggSum, Alias: v}},
 		Filters: []FilterExpr{
 			{Field: v, FieldExpr: v, Op: FilterEq, Value: "p", Logic: "AND"},
 			{Field: v, FieldExpr: v, Op: FilterIsNull},
