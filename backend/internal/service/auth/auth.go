@@ -67,9 +67,17 @@ type Principal struct {
 	Kind     string // model.TokenKindSession | model.TokenKindPAT
 }
 
+// AdminConfig carries the startup escape hatches for the first administrator.
+// All three are optional; an empty value means "not configured".
+type AdminConfig struct {
+	Username   string
+	Password   string
+	ResetToken string
+}
+
 // Service is the auth use-case surface consumed by handlers and the middleware.
 type Service interface {
-	Register(ctx context.Context, username, password, ip, ua string) (*entity.AuthResult, error)
+	Register(ctx context.Context, username, password, bootstrapToken, ip, ua string) (*entity.AuthResult, error)
 	Login(ctx context.Context, username, password, ip, ua string) (*entity.AuthResult, error)
 	Verify(ctx context.Context, rawToken, ip, ua string) (*Principal, error)
 	Revoke(ctx context.Context, rawToken string) error
@@ -77,6 +85,9 @@ type Service interface {
 	CreatePAT(ctx context.Context, userID int, name string, never bool) (*entity.PATCreateResult, error)
 	ListPATs(ctx context.Context, userID int) ([]entity.TokenInfo, error)
 	RevokeByID(ctx context.Context, userID, id int) error
+	EnsureBootstrap(ctx context.Context) (string, bool, error)
+	BootstrapStatus(ctx context.Context) (bool, string, error)
+	RecoverAdmin(ctx context.Context, resetToken, newPassword string) error
 
 	// 最小用户管理（issue #202）：管理员建号 / 改显示名与角色 / 禁用 / 重置口令。
 	// 开放注册仍保持关闭；这些方法只由挂 Bearer(allowPAT=false) 且校验 admin
@@ -104,19 +115,20 @@ type UpdateUserInput struct {
 }
 
 type authService struct {
-	db    *bun.DB
-	guard *Guard
+	db       *bun.DB
+	adminCfg AdminConfig
+	guard    *Guard
 }
 
-// NewService wires the bun-backed auth service with a guard built from opts.
-// Tests inject a guard with a fake clock via newServiceWithGuard.
-func NewService(db *bun.DB, opts GuardOptions) Service {
-	return newServiceWithGuard(db, NewGuard(opts, nil))
+// NewService wires the bun-backed auth service with a guard built from opts and
+// the first-admin startup escape hatches (R-91).
+func NewService(db *bun.DB, opts GuardOptions, admin AdminConfig) Service {
+	return newServiceWithGuard(db, NewGuard(opts, nil), admin)
 }
 
 // newServiceWithGuard wires the service with an explicit guard.
-func newServiceWithGuard(db *bun.DB, guard *Guard) Service {
-	return &authService{db: db, guard: guard}
+func newServiceWithGuard(db *bun.DB, guard *Guard, admin AdminConfig) Service {
+	return &authService{db: db, adminCfg: admin, guard: guard}
 }
 
 // --- token primitives (pure, unit-tested) ---
@@ -164,15 +176,18 @@ func toUserEntity(m *model.User) *entity.User {
 
 // --- lifecycle ---
 
-// Register creates the FIRST user as admin and closes registration afterwards.
-// On the bootstrap it also adopts every row still stamped with the L0 placeholder
+// Register creates the FIRST administrator as admin and closes registration
+// afterwards. It requires the one-time bootstrap token printed at startup; an
+// advisory lock makes concurrent first-boot requests converge on one winner.
+// On success it also adopts every row still stamped with the L0 placeholder
 // owner (model.SystemOwnerID) onto the new admin — the R-22 存量归属衔接
 // (#183 acceptance 6). All of this is one transaction so a partially-applied
 // bootstrap (admin exists but owner_id not adopted) cannot be observed.
 //
 // 限流（issue #203）：注册引导窗口可被抢注（部署后到首个管理员之间的裸奔期），
 // 所以 register 也挂 IP 维度限流 —— 同一来源 IP 每分钟超限即拒。
-func (s *authService) Register(ctx context.Context, username, password, ip, ua string) (*entity.AuthResult, error) {
+func (s *authService) Register(ctx context.Context, username, password, bootstrapToken, ip, ua string) (*entity.AuthResult, error) {
+
 	if username == "" || password == "" {
 		return nil, router.NewBusinessError(response.CodeBadRequest, "username and password are required")
 	}
@@ -186,16 +201,32 @@ func (s *authService) Register(ctx context.Context, username, password, ip, ua s
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	var created *model.User
 	var result *entity.AuthResult
 	err = database.WithTx(ctx, s.db, func(ctx context.Context, tx bun.Tx) error {
-		live, err := tx.NewSelect().Model((*model.User)(nil)).
-			Where("deleted_at IS NULL").Count(ctx)
-		if err != nil {
-			return fmt.Errorf("count users: %w", err)
+		if _, err := tx.NewRaw("SELECT pg_advisory_xact_lock(?)", bootstrapAdvisoryLock).Exec(ctx); err != nil {
+			return fmt.Errorf("acquire bootstrap lock: %w", err)
 		}
-		if live > 0 {
+		// Closed once ANY admin row exists, including disabled ones: disabling
+		// the last administrator must not reopen self-service registration.
+		admins, err := countAdmins(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if admins > 0 {
 			return router.NewBusinessError(response.CodeUnauthorized, "注册已关闭：系统管理员已建立")
+		}
+		if err := validateBootstrapToken(ctx, tx, bootstrapToken); err != nil {
+			return err
+		}
+		// Usernames stay reserved after soft delete (unique index covers all
+		// rows), otherwise a deleted admin's name could be silently re-used.
+		reused, err := tx.NewSelect().Model((*model.User)(nil)).
+			Where("username = ?", username).Count(ctx)
+		if err != nil {
+			return fmt.Errorf("check username: %w", err)
+		}
+		if reused > 0 {
+			return router.NewBusinessError(response.CodeBadRequest, "username already used")
 		}
 
 		u := &model.User{
@@ -208,22 +239,8 @@ func (s *authService) Register(ctx context.Context, username, password, ip, ua s
 		if _, err := tx.NewInsert().Model(u).Returning("id").Exec(ctx); err != nil {
 			return fmt.Errorf("insert user: %w", err)
 		}
-		created = u
-
-		// 存量归属衔接：把 L0 占位 owner 的行认到首个管理员名下。三张表各一条
-		// 显式更新（而非动态表名的 TableExpr —— 那会渲染出畸形 SQL）。
-		owner := int(model.SystemOwnerID)
-		updates := []*bun.UpdateQuery{
-			tx.NewUpdate().Model((*model.Datasource)(nil)),
-			tx.NewUpdate().Model((*model.Dataset)(nil)),
-			tx.NewUpdate().Model((*model.Chart)(nil)),
-		}
-		for _, q := range updates {
-			if _, err := q.Set("owner_id = ?", u.ID).
-				Where("owner_id = ?", owner).
-				Exec(ctx); err != nil {
-				return fmt.Errorf("adopt owner_id: %w", err)
-			}
+		if err := adoptSystemOwnedRows(ctx, tx, u.ID); err != nil {
+			return err
 		}
 
 		res, err := s.issueSession(ctx, tx, u, ip, ua)
@@ -231,18 +248,17 @@ func (s *authService) Register(ctx context.Context, username, password, ip, ua s
 			return err
 		}
 		result = res
-		return nil
+		return clearBootstrapSettings(ctx, tx)
 	})
 	if err != nil {
-		// WithTx wraps the closure error; the "registration closed" business
-		// error must reach the router UNWRAPPED so it maps to 20200, not 50000.
+		// WithTx wraps the closure error; business errors must reach the router
+		// UNWRAPPED so they map to their own code, not 50000.
 		var be router.BusinessError
 		if errors.As(err, &be) {
 			return nil, be
 		}
 		return nil, err
 	}
-	_ = created
 	return result, nil
 }
 

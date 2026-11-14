@@ -61,6 +61,10 @@ type Config struct {
 	// Log 是日志运行期配置（R-96）：Level 为 LOG_LEVEL 原始值，
 	// 解析交给 logx.ParseLevel（非法值由调用方回落 info 并 warn 一次）。
 	Log LogConfig
+	// Admin 是首管建立与恢复的逃生口（R-91）：三者都留空 = 走一次性
+	// bootstrap token（启动时打印）。
+	Admin AdminConfig
+
 	// Auth 是认证端点防护（issue #203）的运行期配置。
 	Auth AuthConfig
 }
@@ -69,6 +73,14 @@ type Config struct {
 type LogConfig struct {
 	// Level 是 LOG_LEVEL 原始值（debug/info/warn/error）。
 	Level string
+}
+
+// AdminConfig 聚合首管相关的环境变量。ADMIN_USERNAME 与 ADMIN_PASSWORD
+// 必须成对出现；ADMIN_RESET_TOKEN 留空即关闭恢复通道。
+type AdminConfig struct {
+	Username   string
+	Password   string
+	ResetToken string
 }
 
 // AlertConfig 聚合预警模块的环境变量。SMTP 五项 + 收件人任何一项缺失都不拦启动：
@@ -232,6 +244,16 @@ func (c *Config) Load() error {
 
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		c.Log.Level = v
+	}
+	if v := os.Getenv("ADMIN_USERNAME"); v != "" {
+		c.Admin.Username = v
+	}
+	if v := os.Getenv("ADMIN_PASSWORD"); v != "" {
+		c.Admin.Password = v
+	}
+	if v := os.Getenv("ADMIN_RESET_TOKEN"); v != "" {
+		c.Admin.ResetToken = v
+
 	}
 
 	// 认证端点限流（issue #203）：非法值不 fail-fast（防护是安全增强，配置错误不该

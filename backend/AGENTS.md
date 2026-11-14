@@ -60,7 +60,8 @@ handler → service → domain/entity
 
 ### 泛型路由注册
 
-`router/router.go` 提供 `RegisterRoute[In, Out]` 泛型函数（`RegisterGetRoute`/`RegisterPostRoute`/`RegisterPutRoute`/`RegisterDeleteRoute`），自动绑定 query 参数和 JSON body，统一包装响应。**59 个 API 端点已全部经此注册**（datasource 12 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）。
+`router/router.go` 提供 `RegisterRoute[In, Out]` 泛型函数（`RegisterGetRoute`/`RegisterPostRoute`/`RegisterPutRoute`/`RegisterDeleteRoute`），自动绑定 query 参数和 JSON body，统一包装响应。**61 个 API 端点已全部经此注册**（datasource 12 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 6 + token 3）。
+
 
 - 签名 `API[In,Out] func(req Request[In], res *Response[Out]) error`——`res` 为指针，值传递会静默丢弃 handler 写入。
 - 路由器按 HTTP 方法自动绑定 JSON body（POST/PUT/PATCH 绑定，GET/DELETE 不绑定）+ query 参数；handler 内部不再手写 `response.*`。手工注册的例外共 4 个：`/health` 在 cmd/main.go 用裸 `r.GET`+`response.Success`；`POST /api/datasets/import`（上传新建数据集）与 `POST /api/datasets/:id/replace`（上传替换已有数据集）是 multipart，绑定与泛型路由的 `ShouldBindJSON` 语义不兼容；`POST /api/charts/export`（下载数据，issue #120）成功时是文件流而非信封。后三者均循 `/health` 先例在 cmd/routes.go 以裸 `*gin.Context` handler 注册。
@@ -139,7 +140,7 @@ go test -race ./...                        # 带竞态检测运行测试
 | `bi_query` | 查询记录（queryrecord 领域） |
 | `bi_alert_rule` | 指标预警规则（绑定图表 + 指标 + 阈值，迁移 00011） |
 | `bi_alert_trigger` | 指标预警触发记录（只追加不改写，迁移 00011） |
-| `bi_user` | 用户账号（auth 领域，迁移 00010） |
+| `bi_user` | 用户账号（auth 领域，迁移 00010 + 00013 全局用户名唯一） |
 | `bi_token` | 个人访问令牌 PAT（迁移 00010） |
 | `bi_setting` | 运行期设置（keystore 持久化 SECURITY_KEY、示例数据集「忽略」标记） |
 
@@ -152,6 +153,7 @@ go test -race ./...                        # 带竞态检测运行测试
 
 所有路由前缀 `/api`，除 4 个手工注册的 `GET /health`（健康检查，cmd/main.go）、`POST /api/datasets/import` 与 `POST /api/datasets/:id/replace`（本地文件上传，multipart，cmd/routes.go）、`POST /api/charts/export`（图表导出，文件流，cmd/routes.go）外，共 **59 个端点** 经泛型路由注册（datasource 12 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 4 + token 3）。
 
+
 | 领域 | 路由 |
 |------|------|
 | Datasource (11) | CRUD + test, tables, columns, table data, preview, field-distribution |
@@ -162,7 +164,7 @@ go test -race ./...                        # 带竞态检测运行测试
 | DashboardFolder (5) | CRUD（归档树扁平出口，独立前缀 `/api/dashboard-folders`） |
 | Alert (6) | CRUD + triggers（触发历史查询） |
 | SampleDataset (4) | status, load, dismiss, remove（内置示例数据集） |
-| Auth (4) | register, login, me, logout（后两者需 Bearer） |
+| Auth (6) | bootstrap-status, register, recover-admin, login（公开）, me, logout（后两者需 Bearer） |
 | Token (3) | create, list, revoke（PAT 管理，仅人类会话可操作） |
 
 ## 数据库与迁移

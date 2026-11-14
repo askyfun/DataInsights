@@ -81,7 +81,7 @@ func newMockAuth(t *testing.T) (*authService, sqlmock.Sqlmock) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	// 宽松默认 guard：认证相关既有用例不受限流干扰；限流行为由 guard_test.go 单独覆盖。
 	svc := newServiceWithGuard(bun.NewDB(sqlDB, pgdialect.New()),
-		NewGuard(GuardOptions{RatePerMinute: 1_000_000, MaxFailures: 1_000_000}, nil))
+		NewGuard(GuardOptions{RatePerMinute: 1_000_000, MaxFailures: 1_000_000}, nil), AdminConfig{})
 	return svc.(*authService), mock
 }
 
@@ -93,15 +93,29 @@ func newMockAuthWithGuard(t *testing.T, guard *Guard) *authService {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	svc := newServiceWithGuard(bun.NewDB(sqlDB, pgdialect.New()), guard)
+	svc := newServiceWithGuard(bun.NewDB(sqlDB, pgdialect.New()), guard, AdminConfig{})
 	return svc.(*authService)
+}
+
+const testBootstrapToken = "di_boot_test-token"
+
+func expectBootstrapToken(mock sqlmock.Sqlmock, expiry time.Time) {
+	// bun inlines arguments into the SQL, so sqlmock sees literal keys.
+	mock.ExpectQuery(`SELECT value FROM bi_setting WHERE key = 'bootstrap_token_hash'`).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(hashToken(testBootstrapToken)))
+	mock.ExpectQuery(`SELECT value FROM bi_setting WHERE key = 'bootstrap_token_expires_at'`).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(expiry.UTC().Format(time.RFC3339)))
 }
 
 func TestRegister_BootstrapsAdminAndAdoptsOwner(t *testing.T) {
 	s, mock := newMockAuth(t)
-	// tx begin → count live users = 0
+	// tx begin → serialize → no admin exists → valid bootstrap token → name free
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"`).
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"( AS "user")?`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	expectBootstrapToken(mock, time.Now().Add(time.Minute))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"( AS "user")? WHERE \(username = `).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	// insert admin, RETURNING id → id = 1 (bun runs INSERT-with-Returning as a Query).
 	mock.ExpectQuery(`INSERT INTO "bi_user".*RETURNING id`).
@@ -110,12 +124,16 @@ func TestRegister_BootstrapsAdminAndAdoptsOwner(t *testing.T) {
 	mock.ExpectExec(`UPDATE "bi_datasource" AS "datasource" SET owner_id`).WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec(`UPDATE "bi_dataset" AS "dataset" SET owner_id`).WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectExec(`UPDATE "bi_chart" AS "chart" SET owner_id`).WillReturnResult(sqlmock.NewResult(0, 1))
-	// session token insert (also RETURNING → Query), then commit.
+	// session token insert (also RETURNING → Query), then consume the token.
 	mock.ExpectQuery(`INSERT INTO "bi_token".*RETURNING`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "revoked_at"}).AddRow(1, nil))
+	mock.ExpectExec(`DELETE FROM bi_setting WHERE key = 'bootstrap_token_hash'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM bi_setting WHERE key = 'bootstrap_token_expires_at'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	res, err := s.Register(context.Background(), "alice", "pw-secret", "1.2.3.4", "curl")
+	res, err := s.Register(context.Background(), "alice", "pw-secret", testBootstrapToken, "1.2.3.4", "curl")
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -133,17 +151,20 @@ func TestRegister_BootstrapsAdminAndAdoptsOwner(t *testing.T) {
 func TestRegister_ClosedAfterFirstUser(t *testing.T) {
 	s, mock := newMockAuth(t)
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"`).
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
+	// Counts ALL admin rows, including soft-deleted ones: disabling the last
+	// administrator must not reopen registration.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"( AS "user")? WHERE \(role = `).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectRollback()
 
-	_, err := s.Register(context.Background(), "bob", "pw", "", "")
+	_, err := s.Register(context.Background(), "bob", "pw", testBootstrapToken, "", "")
 	if err == nil {
 		t.Fatal("second registration must be rejected")
 	}
 	var be router.BusinessError
 	if !errors.As(err, &be) || be.Code != 20200 {
-		t.Fatalf("want 20200 business error, got %#v", err)
+		t.Fatalf("want 20200 business error, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -156,11 +177,12 @@ func TestRegister_ClosedAfterFirstUser(t *testing.T) {
 func TestRegister_ClosedWhenOnlyDisabledAdminExists(t *testing.T) {
 	s, mock := newMockAuth(t)
 	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "bi_user"`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectRollback()
 
-	_, err := s.Register(context.Background(), "intruder", "pw", "", "")
+	_, err := s.Register(context.Background(), "intruder", "pw", "", "", "")
 	if err == nil || errorCode(err) != 20200 {
 		t.Fatalf("registration must stay closed with a disabled admin present, got %v", err)
 	}

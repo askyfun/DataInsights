@@ -71,9 +71,19 @@
 
 ## 7. 升级与回滚
 
+- **忘记管理员口令**：设置 `ADMIN_RESET_TOKEN` 后重启容器，用一次性令牌重置（成功一次即失效，记得随后更换或清空该变量）：
+
+  ```bash
+  # 在宿主机执行（镜像内只有 server 与静态产物，没有 curl）
+  curl -sS -X POST http://127.0.0.1:23352/api/auth/recover-admin \
+    -H 'Content-Type: application/json' \
+    -d "{\"reset_token\":\"$ADMIN_RESET_TOKEN\",\"new_password\":\"<新口令>\"}"
+  ```
+
 逐条可复制的命令（备份 / 恢复 / 换版本 / 失败回滚）见 **[backup-restore.md](backup-restore.md)** 与 `scripts/upgrade.sh` —— 本节只留原则。
 
 - **迁移前先备份**：迁移随启动自动应用，升级前先对 `DATABASE_URL` 指向的库做一次备份（`scripts/backup.sh` 或 `pg_dump -Fc`）。
+
 - **镜像用不可变 tag**：用版本号或提交 sha 打 tag，避免 `latest` 无法区分版本、难以回滚。
 - **回滚注意 `SECURITY_KEY`**：回滚到旧版本时，`SECURITY_KEY` 必须与库里已加密数据对应的 key 保持一致（留空时 key 落在数据库里，容器重建会自动复用；显式配置时须保持同一把）。
 - **迁移顺序红线**：schema 迁移随新版本启动自动应用；「一次性数据迁移」`./server -migrate-column-ids` 是另一套机制 —— 正确顺序是 **dry-run 看报告 → `-apply` 写库 → 再放量新版本**。顺序颠倒时新进程读旧引用会静默丢弃过滤条件（返回放大后的错数而非报错）。`upgrade.sh` 把这条红线作为换版本前的显式前置检查步骤承载。

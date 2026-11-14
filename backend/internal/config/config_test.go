@@ -15,7 +15,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"PORT", "DATABASE_URL", "SECURITY_KEY", "SENTRY_DSN", "STATIC_DIR", "CORS_ALLOWED_ORIGINS",
-		"EXTRACT_DATASOURCE_ID",
+		"EXTRACT_DATASOURCE_ID", "ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_RESET_TOKEN",
 	} {
 		t.Setenv(name, "")
 	}
