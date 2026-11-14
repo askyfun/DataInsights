@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1
 
 # =============================================================================
-# Data Insights 单镜像：前端构建产物 + Go 二进制打进同一个镜像，一个进程、一个端口。
+# TableWave 单镜像：前端构建产物 + Go 二进制打进同一个镜像，一个进程、一个端口。
 #
 # 路由分工由 Go 进程按路径完成，不再需要 nginx：
 #   /api、/mcp、/health  → 后端内部路由（未匹配到就是 JSON 404，不会回落成页面）
 #   其余路径             → 静态目录里的文件；没有对应文件就回落 index.html（SPA 路由）
 #
 # 构建上下文必须是仓库根目录 —— 镜像要同时看到 frontend/ 与 backend/：
-#   docker build -t data-insights .
-#   docker run -d --name data-insights -p 23352:23352 --env-file .env data-insights
+#   docker build -t tablewave .
+#   docker run -d --name tablewave -p 23352:23352 --env-file .env tablewave
 # =============================================================================
 
 

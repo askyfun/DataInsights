@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/listpage"
-	"data-insights/internal/query"
-	"data-insights/internal/router"
-	"data-insights/internal/service/chart"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/listpage"
+	"tablewave/internal/query"
+	"tablewave/internal/router"
+	"tablewave/internal/service/chart"
 
 	"github.com/gin-gonic/gin"
 )

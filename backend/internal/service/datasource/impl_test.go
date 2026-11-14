@@ -10,9 +10,9 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/crypto"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
+	"tablewave/internal/crypto"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
 )
 
 // TestBuildDistributionSQLsSQLDatasetUsesQuerySQL verifies that for SQL-type

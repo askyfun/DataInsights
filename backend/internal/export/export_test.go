@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/query"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/query"
 )
 
 func TestWriteCSV_BOMHeaderRows(t *testing.T) {

@@ -36,6 +36,8 @@ export function resolveTheme(preference: ThemeMode): ResolvedTheme {
 
 let preference: ThemeMode = 'system';
 let resolved: ResolvedTheme = 'light';
+/** 临时强制主题（如大屏播放器强制深色，issue #159）；null = 不强制，走 preference。 */
+let forcedTheme: ResolvedTheme | null = null;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -49,7 +51,7 @@ function applyToDom(): void {
 
 /** 偏好/系统变化后重算解析主题，必要时通知订阅者。 */
 function recompute(): void {
-  const next = resolveTheme(preference);
+  const next = forcedTheme ?? resolveTheme(preference);
   if (next !== resolved) {
     resolved = next;
     applyToDom();
@@ -88,6 +90,24 @@ export function getThemePreference(): ThemeMode {
 export function setThemeMode(next: ThemeMode): void {
   preference = next;
   localStorage.setItem(PREF_KEY, next);
+  recompute();
+}
+
+/**
+ * 临时强制主题（不改用户偏好、不写 localStorage）。
+ *
+ * 供大屏播放器（issue #159）在挂载时强制深色、卸载时释放：`forcedTheme` 会盖过
+ * `resolveTheme(preference)` 的输出，但用户偏好原样保留——退出大屏即回到用户选的主题。
+ * 与 setThemeMode 的区别正在于此：后者持久化并成为用户的新偏好。
+ */
+export function forceTheme(next: ResolvedTheme): void {
+  forcedTheme = next;
+  recompute();
+}
+
+/** 释放临时强制主题，回到用户偏好（`preference` + 系统深浅色）。 */
+export function releaseTheme(): void {
+  forcedTheme = null;
   recompute();
 }
 

@@ -466,6 +466,14 @@ const DateFilterEditor: React.FC<DateFilterEditorProps> = ({
       {value.kind === 'special' && renderSpecial()}
       {value.kind === 'single' && renderSingle()}
 
+      {/* R-78：把「昨天为数据上界」的刻意口径放到用户眼前，避免把 T+1 落数当 bug。 */}
+      {(value.kind === 'dynamic' || value.kind === 'fixed') && (
+        <Text type="secondary" style={{ fontSize: 12 }} data-testid="date-filter-t1-note">
+          区间默认以「昨天」为数据上界（T+1
+          落数假设）；需要包含今天时，请选「自定义」并勾选「包含今天」。
+        </Text>
+      )}
+
       {resolved.includeEmpty && (
         <Text type="secondary" style={{ fontSize: 12 }}>
           已开启「包含空日期」：区间条件之外会额外放行该列为 NULL 的行。

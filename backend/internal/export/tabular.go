@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/query"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/query"
 )
 
 // Table 是导出的中间形态：列名（与图表展示的列名逐字一致）+ 行。

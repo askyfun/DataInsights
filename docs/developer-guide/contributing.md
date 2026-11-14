@@ -134,9 +134,9 @@ import (
     "github.com/gin-gonic/gin"
     "github.com/uptrace/bun"
 
-    "data-insights/internal/config"
-    "data-insights/internal/database"
-    "data-insights/internal/model"
+    "tablewave/internal/config"
+    "tablewave/internal/database"
+    "tablewave/internal/model"
 )
 ```
 

@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/extract"
-	"data-insights/internal/idgen"
-	"data-insights/internal/model"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/datasource"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/extract"
+	"tablewave/internal/idgen"
+	"tablewave/internal/model"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 )
 
 // importBatchSize caps how many rows go into one INSERT statement, keeping the

@@ -9,13 +9,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/export"
-	"data-insights/internal/listpage"
-	"data-insights/internal/query"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/chart"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/export"
+	"tablewave/internal/listpage"
+	"tablewave/internal/query"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/chart"
 )
 
 // ChartHandler handles chart HTTP requests

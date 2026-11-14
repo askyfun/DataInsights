@@ -3,8 +3,8 @@ package extract
 import (
 	"testing"
 
-	"data-insights/internal/crypto"
-	"data-insights/internal/model"
+	"tablewave/internal/crypto"
+	"tablewave/internal/model"
 )
 
 // R-85 风险面：自举存储的口令也会被加密，而管理员换 SECURITY_KEY 是既有运维动作。

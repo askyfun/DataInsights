@@ -37,11 +37,11 @@ func TestCORSAllowsConfiguredOrigin(t *testing.T) {
 func TestCORSPreflightAllowedOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(corsMiddleware([]string{"http://localhost:3000", "https://data-insights.example"}))
+	r.Use(corsMiddleware([]string{"http://localhost:3000", "https://tablewave.example"}))
 	r.GET("/ping", func(c *gin.Context) { c.Status(200) })
 
 	req := httptest.NewRequest(http.MethodOptions, "/ping", nil)
-	req.Header.Set("Origin", "https://data-insights.example")
+	req.Header.Set("Origin", "https://tablewave.example")
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -49,7 +49,7 @@ func TestCORSPreflightAllowedOrigin(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected preflight 204, got %d", w.Code)
 	}
-	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://data-insights.example" {
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://tablewave.example" {
 		t.Fatalf("expected preflight origin echo, got %q", got)
 	}
 	if w.Header().Get("Access-Control-Allow-Methods") == "" {

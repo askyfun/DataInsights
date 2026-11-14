@@ -1,4 +1,4 @@
-# Data Insights Makefile
+# TableWave Makefile
 
 # 颜色定义
 GREEN := \033[0;32m
@@ -10,7 +10,7 @@ NC := \033[0m # No Color
 
 # 默认目标
 help:
-	@echo "$(BLUE)Data Insights 开发命令$(NC)"
+	@echo "$(BLUE)TableWave 开发命令$(NC)"
 	@echo ""
 	@echo "$(GREEN)安装依赖:$NC"
 	@echo "  make install          安装前后端依赖 (pnpm)"
@@ -119,8 +119,8 @@ api-gen:
 
 # Docker：单镜像（前端静态产物 + Go 二进制同进程），构建上下文是仓库根目录
 docker-build:
-	@echo "$(YELLOW)构建 Data Insights 单镜像...$(NC)"
-	docker build -t data-insights .
+	@echo "$(YELLOW)构建 TableWave 单镜像...$(NC)"
+	docker build -t tablewave .
 
 # Docker：一键体验环境（Docker Hub 发布镜像 + PostgreSQL），见 docker-compose.allinone.yml
 COMPOSE_FILE := docker-compose.allinone.yml
