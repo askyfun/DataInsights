@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
+	"tablewave/internal/datasource"
 )
 
 // boxplotCaps 是 boxplot stats builder 需要的能力声明（PG percentile_cont）。

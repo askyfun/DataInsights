@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/query"
+	"tablewave/internal/query"
 
 	"github.com/gin-gonic/gin"
 )

@@ -3,7 +3,7 @@ package chart
 import (
 	"testing"
 
-	"data-insights/internal/domain/entity"
+	"tablewave/internal/domain/entity"
 )
 
 // 仪表盘筛选合并（PRD §8.3 / D5–D7）的单元测试。

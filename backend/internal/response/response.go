@@ -21,6 +21,7 @@ const (
 	// 4xx 客户端错误
 	CodeBadRequest    = 20100 // 请求参数错误
 	CodeUnauthorized  = 20200 // 认证/授权错误
+	CodeRateLimited   = 20201 // 认证端点限流/锁定（issue #203；HTTP 语义对应 429，信封码独立以便前端区分）
 	CodeNotFound      = 20300 // 资源不存在
 	CodeBusinessError = 20400 // 业务逻辑错误
 	CodeThirdPartyErr = 20500 // 第三方服务错误
