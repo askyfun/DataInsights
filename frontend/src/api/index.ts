@@ -296,8 +296,17 @@ export type DashboardQueryLinkage = {
   value: unknown[];
 };
 
+// 动态维度/指标的观看侧选择（issue #134）：只带「哪块图的哪个槽位切到了哪一列」，
+// 列与槽位的关系由后端在该图表的 config 里校验（必须是默认列或候选列）。
+export type DashboardQuerySelection = {
+  widgetId: string;
+  bindingId: string;
+  fieldId: string;
+};
+
 export type DashboardQueryRequest = G['DashboardQueryRequest'] & {
   linkages?: DashboardQueryLinkage[];
+  selections?: DashboardQuerySelection[];
 };
 // 注意命名陷阱：这里取的是**单块结果**（DashboardQueryResult 是 block schema），
 // 接口的 Envelope 同名类型是 G['DashboardQueryResponse']（见文件头迁移规则）。

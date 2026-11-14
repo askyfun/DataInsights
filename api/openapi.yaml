@@ -3865,6 +3865,30 @@ components:
             被点击数据项的维度取值；空数组等同于未激活。单值 → eq，多值 → in
             （与盘级筛选器同一条「按值个数收形」的规则）。
           items: {}
+    DashboardQuerySelection:
+      type: object
+      description: >-
+        POST /api/dashboards/{id}/query 的动态维度/指标当前选择（issue #134）。
+        观看者在图表切换器里选了哪个候选列，就下发哪一条；没出现的槽位一律用图表配置
+        里的默认字段。选择只作用于本次取数，绝不写回 bi_chart.config。
+      required:
+        - widgetId
+        - bindingId
+        - fieldId
+      properties:
+        widgetId:
+          type: string
+          description: 图表块 widgetId（对应布局里 type=chart 的块）。
+        bindingId:
+          type: string
+          description: >-
+            图表 config 里该槽位的 bindingId（与 fieldMeta 的键同域）。找不到对应绑定的
+            选择被忽略（作者可能已删掉该槽位）。
+        fieldId:
+          type: string
+          description: >-
+            目标列的稳定 id（DatasetColumn.id）。必须等于该 binding 的默认 fieldId，或落在
+            bindings[].candidates 内；越界选择让该块返回 error 状态，不做静默换列。
     DashboardQueryRequest:
       type: object
       description: >-
@@ -3887,6 +3911,13 @@ components:
             已激活的图表联动（issue #143）。同一来源只应出现一次；未点击的来源不要下发。
           items:
             $ref: '#/components/schemas/DashboardQueryLinkage'
+        selections:
+          type: array
+          description: >-
+            动态维度/指标的观看侧选择（issue #134）。同一槽位只应出现一次；用默认字段的
+            槽位不要下发。
+          items:
+            $ref: '#/components/schemas/DashboardQuerySelection'
     DashboardQueryResult:
       type: object
       description: 单块取数结果（PRD §6.3）。单块失败不整盘失败。

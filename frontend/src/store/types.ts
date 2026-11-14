@@ -110,6 +110,12 @@ export interface BindingInstance {
   bindingId: string;
   /** 数据集列的稳定 id（`DatasetColumn.id`）。列名是可变展示名，不进任何持久化引用。 */
   fieldId: string;
+  /**
+   * 动态维度/指标（issue #134）的候选列：**不含**默认列（fieldId 本身）。
+   * 作者在这里配置可切换的其他列；观看侧切换器把选择换成其中之一后重新查询，
+   * 选择只是会话态，不写回 binding.fieldId。
+   */
+  candidates?: string[];
 }
 
 // 字段组 - 支持多维度/多指标

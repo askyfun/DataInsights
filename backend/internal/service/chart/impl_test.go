@@ -1157,3 +1157,103 @@ func TestChartDataQueryFromConfig_PercentFormatNeedsTotal(t *testing.T) {
 		})
 	}
 }
+
+// --- 动态维度/指标（issue #134）：观看侧选择只作用于本次取数 ---
+
+// dynamicSlotChart 是一份带候选集的 v2 配置：维度 b-0 默认 region、候选 city；
+// 指标 b-1 默认 amount、候选 qty。
+func dynamicSlotChart() *model.Chart {
+	return &model.Chart{ID: 7, DatasetID: 10, ChartType: "bar", Config: `{"version":2,"chartType":"bar","query":{
+		"dimensionGroups":[{"id":"dims","bindings":[{"bindingId":"b-0","fieldId":"region","candidates":["city"]}]}],
+		"metricGroups":[{"id":"values","bindings":[{"bindingId":"b-1","fieldId":"amount","candidates":["qty"]}]}],
+		"filters":[]},"fieldMeta":{},"style":{},"queryOptions":{}}`}
+}
+
+func TestChartDataQueryFromConfigWithSelections_SwitchesCandidate(t *testing.T) {
+	chart := dynamicSlotChart()
+
+	req, ok, err := chartDataQueryFromConfigWithSelections(chart, []entity.ChartFieldSelection{
+		{BindingID: "b-0", FieldID: "city"},
+		{BindingID: "b-1", FieldID: "qty"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(req.Dims) != 1 || req.Dims[0] != "city" {
+		t.Fatalf("dims = %v, want [city]", req.Dims)
+	}
+	if len(req.Metrics) != 1 || req.Metrics[0].Field != "qty" {
+		t.Fatalf("metrics = %+v, want field qty", req.Metrics)
+	}
+	// 默认值不被改写：选择只活在本次请求里。
+	if chart.Config == "" || !strings.Contains(chart.Config, `"fieldId":"region","candidates":["city"]`) {
+		t.Fatalf("chart config must stay untouched: %s", chart.Config)
+	}
+}
+
+// 选中默认列本身是 no-op（不是错误）：候选集不含默认列，但选择它就是「不切换」。
+func TestChartDataQueryFromConfigWithSelections_DefaultIsNoop(t *testing.T) {
+	req, ok, err := chartDataQueryFromConfigWithSelections(dynamicSlotChart(), []entity.ChartFieldSelection{
+		{BindingID: "b-0", FieldID: "region"},
+	})
+	if err != nil || !ok {
+		t.Fatalf("expected ok, got ok=%v err=%v", ok, err)
+	}
+	if len(req.Dims) != 1 || req.Dims[0] != "region" {
+		t.Fatalf("dims = %v, want [region]", req.Dims)
+	}
+}
+
+// 候选集之外的列必须显式报错：否则前端一个过期/篡改的 selection 会静默换成
+// 任意列，绕开「只允许候选互为维度」的产品约束。
+func TestChartDataQueryFromConfigWithSelections_RejectsNonCandidate(t *testing.T) {
+	_, _, err := chartDataQueryFromConfigWithSelections(dynamicSlotChart(), []entity.ChartFieldSelection{
+		{BindingID: "b-0", FieldID: "amount"},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-candidate selection")
+	}
+	if !strings.Contains(err.Error(), "not a candidate") {
+		t.Fatalf("error should explain candidate constraint, got %v", err)
+	}
+}
+
+// 找不到 bindingId 的选择被忽略：作者可能已经删掉该槽位，过期会话不该让整块失败。
+func TestChartDataQueryFromConfigWithSelections_IgnoresUnknownBinding(t *testing.T) {
+	req, ok, err := chartDataQueryFromConfigWithSelections(dynamicSlotChart(), []entity.ChartFieldSelection{
+		{BindingID: "b-404", FieldID: "city"},
+	})
+	if err != nil || !ok {
+		t.Fatalf("expected ok, got ok=%v err=%v", ok, err)
+	}
+	if len(req.Dims) != 1 || req.Dims[0] != "region" {
+		t.Fatalf("dims = %v, want default [region]", req.Dims)
+	}
+}
+
+// v1 文档没有 bindingId：带选择时显式报错，而不是「切换了却没反应」。
+func TestChartDataQueryFromConfigWithSelections_RejectsV1(t *testing.T) {
+	chart := &model.Chart{ID: 7, DatasetID: 10, ChartType: "bar", Config: `{"chartType":"bar","query":{"dimensionGroups":[{"id":"dims","fields":["region"]}],"metricGroups":[{"id":"values","fields":["amount"]}],"filters":[]},"fieldMeta":{}}`}
+	_, _, err := chartDataQueryFromConfigWithSelections(chart, []entity.ChartFieldSelection{
+		{BindingID: "b-0", FieldID: "city"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not v2") {
+		t.Fatalf("expected v2 requirement error, got %v", err)
+	}
+}
+
+// 无选择时与 chartDataQueryFromConfig 完全等价。
+func TestChartDataQueryFromConfigWithSelections_EmptyMatchesBase(t *testing.T) {
+	chart := dynamicSlotChart()
+	base, baseOK := chartDataQueryFromConfig(chart)
+	got, ok, err := chartDataQueryFromConfigWithSelections(chart, nil)
+	if err != nil || ok != baseOK {
+		t.Fatalf("expected parity, got ok=%v err=%v", ok, err)
+	}
+	if !reflect.DeepEqual(got, base) {
+		t.Fatalf("empty selections changed request:\n got %+v\nwant %+v", got, base)
+	}
+}

@@ -17,6 +17,8 @@ import (
 type chartDataProvider interface {
 	ChartQueryContext(ctx context.Context, id int) (*entity.ChartQueryContext, error)
 	GetDataWithFilterOverrides(ctx context.Context, id int, overrides []entity.Filter) (entity.ChartDataResult, error)
+	// GetDataWithOverrides 额外应用本块图表的动态维度/指标观看侧选择（issue #134）。
+	GetDataWithOverrides(ctx context.Context, id int, overrides []entity.Filter, selections []entity.ChartFieldSelection) (entity.ChartDataResult, error)
 }
 
 // dashboardQueryConcurrency 是「单盘 N 块并发取数」的并发上限（PRD §6.3 / §11-6）。
@@ -288,6 +290,17 @@ func (s *dashboardService) Query(
 		}
 	}
 
+	// 动态维度/指标选择（issue #134）按 widget 建索引：选择只作用于对应图表块，
+	// 未出现在请求里的块一律用图表配置的默认字段。
+	selectionsByWidget := make(map[string][]entity.ChartFieldSelection, len(in.Selections))
+	for _, selection := range in.Selections {
+		if selection.WidgetID == "" || selection.BindingID == "" || selection.FieldID == "" {
+			continue
+		}
+		selectionsByWidget[selection.WidgetID] = append(selectionsByWidget[selection.WidgetID],
+			entity.ChartFieldSelection{BindingID: selection.BindingID, FieldID: selection.FieldID})
+	}
+
 	sem := make(chan struct{}, dashboardQueryConcurrency)
 	var wg sync.WaitGroup
 	for i := range projection.Charts {
@@ -300,6 +313,7 @@ func (s *dashboardService) Query(
 			// 恒等于 layout 顺序。
 			result.Results[i] = s.queryBlock(
 				ctx, filters, projection.Charts[i], values, in.Linkages, targetsBySource,
+				selectionsByWidget[projection.Charts[i].WidgetID],
 			)
 		}(i)
 	}
@@ -314,6 +328,7 @@ func (s *dashboardService) queryBlock(
 	ctx context.Context, filters []layoutFilterBinding, block layoutChartBlock,
 	values map[string][]any, linkages []entity.DashboardQueryLinkage,
 	targetsBySource map[string][]layoutLinkageTarget,
+	selections []entity.ChartFieldSelection,
 ) entity.DashboardQueryBlock {
 	out := entity.DashboardQueryBlock{WidgetID: block.WidgetID, ChartID: block.ChartID}
 
@@ -337,7 +352,10 @@ func (s *dashboardService) queryBlock(
 	overrides, appliedFields := mergeOverrides(filterOverrides, linkageOverrides)
 
 	var data entity.ChartDataResult
-	if len(overrides) == 0 {
+	if len(selections) > 0 {
+		// 动态槽位选择（issue #134）与筛选覆盖走同一条「只作用于本次取数」的通道。
+		data, err = s.chartProvider.GetDataWithOverrides(ctx, block.ChartID, overrides, selections)
+	} else if len(overrides) == 0 {
 		// 无适用筛选器时传 nil：让 chart 侧走「不做任何覆盖」的短路，语义更明确。
 		data, err = s.chartProvider.GetDataWithFilterOverrides(ctx, block.ChartID, nil)
 	} else {

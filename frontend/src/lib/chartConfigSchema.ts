@@ -26,6 +26,8 @@
  * - sort 以 bindingId 引用排序目标绑定（Task 1-7/R-50；v1/legacy 文档的列名键在
  *   迁移时翻译为对应 binding 的 bindingId，翻译不到则丢弃）；filters 的字段引用与
  *   bindings 同一口径（列 ID，键为 `fieldId`）；
+ * - bindings[].candidates（issue #134）是动态维度/指标的候选列（不含默认列），
+ *   可选增量：旧文档没有该键时形状不变；
  * - chartType / title / style / queryOptions 小节形状不变。
  *
  * 迁移是全覆盖函数：任何输入（空串、损坏 JSON、非对象）都返回合法 v2 文档，
@@ -368,10 +370,19 @@ function localizeGroups(
 ): ConfigFieldGroup[] {
   return groups.map((group) => ({
     ...group,
-    bindings: group.bindings.map((binding) => ({
-      bindingId: binding.bindingId,
-      fieldId: nameToId.get(binding.fieldId) ?? binding.fieldId,
-    })),
+    bindings: group.bindings.map((binding) => {
+      const localized: BindingInstance = {
+        bindingId: binding.bindingId,
+        fieldId: nameToId.get(binding.fieldId) ?? binding.fieldId,
+      };
+      // 候选列与 fieldId 同一标识口径，也需要升级（issue #134）
+      if (binding.candidates) {
+        localized.candidates = binding.candidates.map(
+          (candidate) => nameToId.get(candidate) ?? candidate
+        );
+      }
+      return localized;
+    }),
   }));
 }
 
@@ -479,6 +490,23 @@ function isBindingInstance(value: unknown): value is BindingInstance {
   );
 }
 
+/** 动态维度/指标的候选列校验：只留非空字符串、去重、剔除与默认列相同的项 */
+function normalizeCandidates(input: unknown, fieldId: string): string[] | undefined {
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+  const seen = new Set<string>([fieldId]);
+  const candidates: string[] = [];
+  for (const value of input) {
+    if (typeof value !== 'string' || value === '' || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    candidates.push(value);
+  }
+  return candidates.length > 0 ? candidates : undefined;
+}
+
 /** v2 直通：校验拷贝 bindings（产出全新对象，绝不与输入共享引用） */
 function normalizeV2Groups(input: unknown): ConfigFieldGroup[] {
   if (!Array.isArray(input)) {
@@ -490,9 +518,18 @@ function normalizeV2Groups(input: unknown): ConfigFieldGroup[] {
       return;
     }
     const bindings = Array.isArray(entry.bindings)
-      ? entry.bindings
-          .filter(isBindingInstance)
-          .map((b) => ({ bindingId: b.bindingId, fieldId: b.fieldId }))
+      ? entry.bindings.filter(isBindingInstance).map((b) => {
+          const normalized: BindingInstance = {
+            bindingId: b.bindingId,
+            fieldId: b.fieldId,
+          };
+          // 候选列（issue #134）是可选增量：旧文档没有这个键，形状保持不变。
+          const candidates = normalizeCandidates(b.candidates, b.fieldId);
+          if (candidates) {
+            normalized.candidates = candidates;
+          }
+          return normalized;
+        })
       : [];
     const group: ConfigFieldGroup = {
       id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `group-${index}`,

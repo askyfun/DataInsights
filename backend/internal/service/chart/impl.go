@@ -39,6 +39,10 @@ type Service interface {
 	// on the same fields (dashboard runtime merge, PRD §8.3 / D5–D7). The
 	// persisted chart config is never rewritten.
 	GetDataWithFilterOverrides(ctx context.Context, id int, overrides []entity.Filter) (entity.ChartDataResult, error)
+	// GetDataWithOverrides 在 GetDataWithFilterOverrides 之上再叠加观看侧的动态槽位
+	// 选择（issue #134）：把 bindingId 对应绑定的生效列换成候选集里的列，同样只作用于
+	// 本次取数、绝不写回 config。空 selections 与 GetDataWithFilterOverrides 等价。
+	GetDataWithOverrides(ctx context.Context, id int, overrides []entity.Filter, selections []entity.ChartFieldSelection) (entity.ChartDataResult, error)
 	Query(ctx context.Context, req *entity.ChartQueryRequest) (entity.ChartDataResult, error)
 
 	// ChartQueryContext 汇总仪表盘取一块所需的图表元信息：行是否存在 / 是否已软删
@@ -196,7 +200,7 @@ func (s *chartService) Delete(ctx context.Context, id int) error {
 // of the bound dataset): those configs carry positional field ids whose column
 // names are not recoverable server-side, and the share view renders them.
 func (s *chartService) GetData(ctx context.Context, id int) (entity.ChartDataResult, error) {
-	return s.getData(ctx, id, nil)
+	return s.getData(ctx, id, nil, nil)
 }
 
 // GetDataWithFilterOverrides 与 GetData 走同一条"解析 config → 构造请求 → 执行"
@@ -206,11 +210,21 @@ func (s *chartService) GetData(ctx context.Context, id int) (entity.ChartDataRes
 func (s *chartService) GetDataWithFilterOverrides(
 	ctx context.Context, id int, overrides []entity.Filter,
 ) (entity.ChartDataResult, error) {
-	return s.getData(ctx, id, overrides)
+	return s.getData(ctx, id, overrides, nil)
+}
+
+// GetDataWithOverrides 在过滤覆盖之外再应用观看侧的动态槽位选择（issue #134）。
+// 选择的解析与候选校验发生在 config → 请求的构造处（chartDataQueryFromConfigWithSelections）。
+func (s *chartService) GetDataWithOverrides(
+	ctx context.Context, id int, overrides []entity.Filter,
+	selections []entity.ChartFieldSelection,
+) (entity.ChartDataResult, error) {
+	return s.getData(ctx, id, overrides, selections)
 }
 
 func (s *chartService) getData(
 	ctx context.Context, id int, overrides []entity.Filter,
+	selections []entity.ChartFieldSelection,
 ) (entity.ChartDataResult, error) {
 	chart, err := s.getChartModelFn(ctx, id)
 	if err != nil {
@@ -233,7 +247,11 @@ func (s *chartService) getData(
 	}
 	defer conn.Close()
 
-	if req, ok := chartDataQueryFromConfig(chart); ok {
+	req, ok, err := chartDataQueryFromConfigWithSelections(chart, selections)
+	if err != nil {
+		return entity.ChartDataResult{}, err
+	}
+	if ok {
 		return s.executeQueryOnConn(ctx, conn, dataset, dsModel, applyFilterOverrides(req, overrides))
 	}
 
@@ -246,6 +264,11 @@ func (s *chartService) getData(
 	if len(overrides) > 0 {
 		return entity.ChartDataResult{}, fmt.Errorf(
 			"chart %d has no queryable config; dashboard filters cannot be applied", id,
+		)
+	}
+	if len(selections) > 0 {
+		return entity.ChartDataResult{}, fmt.Errorf(
+			"chart %d has no queryable config; dynamic slot selections cannot be applied", id,
 		)
 	}
 	source := getPlannerSource(dataset)
@@ -466,11 +489,32 @@ type chartConfigSort struct {
 // （对应前端 BindingInstance，键为 camelCase bindingId）。fieldId 是数据集列的
 // 稳定 id（列名是可变展示名，不进持久化引用）。
 type chartConfigBindingGroup struct {
-	ID       string `json:"id"`
-	Bindings []struct {
-		BindingID string `json:"bindingId"`
-		Field     string `json:"fieldId"`
-	} `json:"bindings"`
+	ID       string               `json:"id"`
+	Bindings []chartConfigBinding `json:"bindings"`
+}
+
+// chartConfigBinding 是 v2 文档里的一个字段绑定实例。
+type chartConfigBinding struct {
+	BindingID string `json:"bindingId"`
+	Field     string `json:"fieldId"`
+	// Candidates 是动态槽位（issue #134）的候选列：不含默认列（Field 本身）。
+	// 观看侧的 selections 只能在此集合内切换，否则整块报错而不是静默换列。
+	Candidates []string `json:"candidates"`
+}
+
+// applySelectionToBinding 把一次观看侧选择写进绑定：换成默认列本身是 no-op；
+// 候选集之外的目标列直接报错（候选集为空 = 该槽位不是动态槽位，同样拒绝）。
+func applySelectionToBinding(b *chartConfigBinding, fieldID string) error {
+	if b.Field == fieldID {
+		return nil
+	}
+	for _, candidate := range b.Candidates {
+		if candidate == fieldID {
+			b.Field = fieldID
+			return nil
+		}
+	}
+	return fmt.Errorf("field %q is not a candidate of binding %q", fieldID, b.BindingID)
 }
 
 // chartDataQueryFromConfig parses a persisted chart config into the same
@@ -528,6 +572,76 @@ func chartDataQueryFromConfig(chart *model.Chart) (*entity.ChartQueryRequest, bo
 	return req, true
 }
 
+// chartDataQueryFromConfigWithSelections 在持久化配置之上应用观看侧的动态槽位选择
+// （issue #134）。三条纪律：
+//   - 空选择与 chartDataQueryFromConfig 完全等价（不改变既有路径）；
+//   - 选择只认 v2 文档（bindingId 是 v2 才有的标识）：v1 文档带选择时**显式报错**，
+//     否则用户会看到「切换了却没反应」；
+//   - 选择必须在绑定自己的 candidates 里：越界列按整块错误处理，不做静默降级。
+//
+// 找不到 bindingId 的选择被忽略：图表配置可能在观看会话开始后被作者改过（槽位已删），
+// 这属于过期会话状态，用默认配置照常出数比整块报错更合理。
+func chartDataQueryFromConfigWithSelections(
+	chart *model.Chart, selections []entity.ChartFieldSelection,
+) (*entity.ChartQueryRequest, bool, error) {
+	if len(selections) == 0 {
+		req, ok := chartDataQueryFromConfig(chart)
+		return req, ok, nil
+	}
+
+	var versionProbe struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(chart.Config), &versionProbe); err != nil || versionProbe.Version != 2 {
+		return nil, false, fmt.Errorf(
+			"chart %d config is not v2; dynamic slot selections cannot be applied", chart.ID,
+		)
+	}
+
+	var doc chartConfigV2
+	if err := json.Unmarshal([]byte(chart.Config), &doc); err != nil || doc.Query == nil {
+		return nil, false, nil
+	}
+	if err := applyFieldSelections(&doc, selections); err != nil {
+		return nil, false, fmt.Errorf("chart %d: %w", chart.ID, err)
+	}
+	req, ok := buildV2ConfigQueryRequest(chart, &doc)
+	return req, ok, nil
+}
+
+// applyFieldSelections 把观看侧选择写进 config 投影的 bindings（不落库）：
+// 命中的 binding 换列，未命中的忽略；换成 candidates 之外的列返回错误。
+func applyFieldSelections(doc *chartConfigV2, selections []entity.ChartFieldSelection) error {
+	apply := func(bindingID, fieldID string) error {
+		if bindingID == "" || fieldID == "" {
+			return nil
+		}
+		for _, group := range doc.Query.DimensionGroups {
+			for i := range group.Bindings {
+				b := &group.Bindings[i]
+				if b.BindingID == bindingID {
+					return applySelectionToBinding(b, fieldID)
+				}
+			}
+		}
+		for _, group := range doc.Query.MetricGroups {
+			for i := range group.Bindings {
+				b := &group.Bindings[i]
+				if b.BindingID == bindingID {
+					return applySelectionToBinding(b, fieldID)
+				}
+			}
+		}
+		return nil
+	}
+	for _, selection := range selections {
+		if err := apply(selection.BindingID, selection.FieldID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // chartDataQueryFromConfigV2 解析 v2 持久化文档（Task 0-3 起前端保存的形状）并
 // 重建平铺 entity.ChartQueryRequest：dims 平铺各组 bindings[].field，metrics 平铺
 // bindings[].field 并按 bindingId 查 fieldMeta 取 aggregation（默认 sum）/alias
@@ -539,7 +653,12 @@ func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, 
 	if err := json.Unmarshal([]byte(chart.Config), &doc); err != nil || doc.Query == nil {
 		return nil, false
 	}
+	return buildV2ConfigQueryRequest(chart, &doc)
+}
 
+// buildV2ConfigQueryRequest 从已解析（可能已被观看侧选择改写）的 v2 文档投影出
+// 平铺 entity.ChartQueryRequest。空组/损坏文档返回 ok=false（回退裸数据行）。
+func buildV2ConfigQueryRequest(chart *model.Chart, doc *chartConfigV2) (*entity.ChartQueryRequest, bool) {
 	var dims []string
 	for _, group := range doc.Query.DimensionGroups {
 		for _, b := range group.Bindings {
@@ -567,7 +686,7 @@ func chartDataQueryFromConfigV2(chart *model.Chart) (*entity.ChartQueryRequest, 
 		return nil, false
 	}
 
-	req := buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, resolveV2DocSort(doc.Query.Sort, &doc), doc.Query.Limit)
+	req := buildConfigQueryRequest(chart, doc.ChartType, dims, metrics, doc.Query.Filters, resolveV2DocSort(doc.Query.Sort, doc), doc.Query.Limit)
 	req.QueryOptions = normalizePersistedQueryOptions(doc.QueryOptions)
 	ensureTotalForPercentFormats(req, metricFormats)
 	return req, true

@@ -33,6 +33,14 @@ type ChartQueryRequest struct {
 	QueryOptions map[string]any `json:"query_options,omitempty"`
 }
 
+// ChartFieldSelection 是观看侧对一块动态槽位的本次选择（issue #134）：把某个
+// binding 的生效列换成 bindings[].candidates 里的另一列。它只作用于本次取数，
+// 绝不写回 bi_chart.config —— 图表的默认选中项仍是 binding.fieldId。
+type ChartFieldSelection struct {
+	BindingID string `json:"bindingId"`
+	FieldID   string `json:"fieldId"`
+}
+
 // DimensionGroupIn v2 协议的维度槽位组（json tag 与 query.DimensionGroup 一致）。
 // 注意与 FieldGroup（dataset.go，持久化 config 解析用）是完全不同的结构。
 type DimensionGroupIn struct {
