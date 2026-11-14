@@ -40,6 +40,7 @@
   - ⚠️ **已有加密数据不可换 key**：换了 key 就再也解不开存量密码。若显式配置，务必保证多个副本 / 多次重启用的是同一把，且与库内已加密数据对应的 key 一致。
 - **数据源密码**：API 响应中**永不回显**（`password` 字段 `json:"-"`），仅落库前加密。
 - **CORS**：默认放开所有来源（平台 API 无登录态，CORS 不构成安全边界）；将来引入认证或需要限定域名时，用 `CORS_ALLOWED_ORIGINS` 收紧。
+- **认证端点限流（issue #203）**：`/api/auth/login` 与 `/api/auth/register` 按「来源 IP + 用户名」双维防护（默认同一 IP 每分钟 10 次，连续失败 5 次锁定 300 秒，见 `AUTH_RATE_LIMIT_PER_MINUTE`）。**⚠️ 反代场景的信任边界**：限流按 `c.ClientIP()` 取 IP —— 若前面挂了 Nginx / 负载均衡，**必须**让反代把客户端真实 IP 透传（`X-Forwarded-For` 等）并配置 Gin 的 `SetTrustedProxies` 指向反代地址；否则所有请求会看成同一来源 IP（反代地址），限流会误伤所有用户，或（若信任了任意 `X-Forwarded-For`）被伪造头绕过。
 - **`VITE_*` 是构建期内联，绝不能放密钥**。
 
 ## 4. 可观测与健康检查

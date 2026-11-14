@@ -1707,6 +1707,7 @@ components:
         - 20000
         - 20100
         - 20200
+        - 20201
         - 20300
         - 20400
         - 20500
@@ -1715,6 +1716,7 @@ components:
         - CodeSuccess
         - CodeBadRequest
         - CodeUnauthorized
+        - CodeRateLimited
         - CodeNotFound
         - CodeBusinessError
         - CodeThirdPartyErr

@@ -44,6 +44,7 @@ cp .env.example .env    # 然后按需修改
 | `SMTP_PASSWORD` | 否 | 空 | SMTP 认证密码。 |
 | `SMTP_FROM` | 否 | 空 | 发件人地址。配了 `SMTP_HOST` 但此项或收件人为空时，通知失败并在 `notify_error` 留档（不会静默）。 |
 | `ALERT_NOTIFY_EMAIL` | 否 | 空 | 预警邮件收件人，逗号分隔多个。与 `SMTP_FROM` 同时非空才会真正发送。 |
+| `AUTH_RATE_LIMIT_PER_MINUTE` | 否 | `10` | 认证端点防护（issue #203）：同一来源 IP 每分钟允许的登录/注册请求数。仅作用于 `/api/auth/login` 与 `/api/auth/register`。用户名维度另有「连续失败 5 次锁定 300 秒」的内置策略（不可配）。非法值（非整数 / 小于 1）**不 fail-fast**：回退 10 并打 warning。**分布式部署（多副本）时各副本独立计数**，实际阈值 = 本值 × 副本数。 |
 | `VITE_API_BASE_URL` | 否 | 空 | 前端 API 基础地址。未配置时：生产构建自动同源、开发回退 `http://<当前访问主机名>:23352`。**仅前后端分开部署时**才需配成非空绝对地址。 |
 | `VITE_SENTRY_DSN` | 否 | 空 | 前端 Sentry DSN。留空 = 完全跳过 `Sentry.init`，不打点也不上报。 |
 

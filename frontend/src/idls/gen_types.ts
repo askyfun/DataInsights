@@ -729,7 +729,7 @@ export interface components {
          * @description 业务状态码，与 backend/internal/response/response.go 常量一一对应。
          * @enum {integer}
          */
-        ResponseCode: 20000 | 20100 | 20200 | 20300 | 20400 | 20500 | 50000;
+        ResponseCode: 20000 | 20100 | 20200 | 20201 | 20300 | 20400 | 20500 | 50000;
         /** @description 统一响应封装；HTTP 状态码恒为 200，业务状态由 code 表达。 */
         Envelope: {
             code: components["schemas"]["ResponseCode"];
