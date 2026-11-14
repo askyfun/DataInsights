@@ -137,7 +137,34 @@ func (s *dashboardService) List(ctx context.Context, opts ListOptions) (listpage
 	}
 	out.Items = toDashboardEntityList(rows)
 	out.Total = total
+	// R-95（#220）：列表出口带创建人用户名（可空；匿名/存量行 owner_id=0 → null）。
+	if err := fillOwnerNames(ctx, s.db, rows, out.Items); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+// fillOwnerNames 按行序把创建人用户名写进列表项（与 datasource 包同款；模型行与
+// 实体项同序同长，owner_id=0/NULL 的行保持 null）。
+func fillOwnerNames(ctx context.Context, db bun.IDB, rows []model.Dashboard, items []entity.Dashboard) error {
+	ids := make([]int32, 0, len(rows))
+	for i := range rows {
+		if rows[i].OwnerID.Valid && rows[i].OwnerID.Int32 > 0 {
+			ids = append(ids, rows[i].OwnerID.Int32)
+		}
+	}
+	names, err := model.OwnerNames(ctx, db, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if i < len(rows) && rows[i].OwnerID.Valid {
+			if n, ok := names[rows[i].OwnerID.Int32]; ok {
+				items[i].OwnerName = &n
+			}
+		}
+	}
+	return nil
 }
 
 // Get returns a dashboard by its UUID.
@@ -176,8 +203,11 @@ func (s *dashboardService) Create(ctx context.Context, in entity.DashboardCreate
 		LayoutJSON:  defaultLayoutJSON(in.LayoutJSON),
 		Status:      defaultStatus(in.Status),
 		FolderID:    folderID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		// R-95（#220）：此前 dashboard 创建路径连占位 0 都不写（列留 NULL），现在
+		// 与其它领域对齐——handler 注入 principal 用户 id，匿名打系统占位 0。
+		OwnerID:   sql.NullInt32{Int32: model.ResolveOwnerID(in.OwnerID), Valid: true},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	if _, err := s.db.NewInsert().Model(m).Exec(ctx); err != nil {

@@ -68,6 +68,9 @@ type AlertRuleCreateRequest struct {
 	Metric    string        `json:"metric"`
 	Operator  AlertOperator `json:"operator"`
 	Threshold float64       `json:"threshold"`
+	// OwnerID 是 R-95（#220）的归属注入位：handler 从已认证 principal 取值塞进
+	// 来，service 落库；匿名请求保持 0。json:"-" 不上 wire、不参与请求绑定。
+	OwnerID int `json:"-"`
 }
 
 // AlertRuleUpdateRequest 是 PUT /api/alerts/{id} 的业务输入。

@@ -52,6 +52,35 @@ func Bearer(svc auth.Service, allowPAT bool) gin.HandlerFunc {
 	}
 }
 
+// OptionalBearer returns a middleware for the L0-open resource endpoints
+// (R-95, issue #220): a missing Authorization header passes through as
+// anonymous (AUTH_ENFORCE=off 的匿名口径不变，owner_id 落系统占位 0)；一个
+// **携带但无效**的凭证则 fail-closed 返回 20200——静默降级成匿名会让过期
+// token 的创建悄悄丢失归属，正是 R-95 要消灭的状态。有效凭证把 principal
+// 写进上下文供 handler 注入 owner_id（不改变端点的开放口径）。
+func OptionalBearer(svc auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := bearerToken(c.GetHeader("Authorization"))
+		if raw == "" {
+			c.Next()
+			return
+		}
+		principal, err := svc.Verify(c.Request.Context(), raw, c.ClientIP(), c.Request.UserAgent())
+		if err != nil {
+			if be, ok := err.(router.BusinessError); ok {
+				response.Error(c, be.Code, be.Message)
+			} else {
+				response.Unauthorized(c, "authentication failed")
+			}
+			c.Abort()
+			return
+		}
+		c.Set(principalKey, principal)
+		c.Set(rawTokenKey, raw)
+		c.Next()
+	}
+}
+
 // bearerToken extracts the credential after a case-insensitive "Bearer " scheme.
 func bearerToken(header string) string {
 	const p = "bearer "

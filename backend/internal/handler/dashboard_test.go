@@ -102,7 +102,7 @@ const (
 	// 的转义形态（内嵌双引号必须转义）。
 	dashLayout       = `{"version":1,"widgets":[]}`
 	dashLayoutJSON   = `{\"version\":1,\"widgets\":[]}`
-	dashFoundJSON    = `{"id":"` + dashID + `","name":"月度经营总览","description":null,"layout_json":"` + dashLayoutJSON + `","status":"draft","folder_id":null,"created_at":"","updated_at":""}`
+	dashFoundJSON    = `{"id":"` + dashID + `","name":"月度经营总览","description":null,"layout_json":"` + dashLayoutJSON + `","status":"draft","folder_id":null,"created_at":"","updated_at":"","owner_name":null}`
 	dashNotFound     = `{"code":20300,"msg":"dashboard not found","trace":"","data":{}}`
 	dashBadLayout    = `{"code":20100,"msg":"layout_json 必须是合法 JSON","trace":"","data":{}}`
 	refEmptyEnvelope = `{"code":20000,"msg":"success","trace":"","data":{"count":0,"dashboards":[]}}`
@@ -328,7 +328,7 @@ func TestDashboardUpdate_UnprovidedFieldsStayNil(t *testing.T) {
 		},
 	})
 	w := serve(newDashboardTestRouter(h), http.MethodPut, "/api/dashboards/"+dashID, `{"name":"改名后的盘"}`)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":"`+dashID+`","name":"改名后的盘","description":null,"layout_json":"`+dashLayoutJSON+`","status":"draft","folder_id":null,"created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":"`+dashID+`","name":"改名后的盘","description":null,"layout_json":"`+dashLayoutJSON+`","status":"draft","folder_id":null,"created_at":"","updated_at":"","owner_name":null}}`)
 
 	if gotID != dashID {
 		t.Errorf("path id 未透传: %q", gotID)

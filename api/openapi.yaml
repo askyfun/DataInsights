@@ -2142,6 +2142,12 @@ components:
         updated_at:
           type: string
           description: RFC3339 时间；数据库时间戳无效时为空字符串。
+        owner_name:
+          type: string
+          nullable: true
+          description: |
+            创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL）
+            为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
     DatasourceCreateRequest:
       type: object
       description: POST /api/datasources 请求体；password 仅出现在请求侧。
@@ -2452,6 +2458,12 @@ components:
         updated_at:
           type: string
           description: RFC3339 时间；数据库时间戳无效时为空字符串。
+        owner_name:
+          type: string
+          nullable: true
+          description: |
+            创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL）
+            为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
     DatasetCreateRequest:
       type: object
       description: >-
@@ -2889,6 +2901,12 @@ components:
         updated_at:
           type: string
           description: RFC3339 时间；数据库时间戳无效时为空字符串。
+        owner_name:
+          type: string
+          nullable: true
+          description: |
+            创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL）
+            为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
     ChartCreateRequest:
       type: object
       description: >-
@@ -4045,6 +4063,12 @@ components:
         updated_at:
           type: string
           description: RFC3339；由后端在每次更新时显式前进（表无触发器）。
+        owner_name:
+          type: string
+          nullable: true
+          description: |
+            创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL）
+            为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
     DashboardCreateRequest:
       type: object
       description: >-

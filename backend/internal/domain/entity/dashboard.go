@@ -27,6 +27,9 @@ type Dashboard struct {
 	FolderID    *string `json:"folder_id"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+	// OwnerName 是读出口的创建人用户名（R-95，列表回填，可空）；单体 GET/POST/PUT
+	// 响应目前不回填，序列化为 null。
+	OwnerName *string `json:"owner_name"`
 }
 
 // DashboardCreateRequest is the business input of POST /api/dashboards.
@@ -38,6 +41,9 @@ type DashboardCreateRequest struct {
 	LayoutJSON  string  `json:"layout_json"`
 	Status      string  `json:"status"`
 	FolderID    string  `json:"folder_id"`
+	// OwnerID 是 R-95（#220）的归属注入位：handler 从已认证 principal 取值塞进
+	// 来，service 落库；匿名请求保持 0。json:"-" 不上 wire、不参与请求绑定。
+	OwnerID int `json:"-"`
 }
 
 // DashboardUpdateRequest is the business input of PUT /api/dashboards/{id}.

@@ -88,6 +88,8 @@ func (h *AlertHandler) Create(
 		Metric:    req.In.Metric,
 		Operator:  req.In.Operator,
 		Threshold: req.In.Threshold,
+		// R-95（#220）：有已认证主体则带归属创建。
+		OwnerID: principalOwnerID(req.Ctx),
 	})
 	if err != nil {
 		return err

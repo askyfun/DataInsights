@@ -71,6 +71,12 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	// API routes
 	api := r.Group("/api")
 
+	// R-95（issue #220）：资源端点可选认证——无 Authorization 头保持匿名（L0 口径
+	// 不变），携带有效凭证则把 principal 注入上下文供 create 路径写 owner_id；
+	// 携带无效凭证 fail-closed 401。auth/token 端点在此之上再挂强制 Bearer。
+	// authSvc 提前到分组装配前，供 OptionalBearer 与 auth 路由共用。
+	api.Use(middleware.OptionalBearer(authSvc))
+
 	// Datasource routes (generic router)
 	ds := api.Group("/datasources")
 	router.RegisterGetRoute(ds, "", datasourceHandler.List)

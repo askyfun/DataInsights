@@ -454,6 +454,9 @@ type Chart struct {
 	Id        int    `json:"id"`
 	Name      string `json:"name"`
 
+	// OwnerName 创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL） 为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
+	OwnerName *string `json:"owner_name,omitempty"`
+
 	// UpdatedAt RFC3339 时间；数据库时间戳无效时为空字符串。
 	UpdatedAt string `json:"updated_at"`
 }
@@ -725,6 +728,9 @@ type Dashboard struct {
 	LayoutJson string `json:"layout_json"`
 	Name       string `json:"name"`
 
+	// OwnerName 创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL） 为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
+	OwnerName *string `json:"owner_name,omitempty"`
+
 	// Status 发布状态位（PRD R-73 / D9）。v1 只会出现 draft（新建缺省，UI 不暴露 切换入口）；published 为将来分享预留。后端不做枚举强校验。
 	Status string `json:"status"`
 
@@ -955,6 +961,9 @@ type Dataset struct {
 	// 灌数与 extract 查询路径未实现（查询会显式报错）。
 	Mode        string  `json:"mode"`
 	Name        string  `json:"name"`
+
+	// OwnerName 创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL） 为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
+	OwnerName   *string `json:"owner_name,omitempty"`
 	PreviewData *string `json:"preview_data"`
 
 	// QualityRules JSON 数组字符串；缺省 "[]"。
@@ -1136,6 +1145,9 @@ type Datasource struct {
 
 	// Type 驱动类型；后端 datasource.NewDriver 支持 postgresql / mysql / clickhouse / starrocks（创建时后端不做枚举强校验，落库什么返回什么）。
 	Type string `json:"type"`
+
+	// OwnerName 创建人用户名（R-95）。列表端点回填；匿名或存量行（owner_id=0/NULL） 为 null。单体 GET/POST/PUT 响应目前不回填，恒为 null。
+	OwnerName *string `json:"owner_name,omitempty"`
 
 	// UpdatedAt RFC3339 时间；数据库时间戳无效时为空字符串。
 	UpdatedAt string `json:"updated_at"`

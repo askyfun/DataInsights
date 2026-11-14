@@ -115,6 +115,8 @@ func (h *DashboardHandler) Create(req router.Request[dashboardCreateIn], res *ro
 		LayoutJSON:  in.LayoutJSON,
 		Status:      in.Status,
 		FolderID:    in.FolderID,
+		// R-95（#220）：有已认证主体则带归属创建。
+		OwnerID: principalOwnerID(req.Ctx),
 	})
 	if err != nil {
 		return err

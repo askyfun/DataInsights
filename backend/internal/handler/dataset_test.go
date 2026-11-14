@@ -138,7 +138,7 @@ func newDatasetTestRouter(h *DatasetHandler) *gin.Engine {
 // Pinned dataset entity JSON. Field order follows the entity.Dataset struct
 // tags; *string fields serialize as null when unset.
 const (
-	datasetGetJSON = `{"id":4,"name":"sales","datasource_id":2,"table_name":"orders","query_sql":null,"query_type":"table","mode":"direct","accelerate_config":null,"description":null,"tags":"[]","refresh_strategy":null,"preview_data":null,"quality_rules":"[]","columns":"[]","shard_enabled":false,"shard_keys":"","created_at":"","updated_at":""}`
+	datasetGetJSON = `{"id":4,"name":"sales","datasource_id":2,"table_name":"orders","query_sql":null,"query_type":"table","mode":"direct","accelerate_config":null,"description":null,"tags":"[]","refresh_strategy":null,"preview_data":null,"quality_rules":"[]","columns":"[]","shard_enabled":false,"shard_keys":"","created_at":"","updated_at":"","owner_name":null}`
 	notFoundDS     = `{"code":20300,"msg":"dataset not found: sql: no rows in result set","trace":"","data":{}}`
 )
 
@@ -306,7 +306,7 @@ func TestDatasetCreate_Success(t *testing.T) {
 	})
 	body := `{"name":"sales","datasource_id":2,"table_name":"orders","query_type":"table","mode":"direct","tags":"[]","quality_rules":"[]","columns":"[]","shard_enabled":false,"shard_keys":""}`
 	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets", body)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":9,"name":"sales","datasource_id":2,"table_name":"orders","query_sql":null,"query_type":"table","mode":"direct","accelerate_config":null,"description":null,"tags":"[]","refresh_strategy":null,"preview_data":null,"quality_rules":"[]","columns":"[]","shard_enabled":false,"shard_keys":"","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":9,"name":"sales","datasource_id":2,"table_name":"orders","query_sql":null,"query_type":"table","mode":"direct","accelerate_config":null,"description":null,"tags":"[]","refresh_strategy":null,"preview_data":null,"quality_rules":"[]","columns":"[]","shard_enabled":false,"shard_keys":"","created_at":"","updated_at":"","owner_name":null}}`)
 	if got == nil || got.DatasourceID != 2 || got.TableName == nil || *got.TableName != "orders" {
 		t.Fatalf("service received unexpected entity: %+v", got)
 	}
@@ -325,7 +325,7 @@ func TestDatasetCreate_SQLModeDefaults(t *testing.T) {
 	})
 	w := serve(newDatasetTestRouter(h), http.MethodPost, "/api/datasets",
 		`{"name":"q","datasource_id":1,"query_sql":"SELECT 1","query_type":"sql"}`)
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":0,"name":"q","datasource_id":1,"table_name":null,"query_sql":"SELECT 1","query_type":"sql","mode":"direct","accelerate_config":null,"description":null,"tags":"[]","refresh_strategy":null,"preview_data":null,"quality_rules":"[]","columns":"[]","shard_enabled":false,"shard_keys":"","created_at":"","updated_at":""}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":0,"name":"q","datasource_id":1,"table_name":null,"query_sql":"SELECT 1","query_type":"sql","mode":"direct","accelerate_config":null,"description":null,"tags":"[]","refresh_strategy":null,"preview_data":null,"quality_rules":"[]","columns":"[]","shard_enabled":false,"shard_keys":"","created_at":"","updated_at":"","owner_name":null}}`)
 	if got == nil || got.TableName != nil || got.QuerySQL == nil || *got.QuerySQL != "SELECT 1" {
 		t.Fatalf("unexpected pointer-field handling: %+v", got)
 	}
@@ -443,7 +443,7 @@ func TestDatasetUpdate_Success(t *testing.T) {
 	// Response echoes the merged entity: provided fields overlaid on the
 	// stored row, unprovided metadata (quality_rules/columns) and the
 	// timestamps carried through — byte-level proof of no data loss.
-	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":4,"name":"upd","datasource_id":2,"table_name":"orders","query_sql":null,"query_type":"table","mode":"direct","accelerate_config":null,"description":"d","tags":"[\"x\"]","refresh_strategy":null,"preview_data":null,"quality_rules":"[{\"rule\":\"not_null\"}]","columns":"[{\"name\":\"id\",\"expr\":\"id\",\"type\":\"int\",\"type_config\":{\"precision\":0,\"scale\":0},\"comment\":\"\",\"role\":\"metric\"}]","shard_enabled":true,"shard_keys":"[\"id\"]","created_at":"2024-01-02T03:04:05Z","updated_at":"2024-06-07T08:09:10Z"}}`)
+	assertBody(t, w, `{"code":20000,"msg":"success","trace":"","data":{"id":4,"name":"upd","datasource_id":2,"table_name":"orders","query_sql":null,"query_type":"table","mode":"direct","accelerate_config":null,"description":"d","tags":"[\"x\"]","refresh_strategy":null,"preview_data":null,"quality_rules":"[{\"rule\":\"not_null\"}]","columns":"[{\"name\":\"id\",\"expr\":\"id\",\"type\":\"int\",\"type_config\":{\"precision\":0,\"scale\":0},\"comment\":\"\",\"role\":\"metric\"}]","shard_enabled":true,"shard_keys":"[\"id\"]","created_at":"2024-01-02T03:04:05Z","updated_at":"2024-06-07T08:09:10Z","owner_name":null}}`)
 	if got == nil || !updateRan {
 		t.Fatalf("service.Update not called")
 	}

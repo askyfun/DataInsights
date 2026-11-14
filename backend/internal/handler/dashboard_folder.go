@@ -92,6 +92,8 @@ func (h *DashboardFolderHandler) Create(
 	result, err := h.svc.CreateFolder(req.Ctx.Request.Context(), entity.DashboardFolderCreateRequest{
 		Name:     req.In.Name,
 		ParentID: req.In.ParentID,
+		// R-95（#220）：有已认证主体则带归属创建。
+		OwnerID: principalOwnerID(req.Ctx),
 	})
 	if err != nil {
 		return err
