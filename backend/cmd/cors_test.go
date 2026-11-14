@@ -92,7 +92,7 @@ func TestCORSEmptyOriginsAllowsAll(t *testing.T) {
 }
 
 func TestInitSentrySkipsEmptyDSN(t *testing.T) {
-	if initSentry("") {
+	if initSentry("", "") {
 		t.Fatal("expected initSentry to skip initialization for empty DSN")
 	}
 }

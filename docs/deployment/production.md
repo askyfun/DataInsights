@@ -59,6 +59,7 @@
 - **Sentry**：前后端是两个**独立项目**（`SENTRY_DSN` 与 `VITE_SENTRY_DSN`），可分别接入。
 - 镜像自带 `/health` 的 HEALTHCHECK；发布镜像通过 `VERSION` / `COMMIT` / `BUILD_TIME` 构建参数注入版本。
 
+
 ## 5. 缓存与静态托管
 
 - `assets/` 下带内容哈希的产物走 `immutable` 长缓存，其余路径 `no-cache`。

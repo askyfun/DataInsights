@@ -6,6 +6,7 @@ import (
 )
 
 // TestRedact 表驱动覆盖 R-96 验收 5 的脱敏基线：
+
 // 连接串密码、password=/token=、Bearer、PAT、API key，以及不含机密的文本原样通过。
 func TestRedact(t *testing.T) {
 	cases := []struct {
@@ -22,6 +23,7 @@ func TestRedact(t *testing.T) {
 		{"token= 赋值", `token=abcdef123 and more`, `token=<redacted> and more`},
 		{"token= 在 query 串", `?page=1&token=zzz9`, `?page=1&token=<redacted>`},
 		{"Bearer 令牌", `Authorization: Bearer eyJhbGciOi.abc-123`, `Authorization: Bearer <redacted>`},
+
 		{"bearer 小写", `authorization: bearer di_pat_x1y2z3`, `authorization: bearer <redacted>`},
 		{"平台 PAT", `verify failed for di_pat_9f8e7d6c5b`, `verify failed for di_pat_<redacted>`},
 		{"sk- 密钥", `upstream 401 for sk-Ab3xY91234`, `upstream 401 for sk-<redacted>`},
@@ -62,3 +64,4 @@ func TestParseLevel(t *testing.T) {
 		}
 	}
 }
+

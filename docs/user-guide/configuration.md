@@ -35,6 +35,7 @@ cp .env.example .env    # 然后按需修改
 | `SENTRY_DSN` | 否 | 空 | 后端 Sentry DSN，留空 = 关闭上报。 |
 | `CORS_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔白名单；**留空 = 放开所有来源**。Bearer 令牌不会由浏览器自动携带，CORS 不构成安全边界——真正的访问面由 `AUTH_ENFORCE` 控制（见下文「鉴权开放口径」与[第一次启动](../getting-started/first-run.md)）。填非空白名单则只回显名单内来源。 |
 
+
 | `HOST_BIND` | 否 | `127.0.0.1` | **仅 docker compose 层生效**（后端进程不读）：app 端口在宿主机上的绑定地址。默认只监听本机；内网共享时设 `0.0.0.0`，并先改掉 compose 里的 PostgreSQL 演示口令、按[生产部署](../deployment/production.md)收紧访问面。数据库端口固定只绑 `127.0.0.1`，不受此变量影响。 |
 | `STATIC_DIR` | 否 | 空 | 前端构建产物目录。设置后本进程一并托管页面（未命中回落 `index.html`）；**留空 = 只提供 API**（本地开发默认形态，页面走 Vite dev server）。目录配错即启动失败。 |
 | `HEALTH_DETAIL` | 否 | 关闭 | 开启 `GET /health/detail`（版本 / 迁移水位 / DB 耗时 / 驱动数 / Sentry 与鉴权档位）。只认 `1` / `true` / `on`（大小写不敏感），其他取值或留空一律按关闭处理；关闭时该端点返回 **404**。详情不含连接串 / host / 库名 / 口令，但仍建议只在需要排障时打开。**改完需重启**。 |

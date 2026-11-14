@@ -758,6 +758,7 @@ export interface components {
             hint_key?: string;
             /** @description 本次错误唯一标识（uuid v7），用于报障与日志对账 */
             id: string;
+
         };
         HealthData: {
             /** @example ok */

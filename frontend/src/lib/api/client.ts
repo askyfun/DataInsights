@@ -23,6 +23,8 @@ export function getBearerToken(): string {
 // G['Envelope']['code'] (ResponseCode) is the same 7-literal union as ApiCode.
 export type ApiResponse<T = unknown> = Omit<components['schemas']['Envelope'], 'data'> & {
   data: T;
+  /** 可反查的错误编号（R-97/R-98，DI-<biz>-<hex>）；仅错误路径携带。 */
+  error_id?: string;
 };
 
 // ---- 细粒度错误（issue #99）：业务码 / HTTP 状态 / 请求 id 一处可查 ----
@@ -40,6 +42,7 @@ export class ApiClientError extends Error {
   /** 信封 error.hint_key（i18n 词典键）；分支判断请用 stableCode */
   hintKey?: string;
   /** 信封 error.id（每次出错唯一），报障与日志对账 */
+
   errorId?: string;
 
   constructor(
@@ -51,6 +54,7 @@ export class ApiClientError extends Error {
       timedOut?: boolean;
       stableCode?: string;
       hintKey?: string;
+
       errorId?: string;
     } = {}
   ) {
@@ -62,6 +66,7 @@ export class ApiClientError extends Error {
     this.timedOut = opts.timedOut;
     this.stableCode = opts.stableCode;
     this.hintKey = opts.hintKey;
+
     this.errorId = opts.errorId;
   }
 }
@@ -225,16 +230,29 @@ function createApiClient(baseURL: string): AxiosInstance {
   // 统一弹窗会导致同一失败被提示两次。
   client.interceptors.response.use(
     (response: AxiosResponse<ApiResponse>) => {
-      const { code, msg, error } = response.data || {};
+      const { code, msg, error, error_id } = response.data || {};
+
 
       if (code !== undefined && code !== API_SUCCESS_CODE) {
         console.error(`API Error [${code}]: ${msg}`);
+        // 业务码错误统一上报（R-98 验收 7）：带 biz_code / request_id / error_id /
+        // 路由，与后端日志按 request_id 对账。Sentry 未初始化时是 no-op。
+        Sentry.captureMessage(`API Error [${code}]: ${msg || `API Error: ${code}`}`, {
+          level: 'error',
+          tags: {
+            biz_code: String(code),
+            request_id: (response.config.headers?.['X-Request-ID'] as string | undefined) ?? '',
+            error_id: error_id ?? '',
+            route: window.location.pathname,
+          },
+        });
         throw new ApiClientError(msg || `API Error: ${code}`, {
           code,
           requestId: response.config.headers?.['X-Request-ID'] as string | undefined,
           stableCode: error?.code,
           hintKey: error?.hint_key,
           errorId: error?.id,
+
         });
       }
 
@@ -272,12 +290,22 @@ function createApiClient(baseURL: string): AxiosInstance {
         error.response?.data?.message ||
         error.message ||
         'An error occurred';
+      const errorId = error.response?.data?.error_id;
       console.error('API Error:', errorMsg);
 
-      // Report non-2xx responses to Sentry
+      // Report non-2xx responses to Sentry（panic 兜底外的 HTTP 层错误；
+      // panic 信封是 HTTP 200 + code 50000，走上方业务码分支）
       if (status && status >= 400) {
         Sentry.captureMessage(
-          `API Error: ${error.response?.config?.method?.toUpperCase()} ${error.response?.config?.url} returned ${status}: ${errorMsg}`
+          `API Error: ${error.response?.config?.method?.toUpperCase()} ${error.response?.config?.url} returned ${status}: ${errorMsg}`,
+          {
+            level: 'error',
+            tags: {
+              request_id: (config?.headers?.['X-Request-ID'] as string | undefined) ?? '',
+              error_id: errorId ?? '',
+              route: window.location.pathname,
+            },
+          }
         );
       }
 
@@ -292,6 +320,7 @@ function createApiClient(baseURL: string): AxiosInstance {
         stableCode: envelopeError?.code,
         hintKey: envelopeError?.hint_key,
         errorId: envelopeError?.id,
+
       });
     }
   );

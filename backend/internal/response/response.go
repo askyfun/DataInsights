@@ -36,6 +36,8 @@ type Response struct {
 	Trace string       `json:"trace"`
 	Data  any          `json:"data"`
 	Error *ErrorDetail `json:"error,omitempty"`
+	// ErrorID 可反查错误编号（R-97/R-98，DI-<biz>-<hex>），panic 兜底信封等携带。
+	ErrorID string `json:"error_id,omitempty"`
 }
 
 // RequestIDKey 是请求 id 在 gin context 里的唯一键名。requestID 中间件写、
@@ -189,6 +191,18 @@ func ErrorWithHTTPStatus(c *gin.Context, httpStatus, code int, msg string) {
 		Msg:   msg,
 		Trace: getTraceID(c),
 		Data:  normalizeResponseData(nil),
+	})
+}
+
+// ErrorWithID 带错误编号的错误响应（R-98 panic 兜底信封使用；error_id 空串时
+// 退化为普通 Error 信封，omitempty 保证不出现在 JSON 里）。
+func ErrorWithID(c *gin.Context, code int, msg string, errorID string) {
+	c.JSON(http.StatusOK, Response{
+		Code:    code,
+		Msg:     msg,
+		Trace:   getTraceID(c),
+		Data:    normalizeResponseData(nil),
+		ErrorID: errorID,
 	})
 }
 

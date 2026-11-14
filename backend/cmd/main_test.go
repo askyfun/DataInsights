@@ -14,9 +14,11 @@ import (
 
 	"tablewave/internal/config"
 	"tablewave/internal/keystore"
+	"tablewave/internal/monitor"
 	"tablewave/internal/response"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 )
 
@@ -51,39 +53,37 @@ func TestHealthRouteUsesUnifiedResponse(t *testing.T) {
 	}
 }
 
-// TestSentryPanicPathReturns500 验证 panic 场景不会变成 200 空响应：
-// sentrygin 默认吞 panic，生产配置必须 Repanic: true 让 panic 穿透到外层
-// gin Recovery（gin.Default()），从而返回 500。
-func TestSentryPanicPathReturns500(t *testing.T) {
+// TestSentryPanicPathReturnsEnvelope 验证 panic 场景返回标准信封（R-98 验收 5）：
+// sentrygin 以 Repanic: true 捕获后重新抛出，monitor.Recovery 在最外层接住，
+// 返回 HTTP 200 + code 50000 + error_id 的统一信封——消灭「200 空 body / 500
+// 空 body」两种非信封形态。
+func TestSentryPanicPathReturnsEnvelope(t *testing.T) {
 	t.Run("sentrygin mounted with repanic", func(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
-		r.Use(gin.Recovery()) // 模拟 gin.Default() 的外层 Recovery
-		r.Use(newSentryginMiddleware())
+		r.Use(monitor.Recovery())
+		r.Use(newSentryginMiddleware()) // Repanic: true，panic 穿透到 Recovery
 		r.GET("/boom", func(c *gin.Context) { panic("boom") })
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/boom", nil))
 
-		if w.Code != http.StatusInternalServerError {
-			t.Fatalf("expected 500 after panic, got %d", w.Code)
-		}
+		assertPanicEnvelope(t, w)
 	})
 
 	t.Run("sentry not active, sentrygin not mounted", func(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		r := gin.New()
-		r.Use(gin.Recovery())
+		r.Use(monitor.Recovery())
 		r.GET("/boom", func(c *gin.Context) { panic("boom") })
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/boom", nil))
 
-		if w.Code != http.StatusInternalServerError {
-			t.Fatalf("expected 500 after panic, got %d", w.Code)
-		}
+		assertPanicEnvelope(t, w)
 	})
 }
+
 
 func TestResolveSecurityKeyEnvTakesPriority(t *testing.T) {
 	db, _, err := sqlmock.New()

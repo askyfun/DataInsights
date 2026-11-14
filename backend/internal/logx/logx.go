@@ -24,6 +24,9 @@ var redactRules = []redactRule{
 	{regexp.MustCompile(`(?i)\b(password|token)=([^\s&"']+)`), `${1}=<redacted>`},
 	// Authorization: Bearer <jwt/pat>。
 	{regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)([A-Za-z0-9._-]+)`), `${1}<redacted>`},
+	// 裸 Bearer 令牌（错误文本常丢掉 Authorization: 前缀，只剩 "Bearer <tok>"）。
+	{regexp.MustCompile(`(?i)\bbearer\s+([A-Za-z0-9._-]{10,})`), `bearer <redacted>`},
+
 	// 平台 PAT（di_pat_ 前缀）与 OpenAI 风格密钥（sk- 前缀）：保留前缀、抹掉密文体。
 	{regexp.MustCompile(`di_pat_[A-Za-z0-9_-]+`), `di_pat_<redacted>`},
 	{regexp.MustCompile(`sk-[A-Za-z0-9]+`), `sk-<redacted>`},
@@ -31,6 +34,7 @@ var redactRules = []redactRule{
 
 // Redact 抹掉错误文本里出现过的机密：连接串密码、password=/token= 赋值、
 // Bearer 令牌、PAT 与第三方 API key。所有写日志与写响应的错误文本都必须经它
+
 // 收口，禁止各处手写替换。
 func Redact(s string) string {
 	if s == "" {
