@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"data-insights/migrations"
+	"tablewave/migrations"
 	"github.com/pressly/goose/v3"
 )
 

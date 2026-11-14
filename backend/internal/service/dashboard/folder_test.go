@@ -11,9 +11,9 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
-	"data-insights/internal/response"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
+	"tablewave/internal/response"
 )
 
 // 夹侧测试用的固定 id：kid 是 root 的子夹，move 三态与环检测都围绕这一对展开。

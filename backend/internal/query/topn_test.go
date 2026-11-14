@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/model"
+	"tablewave/internal/model"
 )
 
 func TestParseTopN(t *testing.T) {

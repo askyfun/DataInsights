@@ -9,7 +9,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/listpage"
+	"tablewave/internal/listpage"
 )
 
 // TestListSecondPageSortsAndCountsTheFullSet 钉住 issue #205 的核心口径：

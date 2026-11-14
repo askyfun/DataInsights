@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { type ApiUser, authApi, type PATCreateResult, type TokenInfo, tokensApi } from '../api';
 import PageHeader from '../components/PageHeader';
-import { setBearerToken } from '../lib/api/client';
+import { ApiClientError, setBearerToken } from '../lib/api/client';
 import { setSessionUser } from '../lib/authSession';
 
 const { Paragraph, Text } = Typography;
@@ -68,6 +68,16 @@ const AccountPage: React.FC = () => {
       setSessionUser(res.user);
       message.success(intl.formatMessage({ id: 'account.welcome' }, { name: res.user.username }));
       await loadPats();
+    } catch (e) {
+      // 限流/锁定（issue #203 acceptance 4）：业务码 20201 对应后端
+      // response.CodeRateLimited，给出「尝试过于频繁」的可区分文案。
+      if (e instanceof ApiClientError && e.code === 20201) {
+        message.error(intl.formatMessage({ id: 'account.rateLimited' }));
+      } else {
+        // 其余失败（含通用认证失败 20200）沿用错误消息本身，不再重复弹。
+        const msg = e instanceof Error ? e.message : 'auth failed';
+        message.error(msg);
+      }
     } finally {
       setAuthLoading(false);
     }

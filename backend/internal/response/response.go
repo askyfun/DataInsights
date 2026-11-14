@@ -16,8 +16,11 @@ const (
 	CodeBadRequest   = 20100 // 请求参数错误
 	CodeUnauthorized = 20200 // 未认证：没登录 / 凭据失效
 	// CodeForbidden 已认证但无权限。与 20200 分开，前端才能决定「去登录」
-	// 还是「提示无权限」（issue #202；字符串码 FORBIDDEN 由 #224 落地）。
-	CodeForbidden     = 20201 // 越权
+	// 还是「提示无权限」（issue #202；字符串码 FORBIDDEN，整数码 20202 与 #224 对齐）。
+	CodeForbidden = 20202 // 越权
+	// CodeRateLimited 认证端点限流/锁定（issue #203；HTTP 语义对应 429）。
+	CodeRateLimited = 20201
+
 	CodeNotFound      = 20300 // 资源不存在
 	CodeBusinessError = 20400 // 业务逻辑错误
 	CodeThirdPartyErr = 20500 // 第三方服务错误

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/model"
+	"tablewave/internal/datasource"
+	"tablewave/internal/model"
 )
 
 // boxplotMockConnection 按调用次序应答多组行，并回显每次调用的 SQL/args。

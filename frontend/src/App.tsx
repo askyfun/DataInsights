@@ -27,6 +27,7 @@ const AlertsPage = lazy(() => import('./pages/Alerts'));
 const ChartBuilder = lazy(() => import('./pages/ChartBuilder'));
 const ChartsPage = lazy(() => import('./pages/Charts'));
 const DashboardEditor = lazy(() => import('./pages/DashboardEditor'));
+const DashboardScreen = lazy(() => import('./pages/DashboardScreen'));
 const DashboardsPage = lazy(() => import('./pages/Dashboards'));
 const DatasetPage = lazy(() => import('./pages/Dataset'));
 const DatasetDetail = lazy(() => import('./pages/DatasetDetail'));
@@ -74,7 +75,7 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    document.title = 'Data Insights';
+    document.title = 'TableWave';
   }, []);
 
   const menuItems = [
@@ -155,9 +156,16 @@ const App: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', marginRight: isMobile ? 8 : 32 }}>
           <div className="demo-logo" />
           {!isMobile && (
-            <Title level={4} style={{ margin: 0, marginLeft: 12 }}>
-              Data Insights
-            </Title>
+            <div
+              style={{ display: 'flex', flexDirection: 'column', marginLeft: 12, lineHeight: 1.15 }}
+            >
+              <Title level={5} style={{ margin: 0 }}>
+                TableWave
+              </Title>
+              <span style={{ fontSize: 10, color: 'var(--dr-text-3)', letterSpacing: '0.03em' }}>
+                Data Intelligence Platform
+              </span>
+            </div>
           )}
         </div>
         {!isMobile ? (
@@ -204,7 +212,14 @@ const App: React.FC = () => {
         title={
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div className="demo-logo" />
-            <span style={{ marginLeft: 12, fontWeight: 'bold' }}>Data Insights</span>
+            <div
+              style={{ display: 'flex', flexDirection: 'column', marginLeft: 12, lineHeight: 1.15 }}
+            >
+              <span style={{ fontWeight: 'bold' }}>TableWave</span>
+              <span style={{ fontSize: 10, color: 'var(--dr-text-3)' }}>
+                Data Intelligence Platform
+              </span>
+            </div>
           </div>
         }
         placement="left"
@@ -258,6 +273,7 @@ const App: React.FC = () => {
                 {/* 首页即仪表盘列表（导航项 nav.dashboard 一直指向 /）。 */}
                 <Route path="/" element={<DashboardsPage />} />
                 <Route path="/dashboards/:id" element={<DashboardEditor />} />
+                <Route path="/dashboards/:id/screen" element={<DashboardScreen />} />
                 <Route path="/datasources" element={<DatasourcePage />} />
                 <Route path="/datasources/:id" element={<DatasourceDetailPage />} />
                 <Route path="/datasets" element={<DatasetPage />} />
@@ -286,7 +302,7 @@ const App: React.FC = () => {
           padding: '16px',
         }}
       >
-        Data Insights ©2026 Created with React + Ant Design
+        TableWave ©2026 Created with React + Ant Design
       </Footer>
     </Layout>
   );

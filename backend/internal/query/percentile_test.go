@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
+	"tablewave/internal/datasource"
 )
 
 // percentile_test.go — percentile 原语（R-54）单测。覆盖：

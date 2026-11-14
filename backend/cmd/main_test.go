@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"testing"
 
-	"data-insights/internal/config"
-	"data-insights/internal/keystore"
-	"data-insights/internal/response"
+	"tablewave/internal/config"
+	"tablewave/internal/keystore"
+	"tablewave/internal/response"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"

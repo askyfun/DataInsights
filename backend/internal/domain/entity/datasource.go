@@ -68,3 +68,14 @@ type FieldValueCount struct {
 	Count      int64   `json:"count"`
 	Percentage float64 `json:"percentage"`
 }
+
+// DatasourceCapabilities is the wire projection of datasource.DialectCapabilities
+// plus the dialect name, so the UI can explain which chart types a connection
+// cannot produce (R-78).
+type DatasourceCapabilities struct {
+	Dialect                 string `json:"dialect"`
+	SupportsGroupingSets    bool   `json:"supports_grouping_sets"`
+	SupportsPercentileCont  bool   `json:"supports_percentile_cont"`
+	SupportsWindowFunctions bool   `json:"supports_window_functions"`
+	PercentileStrategy      string `json:"percentile_strategy"`
+}

@@ -9,11 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/listpage"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/auth"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/listpage"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/auth"
 )
 
 // fakeAuth returns a principal whose Kind mirrors the token's kind marker, so a
@@ -102,8 +102,8 @@ func TestBearer_SessionAlwaysAllowed(t *testing.T) {
 func TestBearer_PATDeniedOnUserManagement(t *testing.T) {
 	r, _ := newEngine(false, false)
 	_, out := do(r, "Bearer di_pat_abcdef")
-	if !strings.Contains(out, "20201") {
-		t.Fatalf("PAT must be refused with 20201 (authenticated but forbidden), got %q", out)
+	if !strings.Contains(out, "20202") {
+		t.Fatalf("PAT must be refused with 20202 (authenticated but forbidden), got %q", out)
 	}
 }
 
@@ -140,8 +140,8 @@ func TestRequireAdmin_NonAdminForbidden(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer di_session_abcdef")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if !strings.Contains(w.Body.String(), "20201") {
-		t.Fatalf("non-admin must get 20201, got %q", w.Body.String())
+	if !strings.Contains(w.Body.String(), "20202") {
+		t.Fatalf("non-admin must get 20202, got %q", w.Body.String())
 	}
 	if body.Len() != 0 {
 		t.Fatalf("handler must not be reached, got %q", body.String())
