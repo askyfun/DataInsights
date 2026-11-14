@@ -1,5 +1,5 @@
 {
-  "name": "data-insights",
+  "name": "tablewave",
   "version": "0.3.1",
   "packageManager": "pnpm@12.4.2",
   "description": "拖拽式 BI 可视化分析平台 MVP",
@@ -14,16 +14,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/askyfun/DataInsights.git"
+    "url": "git+https://github.com/askyfun/TableWave.git"
   },
   "keywords": [],
   "author": "",
   "license": "GPL-3.0-only",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/askyfun/DataInsights/issues"
+    "url": "https://github.com/askyfun/TableWave/issues"
   },
-  "homepage": "https://github.com/askyfun/DataInsights#readme",
+  "homepage": "https://github.com/askyfun/TableWave#readme",
   "devDependencies": {
     "husky": "^9.1.7"
   }

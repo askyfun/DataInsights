@@ -60,16 +60,16 @@
 **仅 Docker（自备 PostgreSQL）**
 
 ```bash
-docker pull kzzhr/datainsights:v0.3.0
-docker run -d --name data-insights -p 23352:23352 \
+docker pull kzzhr/tablewave:v0.3.0
+docker run -d --name tablewave -p 23352:23352 \
   -e DATABASE_URL='postgres://user:password@your-db-host:5432/dbname?sslmode=disable' \
-  kzzhr/datainsights:v0.3.0
+  kzzhr/tablewave:v0.3.0
 ```
 
 **Docker Compose（连带 PostgreSQL，零外部依赖）**
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/askyfun/DataInsights/master/docker-compose.allinone.yml
+curl -fsSLO https://raw.githubusercontent.com/askyfun/TableWave/master/docker-compose.allinone.yml
 TAG=v0.3.0 docker compose -f docker-compose.allinone.yml up -d
 ```
 

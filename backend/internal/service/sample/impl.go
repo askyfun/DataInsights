@@ -20,11 +20,11 @@ import (
 	"strings"
 	"time"
 
-	"data-insights/internal/crypto"
-	"data-insights/internal/database"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/idgen"
-	"data-insights/internal/model"
+	"tablewave/internal/crypto"
+	"tablewave/internal/database"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/idgen"
+	"tablewave/internal/model"
 
 	"github.com/uptrace/bun"
 )

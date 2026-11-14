@@ -12,11 +12,11 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
-	"data-insights/internal/query"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
+	"tablewave/internal/query"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 )
 
 // 复用 dashboard 包的 sqlmock 测试模式：captureMatcher 记录真实下发的 SQL，

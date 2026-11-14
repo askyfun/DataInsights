@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/model"
+	"tablewave/internal/datasource"
+	"tablewave/internal/model"
 )
 
 // tablePaginationConnection 按 SQL 内容分流返回结果：数据查询返回明细行，计数查询返回

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/model"
+	"tablewave/internal/datasource"
+	"tablewave/internal/model"
 )
 
 // seqConnection 按调用次序返回不同行集（同环比 = 当期 + 基线两次查询）。

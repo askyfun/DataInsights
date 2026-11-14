@@ -17,7 +17,7 @@ import (
 // 它会出现在 bi_datasource 里（因此能被 GET /api/datasources/:id 单独取到），
 // 但列表接口会把它藏掉（extract.Guard 的既有口径）。名字带括号是为了让任何
 // 直接查库的人都一眼看出它是平台自建的，而不是用户建的数据源。
-const SelfProvisionedDatasourceName = "data-insights internal storage (upload files)"
+const SelfProvisionedDatasourceName = "tablewave internal storage (upload files)"
 
 // selfProvisionKey 是 bi_setting 里记住自举结果的键。
 //

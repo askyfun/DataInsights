@@ -1,6 +1,6 @@
 // pre-commit 泄露扫描：拦截「新增行」里的内网 IP / 个人家目录 / 个人工具链路径。
 // 只检查本次暂存的 diff（新增行），不追溯已提交内容，故不会因历史遗留而误挡日常提交。
-// 注：insight_dev / dataray_data 是仓库里合法的默认名（.env.example 等），刻意不列入。
+// 注：tablewave_dev / tablewave_data 是仓库里合法的默认名（.env.example 等），刻意不列入。
 // 需要追加模式就往 PATTERNS 里加；确要放行单次提交用 `git commit --no-verify`。
 import { execSync } from 'node:child_process';
 

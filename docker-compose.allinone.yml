@@ -1,8 +1,10 @@
-# Data Insights 一键体验（Docker Hub 发布镜像 + PostgreSQL）
+# TableWave 一键体验（Docker Hub 发布镜像 + PostgreSQL）
 #
+# ⚠️ 默认只监听本机（127.0.0.1）。要从别的机器访问，必须显式设置 HOST_BIND=0.0.0.0，
+#    并先改掉下面的 PostgreSQL 演示口令、按 docs/deployment/production.md 收紧访问面。
 # ⚠️ 平台已具备账号体系，但 AUTH_ENFORCE=off（默认）时资源端点仍可匿名访问：
 #    对外暴露务必设 AUTH_ENFORCE=on（见 docs/user-guide/configuration.md「鉴权开放口径」）。
-#    且不要把这个端口暴露到公网；下面的 PostgreSQL 用的是公开的演示密码，仅本地体验用。
+#    不要把端口直接暴露到公网；下面的 PostgreSQL 用的是公开的演示密码，仅本地体验用。
 #
 # 用法：
 #   docker compose -f docker-compose.allinone.yml up -d
@@ -20,14 +22,15 @@
 services:
   postgres:
     image: postgres:18-alpine
-    container_name: data-insights-postgres
+    container_name: tablewave-postgres
     environment:
       POSTGRES_USER: insights
       POSTGRES_PASSWORD: insights123
       POSTGRES_DB: insights
     # 体验场景默认映射 5432，方便用本机客户端连进去造数据；不需要可注释掉。
+    # 只绑环回：数据库即便用演示口令也不对同网段开放。
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       # 数据落在这个命名卷里，down 不会删，只有 down -v 才清。
       - postgres_data:/var/lib/postgresql/data
@@ -40,8 +43,8 @@ services:
 
   app:
     # TAG 不设则用 latest。镜像支持 linux/amd64 与 linux/arm64。
-    image: kzzhr/datainsights:${TAG:-latest}
-    container_name: data-insights-app
+    image: kzzhr/tablewave:${TAG:-latest}
+    container_name: tablewave-app
     # 后端不读任何配置文件，所有配置都从环境变量进来。以下变量可三种方式覆盖
     # （优先级高 → 低）：① shell 环境变量；② 同目录 .env；③ 本文件里的默认值。
     environment:
@@ -56,7 +59,8 @@ services:
       SECURITY_KEY: ${SECURITY_KEY:-}
     ports:
       # 容器内监听端口与宿主机映射端口保持一致，由 PORT 统一控制。
-      - "${PORT:-23352}:${PORT:-23352}"
+      # 默认只绑环回；内网共享时显式 HOST_BIND=0.0.0.0（先按文件头提示收紧暴露面）。
+      - "${HOST_BIND:-127.0.0.1}:${PORT:-23352}:${PORT:-23352}"
     depends_on:
       postgres:
         condition: service_healthy
