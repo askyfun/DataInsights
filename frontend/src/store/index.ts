@@ -16,6 +16,7 @@ export type {
   ChartField,
   ChartQueryOptions,
   ChartStyleConfig,
+  ColumnHierarchy,
   ComparisonConfig,
   FieldGroup,
   FieldType,

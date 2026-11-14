@@ -180,6 +180,14 @@ export const createChartBuilderSlice: StateCreator<AppState, [], [], ChartBuilde
         type: col.role || (isNumericType(normalizeDataType(col.type)) ? 'metric' : 'dimension'),
         dataType: normalizeDataType(col.type),
         comment: col.comment,
+        // wire（snake parent_id/next_id）→ store（camel parentId/nextId）。
+        // 列 id 引用是稳定身份，跨层一致；空串在两层都表示「无上级/无下级」。
+        hierarchy: col.hierarchy
+          ? {
+              parentId: col.hierarchy.parent_id || undefined,
+              nextId: col.hierarchy.next_id || undefined,
+            }
+          : undefined,
       }));
 
       set({ chartBuilderFields: fields, chartBuilderFieldsLoading: false });

@@ -13,6 +13,7 @@ import {
   PlusOutlined,
   RedoOutlined,
   ReloadOutlined,
+  RollbackOutlined,
   SaveOutlined,
   SwapOutlined,
   UndoOutlined,
@@ -114,6 +115,7 @@ import {
   expandDateFilterIntent,
   isDateFilterValue,
 } from '../lib/dateFilter';
+import { applyDrillDown, applyDrillUp } from '../lib/drillDown';
 import {
   type DynamicFieldSelections,
   dynamicSlotsOf,
@@ -825,6 +827,10 @@ interface ChartCanvasProps {
   queryOptions: ChartQueryOptions;
   /** 动态槽位的会话选择（issue #134）：labels/维度名按生效列解析。 */
   fieldOverrides?: DynamicFieldSelections;
+  /** 可下钻的维度 bindingId（issue #136）：图表点击该维度的数据项触发下钻。 */
+  drillBindingId?: string;
+  /** 下钻点击回调（issue #136）：收到 (bindingId, 点击到的维度值)。 */
+  onDrillClick?: (bindingId: string, value: string | number) => void;
 }
 
 /** 离屏主题探针样式：不影响布局，仅供 chartPalette 读取当前主题的 --dr-*。 */
@@ -872,6 +878,8 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   chartStyle,
   queryOptions,
   fieldOverrides,
+  drillBindingId,
+  onDrillClick,
 }) => {
   // 主题宿主探针（与 ChartView 同一机制）：canvas 取不到 CSS 变量，须在构造 option 时
   // 把当前主题的颜色算成字面值。resolvedTheme 入依赖 → 切主题即重建 option 实时重绘。
@@ -988,6 +996,31 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     reducedMotion,
   ]);
 
+  // 维度下钻（issue #136）：只有声明了可下钻维度才挂 click。复用 ChartView 的
+  // handler 语义——ECharts 点击 series 的分类值即维度原值，交给 onDrillClick。
+  // 必须在早退之前声明（rules-of-hooks）。
+  const drillClickable = Boolean(drillBindingId && onDrillClick);
+  const handleDrillClick = useCallback(
+    (params: unknown) => {
+      if (!drillClickable || !drillBindingId || !onDrillClick) {
+        return;
+      }
+      const item = params as { componentType?: string; name?: unknown };
+      if (item?.componentType !== 'series') {
+        return;
+      }
+      const value = item.name;
+      if (typeof value !== 'string' && typeof value !== 'number') {
+        return;
+      }
+      if (value === '') {
+        return;
+      }
+      onDrillClick(drillBindingId, value);
+    },
+    [drillClickable, drillBindingId, onDrillClick]
+  );
+
   if (loading) {
     return (
       <div
@@ -1059,6 +1092,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         option={chartOption}
         style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }}
         opts={{ renderer: 'canvas' }}
+        onEvents={drillClickable ? { click: handleDrillClick } : undefined}
       />
     </>
   );
@@ -2591,6 +2625,63 @@ const ChartBuilder: React.FC = () => {
     [dynamicSlots, dynamicSelections]
   );
 
+  // 维度层级（issue #136）：预览图表的可下钻/可上钻维度。只有恰好一个维度绑定、且该
+  // 维度字段声明了层级（hierarchy）时才有层级语义——多维度时「点了哪个维度」在
+  // ECharts 点击事件里分不出来（与 dashboardLinkage 的 linkageKeyColumnOf 同款约束）。
+  // 下钻态（当前列带 nextId）挂 click 下钻；上钻态（当前列带 parentId，说明已下钻到
+  // 子级）显示上钻入口。两者互斥，用同一份状态表达。
+  const drillState = useMemo(() => {
+    const dimensionBindings = activeQueryConfig.dimensionGroups.flatMap((g) => g.bindings);
+    if (dimensionBindings.length !== 1) {
+      return null;
+    }
+    const binding = dimensionBindings[0];
+    const fieldId = effectiveFieldId(binding, dynamicSelections);
+    const field = chartBuilderFields.find((f) => f.id === fieldId);
+    if (!field?.hierarchy) {
+      return null;
+    }
+    return {
+      binding,
+      field,
+      nextId: field.hierarchy.nextId || undefined,
+      parentId: field.hierarchy.parentId || undefined,
+    };
+  }, [activeQueryConfig, chartBuilderFields, dynamicSelections]);
+
+  /** 处理一次下钻点击：把当前维度换成层级下一级 + 追加父级列过滤，触发自动查询。 */
+  const handleDrillClick = useCallback(
+    (bindingId: string, value: string | number) => {
+      const state = drillState;
+      if (!state?.nextId || state.binding.bindingId !== bindingId) {
+        return;
+      }
+      const next = applyDrillDown(
+        useStore.getState().queryConfig,
+        bindingId,
+        state.field,
+        value,
+        state.nextId
+      );
+      setQueryConfig(next);
+    },
+    [drillState, setQueryConfig]
+  );
+
+  /** 上钻：当前维度换回层级上一级 + 移除下钻过滤。 */
+  const handleDrillUp = useCallback(() => {
+    const state = drillState;
+    if (!state?.parentId) {
+      return;
+    }
+    const next = applyDrillUp(
+      useStore.getState().queryConfig,
+      state.binding.bindingId,
+      state.parentId
+    );
+    setQueryConfig(next);
+  }, [drillState, setQueryConfig]);
+
   // 失效选择（槽位删除 / 候选被改 / 换数据集）自动回落默认列，避免把过期列发进查询。
   useEffect(() => {
     setDynamicSelections((prev) => pruneSelections(prev, dynamicSlots));
@@ -3652,18 +3743,32 @@ const ChartBuilder: React.FC = () => {
     }
     return (
       <ChartErrorBoundary>
-        <ChartCanvas
-          config={chartBuilderConfig}
-          data={chartData}
-          loading={chartDataLoading}
-          dimensionLabels={dimensionLabels}
-          metricAliases={metricAliases}
-          metricUnits={metricUnits}
-          metricFormats={metricFormats}
-          chartStyle={chartStyle}
-          queryOptions={chartQueryOptions}
-          fieldOverrides={dynamicFieldOverrides}
-        />
+        <div style={{ position: 'relative', height: '100%' }}>
+          {drillState?.parentId ? (
+            <Button
+              size="small"
+              icon={<RollbackOutlined />}
+              onClick={handleDrillUp}
+              style={{ position: 'absolute', top: 8, right: 8, zIndex: 5 }}
+            >
+              上钻
+            </Button>
+          ) : null}
+          <ChartCanvas
+            config={chartBuilderConfig}
+            data={chartData}
+            loading={chartDataLoading}
+            dimensionLabels={dimensionLabels}
+            metricAliases={metricAliases}
+            metricUnits={metricUnits}
+            metricFormats={metricFormats}
+            chartStyle={chartStyle}
+            queryOptions={chartQueryOptions}
+            fieldOverrides={dynamicFieldOverrides}
+            drillBindingId={drillState?.nextId ? drillState.binding.bindingId : undefined}
+            onDrillClick={handleDrillClick}
+          />
+        </div>
       </ChartErrorBoundary>
     );
   };

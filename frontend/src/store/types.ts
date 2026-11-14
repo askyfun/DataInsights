@@ -97,6 +97,19 @@ export interface ChartField {
   type: FieldType;
   dataType: string;
   comment?: string;
+  /**
+   * 维度层级定义（issue #136）：当前列在某个层级里的上一级/下一级列 id。
+   * 列 ID 引用；nil/undefined 表示该列不参与任何层级。
+   */
+  hierarchy?: ColumnHierarchy;
+}
+
+/** 维度层级：列 ID 之间的有序链（省份→城市→区县），随数据集列配置持久化。 */
+export interface ColumnHierarchy {
+  /** 上一级列 id（上钻目标）；空串 = 层级根。 */
+  parentId?: string;
+  /** 下一级列 id（下钻目标）；空串 = 层级叶子（不可再下钻）。 */
+  nextId?: string;
 }
 
 /**

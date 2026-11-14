@@ -39,6 +39,10 @@ type ChartQueryRequest struct {
 type ChartFieldSelection struct {
 	BindingID string `json:"bindingId"`
 	FieldID   string `json:"fieldId"`
+	// DrillValue 是维度下钻（issue #136）点击的父级维度取值。非空时后端在换列
+	// （FieldID = 层级下一级）之外，再追加一条「父级列 == DrillValue」的过滤条件，
+	// 使查询收敛到被点击分支的下一级明细。空串表示纯换列（与 #134 行为一致）。
+	DrillValue string `json:"drillValue,omitempty"`
 }
 
 // DimensionGroupIn v2 协议的维度槽位组（json tag 与 query.DimensionGroup 一致）。

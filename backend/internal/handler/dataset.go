@@ -295,6 +295,8 @@ func (h *DatasetHandler) UpdateColumns(req router.Request[[]entity.DatasetColumn
 // 字段名是**可变展示名**，列的引用键是 ID；但列名会作为 SQL 输出别名 / 响应负载键
 // 使用，同名会让表格与系列无法区分，故必须在写入口挡住。空名同理（无名的列在
 // 字段列表里不可选，且在 SQL 里会产生空别名）。
+// 层级定义（issue #136）一并校验：parent_id / next_id 必须引用数据集内真实存在的列 id，
+// 且不得自引用（层级是「有序链」而非「自己指自己」）。
 func validateColumnPayload(columns []entity.DatasetColumn) error {
 	seen := make(map[string]struct{}, len(columns))
 	for _, col := range columns {
@@ -306,8 +308,42 @@ func validateColumnPayload(columns []entity.DatasetColumn) error {
 			return router.NewBusinessError(response.CodeBadRequest, fmt.Sprintf("duplicate column name: %s", name))
 		}
 		seen[name] = struct{}{}
+
+		if err := validateColumnHierarchy(col, columns); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// validateColumnHierarchy 校验单列的层级引用：目标列 id 必须在本数据集列集合内，
+// 且不能指向自身（parent_id == id 或 next_id == id 都是自环，会让下钻/上钻无限递归）。
+func validateColumnHierarchy(col entity.DatasetColumn, columns []entity.DatasetColumn) error {
+	if col.Hierarchy == nil {
+		return nil
+	}
+	ids := make(map[string]struct{}, len(columns))
+	for _, c := range columns {
+		ids[c.ID] = struct{}{}
+	}
+	check := func(kind, target string) error {
+		if target == "" {
+			return nil // 空串 = 无上级/无下级（层级根/叶子），合法
+		}
+		if target == col.ID {
+			return router.NewBusinessError(response.CodeBadRequest,
+				fmt.Sprintf("column %q: hierarchy %s cannot reference itself", col.Name, kind))
+		}
+		if _, ok := ids[target]; !ok {
+			return router.NewBusinessError(response.CodeBadRequest,
+				fmt.Sprintf("column %q: hierarchy %s references unknown column id %q", col.Name, kind, target))
+		}
+		return nil
+	}
+	if err := check("parent_id", col.Hierarchy.ParentID); err != nil {
+		return err
+	}
+	return check("next_id", col.Hierarchy.NextID)
 }
 
 // Preview handles GET /api/datasets/:id/preview. Unlike the datasource
