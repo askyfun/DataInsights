@@ -1,10 +1,10 @@
-# Data Insights 开发规范
+# TableWave 开发规范
 
-**项目**: Data Insights - 拖拽式 BI 可视化分析平台
+**项目**: TableWave - 拖拽式 BI 可视化分析平台
 
 ## 项目概述
 
-Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构，包含前端（React/TypeScript）和后端（Go）。核心功能：数据源管理、数据集管理、拖拽式图表构建、仪表盘、查询记录短码分享。
+TableWave 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo 结构，包含前端（React/TypeScript）和后端（Go）。核心功能：数据源管理、数据集管理、拖拽式图表构建、仪表盘、查询记录短码分享。
 
 ## 架构
 
@@ -25,7 +25,8 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 | Domain | `backend/internal/domain/entity/` | 领域实体类型 |
 | Query | `backend/internal/query/` | SQL 构造唯一出口：AST + bun_builder（结构化查询）+ raw.go（原始 SQL 构造） |
 | Model | `backend/internal/model/` | 数据库模型（bun ORM） |
-| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：60 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
+| Router | `backend/internal/router/` | 泛型路由注册 `RegisterRoute[In, Out]`（**已全面启用**：61 个 API 端点经此注册；另有 3 个手工注册例外，见下） |
+
 | WebUI | `backend/internal/webui/` | 前端构建产物的托管与路径分流（挂在 gin 的 `NoRoute` 上）：命中磁盘文件就返回，未命中回落 `index.html`，保留前缀回 JSON 404 |
 | Datasource | `backend/internal/datasource/` | 数据源驱动抽象（Driver 接口） |
 | Crypto | `backend/internal/crypto/` | AES-GCM 加解密（密钥来自 `SECURITY_KEY`） |
@@ -36,7 +37,8 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 ⚠️ **`make api-gen` 的「前端」半步当前必然失败**（不是环境问题）：`openapi-typescript@7.13.0` 依赖 `typescript` 包的运行时导出 `ts.factory`，而本仓 `typescript@7` 没有它 → `TypeError: Cannot read properties of undefined`。崩溃发生在写文件之前（生成物不会被写坏）。绕过方式见 [docs/developer-guide/troubleshooting.md](docs/developer-guide/troubleshooting.md) 的「版本与依赖」（入库）；彻底修法是把生成器与 `typescript@7` 解耦（独立 package.json 或钉一个 TS 5 别名），属独立改动。**后端那半步能跑，但输出不保证可编译**：issue #201 加了 multipart 端点后，生成物引用 `github.com/oapi-codegen/runtime/types`，而 `backend/go.mod` 没有这个依赖 → 重跑生成会把编译跑坏，得先补依赖或收紧 cfg 的 generate 范围。它只输出被 cfg 允许的子集（不含 `DashboardFilter*` 等 layout schema）。无论走哪条路，重跑生成后都要 `diff` 生成物，确认只漂了本次改动（`ci.yml` 的 contract-drift job 就在自动做这个 diff，只报告不阻断，直到依赖缺口补上）。
 
-`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 60 个 API 端点**（`cmd/routes.go` 集中注册：datasource 11 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 6 + token 3）；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
+`backend/internal/router/router.go` 的泛型路由**已全面启用并接入 61 个 API 端点**（`cmd/routes.go` 集中注册：datasource 12 + dataset 9 + chart 8 + queryrecord 2 + dashboard 6 + dashboard-folder 5 + alert 6 + sample-dataset 4 + auth 6 + token 3）；签名语义、In 镜像 struct、PUT「未提供则保留」约定等细节见 `backend/AGENTS.md`「泛型路由注册」。横切面：PUT 更新遵循**"未提供则保留"**项目约定（datasource 密码、dataset 可选元数据同例），payload 省略/空的可选字段保留存量值而非清零，显式 `"[]"` 仍可清空。
+
 
 `datasource/` 包实现了 `Driver` 接口用于多数据库后端——新增驱动只需实现该接口。
 
@@ -48,7 +50,7 @@ Data Insights 是一个拖拽式 BI 可视化分析平台（MVP）。Monorepo �
 
 ```
 frontend/src/
-├── api/           # API 端点封装（10 个领域模块 / 59 个方法，复用 lib/api/client 的单一 axios 实例）
+├── api/           # API 端点封装（10 个领域模块 / 60 个方法，复用 lib/api/client 的单一 axios 实例）
 ├── store/         # Zustand 状态管理
 ├── pages/         # 页面组件
 ├── components/    # 可复用组件（日期筛选器在 components/DateFilter/，过滤弹窗在 components/ChartBuilder/，盘底部页面标签条在 components/DashboardPageTabs/）
@@ -128,6 +130,15 @@ frontend/src/
 - **已知边界**：① 盘级筛选每个筛选器每次查询最多产生**一条**合并条件，所以「包含空日期」
   （区间 OR IS NULL）在仪表盘侧表达不出来；② **未落库的图表块**走本地取数（`GET /api/charts/{id}/data`），
   不带盘级筛选——新增的筛选器只作用到**已保存**的图表块。
+
+### 动态维度/指标（issue #134）
+
+槽位的 `bindings[].candidates`（**不含**默认列）声明可切换的其他列；纯逻辑在
+`frontend/src/lib/dynamicFieldSlots.ts`（`effectiveFieldId` / `dynamicSlotsOf` / `fieldOverridesOf`）。
+切换是**观看侧会话态**，不写回 config：构建页/仪表盘只把选择传给查询组装（`composeChartQueryRequest`
+的 `fieldOverrides`）或 `/query` 的 `selections[]`，后端在内存 config 投影上换列并校验候选集。
+`?q=` 快照落库前用 `applyFieldOverrides` 把当前选择物化进 bindings（图表保存路径不物化）。
+仪表盘仅对已落库块渲染切换器（未保存块走 `GET /api/charts/{id}/data` 本地取数）。
 
 ### 查询容器（第一期，issue #154）
 
@@ -324,7 +335,7 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
   - 缓存策略继承原来的 nginx 配置语义：`assets/` 下带内容哈希的产物 `immutable` 长缓存，其余 `no-cache`。
   - 静态目录**配错即启动失败**（`webui.New` 读不到 `index.html` 就退出），不会跑起来之后整站 404。
   - 镜像自带的只有 `STATIC_DIR=/app/web`（代码默认值是"空 = 只提供 API"，必须显式指）；监听地址/端口的内置默认值本就是 `0.0.0.0:23352`，无需重复声明。其余全部运行时注入。
-- `docker compose`（唯一一份，`docker-compose.allinone.yml`）: PostgreSQL（端口 5432，本地体验用）+ **一个 app 服务**（23352，前后端同容器），app 用 Docker Hub 发布镜像 `kzzhr/datainsights:${TAG:-latest}` **不构建**；生产环境换外部高可用 PostgreSQL 只跑 app（见 README）。镜像由 `.github/workflows/release.yml` 手动触发发布（校验版本号 + 双端测试 → 冒烟 → 推 amd64/arm64 镜像到 Docker Hub → 打 tag + 建 Release），运维手册见 `docs/deployment/release.md`。
+- `docker compose`（唯一一份，`docker-compose.allinone.yml`）: PostgreSQL（端口 5432，本地体验用）+ **一个 app 服务**（23352，前后端同容器），app 用 Docker Hub 发布镜像 `kzzhr/tablewave:${TAG:-latest}` **不构建**；生产环境换外部高可用 PostgreSQL 只跑 app（见 README）。镜像由 `.github/workflows/release.yml` 手动触发发布（校验版本号 + 双端测试 → 冒烟 → 推 amd64/arm64 镜像到 Docker Hub → 打 tag + 建 Release），运维手册见 `docs/deployment/release.md`。
 - 本地不起 Docker 也能验证同一形态：`make serve`（构建前端产物后 `STATIC_DIR=../frontend/dist go run ./cmd`）。不设 `STATIC_DIR` 时后端退化为纯 API 服务（只提供 `/api`、`/mcp`、`/health`）。
 - ⚠️ **`frontend/vite.config.js` / `.d.ts` 是 tsc 产物，且会遮蔽 `vite.config.ts`**（Vite 解析 `vite.config.js` 优先于 `.ts`）。曾出现改了 `.ts` 却完全不生效的情况。发现配置改动「没反应」时先 `ls frontend/vite.config.*`，删掉这两个文件再验证。
 
@@ -338,6 +349,7 @@ npm / yarn / bun 会被**硬性拦截**，不是约定而是机制。
 | [docs/user-guide/features.md](docs/user-guide/features.md) | 核心功能使用说明（含「为什么做这个功能」） |
 | [docs/deployment/docker.md](docs/deployment/docker.md) | 容器镜像（发布镜像 / 本地构建）、Docker Compose |
 | [docs/deployment/release.md](docs/deployment/release.md) | 发布流程（打 tag + 推镜像到 Docker Hub + 建 Release） |
+| [docs/deployment/release-readiness.md](docs/deployment/release-readiness.md) | 单版本发版就绪判据（当前 V0.4.0）+ `scripts/release-gate-v0.4.0.sh` 静态闸 |
 | [docs/deployment/production.md](docs/deployment/production.md) | 生产环境部署实践 |
 | [docs/developer-guide/architecture.md](docs/developer-guide/architecture.md) | 系统架构 + 关键设计决策 |
 | [docs/developer-guide/api.md](docs/developer-guide/api.md) | API 接口文档（叙述性视图；契约事实源是 api/openapi.yaml） |

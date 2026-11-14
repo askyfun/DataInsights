@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/router"
-	"data-insights/internal/service/alert"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/router"
+	"tablewave/internal/service/alert"
 
 	"github.com/gin-gonic/gin"
 )

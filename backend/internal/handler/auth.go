@@ -1,11 +1,17 @@
 package handler
 
 import (
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/middleware"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/auth"
+	"errors"
+	"math"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/middleware"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/auth"
 )
 
 // AuthHandler serves the R-82 account endpoints (issue #183): bootstrap
@@ -48,7 +54,7 @@ func (h *AuthHandler) Register(req router.Request[authRegisterIn], res *router.R
 	out, err := h.svc.Register(req.Ctx.Request.Context(), req.In.Username, req.In.Password,
 		req.In.BootstrapToken, req.Ctx.ClientIP(), req.Ctx.Request.UserAgent())
 	if err != nil {
-		return err
+		return h.mapAuthError(req.Ctx, err)
 	}
 	res.Out = out
 	return nil
@@ -79,10 +85,28 @@ func (h *AuthHandler) Login(req router.Request[authCredentialsIn], res *router.R
 	out, err := h.svc.Login(req.Ctx.Request.Context(), req.In.Username, req.In.Password,
 		req.Ctx.ClientIP(), req.Ctx.Request.UserAgent())
 	if err != nil {
-		return err
+		return h.mapAuthError(req.Ctx, err)
 	}
 	res.Out = out
 	return nil
+}
+
+// mapAuthError 把认证服务的错误映射为路由可识别的错误。
+//
+// ErrRateLimited 携带 Retry-After 语义（issue #203 acceptance 4）：这里在响应头
+// 写入 `Retry-After: <秒>`，并返回 CodeRateLimited 业务码；返回的 BusinessError
+// 由泛型路由以统一信封落盘。其余错误（如登录失败 20200）原样透传。
+func (h *AuthHandler) mapAuthError(ctx *gin.Context, err error) error {
+	var rl auth.ErrRateLimited
+	if errors.As(err, &rl) {
+		secs := int(math.Ceil(rl.RetryAfter.Seconds()))
+		if secs < 1 {
+			secs = 1
+		}
+		ctx.Header("Retry-After", strconv.Itoa(secs))
+		return router.NewBusinessError(response.CodeRateLimited, rl.Error())
+	}
+	return err
 }
 
 // Logout revokes the bearer token used to make the call (immediate, no cache).

@@ -16,15 +16,15 @@ import (
 	"syscall"
 	"time"
 
-	"data-insights/internal/config"
-	"data-insights/internal/database"
-	"data-insights/internal/extract"
-	"data-insights/internal/keystore"
-	"data-insights/internal/migration/columnids"
-	"data-insights/internal/response"
-	"data-insights/internal/service/alert"
-	"data-insights/internal/service/auth"
-	"data-insights/internal/webui"
+	"tablewave/internal/config"
+	"tablewave/internal/database"
+	"tablewave/internal/extract"
+	"tablewave/internal/keystore"
+	"tablewave/internal/migration/columnids"
+	"tablewave/internal/response"
+	"tablewave/internal/service/alert"
+	"tablewave/internal/service/auth"
+	"tablewave/internal/webui"
 
 	"github.com/getsentry/sentry-go"
 	sentrygin "github.com/getsentry/sentry-go/gin"
@@ -150,7 +150,9 @@ func main() {
 
 	// 首管建立与恢复通道：ADMIN_USERNAME/ADMIN_PASSWORD 幂等建管理员；
 	// 否则在无管理员时签发一次性 bootstrap token（只在启动打印这一行明文）。
-	authSvc := auth.NewService(db, auth.AdminConfig{
+	authSvc := auth.NewService(db, auth.GuardOptions{
+		RatePerMinute: c.Auth.RateLimitPerMinute,
+	}, auth.AdminConfig{
 		Username:   c.Admin.Username,
 		Password:   c.Admin.Password,
 		ResetToken: c.Admin.ResetToken,

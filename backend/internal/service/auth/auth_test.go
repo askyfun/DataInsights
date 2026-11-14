@@ -13,7 +13,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"golang.org/x/crypto/bcrypt"
 
-	"data-insights/internal/router"
+	"tablewave/internal/router"
 )
 
 // --- pure token primitives ---
@@ -79,7 +79,22 @@ func newMockAuth(t *testing.T) (*authService, sqlmock.Sqlmock) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	return &authService{db: bun.NewDB(sqlDB, pgdialect.New())}, mock
+	// 宽松默认 guard：认证相关既有用例不受限流干扰；限流行为由 guard_test.go 单独覆盖。
+	svc := newServiceWithGuard(bun.NewDB(sqlDB, pgdialect.New()),
+		NewGuard(GuardOptions{RatePerMinute: 1_000_000, MaxFailures: 1_000_000}, nil), AdminConfig{})
+	return svc.(*authService), mock
+}
+
+// newMockAuthWithGuard 构造一个可注入 guard 的服务（限流链路用）。
+func newMockAuthWithGuard(t *testing.T, guard *Guard) *authService {
+	t.Helper()
+	sqlDB, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	svc := newServiceWithGuard(bun.NewDB(sqlDB, pgdialect.New()), guard, AdminConfig{})
+	return svc.(*authService)
 }
 
 const testBootstrapToken = "di_boot_test-token"
@@ -189,6 +204,48 @@ func TestLogin_WrongPassword(t *testing.T) {
 	}
 	if !regexp.MustCompile("invalid").MatchString(err.Error()) {
 		t.Fatalf("generic credentials error expected, got %v", err)
+	}
+}
+
+// --- Login 限流/锁定（issue #203 acceptance 5） ---
+
+func TestLogin_IPRateLimited_ReturnsErrRateLimited(t *testing.T) {
+	clk := newFakeClock()
+	g := NewGuard(GuardOptions{RatePerMinute: 1, MaxFailures: 100}, clk.now)
+	s := newMockAuthWithGuard(t, g)
+	const ip = "203.0.113.9"
+
+	// 第 1 次放行（会走到 DB 查询，但限流在 DB 之前 —— 用任意用户名即可）。
+	if _, ok := g.AllowIP(ip); !ok {
+		t.Fatal("first IP allow should pass")
+	}
+	// 第 2 次：IP 维度被拒 → ErrRateLimited。
+	_, err := s.Login(context.Background(), "alice", "pw", ip, "")
+	var rl ErrRateLimited
+	if !errors.As(err, &rl) {
+		t.Fatalf("expected ErrRateLimited for IP limit, got %#v", err)
+	}
+	if rl.RetryAfter <= 0 {
+		t.Fatalf("retry-after must be positive, got %v", rl.RetryAfter)
+	}
+}
+
+func TestLogin_UserLockout_ReturnsErrRateLimited(t *testing.T) {
+	clk := newFakeClock()
+	g := NewGuard(GuardOptions{RatePerMinute: 1_000_000, MaxFailures: 2, LockSeconds: 300}, clk.now)
+	s := newMockAuthWithGuard(t, g)
+
+	// 直接灌 2 次失败触发锁定（不经过 DB）。
+	g.RecordLoginFailure("alice")
+	g.RecordLoginFailure("alice")
+	if _, ok := g.AllowUser("alice"); ok {
+		t.Fatal("alice should be locked")
+	}
+
+	_, err := s.Login(context.Background(), "alice", "pw", "1.2.3.4", "")
+	var rl ErrRateLimited
+	if !errors.As(err, &rl) {
+		t.Fatalf("expected ErrRateLimited for lockout, got %#v", err)
 	}
 }
 

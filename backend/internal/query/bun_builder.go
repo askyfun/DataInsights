@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	internalExpr "data-insights/internal/expr"
+	internalExpr "tablewave/internal/expr"
 
 	bundialect "github.com/uptrace/bun/dialect"
 )

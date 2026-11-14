@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"data-insights/internal/database"
-	"data-insights/internal/router"
+	"tablewave/internal/database"
+	"tablewave/internal/router"
 )
 
 // TestRegister_ConcurrentBootstrapOnlyOneWins exercises the advisory lock on a
@@ -35,7 +35,7 @@ func TestRegister_ConcurrentBootstrapOnlyOneWins(t *testing.T) {
 		t.Fatalf("truncate scratch tables: %v", err)
 	}
 
-	svc := NewService(db, AdminConfig{})
+	svc := NewService(db, GuardOptions{}, AdminConfig{})
 	raw, generated, err := svc.EnsureBootstrap(context.Background())
 	if err != nil || !generated {
 		t.Fatalf("EnsureBootstrap: generated=%v err=%v", generated, err)

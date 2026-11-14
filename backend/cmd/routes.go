@@ -4,18 +4,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/uptrace/bun"
 
-	"data-insights/internal/extract"
-	"data-insights/internal/handler"
-	"data-insights/internal/middleware"
-	"data-insights/internal/router"
-	"data-insights/internal/service/alert"
-	"data-insights/internal/service/auth"
-	"data-insights/internal/service/chart"
-	"data-insights/internal/service/dashboard"
-	"data-insights/internal/service/dataset"
-	"data-insights/internal/service/datasource"
-	"data-insights/internal/service/queryrecord"
-	"data-insights/internal/service/sample"
+	"tablewave/internal/extract"
+	"tablewave/internal/handler"
+	"tablewave/internal/middleware"
+	"tablewave/internal/router"
+	"tablewave/internal/service/alert"
+	"tablewave/internal/service/auth"
+	"tablewave/internal/service/chart"
+	"tablewave/internal/service/dashboard"
+	"tablewave/internal/service/dataset"
+	"tablewave/internal/service/datasource"
+	"tablewave/internal/service/queryrecord"
+	"tablewave/internal/service/sample"
 )
 
 // SetupRoutes configures all routes.
@@ -80,6 +80,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	router.RegisterDeleteRoute(ds, "/:id", datasourceHandler.Delete)
 	router.RegisterPostRoute(ds, "/test", datasourceHandler.TestConnection)
 	router.RegisterGetRoute(ds, "/:id/tables", datasourceHandler.GetTables)
+	router.RegisterGetRoute(ds, "/:id/capabilities", datasourceHandler.GetCapabilities)
 	router.RegisterGetRoute(ds, "/:id/tables/:table/columns", datasourceHandler.GetColumns)
 	router.RegisterGetRoute(ds, "/:id/tables/:table/data", datasourceHandler.GetTableData)
 	router.RegisterPostRoute(ds, "/:id/preview", datasourceHandler.Preview)
@@ -167,6 +168,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	// token. allowPAT=true here because both are self-service identity
 	// operations, not user-management; the PAT-forbidden guard lives on the
 	// token-management endpoints (#184).
+
 	authHandler := handler.NewAuthHandler(authSvc)
 	authPublic := api.Group("/auth")
 	router.RegisterGetRoute(authPublic, "/bootstrap-status", authHandler.BootstrapStatus)

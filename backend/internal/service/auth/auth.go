@@ -17,16 +17,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/uptrace/bun"
 	"golang.org/x/crypto/bcrypt"
 
-	"data-insights/internal/database"
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/model"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/database"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/model"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 )
 
 // sessionTokenTTL is the 24h lifetime of a human session token (#183/#184).
@@ -40,6 +41,18 @@ const defaultPATTTL = 90 * 24 * time.Hour
 // ErrInvalidCredentials collapses "unknown user" and "wrong password" into one
 // message so login does not leak which usernames exist.
 var errInvalidCredentials = router.NewBusinessError(response.CodeUnauthorized, "invalid username or password")
+
+// ErrRateLimited is the error returned when the auth guard rejects a request
+// (IP-dimension rate limit or username lockout). The handler maps it to a
+// distinct business code + Retry-After header so the frontend can show the
+// "尝试过于频繁，请稍后再试" copy (issue #203 acceptance 4).
+type ErrRateLimited struct {
+	RetryAfter time.Duration
+}
+
+func (e ErrRateLimited) Error() string {
+	return "尝试过于频繁，请稍后再试"
+}
 
 // Principal is the authenticated caller resolved from a bearer token. Kind
 // distinguishes a human session from a machine PAT so the middleware can deny
@@ -77,11 +90,18 @@ type Service interface {
 type authService struct {
 	db       *bun.DB
 	adminCfg AdminConfig
+	guard    *Guard
 }
 
-// NewService wires the bun-backed auth service.
-func NewService(db *bun.DB, admin AdminConfig) Service {
-	return &authService{db: db, adminCfg: admin}
+// NewService wires the bun-backed auth service with a guard built from opts and
+// the first-admin startup escape hatches (R-91).
+func NewService(db *bun.DB, opts GuardOptions, admin AdminConfig) Service {
+	return newServiceWithGuard(db, NewGuard(opts, nil), admin)
+}
+
+// newServiceWithGuard wires the service with an explicit guard.
+func newServiceWithGuard(db *bun.DB, guard *Guard, admin AdminConfig) Service {
+	return &authService{db: db, adminCfg: admin, guard: guard}
 }
 
 // --- token primitives (pure, unit-tested) ---
@@ -133,10 +153,19 @@ func toUserEntity(m *model.User) *entity.User {
 // On success it also adopts every row still stamped with the L0 placeholder
 // owner (model.SystemOwnerID) onto the new admin — the R-22 存量归属衔接
 // (#183 acceptance 6). All of this is one transaction so a partially-applied
-// bootstrap cannot be observed.
+// bootstrap (admin exists but owner_id not adopted) cannot be observed.
+//
+// 限流（issue #203）：注册引导窗口可被抢注（部署后到首个管理员之间的裸奔期），
+// 所以 register 也挂 IP 维度限流 —— 同一来源 IP 每分钟超限即拒。
 func (s *authService) Register(ctx context.Context, username, password, bootstrapToken, ip, ua string) (*entity.AuthResult, error) {
+
 	if username == "" || password == "" {
 		return nil, router.NewBusinessError(response.CodeBadRequest, "username and password are required")
+	}
+	if retryAfter, ok := s.guard.AllowIP(ip); !ok {
+		slog.Warn("auth register rate-limited",
+			"method", "register", "client_ip", ip, "username", username, "reason", "ip_rate_limit")
+		return nil, ErrRateLimited{RetryAfter: retryAfter}
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -204,9 +233,26 @@ func (s *authService) Register(ctx context.Context, username, password, bootstra
 	return result, nil
 }
 
+// Login exchanges credentials for a session token, with two-dimension abuse
+// protection (issue #203 acceptance 2):
+//   - IP 维度：同一来源 IP 每分钟限流（令牌桶）。
+//   - 用户名维度：同一用户名连续失败 M 次后锁定 K 秒；成功登录即清零。
+//
+// 失败与锁定事件用 slog 留痕（method/path/client_ip/username/reason），不落新表
+// （审计日志属 #63）。
 func (s *authService) Login(ctx context.Context, username, password, ip, ua string) (*entity.AuthResult, error) {
 	if username == "" || password == "" {
 		return nil, errInvalidCredentials
+	}
+	if retryAfter, ok := s.guard.AllowIP(ip); !ok {
+		slog.Warn("auth login rate-limited",
+			"method", "login", "client_ip", ip, "username", username, "reason", "ip_rate_limit")
+		return nil, ErrRateLimited{RetryAfter: retryAfter}
+	}
+	if retryAfter, ok := s.guard.AllowUser(username); !ok {
+		slog.Warn("auth login locked",
+			"method", "login", "client_ip", ip, "username", username, "reason", "user_lockout")
+		return nil, ErrRateLimited{RetryAfter: retryAfter}
 	}
 	u := &model.User{}
 	err := s.db.NewSelect().Model(u).
@@ -214,14 +260,25 @@ func (s *authService) Login(ctx context.Context, username, password, ip, ua stri
 		Where("deleted_at IS NULL").
 		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
+		s.guard.RecordLoginFailure(username)
+		slog.Warn("auth login failed",
+			"method", "login", "client_ip", ip, "username", username, "reason", "unknown_user")
 		return nil, errInvalidCredentials
 	}
 	if err != nil {
 		return nil, fmt.Errorf("lookup user: %w", err)
 	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+		if _, locked := s.guard.RecordLoginFailure(username); locked {
+			slog.Warn("auth login lockout triggered",
+				"method", "login", "client_ip", ip, "username", username, "reason", "user_lockout")
+		} else {
+			slog.Warn("auth login failed",
+				"method", "login", "client_ip", ip, "username", username, "reason", "bad_password")
+		}
 		return nil, errInvalidCredentials
 	}
+	s.guard.RecordLoginSuccess(username)
 	return s.issueSession(ctx, s.db, u, ip, ua)
 }
 

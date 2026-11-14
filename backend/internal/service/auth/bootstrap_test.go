@@ -9,7 +9,7 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
-	"data-insights/internal/router"
+	"tablewave/internal/router"
 )
 
 func TestBootstrapStatus_NeedsBootstrapOnlyWithoutAdmins(t *testing.T) {

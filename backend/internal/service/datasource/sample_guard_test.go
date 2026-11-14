@@ -9,7 +9,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"data-insights/internal/listpage"
+	"tablewave/internal/listpage"
 )
 
 // TestListHidesSampleDatasource 钉死内置示例数据源（R-79）的隐藏口径：

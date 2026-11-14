@@ -3,7 +3,7 @@ package handler
 import (
 	"strconv"
 
-	"data-insights/internal/listpage"
+	"tablewave/internal/listpage"
 )
 
 // listParams is the single binding→Params conversion shared by the four
