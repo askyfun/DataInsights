@@ -54,7 +54,8 @@ export type ChartType =
   | 'histogram'
   | 'funnel'
   | 'radar'
-  | 'boxplot';
+  | 'boxplot'
+  | 'waterfall';
 
 export interface ChartMeta {
   label?: string;
@@ -125,6 +126,7 @@ const CHART_TYPES: readonly string[] = [
   'funnel',
   'radar',
   'boxplot',
+  'waterfall',
 ];
 
 /** 旧平铺 Record → fieldMeta 键的映射 */
