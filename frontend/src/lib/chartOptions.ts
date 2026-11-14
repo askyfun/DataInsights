@@ -157,6 +157,18 @@ export interface ChartOptionContext {
 export const PIE_OTHER_SLICE_NAME = '其他';
 
 /**
+ * 瀑布图（R-139）的增减语义色：涨/跌各一色，随主题切换。
+ * 刻意不消费 style.colors——用户自定义调色板会破坏「涨绿跌红」的读图约定。
+ */
+const WATERFALL_COLORS = {
+  light: { up: '#52c41a', down: '#ff4d4f' },
+  dark: { up: '#73d13d', down: '#ff7875' },
+} as const;
+
+/** 瀑布图浮动基线的承载系列名：不出现在图例与 tooltip 里（只负责把柱底抬到累计值） */
+const WATERFALL_BASE_SERIES = '__waterfall_base__';
+
+/**
  * 把持久化 queryOptions.pieMergeOtherBelowRatio（schema 上是 unknown）净化为合法阈值。
  * 仅接受 (0, 100) 内的有限数值；其他输入（含 0/负数/非数值）返回 undefined（不合并）。
  */
@@ -766,6 +778,110 @@ export function buildChartOption(
             style.stack
           ),
           ...colorOf(),
+        };
+      }
+
+      case 'waterfall': {
+        if (
+          context.dimensions.length === 0 ||
+          context.metrics.length === 0 ||
+          !('x_axis' in data)
+        ) {
+          return null;
+        }
+        const axis: AxisResponse = sortByTemporalAxis(data);
+        // 槽位声明是单指标（chartDefinitions），这里仍只取第一条：多指标下
+        // 「累计」口径不唯一，叠成一张瀑布图反而误导。
+        const firstSeries = axis.series[0];
+        if (!firstSeries) {
+          return null;
+        }
+        const seriesName = labelOf(firstSeries.name);
+        const deltaValues = firstSeries.data.map(toPieValue);
+        const baseValues: Array<number | null> = [];
+        const cumulativeValues: Array<number | null> = [];
+        let cumulative = 0;
+        for (const value of deltaValues) {
+          if (value === undefined) {
+            baseValues.push(null);
+            cumulativeValues.push(null);
+            continue;
+          }
+          const next = cumulative + value;
+          // 浮动柱基线取两端较小者：涨柱从旧累计向上画，跌柱从新累计向上画回旧值，
+          // 柱体高度始终是落差绝对值。
+          baseValues.push(Math.min(cumulative, next));
+          cumulative = next;
+          cumulativeValues.push(cumulative);
+        }
+        const barColors = WATERFALL_COLORS[theme ?? 'light'];
+        const categoryAxis = {
+          type: 'category' as const,
+          data: axis.x_axis,
+          name: labelOf(context.dimensions[0]),
+          ...themedCategoryExtras(),
+          axisLabel: categoryAxisLabel(axis.x_axis.length),
+        };
+        const valueAxis = themedValueAxis();
+        const metricFormat = context.metricFormats?.[seriesName];
+        const tooltipFormatter = (params: unknown): string => {
+          const items = Array.isArray(params) ? params : [params];
+          const hit = items.find(
+            (item) =>
+              typeof item === 'object' &&
+              item !== null &&
+              (item as Record<string, unknown>).seriesName === seriesName
+          ) as Record<string, unknown> | undefined;
+          if (!hit) {
+            return '';
+          }
+          const index = typeof hit.dataIndex === 'number' ? hit.dataIndex : -1;
+          const name = typeof hit.name === 'string' ? hit.name : String(hit.name ?? '');
+          const deltaValue = index >= 0 ? deltaValues[index] : undefined;
+          const cumulativeValue = index >= 0 ? cumulativeValues[index] : undefined;
+          if (
+            deltaValue === undefined ||
+            cumulativeValue === undefined ||
+            cumulativeValue === null
+          ) {
+            return `${name}<br/>${seriesName}: -`;
+          }
+          return `${name}<br/>${seriesName}: ${formatMetricValue(
+            deltaValue,
+            metricFormat
+          )}<br/>累计: ${formatMetricValue(cumulativeValue)}`;
+        };
+        return {
+          ...commonOptions,
+          xAxis: categoryAxis,
+          yAxis: valueAxis,
+          // 基线系列不进图例：只保留真正承载增减值的系列。
+          legend: { ...commonOptions.legend, data: [seriesName] },
+          tooltip: { ...commonOptions.tooltip, formatter: tooltipFormatter },
+          series: [
+            {
+              name: WATERFALL_BASE_SERIES,
+              type: 'bar' as const,
+              stack: 'waterfall',
+              data: baseValues,
+              itemStyle: { color: 'transparent' },
+              emphasis: { itemStyle: { color: 'transparent' } },
+              silent: true,
+              legendHoverLink: false,
+            },
+            {
+              name: seriesName,
+              type: 'bar' as const,
+              stack: 'waterfall',
+              data: deltaValues.map((value, index) => ({
+                value: value === undefined ? null : Math.abs(value),
+                itemStyle: {
+                  color: (deltaValues[index] ?? 0) < 0 ? barColors.down : barColors.up,
+                },
+              })),
+              ...dataLabelFragment(style, metricFormat),
+            },
+          ],
         };
       }
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/model"
+	"tablewave/internal/datasource"
+	"tablewave/internal/model"
 )
 
 // histogramMockConnection 按调用次序应答多组行的 Connection mock：histogram 是

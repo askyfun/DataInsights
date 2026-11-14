@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/router"
-	"data-insights/internal/service/queryrecord"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/router"
+	"tablewave/internal/service/queryrecord"
 )
 
 // mockQueryRecordService implements queryrecord.Service for handler tests. The

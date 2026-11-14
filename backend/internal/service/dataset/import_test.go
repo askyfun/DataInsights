@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/datasource"
-	"data-insights/internal/extract"
-	"data-insights/internal/model"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
+	"tablewave/internal/datasource"
+	"tablewave/internal/extract"
+	"tablewave/internal/model"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/uptrace/bun"

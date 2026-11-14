@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"data-insights/internal/domain/entity"
+	"tablewave/internal/domain/entity"
 )
 
 // jsonTagTypes 收集结构体声明的全部 json 字段名 → 声明类型（忽略无 tag、

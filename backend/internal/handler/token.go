@@ -3,11 +3,11 @@ package handler
 import (
 	"strconv"
 
-	"data-insights/internal/domain/entity"
-	"data-insights/internal/middleware"
-	"data-insights/internal/response"
-	"data-insights/internal/router"
-	"data-insights/internal/service/auth"
+	"tablewave/internal/domain/entity"
+	"tablewave/internal/middleware"
+	"tablewave/internal/response"
+	"tablewave/internal/router"
+	"tablewave/internal/service/auth"
 )
 
 // TokenHandler serves the PAT management endpoints (issue #184). EVERY route
