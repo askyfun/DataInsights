@@ -468,6 +468,17 @@ export interface SampleDatasetStatus {
   dismissed: boolean;
 }
 
+export interface SetupStatus {
+  needs_admin: boolean;
+  has_sample: boolean;
+  has_any_resource: boolean;
+  version: string;
+}
+
+export const setupApi = {
+  status: () => apiClient.get<ApiResponse<SetupStatus>>('/api/setup/status'),
+};
+
 export const sampleDatasetApi = {
   getStatus: (): Promise<AxiosResponse<ApiResponse<SampleDatasetStatus>>> => {
     return apiClient.get<ApiResponse<SampleDatasetStatus>>('/api/sample-dataset/status');

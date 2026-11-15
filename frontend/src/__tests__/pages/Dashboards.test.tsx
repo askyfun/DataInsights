@@ -33,6 +33,23 @@ vi.mock('../../api', () => ({
     getById: vi.fn(),
     getChartData: vi.fn(),
   },
+  setupApi: {
+    status: vi.fn(() =>
+      Promise.resolve({
+        data: {
+          code: 20000,
+          msg: '',
+          trace: '',
+          data: { needs_admin: false, has_sample: false, has_any_resource: false, version: 'dev' },
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {},
+      })
+    ),
+  },
+  sampleDatasetApi: { load: vi.fn(() => Promise.resolve({ data: { data: {} } })) },
 }));
 
 import { dashboardFoldersApi, dashboardsApi } from '../../api';
