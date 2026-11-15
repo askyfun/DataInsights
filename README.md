@@ -14,8 +14,10 @@
 - **仪表盘** — 12 列栅格布局，**多页面（底部标签页）**，图表块 / 文本块 / 盘级筛选器（可设为「本页」或「全部页面」）/ 查询容器，一次请求多块联动取数；支持**归档文件夹**整理
 - **查询记录** — 每次查询落库（内容 hash 去重）并生成短码直链（不可变快照），"地址栏即分享"
 - **指标预警** — 绑定图表指标设置阈值规则，后台定时评估，触发历史可追溯（可选 SMTP 邮件通知）
-- **用户认证** — 账号注册 / 登录 + Personal Access Token（PAT）管理；资源端点仍渐进式接入鉴权
-- **内置示例数据集** — 首次启动可一键加载示例订单数据并直达首图，开箱体验零配置（可忽略 / 移除）
+- **账号与权限** — 首个管理员 bootstrap 与恢复通道、管理员建号 / 禁用 / 重置口令、Personal Access Token（PAT）管理；资源端点强制鉴权三档（`off` / `shadow` / `on`，**生产默认 `on`**）；资源级细粒度权限（谁能看哪条数据）属付费插件，不在社区主干
+- **开箱可用** — 首启向导带你走完「建管理员 → 载示例 → 出第一张图」；内置示例订单数据集可一键加载（可忽略 / 移除）
+- **可排障** — 统一错误码 + 可复制报障编号、请求关联日志、Sentry 集中上报、一键导出脱敏诊断包、`/version` 与 `/health/ready` 探针
+- **运维** — 备份 / 升级 / 回滚脚本与运维手册；compose 默认只绑环回，`HOST_BIND` 显式放开
 
 > 完整功能说明见 [docs/user-guide/features.md](docs/user-guide/features.md)。
 
@@ -74,11 +76,11 @@ make dev              # 前端 23351 + 后端 23352，一起起
 
 ## 第一次启动会发生什么
 
-1. 访问 `http://<主机>:23352`，首次启动会引导你**建立管理员**：一次性 bootstrap token 在部署日志里（`docker logs data-insights | grep BOOTSTRAP`，30 分钟有效）；无头部署可改用 `ADMIN_USERNAME` + `ADMIN_PASSWORD` 环境变量直接建号。
+1. 访问 `http://<主机>:23352`，首次启动会引导你**建立管理员**：一次性 bootstrap token 在部署日志里（`docker logs tablewave | grep BOOTSTRAP`，30 分钟有效）；无头部署可改用 `ADMIN_USERNAME` + `ADMIN_PASSWORD` 环境变量直接建号。
 2. 登录后按需三选一：**加载内置示例数据集**、**上传 CSV/Excel**、或**连接外部数据库**建数据集。
 3. 把字段拖进槽位，**即时出图**；保存后复制地址栏短码即可分享。
-4. 加同事：管理员在「账号」页建号 / 重置口令 / 禁用。
-5. 默认 `AUTH_ENFORCE=off`，资源端点对匿名开放——**对外暴露务必设 `on`**。备份 / 升级 / 回滚的运维手册随 R-102 批次提供（`docs/deployment/backup-restore.md`），当前先见 [生产部署](docs/deployment/production.md)。
+4. 加同事：管理员走右上角「系统管理 → 用户管理」建号 / 重置口令 / 禁用。
+5. 资源端点**默认要求登录**：`AUTH_ENFORCE` 未设置时生产按 `on`、本地开发（`APP_ENV=development`）按 `off`，只有显式写 `off` 才匿名开放。备份 / 升级 / 回滚的运维手册见 `docs/deployment/backup-restore.md`，其余见 [生产部署](docs/deployment/production.md)。
 
 详细向导（含忘记口令的恢复通道）：[docs/getting-started/first-run.md](docs/getting-started/first-run.md)
 

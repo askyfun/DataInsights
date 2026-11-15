@@ -25,6 +25,11 @@ make build-frontend      # 构建 (tsc + vite build)
 配置统一走仓库根的 `.env`（模板 `.env.example`）：`cp .env.example .env` 后按需修改。
 后端**不读任何配置文件**，只认裸名环境变量（无前缀）。优先级（低 → 高）：内置默认值 < `.env` < 真实系统环境变量；`.env` 由 `LoadDotEnv` 装载且**不覆盖**已存在的真实环境变量。
 
+> 两个容易踩的点：① 探测顺序从**进程工作目录**开始（`./.env` → `../.env`，取第一个**存在**的文件，
+> 不合并）—— 于是 `backend/.env` 一旦存在就会遮蔽根 `.env`，只在仓库根维护一份最省事；
+> ② **改完 `.env` 必须重启后端**才生效，包括 air 托管的情况（air 默认不 watch `.env`）——
+> 否则会出现「明明写了 `APP_ENV=development`，`/api/auth/config` 还报 `enforce_mode: on`」这种怪象。
+
 事实源：`backend/internal/config/config.go` 的 `Load()` 与仓库根 `.env.example`。各变量语义：
 
 | 变量 | 语义 |

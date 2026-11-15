@@ -47,7 +47,8 @@ cp .env.example .env    # 然后按需修改
 | `SMTP_PASSWORD` | 否 | 空 | SMTP 认证密码。 |
 | `SMTP_FROM` | 否 | 空 | 发件人地址。配了 `SMTP_HOST` 但此项或收件人为空时，通知失败并在 `notify_error` 留档（不会静默）。 |
 | `ALERT_NOTIFY_EMAIL` | 否 | 空 | 预警邮件收件人，逗号分隔多个。与 `SMTP_FROM` 同时非空才会真正发送。 |
-| `AUTH_ENFORCE` | 否 | `off` | 资源端点强制鉴权三态：`off`（默认，资源端点匿名可访问）/ `shadow`（照常解析令牌但**不改变任何响应**，只记一条 `auth_would_deny` 告警日志，用于发现存量裸奔脚本 / MCP 客户端 / 监控探针）/ `on`（写操作与敏感读全部要求有效 Bearer，PAT 同样可用）。启动日志打印当前模式；改 env 重启即回滚，无 schema 变更。逐项开放口径见下方「鉴权开放口径」。 |
+| `APP_ENV` | 否 | 空（= `production`） | 运行环境标签，两处生效：① Sentry 事件的 `environment`；② **`AUTH_ENFORCE` 未显式设置时的默认档位**——认作本地开发的白名单是 `development` / `dev` / `local` / `test`（大小写不敏感），其余取值（含留空、`staging`、私有云环境名）一律按生产对待，默认 `on`。安全默认值不靠猜：没被认出来就当生产。 |
+| `AUTH_ENFORCE` | 否 | 按 `APP_ENV` 推导 | 资源端点强制鉴权三态：`off`（资源端点匿名可访问）/ `shadow`（照常解析令牌但**不改变任何响应**，只记一条 `auth_would_deny` 告警日志，用于发现存量裸奔脚本 / MCP 客户端 / 监控探针）/ `on`（写操作与敏感读全部要求有效 Bearer，PAT 同样可用）。**显式设置永远优先**；未设置时生产默认 `on`、本地开发默认 `off`（见上一行）。生产里写 `off` 会打一条 warn 留痕。启动日志打印当前档位与 `app_env`；改 env 重启即生效，无 schema 变更。逐项开放口径见下方「鉴权开放口径」。 |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | 否 | `10` | 认证端点防护（issue #203）：同一来源 IP 每分钟允许的登录/注册请求数，仅作用于 `/api/auth/login` 与 `/api/auth/register`。用户名维度另有「连续失败 5 次锁定 300 秒」的内置策略（不可配）。留空 = 内置默认；非法值（非整数 / 小于 1）回退 10 并打 warning。**分布式部署（多副本）时各副本独立计数**，实际阈值 = 本值 × 副本数。反代场景需正确设置 `X-Forwarded-For` 的信任边界（见[生产部署](../deployment/production.md)）。 |
 | `ADMIN_USERNAME` | 否 | 空 | 首管无头创建的用户名。**必须与 `ADMIN_PASSWORD` 同时设置**；仅在库中还没有管理员时生效（幂等，已有管理员时不改动），设置后启动不再打印 bootstrap token。见[第一次启动](../getting-started/first-run.md)。 |
 | `ADMIN_PASSWORD` | 否 | 空 | 与 `ADMIN_USERNAME` 配对的首管口令。注意：写进 env 意味着它会出现在 `docker inspect` / `compose config`，生产建议用 Secret 注入。 |
@@ -59,13 +60,15 @@ cp .env.example .env    # 然后按需修改
 
 > 前端 API 基础地址的**唯一来源**是代码里的 `resolveApiBaseURL`（前端 `lib/api/client.ts`），`VITE_API_BASE_URL` 只是它读取的环境变量。
 
-> ⚠️ **同批发布说明**：`AUTH_ENFORCE`（R-92，issue #217）与 `AUTH_RATE_LIMIT_PER_MINUTE`（R-87，issue #203）随对应实现**同批发布**；若你运行的版本早于该批次，设置这两个变量不会有任何效果（启动日志也不会打印 enforce 模式）。
+> ⚠️ **同批发布说明**：`AUTH_ENFORCE`（R-92，issue #217）与 `AUTH_RATE_LIMIT_PER_MINUTE`（R-87，issue #203）随对应实现**同批发布**；若你运行的版本早于该批次，设置这两个变量不会有任何效果（启动日志也不会打印 enforce 档位）。
+>
+> ⚠️ **默认值变更（破坏性）**：`AUTH_ENFORCE` 的默认值从「恒定 `off`」改为「按 `APP_ENV` 推导」。升级到该版本后，**生产部署（未设 `APP_ENV`）会默认开启强制鉴权**——存量里匿名调 API 的脚本 / MCP 客户端 / 监控探针会开始拿到 `20200`。升级前先设 `AUTH_ENFORCE=shadow` 跑一轮，看 `auth_would_deny` 日志盘点存量调用方，再随升级切到 `on`（或不设、让它默认 `on`）。本地开发只要 `APP_ENV=development` 就仍是 `off`。
 
 ### 3.1 鉴权开放口径：哪些端点强制 Bearer、哪些仍匿名
 
-「登录了 ≠ 资源已受保护」是本平台刻意的渐进策略：会话与 PAT 管理端点**一直**强制鉴权，而资源端点的强制与否则由 `AUTH_ENFORCE` 控制。逐项口径如下（与 R-92 的路由分类守卫测试同源——该测试遍历 gin 注册表，任何未分类的 `/api` 路由都会让测试失败）：
+「登录了 ≠ 资源已受保护」这句话只在 `AUTH_ENFORCE` 非 `on` 时成立：会话与 PAT 管理端点**一直**强制鉴权，而资源端点的强制与否则由 `AUTH_ENFORCE`（生产默认 `on`、本地开发默认 `off`）控制。逐项口径如下（与 R-92 的路由分类守卫测试同源——该测试遍历 gin 注册表，任何未分类的 `/api` 路由都会让测试失败）：
 
-| 端点 | `off`（默认） | `on` |
+| 端点 | `off`（本地开发默认） | `on`（生产默认） |
 |------|--------------|------|
 | `POST /api/auth/login` / `register`、`GET /api/auth/bootstrap-status` / `config`、`POST /api/auth/recover-admin` | 匿名 | 匿名（**永久白名单**，用例钉死不随重构漂移） |
 | `GET /api/queries/{q}`（`?q=` 分享直链） | 匿名 | 匿名（**永久白名单**） |
@@ -137,19 +140,20 @@ cp .env.example .env    # 然后按需修改
 
 ## 7. 认证现状：哪些端点强制 Bearer
 
-当前是**渐进式强制认证**（Phase C 之前的状态），登录页出现不等于全站受保护。以下口径与 `backend/cmd/routes.go` 的路由注册逐一对应：
+分两层：**身份端点**（账号、令牌、用户管理）永远强制；**资源端点**由 `AUTH_ENFORCE` 决定，生产默认 `on`、本地开发默认 `off`。以下口径与 `backend/cmd/routes.go` 的路由注册逐一对应：
 
 | 范围 | 端点 | 凭据要求 |
 |------|------|----------|
-| 公开 | `POST /api/auth/register`、`POST /api/auth/login` | 无 |
-| **仍匿名** | `/api/datasources*`、`/api/datasets*`、`/api/charts*`、`/api/queries*`、`/api/dashboards*`、`/api/dashboard-folders*`、`/api/alerts*`、`/api/sample-dataset*`、`/health` | 无 |
+| 公开 | `POST /api/auth/register`、`POST /api/auth/login`、`GET /api/auth/config`、`GET /api/auth/bootstrap-status`、`POST /api/auth/recover-admin`、`GET /api/setup/status` | 无 |
+| 受 `AUTH_ENFORCE` 控制 | `/api/datasources*`、`/api/datasets*`、`/api/charts*`、`/api/queries*`、`/api/dashboards*`、`/api/dashboard-folders*`、`/api/alerts*`、`/api/sample-dataset*` | `on`：Bearer（会话或 PAT）；`off`：无 |
 | 人类或机器 | `GET /api/auth/me`、`DELETE /api/auth/logout` | Bearer（会话或 PAT） |
 | 仅人类会话 | `/api/tokens*` | Bearer，且**拒绝 PAT** |
-| 仅人类会话 + 管理员 | `/api/users*` | Bearer + 拒绝 PAT + 角色为 `admin` |
+| 仅人类会话 + 管理员 | `/api/users*`、`/api/admin/*` | Bearer + 拒绝 PAT + 角色为 `admin` |
 
 要点：
 
-- **资源端点仍匿名可读写**。若把平台暴露到公网，请自行在网络层限制访问，不要仅依赖登录入口；「已登录 = 数据受保护」在当前版本不成立。
+- **生产默认受保护**：不设 `APP_ENV`、也不设 `AUTH_ENFORCE` 时，资源端点要求 Bearer。要临时放开（例如做故障定位）就显式写 `AUTH_ENFORCE=off`，启动日志会打 warn 留痕。
+- **携带无效 Bearer 一律 401**（不论哪个档位）：这是 fail-closed，别拿过期 token 探活。
 - `POST /api/auth/register` 只在**没有任何存活账号**时可用，用于创建首个管理员；之后注册关闭，新增账号只能由管理员在「用户管理」页创建（`POST /api/users`）。
 - 禁用账号会立即吊销该用户全部未撤销 token（会话与 PAT），下一跳即失效；最后一个启用中的管理员不可降级、不可禁用。
 - 错误码区分**未认证**与**越权**：`20200` 表示没登录 / 凭据失效，`20201` 表示已登录但无权限（非管理员调 `/api/users*`、PAT 调管理类端点）。

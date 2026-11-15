@@ -176,7 +176,7 @@ go test -race ./...                        # 带竞态检测运行测试
 ## 运维与安全
 
 - Sentry 通过 `SENTRY_DSN` 接通（sentrygin Repanic）。
-- CORS 默认放开所有来源（平台 API 无登录态，CORS 不构成安全边界）；`CORS_ALLOWED_ORIGINS` 填了非空白名单则只回显名单内来源，供将来引入认证后收紧。
+- CORS 默认放开所有来源（Bearer 不由浏览器自动携带，CORS 不构成安全边界）；`CORS_ALLOWED_ORIGINS` 填了非空白名单则只回显名单内来源。真正的访问面开关是 `AUTH_ENFORCE`（未设置时生产 `on`、`APP_ENV=development` 时 `off`）。
 - requestID 中间件返回非全零 ID。
 - datasource 密码 AES-GCM 加密存储（密钥见根「配置」的 `SECURITY_KEY` 说明），API 响应中 `password` 字段 `json:"-"` 不外泄。
 

@@ -106,7 +106,7 @@ R-99：旧整数 `code` 不改义；需要区分原因时读 `error.code`（字�
 |----|------|------|
 | `X-Request-ID` | 请求 | 可选，客户端生成；缺省由后端 requestID 中间件生成（非全零），响应头与 Envelope.trace 原样回显 |
 | `Content-Type: application/json` | 请求 | POST/PUT 请求体 |
-| `Authorization: Bearer <token>` | 请求 | 仅 `GET /api/auth/me`、`DELETE /api/auth/logout`、`/api/tokens/*` 强制（渐进强制，其余端点仍匿名；令牌形态与会话/PAT 边界见 10/11 节） |
+| `Authorization: Bearer <token>` | 请求 | `GET /api/auth/me`、`DELETE /api/auth/logout`、`/api/tokens/*`、`/api/users/*` 永远强制；资源端点由 `AUTH_ENFORCE` 决定（未设置时生产 `on`、本地开发 `off`）。携带**无效**令牌一律 401 / `20200`（fail-closed，与档位无关）。令牌形态与会话/PAT 边界见 10/11 节 |
 
 ### 1.5 分页参数：两套口径，别混用
 
@@ -434,7 +434,7 @@ expires_at / expired / hit_count`）。
 易踩点：
 
 - **首管建立**：首次部署看启动日志的 `BOOTSTRAP TOKEN:`（只打印明文一次，库中存 sha256，TTL 30 分钟）；无头部署改用 `ADMIN_USERNAME`+`ADMIN_PASSWORD`（成对，幂等）。两种路径都会在其他管理员行存在时保持不动。
-- **渐进强制**：当前只有本族 me/logout 两个端点与第 11 节的 3 个端点强制 Bearer，`bootstrap-status / register / recover-admin / login` 是本族仅有的公开端点；其余资源端点仍匿名（Phase C 逐步接入）——不要按「全站已鉴权」理解 20200。
+- **强制范围**：本族 me/logout、第 11 节的 3 个端点、以及 `/api/users/*` 永远强制 Bearer；`bootstrap-status / config / register / recover-admin / login` 是本族仅有的公开端点。资源端点由 `AUTH_ENFORCE` 决定（未设置时生产 `on`、本地开发 `off`）——排查 20200 先看启动日志那行 `Resource endpoint auth enforcement`。
 - 20200 不只属于认证：Bearer 中间件对非业务错误也 fail-closed 成 20200（`middleware/bearer.go`）。
 
 ## 11. Token PAT 管理（3 个端点）
