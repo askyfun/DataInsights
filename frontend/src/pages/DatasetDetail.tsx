@@ -41,7 +41,7 @@ import PageHeader from '../components/PageHeader';
 import { PageSizeChanger } from '../components/ui/PageSizeChanger';
 import { getInitialLocale, messages } from '../i18n/useLocale';
 import { resolveApiErrorMessage } from '../lib/api/errorHint';
-import { normalizeDataType } from '../lib/dataTypes';
+import { DATA_TYPES, dataTypeLabel, normalizeDataType } from '../lib/dataTypes';
 import { validateExpr } from '../lib/expr';
 import { roleColor } from '../lib/fieldRoleColors';
 
@@ -397,24 +397,8 @@ const DatasetDetailPage: React.FC = () => {
           size="small"
           style={{ width: 110 }}
           onChange={(value) => handleColumnTypeChange(record.id, value)}
-        >
-          <Select.Option value="string">
-            {intl.formatMessage({ id: 'dataType.string' })}
-          </Select.Option>
-          <Select.Option value="integer">
-            {intl.formatMessage({ id: 'dataType.integer' })}
-          </Select.Option>
-          <Select.Option value="float">
-            {intl.formatMessage({ id: 'dataType.float' })}
-          </Select.Option>
-          <Select.Option value="date">{intl.formatMessage({ id: 'dataType.date' })}</Select.Option>
-          <Select.Option value="datetime">
-            {intl.formatMessage({ id: 'dataType.datetime' })}
-          </Select.Option>
-          <Select.Option value="boolean">
-            {intl.formatMessage({ id: 'dataType.boolean' })}
-          </Select.Option>
-        </Select>
+          options={DATA_TYPES.map((t) => ({ value: t, label: dataTypeLabel(t, intl) }))}
+        />
       ),
     },
     {
