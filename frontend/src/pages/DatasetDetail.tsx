@@ -38,6 +38,7 @@ import ClickToEdit from '../components/ClickToEdit';
 import ExpressionEditor from '../components/ExpressionEditor';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
+import { PageSizeChanger } from '../components/ui/PageSizeChanger';
 import { getInitialLocale, messages } from '../i18n/useLocale';
 import { resolveApiErrorMessage } from '../lib/api/errorHint';
 import { normalizeDataType } from '../lib/dataTypes';
@@ -691,6 +692,7 @@ const DatasetDetailPage: React.FC = () => {
                     pagination={{
                       pageSize: 10,
                       showSizeChanger: true,
+                      components: { sizeChanger: PageSizeChanger },
                     }}
                     locale={{
                       emptyText: intl.formatMessage({ id: 'dataset.detail.noFields' }),
@@ -721,6 +723,7 @@ const DatasetDetailPage: React.FC = () => {
                     pagination={{
                       pageSize: 10,
                       showSizeChanger: true,
+                      components: { sizeChanger: PageSizeChanger },
                     }}
                     scroll={{ x: 'max-content' }}
                     locale={{

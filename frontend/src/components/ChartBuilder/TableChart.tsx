@@ -13,6 +13,7 @@ import {
 } from '@/lib/tableSparkline';
 import { transposeTable } from '@/lib/tableTranspose';
 import LoadingPlaceholder from '../LoadingPlaceholder';
+import { PageSizeChanger } from '../ui/PageSizeChanger';
 
 interface TableChartProps {
   data: any[];
@@ -514,6 +515,7 @@ const TableChart: React.FC<TableChartProps> = ({
               total: pagination.total,
               showSizeChanger: true,
               pageSizeOptions: ['10', '20', '50', '100'],
+              components: { sizeChanger: PageSizeChanger },
               showTotal: (total) => `总计 ${total} 条`,
               showQuickJumper: true,
             }
@@ -522,6 +524,7 @@ const TableChart: React.FC<TableChartProps> = ({
               defaultPageSize: 100,
               showSizeChanger: true,
               pageSizeOptions: ['10', '20', '50', '100'],
+              components: { sizeChanger: PageSizeChanger },
               showTotal: (total) => `总计 ${total} 条`,
             }
       }

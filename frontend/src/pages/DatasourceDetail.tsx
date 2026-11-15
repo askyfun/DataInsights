@@ -25,6 +25,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { ColumnInfo, TableDataResult, TableInfo } from '../api';
 import { datasourcesApi } from '../api';
 import PageHeader from '../components/PageHeader';
+import { PageSizeChanger } from '../components/ui/PageSizeChanger';
 import { useStore } from '../store';
 
 const { Text } = Typography;
@@ -428,6 +429,7 @@ const DatasourceDetailPage: React.FC = () => {
                 pageSize={previewPageSize}
                 total={previewData.total}
                 showSizeChanger
+                components={{ sizeChanger: PageSizeChanger }}
                 showTotal={(total) => intl.formatMessage({ id: 'common.totalRows' }, { total })}
                 onChange={handlePreviewPageChange}
               />
