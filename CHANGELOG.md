@@ -77,7 +77,8 @@
 ### 修复
 
 - 模糊测试的标识符目标不再把表达式位当作标识符位（此前会产出与真实攻击面无关的崩溃），并补充两条崩溃语料。
-- 依赖更新：`undici` → 8.12.4、`follow-redirects` → 1.16.3、`go.opentelemetry.io/otel/trace` → 1.47.0。
+- 依赖安全更新，仓库依赖告警清零（含全部 high）：`undici` → 8.12.4、`follow-redirects` → 1.16.3、`vite` → 8.3.8、`source-map-js` → 1.2.2、`vitest` → 5.1.0（连带 `@vitest/mocker` 5.1.0）、`go.opentelemetry.io/otel/trace` → 1.47.0。
+  根 workspace lock 与 `frontend/pnpm-lock.yaml`（**CI 与镜像构建实际使用的那份**）均已同步；此前 dependabot 只更新根 lock，导致「CI 测过的依赖树」与「打进镜像的依赖树」不是同一份。
 
 ### 已知限制
 
