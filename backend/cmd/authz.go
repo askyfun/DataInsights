@@ -19,6 +19,7 @@ var authzPublic = map[string]bool{
 	"POST /api/auth/login":           true,
 	"POST /api/auth/register":        true,
 	"POST /api/auth/recover-admin":   true,
+	"GET /api/setup/status":          true, // 首启状态探测（R-101 / #226）匿名
 }
 
 // authzEnforcedGroups 是所有「on 时强制鉴权」的资源分组前缀。默认所有 /api 段

@@ -16,6 +16,7 @@ import (
 	"tablewave/internal/service/datasource"
 	"tablewave/internal/service/queryrecord"
 	"tablewave/internal/service/sample"
+	"tablewave/internal/service/setup"
 )
 
 // SetupRoutes configures all routes.
@@ -28,7 +29,7 @@ import (
 // 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
 // notifier 也由 main 注入，routes.go 不读环境变量）。databaseURL 供内置示例
 // 数据集（R-79）反查应用自身数据库。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authSvc auth.Service, authEnforce string) alert.Service {
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authSvc auth.Service, authEnforce string, version string) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -58,6 +59,10 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	sampleSvc := sample.NewService(db, databaseURL)
 	sampleSvc.SetSecurityKey(securityKey)
 	sampleHandler := handler.NewSampleHandler(sampleSvc)
+
+	// 首启状态探测（R-101 / #226）：匿名可读，供首屏决定是否渲染向导。
+	setupSvc := setup.NewService(db, version)
+	setupHandler := handler.NewSetupHandler(setupSvc)
 
 	// Initialize handlers
 	datasourceHandler := handler.NewDatasourceHandler(dsSvc)
@@ -169,6 +174,10 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	router.RegisterPostRoute(samples, "/load", sampleHandler.Load)
 	router.RegisterPostRoute(samples, "/dismiss", sampleHandler.Dismiss)
 	router.RegisterDeleteRoute(samples, "", sampleHandler.Remove)
+
+	// 首启状态（R-101 / #226）：匿名白名单。
+	setupGroup := api.Group("/setup")
+	router.RegisterGetRoute(setupGroup, "/status", setupHandler.Status)
 
 	// Auth routes (R-82 / issue #183). Progressive enforcement: only these
 	// endpoints are behind the bearer middleware for now — the 40 existing

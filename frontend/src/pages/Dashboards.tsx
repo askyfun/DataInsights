@@ -8,7 +8,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { App, Button, Card, Layout, Popconfirm, Space, Table, Tag, Typography } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { notifyApiError } from '@/lib/describeApiError';
@@ -18,10 +18,14 @@ import {
   dashboardFoldersApi,
   dashboardsApi,
   type ListQuery,
+  sampleDatasetApi,
+  setupApi,
 } from '../api';
 import DashboardFolderTree from '../components/DashboardFolderTree';
+import FirstRunGuide from '../components/FirstRunGuide';
 import { sortOrderOf, useServerList } from '../components/listPage';
 import PageHeader from '../components/PageHeader';
+import { useSessionUser } from '../lib/authSession';
 import type { FolderSelection } from '../lib/dashboardFolderTree';
 import { migrateDashboardLayout } from '../lib/dashboardLayoutSchema';
 import { formatDateTime } from '../lib/format';
@@ -54,6 +58,44 @@ const DashboardsPage: React.FC = () => {
   const [selection, setSelection] = useState<FolderSelection>({ kind: 'root' });
   // 归档树默认展开（占位整列），可向左折叠。
   const [collapsed, setCollapsed] = useState(false);
+
+  // 首启向导（R-101 / #226）：仅「未登录 + needs_admin + 未完成过」时顶替列表。
+  const sessionUser = useSessionUser();
+  const [showWizard, setShowWizard] = useState(false);
+  // 只在首次探测时决定是否进入向导；一旦展示就一直保持，直到用户完成/跳过（onDone 收起）。
+  const wizardDecided = useRef(false);
+  useEffect(() => {
+    if (wizardDecided.current) return;
+    let cancelled = false;
+    setupApi
+      .status()
+      .then((r) => {
+        if (cancelled || wizardDecided.current) return;
+        wizardDecided.current = true;
+        let done = false;
+        try {
+          done = localStorage.getItem('setup_done') === '1';
+        } catch {
+          /* ignore */
+        }
+        setShowWizard(!!r.data.data.needs_admin && !sessionUser && !done);
+      })
+      .catch(() => {
+        wizardDecided.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionUser]);
+
+  const handleLoadSample = async () => {
+    try {
+      await sampleDatasetApi.load();
+      navigate('/chart-builder');
+    } catch (e) {
+      notifyApiError(e, intl, message);
+    }
+  };
 
   const fetchPage = useCallback(
     (query: ListQuery) => dashboardsApi.getAll(query).then((res) => res.data.data),
@@ -293,6 +335,10 @@ const DashboardsPage: React.FC = () => {
     },
   ];
 
+  if (showWizard) {
+    return <FirstRunGuide onDone={() => setShowWizard(false)} />;
+  }
+
   return (
     <div className="dr-page">
       <PageHeader
@@ -374,7 +420,26 @@ const DashboardsPage: React.FC = () => {
               loading={list.loading}
               pagination={list.pagination}
               onChange={list.onTableChange}
-              locale={{ emptyText: intl.formatMessage({ id: 'common.noData' }) }}
+              locale={{
+                emptyText: (
+                  <div style={{ padding: 24 }}>
+                    <div style={{ marginBottom: 12, color: 'var(--dr-text-3)' }}>
+                      {intl.formatMessage({ id: 'empty.title' })}
+                    </div>
+                    <Space wrap>
+                      <Button type="primary" onClick={handleLoadSample}>
+                        {intl.formatMessage({ id: 'empty.sample' })}
+                      </Button>
+                      <Button onClick={() => navigate('/datasets')}>
+                        {intl.formatMessage({ id: 'empty.upload' })}
+                      </Button>
+                      <Button onClick={() => navigate('/datasources')}>
+                        {intl.formatMessage({ id: 'empty.newDatasource' })}
+                      </Button>
+                    </Space>
+                  </div>
+                ),
+              }}
               size="small"
             />
           </Card>
