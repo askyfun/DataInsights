@@ -103,7 +103,7 @@ describe('DatasetDetail 物理字段删除（#267）', () => {
     const sent = mockUpdateColumns.mock.calls[0][1] as Array<{ id: string; name: string }>;
     expect(sent.map((c) => c.id)).toEqual(['c2']);
     // 不应把 visible 之类字段带进契约
-    expect(sent.some((c) => Object.hasOwn(c, 'visible'))).toBe(false);
+    expect(sent.some((c) => Object.prototype.hasOwnProperty.call(c, 'visible'))).toBe(false);
   });
 
   it('只剩一个字段时不允许删除（给出提示、不发请求）', async () => {
