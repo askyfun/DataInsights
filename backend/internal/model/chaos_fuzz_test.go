@@ -38,10 +38,6 @@ func FuzzZZTypeMappers(f *testing.F) {
 			if out := m.ToSource(std, cfg); out == "" {
 				t.Fatalf("%s.ToSource(%q) 返回空串", m.GetSourceName(), std)
 			}
-			// 已知类型必须能显示
-			if std.GetDisplayName() == "" {
-				t.Fatalf("GetDisplayName(%q) 为空", std)
-			}
 		}
 	})
 }

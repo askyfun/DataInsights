@@ -67,3 +67,25 @@ describe('类型助手', () => {
     expect(classifyFieldKind('map')).toBe('string');
   });
 });
+
+describe('dataTypeLabel（#266 单一映射入口）', () => {
+  it('map→字典、array→数组，已知类型取 i18n 中文名', async () => {
+    const { createIntl } = await import('react-intl');
+    const { messages } = await import('../../i18n/useLocale');
+    const { dataTypeLabel } = await import('../../lib/dataTypes');
+    const intl = createIntl({ locale: 'zh-CN', messages: messages['zh-CN'] });
+    expect(dataTypeLabel('map', intl)).toBe('字典');
+    expect(dataTypeLabel('array', intl)).toBe('数组');
+    expect(dataTypeLabel('string', intl)).toBe('字符串');
+    expect(dataTypeLabel('datetime', intl)).toBe('日期时间');
+  });
+
+  it('未知/非法类型回退为原始值（不空白、不崩溃）', async () => {
+    const { createIntl } = await import('react-intl');
+    const { messages } = await import('../../i18n/useLocale');
+    const { dataTypeLabel } = await import('../../lib/dataTypes');
+    const intl = createIntl({ locale: 'zh-CN', messages: messages['zh-CN'] });
+    expect(dataTypeLabel('weird_type', intl)).toBe('weird_type');
+    expect(dataTypeLabel('json', intl)).toBe('json');
+  });
+});

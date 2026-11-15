@@ -96,24 +96,6 @@ type TypeConfig struct {
 	ValueType StandardDataType `json:"value_type,omitempty"` // 字典值类型
 }
 
-// GetDisplayName 获取类型的显示名称
-func (t StandardDataType) GetDisplayName() string {
-	names := map[StandardDataType]string{
-		TypeFloat:   "浮点数",
-		TypeInteger: "整数",
-		TypeBoolean:  "布尔值",
-		TypeString:   "字符串",
-		TypeDate:     "日期",
-		TypeDateTime: "日期时间",
-		TypeArray:    "数组",
-		TypeMap:      "字典",
-	}
-	if name, ok := names[t]; ok {
-		return name
-	}
-	return string(t)
-}
-
 // IsNumeric 判断是否为数值类型
 func (t StandardDataType) IsNumeric() bool {
 	return t == TypeFloat || t == TypeInteger

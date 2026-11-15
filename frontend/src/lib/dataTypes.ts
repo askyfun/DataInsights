@@ -1,3 +1,5 @@
+import type { IntlShape } from 'react-intl';
+
 /**
  * 数据集字段统一数据类型 —— 前端单一事实源。
  *
@@ -91,4 +93,15 @@ export function classifyFieldKind(
   if (isDateTimeType(t)) return 'date';
   if (isNumericType(t)) return 'number';
   return 'string';
+}
+
+/**
+ * 数据类型显示名（单一映射入口，#266）：从 i18n `dataType.<type>` 取中文/英文名，
+ * 未知或非法类型回退为原始值本身（不空白、不崩溃）。
+ *
+ * 所有「类型下拉 / 类型标签」都应经此渲染，禁止再各自硬编码 Option 列表——历史上
+ * DatasetDetail / Dataset 两处残缺下拉漏了 array/map，导致 map 只显示英文。
+ */
+export function dataTypeLabel(type: string, intl: IntlShape): string {
+  return intl.formatMessage({ id: `dataType.${type}`, defaultMessage: type });
 }

@@ -55,7 +55,7 @@ import { ListSearch, sortOrderOf, useDebouncedValue, useServerList } from '../co
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import SampleDatasetCard from '../components/SampleDatasetCard';
-import { isNumericType, normalizeDataType } from '../lib/dataTypes';
+import { DATA_TYPES, dataTypeLabel, isNumericType, normalizeDataType } from '../lib/dataTypes';
 import { roleColor } from '../lib/fieldRoleColors';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
@@ -1282,26 +1282,11 @@ const DatasetPage: React.FC = () => {
                       size="small"
                       style={{ width: 110 }}
                       onChange={(value) => handleColumnTypeChange(record, value)}
-                    >
-                      <Select.Option value="string">
-                        {intl.formatMessage({ id: 'dataType.string' })}
-                      </Select.Option>
-                      <Select.Option value="integer">
-                        {intl.formatMessage({ id: 'dataType.integer' })}
-                      </Select.Option>
-                      <Select.Option value="float">
-                        {intl.formatMessage({ id: 'dataType.float' })}
-                      </Select.Option>
-                      <Select.Option value="boolean">
-                        {intl.formatMessage({ id: 'dataType.boolean' })}
-                      </Select.Option>
-                      <Select.Option value="date">
-                        {intl.formatMessage({ id: 'dataType.date' })}
-                      </Select.Option>
-                      <Select.Option value="datetime">
-                        {intl.formatMessage({ id: 'dataType.datetime' })}
-                      </Select.Option>
-                    </Select>
+                      options={DATA_TYPES.map((t) => ({
+                        value: t,
+                        label: dataTypeLabel(t, intl),
+                      }))}
+                    />
                   ),
                 },
                 {
