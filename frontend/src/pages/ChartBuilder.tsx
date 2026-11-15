@@ -43,6 +43,7 @@ import {
   Layout,
   Modal,
   message,
+  Segmented,
   Select,
   Space,
   Spin,
@@ -1549,10 +1550,13 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
 
             {showStyleControl('tableRowSize') && (
               <SettingRow label="表格行尺寸">
-                <Select
-                  style={{ width: 160 }}
+                <Segmented
                   value={chartStyle.tableRowSize}
-                  onChange={(value) => onChartStyleChange({ tableRowSize: value })}
+                  onChange={(value) =>
+                    onChartStyleChange({
+                      tableRowSize: value as 'small' | 'middle' | 'large',
+                    })
+                  }
                   options={[
                     { value: 'small', label: '紧凑' },
                     { value: 'middle', label: '默认' },
