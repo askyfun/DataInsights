@@ -18,7 +18,6 @@ import (
 	"tablewave/internal/response"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
 )
 
@@ -83,7 +82,6 @@ func TestSentryPanicPathReturnsEnvelope(t *testing.T) {
 		assertPanicEnvelope(t, w)
 	})
 }
-
 
 func TestResolveSecurityKeyEnvTakesPriority(t *testing.T) {
 	db, _, err := sqlmock.New()

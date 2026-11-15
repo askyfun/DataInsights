@@ -106,6 +106,9 @@ type AlertConfig struct {
 type AuthConfig struct {
 	// RateLimitPerMinute 是同一来源 IP 每分钟允许的认证请求数，默认 defaultAuthRateLimitPerMinute。
 	RateLimitPerMinute int
+	// Enforce 是资源端点强制鉴权模式（R-92 / issue #217）：off|shadow|on，默认 off。
+	// 空串等同未设置 = off（遵循「空串等同未写」约定）。
+	Enforce string
 }
 
 const (
@@ -115,6 +118,10 @@ const (
 	defaultAlertSMTPPort = "587"
 	// defaultAuthRateLimitPerMinute 是未设置 AUTH_RATE_LIMIT_PER_MINUTE 时的默认值。
 	defaultAuthRateLimitPerMinute = 10
+	// AuthEnforceOff / AuthEnforceShadow / AuthEnforceOn 是资源端点强制鉴权模式（R-92 / #217）。
+	AuthEnforceOff    = "off"
+	AuthEnforceShadow = "shadow"
+	AuthEnforceOn     = "on"
 )
 
 type DatabaseConfig struct {
@@ -291,6 +298,18 @@ func (c *Config) Load() error {
 			c.Auth.RateLimitPerMinute = rpm
 		}
 
+	}
+
+	// 资源端点强制鉴权模式（R-92 / issue #217）：off|shadow|on，默认 off。
+	// 非法值不 fail-fast，回落 off 并 warn（防护是增强，配置错误不该拦启动）。
+	c.Auth.Enforce = AuthEnforceOff
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_ENFORCE"))); v != "" {
+		switch v {
+		case AuthEnforceOff, AuthEnforceShadow, AuthEnforceOn:
+			c.Auth.Enforce = v
+		default:
+			slog.Warn("invalid AUTH_ENFORCE, falling back to off", "value", v)
+		}
 	}
 
 	return nil

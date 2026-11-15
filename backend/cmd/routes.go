@@ -28,7 +28,7 @@ import (
 // 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
 // notifier 也由 main 注入，routes.go 不读环境变量）。databaseURL 供内置示例
 // 数据集（R-79）反查应用自身数据库。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authSvc auth.Service) alert.Service {
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authSvc auth.Service, authEnforce string) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -75,7 +75,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	// 不变），携带有效凭证则把 principal 注入上下文供 create 路径写 owner_id；
 	// 携带无效凭证 fail-closed 401。auth/token 端点在此之上再挂强制 Bearer。
 	// authSvc 提前到分组装配前，供 OptionalBearer 与 auth 路由共用。
-	api.Use(middleware.OptionalBearer(authSvc))
+	api.Use(middleware.AuthGuard(authSvc, authEnforce, classifyRoute))
 
 	// Datasource routes (generic router)
 	ds := api.Group("/datasources")
@@ -181,6 +181,7 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	authHandler := handler.NewAuthHandler(authSvc)
 	authPublic := api.Group("/auth")
 	router.RegisterGetRoute(authPublic, "/bootstrap-status", authHandler.BootstrapStatus)
+	router.RegisterGetRoute(authPublic, "/config", authHandler.Config)
 	router.RegisterPostRoute(authPublic, "/register", authHandler.Register)
 	router.RegisterPostRoute(authPublic, "/recover-admin", authHandler.RecoverAdmin)
 	router.RegisterPostRoute(authPublic, "/login", authHandler.Login)

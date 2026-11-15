@@ -46,6 +46,8 @@ type GuardOptions struct {
 	MaxFailures int
 	// LockSeconds 是锁定持续秒数，默认 defaultLockSeconds。
 	LockSeconds int
+	// EnforceMode 是资源端点鉴权模式（R-92 / #217），由 BootstrapStatus 透出给前端。
+	EnforceMode string
 }
 
 const (

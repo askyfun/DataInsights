@@ -115,15 +115,20 @@ type UpdateUserInput struct {
 }
 
 type authService struct {
-	db       *bun.DB
-	adminCfg AdminConfig
-	guard    *Guard
+	db          *bun.DB
+	adminCfg    AdminConfig
+	guard       *Guard
+	enforceMode string
 }
 
 // NewService wires the bun-backed auth service with a guard built from opts and
 // the first-admin startup escape hatches (R-91).
 func NewService(db *bun.DB, opts GuardOptions, admin AdminConfig) Service {
-	return newServiceWithGuard(db, NewGuard(opts, nil), admin)
+	mode := opts.EnforceMode
+	if mode == "" {
+		mode = EnforceModeOff
+	}
+	return &authService{db: db, guard: NewGuard(opts, nil), adminCfg: admin, enforceMode: mode}
 }
 
 // newServiceWithGuard wires the service with an explicit guard.

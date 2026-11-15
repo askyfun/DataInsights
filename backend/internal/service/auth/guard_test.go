@@ -12,7 +12,7 @@ type fakeClock struct {
 
 func newFakeClock() *fakeClock { return &fakeClock{t: time.Unix(1_700_000_000, 0)} }
 
-func (f *fakeClock) now() time.Time { return f.t }
+func (f *fakeClock) now() time.Time          { return f.t }
 func (f *fakeClock) advance(d time.Duration) { f.t = f.t.Add(d) }
 
 func TestGuard_IPRateLimit_ExceedsAndRecovers(t *testing.T) {
