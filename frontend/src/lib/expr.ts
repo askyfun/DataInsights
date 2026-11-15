@@ -241,6 +241,14 @@ class ExprParser {
   }
 
   private primary(depth: number): ExprValidation | null {
+    const err = this.atom(depth);
+    if (err) {
+      return err;
+    }
+    return this.postfixJsonPath();
+  }
+
+  private atom(depth: number): ExprValidation | null {
     this.skipSpace();
     if (this.pos >= this.src.length) {
       return fail('unexpected_token', 'end');
@@ -272,6 +280,33 @@ class ExprParser {
       return this.quotedIdent();
     }
     return this.identOrCall(depth);
+  }
+
+  private postfixJsonPath(): ExprValidation | null {
+    for (;;) {
+      this.skipSpace();
+      if (
+        !(
+          this.pos + 1 < this.src.length &&
+          this.src[this.pos] === '-' &&
+          this.src[this.pos + 1] === '>'
+        )
+      ) {
+        return null;
+      }
+      this.pos += 2; // '->'
+      if (this.pos < this.src.length && this.src[this.pos] === '>') {
+        this.pos++; // '->>'
+      }
+      this.skipSpace();
+      if (this.pos >= this.src.length || this.src[this.pos] !== "'") {
+        return fail('unexpected_token', "'");
+      }
+      const err = this.stringLit();
+      if (err) {
+        return err;
+      }
+    }
   }
 
   private number(): ExprValidation | null {

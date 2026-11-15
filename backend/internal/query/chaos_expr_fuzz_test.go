@@ -83,6 +83,8 @@ func FuzzZZExprNoCommentSequence(f *testing.F) {
 	f.Add("-amount")
 	f.Add("a / (b + 1)")
 	f.Add("'x' || name")
+	f.Add("payload->>'$.name'")
+	f.Add("a->'b'->>'c'")
 	// 反例锚点：字面量内部的 -- 与引号都是**数据**，放行且**不该**被判失败。
 	// 没有这两条种子，下面的判据很容易被写回「整段文本查 --」那种过宽版本
 	// （fuzz 实测会把它打成假阳性：'000"' 就是历史案例）。
@@ -151,6 +153,7 @@ func FuzzZZExprArgSubset(f *testing.F) {
 	f.Add("sum(count(x))")
 	f.Add("a.b")
 	f.Add("amount + 1")
+	f.Add("a->>'b'")
 
 	f.Fuzz(func(t *testing.T, in string) {
 		if expr.ValidateArg(in) != nil {

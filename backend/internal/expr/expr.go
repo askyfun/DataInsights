@@ -196,8 +196,16 @@ func (p *parser) factor(depth int) error {
 	return p.primary(depth)
 }
 
-// primary := number | string | ident | funcall | '(' expr ')'
+// primary := atom (jsonPostfix)*
 func (p *parser) primary(depth int) error {
+	if err := p.atom(depth); err != nil {
+		return err
+	}
+	return p.postfixJsonPath()
+}
+
+// atom := number | string | ident | funcall | '(' expr ')'
+func (p *parser) atom(depth int) error {
 	p.skipSpace()
 	if p.pos >= len(p.src) {
 		return p.fail("unexpected end")
@@ -226,6 +234,33 @@ func (p *parser) primary(depth int) error {
 		return p.quotedIdent()
 	default:
 		return p.identOrCall(depth)
+	}
+}
+
+// postfixJsonPath 解析 MySQL 系 JSON 抽取后缀：atom ('->' | '->>') '<json-path>'
+// 可链式（如 col->'$.a'->>'b'）。**只接受单引号字符串字面量作为 JSON 路径**——
+// 不放开标识符字符集（isIdentChar 保持 [A-Za-z0-9_.]），箭头两侧的 '->' / '->>'
+// 是新增的**语法 token**，路径里的 `$` / `.` 落在字符串字面量内（字面量是数据，
+// stringLit 已禁止反斜杠、'' 转义），因此不会把 `$` / `>` 之类带进下游标识符白名单，
+// 也不改变 `--` 注释判据（箭头只含单个 '-'，后接 '>'）。方言差异（MySQL '$.k' vs
+// PostgreSQL 'k' 的路径语义）交给数据库报错——与包文档的 non-goal 一致。
+func (p *parser) postfixJsonPath() error {
+	for {
+		p.skipSpace()
+		if !(p.pos+1 < len(p.src) && p.src[p.pos] == '-' && p.src[p.pos+1] == '>') {
+			return nil
+		}
+		p.pos += 2 // 消费 '->'
+		if p.pos < len(p.src) && p.src[p.pos] == '>' {
+			p.pos++ // '->>' 后再吃一个 '>'
+		}
+		p.skipSpace()
+		if p.pos >= len(p.src) || p.src[p.pos] != '\'' {
+			return p.fail("JSON path must be a string literal")
+		}
+		if err := p.stringLit(); err != nil {
+			return err
+		}
 	}
 }
 

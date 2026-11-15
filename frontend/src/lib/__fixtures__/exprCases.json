@@ -60,6 +60,16 @@
     { "name": "反斜杠转义单引号", "expr": "'it\\'s'", "valid": false },
     { "name": "反斜杠开头", "expr": "'\\abc'", "valid": false },
     { "name": "括号内一元位反斜杠", "expr": "(-'a\\' )", "valid": false },
-    { "name": "非数字开头的小数点标识", "expr": "a.1.2", "valid": true }
+    { "name": "非数字开头的小数点标识", "expr": "a.1.2", "valid": true },
+    { "name": "JSON 箭头 ->", "expr": "col->'$.key'", "valid": true },
+    { "name": "JSON 箭头 ->>", "expr": "col->>'$.key'", "valid": true },
+    { "name": "JSON 箭头链式", "expr": "payload->'$.a'->>'b'", "valid": true },
+    { "name": "JSON 箭头限定名", "expr": "tbl.col->>'$.key'", "valid": true },
+    { "name": "JSON 箭头与算术复合", "expr": "col->>'$.n' + 1", "valid": true },
+    { "name": "箭头缺字符串路径", "expr": "col->>", "valid": false },
+    { "name": "箭头路径非字面量", "expr": "col->>key", "valid": false },
+    { "name": "箭头路径用数字", "expr": "col->>5", "valid": false },
+    { "name": "箭头路径含反斜杠", "expr": "col->>'$.a\\b'", "valid": false },
+    { "name": "箭头后接行注释", "expr": "a->>'x'--b", "valid": false }
   ]
 }
