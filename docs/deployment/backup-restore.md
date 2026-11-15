@@ -6,6 +6,12 @@
 
 一键脚本：仓库内 `scripts/backup.sh`（备份 + sha256 校验和）与 `scripts/upgrade.sh`（备份 → 迁移前置检查 → 换版本 → ready 探测 → 失败打印回滚命令）。下文是两个脚本等价的手工命令，排查脚本行为时以这里为准。
 
+> **容器名提示**：v0.4.0 起 compose 的容器名由 `data-insights-app` / `data-insights-postgres` 改为
+> `tablewave-app` / `tablewave-postgres`（产品更名 TableWave）。下文统一用新名；从 v0.3.1 升上来的
+> 部署此刻跑着的仍是**旧名**，两个脚本已同时识别这两个名字（按 `docker ps` 自动探测），
+> 手工命令请照你机器上 `docker ps` 的实际输出替换。**升级时先读 §3.0** —— 名字变了而旧容器还在跑，
+> 会让 `compose up` 直接撞端口。
+
 ## 1. 备份（pg_dump 自定义格式）
 
 `-Fc` 产出压缩的自定义格式，配合 `pg_restore` 可选择性恢复，是本文唯一推荐的备份形态。
@@ -14,7 +20,7 @@
 
 ```bash
 # 备份到宿主机当前目录，文件名自带时间戳
-docker exec data-insights-postgres pg_dump -Fc -U insights insights \
+docker exec tablewave-postgres pg_dump -Fc -U insights insights \
   > "di-backup-$(date +%Y%m%d-%H%M%S).dump"
 
 # 打印校验和（记录下来，恢复前先验）
@@ -37,15 +43,15 @@ pg_dump -Fc "postgres://user:password@db-host:5432/dbname?sslmode=disable" \
 
 ### 1.3 命名卷整卷备份（pg_dump 的兜底等价物）
 
-pg_dump 拿不到（如库已起不来）时，可直接打包数据卷。卷名以 `docker volume ls` 实际输出为准（compose 项目名前缀）：
+pg_dump 拿不到（如库已起不来）时，可直接打包数据卷。卷名以 `docker volume ls` 实际输出为准（compose 项目名前缀；从 v0.3.1 升上来的部署前缀可能仍是旧目录名，例如 `data-insights_postgres_data`，不要照抄示例）：
 
 ```bash
 # 备份整卷（容器在不在都能跑）
-docker run --rm -v data-insights_postgres_data:/data:ro -v "$PWD:/backup" alpine \
+docker run --rm -v tablewave_postgres_data:/data:ro -v "$PWD:/backup" alpine \
   tar czf "/backup/di-pgdata-$(date +%Y%m%d-%H%M%S).tar.gz" -C /data .
 
 # 恢复整卷（先确保卷为空或不存在，再解包）
-docker run --rm -v data-insights_postgres_data:/data -v "$PWD:/backup:ro" alpine \
+docker run --rm -v tablewave_postgres_data:/data -v "$PWD:/backup:ro" alpine \
   sh -c 'rm -rf /data/* /data/..?* /data/.[!.]* ; tar xzf /backup/di-pgdata-<ts>.tar.gz -C /data'
 ```
 
@@ -61,7 +67,7 @@ shasum -a 256 di-backup-<file>.dump
 docker compose -f docker-compose.allinone.yml stop app
 
 # 2) 恢复：--clean 先删对象再建，--if-exists 不因对象不存在而中断
-docker exec -i data-insights-postgres \
+docker exec -i tablewave-postgres \
   pg_restore --clean --if-exists -U insights -d insights < di-backup-<file>.dump
 
 # 3) 重新拉起（版本可以与备份时相同；换更旧的版本 = 回滚，SECURITY_KEY 必须一致）
@@ -77,6 +83,23 @@ pg_restore --clean --if-exists \
 ```
 
 ## 3. 升级与回滚 runbook
+
+### 3.0 从 v0.3.1 升到 v0.4.0：先删旧容器（本版特有，必须）
+
+v0.4.0 的 compose 文件把 `container_name` 从 `data-insights-*` 改成了 `tablewave-*`。compose 按
+`container_name` 认容器，名字一变它就**找不到旧容器**，于是新建一套；而 23352 / 5432 还被旧容器
+占着，`up -d` 直接失败（`port is already allocated`）—— 报错指向端口与网络，很容易被误判成环境问题。
+
+**数据在命名卷里，删容器不丢数据。** 升级前先执行：
+
+```bash
+docker rm -f data-insights-app data-insights-postgres   # 只删容器，卷保留
+curl -fsSLO https://raw.githubusercontent.com/askyfun/TableWave/master/docker-compose.allinone.yml
+TAG=v0.4.0 docker compose -f docker-compose.allinone.yml up -d
+```
+
+`scripts/upgrade.sh` 会在前置检查阶段拦下这个场景并打印同样的命令 —— 它自己**不**删容器
+（删容器是破坏性动作，交给操作者拍板）。
 
 完整步骤（含**一次性数据迁移的顺序红线**）由 `scripts/upgrade.sh` 承载：
 
@@ -96,8 +119,8 @@ scripts/upgrade.sh v0.3.1               # 备份 → 迁移前置检查 → TAG=
 
 ```bash
 # 升级到「列 ID 契约」版本（何时需要：CHANGELOG 中标注需先跑一次性迁移的版本）
-docker exec data-insights-app ./server -migrate-column-ids           # ① dry-run，只出报告
-docker exec data-insights-app ./server -migrate-column-ids -apply    # ② 报告确认无误后写库
+docker exec tablewave-app ./server -migrate-column-ids           # ① dry-run，只出报告
+docker exec tablewave-app ./server -migrate-column-ids -apply    # ② 报告确认无误后写库
 # ③ 然后才执行升级（scripts/upgrade.sh <TAG> 或手工换镜像 tag）
 ```
 
@@ -110,7 +133,7 @@ docker exec data-insights-app ./server -migrate-column-ids -apply    # ② 报�
 TAG=<old-tag> docker compose -f docker-compose.allinone.yml up -d
 
 # 2) 库已被新版本的迁移改坏时，恢复到升级前的备份
-docker exec -i data-insights-postgres \
+docker exec -i tablewave-postgres \
   pg_restore --clean --if-exists -U insights -d insights < backups/di-backup-<file>.dump
 ```
 

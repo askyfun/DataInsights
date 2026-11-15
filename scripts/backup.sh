@@ -5,7 +5,8 @@
 #   scripts/backup.sh [--output-dir <dir>]
 #
 # 取数路径二选一（自动探测）：
-#   1) Compose 部署：检测到容器 data-insights-postgres 在跑 → docker exec 内的 pg_dump；
+#   1) Compose 部署：检测到 postgres 容器（tablewave-postgres，或品牌更名前的旧名
+#      data-insights-postgres）在跑 → docker exec 内的 pg_dump；
 #   2) 其余：用本机 pg_dump 备份 DATABASE_URL（来自环境变量或仓库根 .env）。
 #
 # 版本号来源：GET /health/detail 的 version 字段（R-100）；该端点不存在时回退
@@ -15,9 +16,35 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_DIR="$REPO_ROOT/backups"
-COMPOSE_CONTAINER="data-insights-postgres"
-APP_CONTAINER="data-insights-app"
 BASE_URL="http://localhost:${PORT:-23352}"
+
+# 容器名在品牌更名（4dd37df「产品更名为 TableWave」）时由 `data-insights-*` 改成 `tablewave-*`，
+# 但存量 compose 部署仍跑着旧名。硬编码任何一个都会在另一种部署上必定找不到容器
+# （写新名则旧部署失效，留旧名则新装失效），所以按候选列表探测，两者都认。
+container_running() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"
+}
+container_exists() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker inspect "$1" >/dev/null 2>&1
+}
+# pick_container <running|exists> <候选名…>：命中即返回；都不命中回落首个候选（新名），
+# 让后续报错信息指向「本该有的那个」而不是随便一个旧名。
+pick_container() {
+  local mode="$1" c; shift
+  for c in "$@"; do
+    if [ "$mode" = running ]; then
+      container_running "$c" && { echo "$c"; return 0; }
+    else
+      container_exists "$c" && { echo "$c"; return 0; }
+    fi
+  done
+  echo "$1"
+}
+
+APP_CONTAINER="$(pick_container exists tablewave-app data-insights-app)"
+COMPOSE_CONTAINER="$(pick_container running tablewave-postgres data-insights-postgres)"
 
 usage() { sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 
@@ -63,7 +90,7 @@ TS="$(date +%Y%m%d-%H%M%S)"
 SAFE_VERSION="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._-' '-')"
 OUT_FILE="$OUTPUT_DIR/di-backup-${SAFE_VERSION}-${TS}.dump"
 
-if docker ps --format '{{.Names}}' | grep -qx "$COMPOSE_CONTAINER"; then
+if container_running "$COMPOSE_CONTAINER"; then
   PG_USER="$(docker exec "$COMPOSE_CONTAINER" printenv POSTGRES_USER 2>/dev/null || echo insights)"
   PG_DB="$(docker exec "$COMPOSE_CONTAINER" printenv POSTGRES_DB 2>/dev/null || echo insights)"
   echo "备份来源：容器 ${COMPOSE_CONTAINER}（库 ${PG_DB}）"

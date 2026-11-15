@@ -15,10 +15,34 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.allinone.yml"
-APP_CONTAINER="data-insights-app"
-COMPOSE_CONTAINER="data-insights-postgres"
 BASE_URL="http://localhost:${PORT:-23352}"
 READY_TIMEOUT_SECS=60
+
+# 容器名在品牌更名（4dd37df「产品更名为 TableWave」）时由 `data-insights-*` 改成 `tablewave-*`，
+# 但存量 compose 部署仍跑着旧名 —— 升级脚本恰恰是「跨这两个名字」运行的那个：它要读旧容器的
+# 镜像 tag 才能给出回滚命令。硬编码任何一个都会让它在另一种部署上直接失效，所以按候选探测。
+container_running() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"
+}
+container_exists() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker inspect "$1" >/dev/null 2>&1
+}
+pick_container() {
+  local mode="$1" c; shift
+  for c in "$@"; do
+    if [ "$mode" = running ]; then
+      container_running "$c" && { echo "$c"; return 0; }
+    else
+      container_exists "$c" && { echo "$c"; return 0; }
+    fi
+  done
+  echo "$1"
+}
+
+APP_CONTAINER="$(pick_container exists tablewave-app data-insights-app)"
+COMPOSE_CONTAINER="$(pick_container running tablewave-postgres data-insights-postgres)"
 
 DRY_RUN=0
 ASSUME_YES=0
@@ -36,7 +60,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-die() { echo "错误：$1" >&2; exit 1; }
+# %b 让消息里的 \n 生效（多行提示比挤成一行好读）；既有单行调用不受影响。
+die() { printf '错误：%b\n' "$1" >&2; exit 1; }
 
 http_code() { curl -fsS -o /dev/null -w '%{http_code}' --max-time 3 "$1" 2>/dev/null || echo 000; }
 
@@ -47,7 +72,7 @@ probe_ready() {
   return 1
 }
 
-# 记录当前版本用于回滚：容器镜像的 tag（kzzhr/datainsights:vX.Y.Z → vX.Y.Z）。
+# 记录当前版本用于回滚：容器镜像的 tag（kzzhr/tablewave:vX.Y.Z → vX.Y.Z）。
 current_image_tag() {
   local image
   if ! image="$(docker inspect --format '{{.Config.Image}}' "$APP_CONTAINER" 2>/dev/null)"; then
@@ -66,6 +91,24 @@ OLD_TAG="$(current_image_tag)"
 [ "$(http_code "$BASE_URL/health")" = "200" ] || die "当前部署不健康（$BASE_URL/health 非 200），先处理再升级"
 [ "$OLD_TAG" = "latest" ] && echo "⚠️ 当前跑的是 latest，回滚命令无法精确钉回旧版本 —— 日常升级请始终用版本号 tag"
 
+# 容器改名守卫（v0.4.0 品牌更名）：compose 按 container_name 认容器，名字一变它就找不到旧容器，
+# 于是新建一套，而端口还被旧容器占着 → `up -d` 直接失败（port is already allocated），
+# 报错却指向网络/端口，很容易被误判成环境问题。这里提前拦下并给出可执行命令。
+# 用 case 做字符串包含判断而不是 `printf | grep -q`：后者会被 SIGPIPE 影响（见 backup.sh 同名注释）。
+compose_names="$(sed -n 's/^[[:space:]]*container_name:[[:space:]]*//p' "$COMPOSE_FILE" 2>/dev/null || true)"
+if [ -n "${APP_CONTAINER:-}" ] && [ -n "$compose_names" ]; then
+  case $'\n'"$compose_names"$'\n' in
+    *$'\n'"$APP_CONTAINER"$'\n'*) ;;
+    *)
+      both="$APP_CONTAINER"
+      [ -n "${COMPOSE_CONTAINER:-}" ] && both="$APP_CONTAINER $COMPOSE_CONTAINER"
+      die "当前容器名（${APP_CONTAINER}）不在本次 compose 文件声明的容器名里 —— 这是 v0.4.0 的品牌更名导致的：容器名从 data-insights-* 改成了 tablewave-*，而旧容器仍占着 23352/5432，直接 compose up 会失败。
+  先执行：docker rm -f ${both}     （数据在命名卷里，删容器不丢数据）
+  再重跑：scripts/upgrade.sh <TAG>"
+      ;;
+  esac
+fi
+
 echo "==> 当前版本: $OLD_TAG"
 
 # ---- 步骤 1：备份 ------------------------------------------------------------
@@ -77,13 +120,13 @@ BACKUP_FILE="$(echo "$BACKUP_OUTPUT" | sed -n 's/^备份完成：//p' | head -1)
 
 # ---- 步骤 2：迁移前置检查（顺序红线：dry-run 看报告 → -apply 写库 → 再放量） ----
 echo "==> 步骤 2/4: 一次性数据迁移前置检查"
-cat <<'EOF'
+cat <<EOF
     「-migrate-column-ids」与「启动自动 schema 迁移」是两套机制，顺序颠倒会静默返回错数。
     正确顺序：dry-run 看报告 → 有待迁移项则 -apply 写库 → 再放量新版本。
     何时需要：CHANGELOG.md 中标注「需先跑一次性迁移」的版本；不确定就先跑 dry-run 看：
 
-      docker exec data-insights-app ./server -migrate-column-ids           # 只扫描，出报告
-      docker exec data-insights-app ./server -migrate-column-ids -apply    # 报告确认无误后写库
+      docker exec ${APP_CONTAINER} ./server -migrate-column-ids           # 只扫描，出报告
+      docker exec ${APP_CONTAINER} ./server -migrate-column-ids -apply    # 报告确认无误后写库
 EOF
 if [ "$DRY_RUN" -eq 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
   if [ -t 0 ]; then

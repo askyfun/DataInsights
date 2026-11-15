@@ -40,7 +40,7 @@
 - **`SECURITY_KEY`**：数据源密码用 AES-256-GCM 加密存储，密钥来自 `SECURITY_KEY`。留空时系统首次启动会**随机生成并持久化到数据库**（`bi_setting` 表），此后复用同一把。
   - ⚠️ **已有加密数据不可换 key**：换了 key 就再也解不开存量密码。若显式配置，务必保证多个副本 / 多次重启用的是同一把，且与库内已加密数据对应的 key 一致。
 - **数据源密码**：API 响应中**永不回显**（`password` 字段 `json:"-"`），仅落库前加密。
-- **CORS**：默认放开所有来源。Bearer 令牌不会由浏览器自动携带，CORS 不构成安全边界；需要限定域名时用 `CORS_ALLOWED_ORIGINS` 收紧。真正的访问面由 `AUTH_ENFORCE` 控制：**对外暴露务必设 `on`**（见下方「多副本升级顺序」与[第一次启动](../getting-started/first-run.md)）。
+- **CORS**：默认放开所有来源。Bearer 令牌不会由浏览器自动携带，CORS 不构成安全边界；需要限定域名时用 `CORS_ALLOWED_ORIGINS` 收紧。真正的访问面由 `AUTH_ENFORCE` 控制：**不设 `APP_ENV`/`AUTH_ENFORCE` 时生产默认 `on`**（资源端点要求 Bearer），只有显式 `off` 才会匿名开放并打 warn（见下方「多副本升级顺序」与[第一次启动](../getting-started/first-run.md)）。
 - **认证端点限流（issue #203）**：`/api/auth/login` 与 `/api/auth/register` 按「来源 IP + 用户名」双维防护（默认同一 IP 每分钟 10 次，连续失败 5 次锁定 300 秒，见 `AUTH_RATE_LIMIT_PER_MINUTE`）。**⚠️ 反代场景的信任边界**：限流按 `c.ClientIP()` 取 IP —— 若前面挂了 Nginx / 负载均衡，**必须**让反代把客户端真实 IP 透传（`X-Forwarded-For` 等）并配置 Gin 的 `SetTrustedProxies` 指向反代地址；否则所有请求会看成同一来源 IP（反代地址），限流会误伤所有用户，或（若信任了任意 `X-Forwarded-For`）被伪造头绕过。
 - **`VITE_*` 是构建期内联，绝不能放密钥**。
 
@@ -85,6 +85,8 @@
 逐条可复制的命令（备份 / 恢复 / 换版本 / 失败回滚）见 **[backup-restore.md](backup-restore.md)** 与 `scripts/upgrade.sh` —— 本节只留原则。
 
 - **迁移前先备份**：迁移随启动自动应用，升级前先对 `DATABASE_URL` 指向的库做一次备份（`scripts/backup.sh` 或 `pg_dump -Fc`）。
+
+- **从 v0.3.1 升到 v0.4.0 先删旧容器**：compose 的 `container_name` 在本版由 `data-insights-*` 改为 `tablewave-*`，compose 认名不认人 —— 旧容器还在跑时 `up -d` 会因端口被占而失败。升级前 `docker rm -f data-insights-app data-insights-postgres`（数据在命名卷里，删容器不丢数据）。`upgrade.sh` 会在前置检查阶段拦下并提示，步骤见 [backup-restore.md §3.0](backup-restore.md)。
 
 - **镜像用不可变 tag**：用版本号或提交 sha 打 tag，避免 `latest` 无法区分版本、难以回滚。
 - **回滚注意 `SECURITY_KEY`**：回滚到旧版本时，`SECURITY_KEY` 必须与库里已加密数据对应的 key 保持一致（留空时 key 落在数据库里，容器重建会自动复用；显式配置时须保持同一把）。
