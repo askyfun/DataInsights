@@ -3,6 +3,7 @@ import { Empty, Table } from 'antd';
 import { useMemo } from 'react';
 import type { PivotResponseV2, PivotRow } from '../../api';
 import LoadingPlaceholder from '../LoadingPlaceholder';
+import { PageSizeChangerWide } from '../ui/PageSizeChanger';
 
 // 镜像后端 query.PivotSubtotalColKey / pivotValueKeySep / PivotValueKey（Go 常量无法
 // import，前后端必须逐字一致，否则单元格取值 undefined → 透视表静默全空）。
@@ -147,6 +148,7 @@ const PivotTable: React.FC<PivotTableProps> = ({ data, loading, columnLabels }) 
           defaultPageSize: 100,
           showSizeChanger: true,
           pageSizeOptions: ['50', '100', '200'],
+          components: { sizeChanger: PageSizeChangerWide },
           hideOnSinglePage: true,
           showTotal: (total) => `总计 ${total} 条`,
         }}
