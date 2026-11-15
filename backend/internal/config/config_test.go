@@ -16,7 +16,9 @@ func clearEnv(t *testing.T) {
 	for _, name := range []string{
 		"PORT", "DATABASE_URL", "SECURITY_KEY", "SENTRY_DSN", "STATIC_DIR", "CORS_ALLOWED_ORIGINS",
 		"EXTRACT_DATASOURCE_ID", "ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_RESET_TOKEN",
-
+		// APP_ENV 决定鉴权默认档位（生产 on / 开发 off），AUTH_ENFORCE 是显式覆盖；
+		// 两者都必须清干净，否则用例会随运行环境的 shell 变量漂移。
+		"APP_ENV", "AUTH_ENFORCE",
 	} {
 		t.Setenv(name, "")
 	}

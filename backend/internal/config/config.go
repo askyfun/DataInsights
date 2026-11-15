@@ -106,8 +106,9 @@ type AlertConfig struct {
 type AuthConfig struct {
 	// RateLimitPerMinute 是同一来源 IP 每分钟允许的认证请求数，默认 defaultAuthRateLimitPerMinute。
 	RateLimitPerMinute int
-	// Enforce 是资源端点强制鉴权模式（R-92 / issue #217）：off|shadow|on，默认 off。
-	// 空串等同未设置 = off（遵循「空串等同未写」约定）。
+	// Enforce 是资源端点强制鉴权模式（R-92 / issue #217）：off|shadow|on。
+	// 显式设置优先；未设置时**按 APP_ENV 推导**：生产（含未设置的默认值 production）默认 on，
+	// 本地开发（development/dev/local/test）默认 off。见 defaultAuthEnforceFor。
 	Enforce string
 }
 
@@ -123,6 +124,31 @@ const (
 	AuthEnforceShadow = "shadow"
 	AuthEnforceOn     = "on"
 )
+
+// devEnvs 是「默认可关闭强制鉴权」的运行环境取值（APP_ENV，大小写与前后空格已归一）。
+// 这里刻意用白名单而不是黑名单：任何**没被认出来**的取值（含未设置 → production、
+// staging、私有云环境名）都按生产对待，默认开鉴权。安全默认值不能靠猜。
+var devEnvs = map[string]bool{
+	"development": true,
+	"dev":         true,
+	"local":       true,
+	"test":        true,
+	"testing":     true,
+}
+
+// isDevEnv 判断 APP_ENV 是否本地开发环境。
+func isDevEnv(appEnv string) bool {
+	return devEnvs[strings.ToLower(strings.TrimSpace(appEnv))]
+}
+
+// defaultAuthEnforceFor 给出未显式设置 AUTH_ENFORCE 时的默认档位：
+// 生产默认 on（资源端点必须带身份），本地开发默认 off（改代码/跑脚本不被登录打断）。
+func defaultAuthEnforceFor(appEnv string) string {
+	if isDevEnv(appEnv) {
+		return AuthEnforceOff
+	}
+	return AuthEnforceOn
+}
 
 type DatabaseConfig struct {
 	Url string
@@ -300,16 +326,24 @@ func (c *Config) Load() error {
 
 	}
 
-	// 资源端点强制鉴权模式（R-92 / issue #217）：off|shadow|on，默认 off。
-	// 非法值不 fail-fast，回落 off 并 warn（防护是增强，配置错误不该拦启动）。
-	c.Auth.Enforce = AuthEnforceOff
+	// 资源端点强制鉴权模式（R-92 / issue #217）：off|shadow|on。
+	//
+	// 默认值按运行环境推导（见 defaultAuthEnforceFor）：生产默认 on，本地开发默认 off。
+	// 显式设置 AUTH_ENFORCE 永远优先——生产确实要关就写 off，但会打一条 warn 留痕。
+	// 非法值不 fail-fast（防护是增强，配置错误不该拦启动），回落环境默认并 warn。
+	c.Auth.Enforce = defaultAuthEnforceFor(c.Sentry.Environment)
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_ENFORCE"))); v != "" {
 		switch v {
 		case AuthEnforceOff, AuthEnforceShadow, AuthEnforceOn:
 			c.Auth.Enforce = v
 		default:
-			slog.Warn("invalid AUTH_ENFORCE, falling back to off", "value", v)
+			slog.Warn("invalid AUTH_ENFORCE, falling back to environment default",
+				"value", v, "app_env", c.Sentry.Environment, "default", c.Auth.Enforce)
 		}
+	}
+	if c.Auth.Enforce == AuthEnforceOff && !isDevEnv(c.Sentry.Environment) {
+		slog.Warn("AUTH_ENFORCE=off in a production-like environment: resource endpoints are anonymously accessible",
+			"app_env", c.Sentry.Environment)
 	}
 
 	return nil

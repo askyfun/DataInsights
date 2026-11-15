@@ -206,6 +206,7 @@ func main() {
 		detailEnabled: c.HealthDetail,
 		sentryEnabled: sentryActive,
 		driverCount:   len(datasource.SupportedDriverTypes()),
+		authEnforce:   c.Auth.Enforce,
 		dbPing:        db.DB.PingContext,
 		migrationStatus: func(ctx context.Context) (int64, bool, error) {
 			return database.MigrationsUpToDate(ctx, db.DB)
@@ -245,6 +246,11 @@ func main() {
 		slog.Warn("No static UI configured, serving API only",
 			"hint", "set STATIC_DIR to the frontend build directory")
 	}
+
+	// 鉴权档位是运维排查的第一手信息（"我明明设了 on 怎么还能匿名访问"），启动即打，
+	// 且带上推导来源 app_env——免得只有代码知道默认值是怎么来的。
+	slog.Info("Resource endpoint auth enforcement",
+		"mode", c.Auth.Enforce, "app_env", c.Sentry.Environment)
 
 	addr := fmt.Sprintf("%s:%d", c.Host, c.Port)
 	slog.Info("Server starting", "addr", addr)
@@ -307,7 +313,10 @@ type healthController struct {
 	detailEnabled bool
 	sentryEnabled bool
 	driverCount   int
-	dbPing        func(ctx context.Context) error
+	// authEnforce 是生效中的资源端点强制鉴权档位（off|shadow|on），来自 config。
+	// 曾经这里写死 "off"，配置改了 health 也不动 —— 运维照着它排查会得出反向结论。
+	authEnforce string
+	dbPing      func(ctx context.Context) error
 	// migrationStatus 返回当前迁移版本与「是否已到本二进制的最新版本」。
 	migrationStatus func(ctx context.Context) (int64, bool, error)
 	// extractReady 报告上传存储是否可用；nil 视为不检查。
@@ -401,13 +410,9 @@ func (h *healthController) handleDetail(c *gin.Context) {
 		"migrations_up_to_date": migrationsUpToDate,
 		"drivers":               h.driverCount,
 		"sentry_enabled":        h.sentryEnabled,
-		"auth_enforce":          authEnforceMode(),
+		"auth_enforce":          h.authEnforce,
 	})
 }
-
-// authEnforceMode 报告生效中的鉴权强制档位。端点级强制（AUTH_ENFORCE=off|shadow|on）
-// 尚未落地，所以生效值确实是 off；此字段先占位，等 R-92 实现后改读 config。
-func authEnforceMode() string { return "off" }
 
 // versionReport 打印四行构建/运行信息。migration_version 需要连库；读不到时
 // 保留 unknown 而不是让 -version 失败——查版本不该被一个坏连接串拦住。

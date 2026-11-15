@@ -279,6 +279,8 @@ func TestHealthDetailExposesRuntimeStateWithoutSecrets(t *testing.T) {
 	h.detailEnabled = true
 	h.sentryEnabled = true
 	h.driverCount = 4
+	// 生效档位必须来自 config（曾写死 "off"：运维照着它排查会得出反向结论）。
+	h.authEnforce = "shadow"
 	// 底层错误里带连接串；详情端点只报「连不上」这一事实，绝不复述原文。
 	h.dbPing = func(context.Context) error {
 		return errors.New("postgres://user:pw@10.0.0.12:5432/insights: connection refused")
@@ -309,5 +311,8 @@ func TestHealthDetailExposesRuntimeStateWithoutSecrets(t *testing.T) {
 	}
 	if payload.Data["database_connected"] != false {
 		t.Fatalf("expected database_connected=false, got %v", payload.Data["database_connected"])
+	}
+	if payload.Data["auth_enforce"] != "shadow" {
+		t.Fatalf("auth_enforce must mirror the configured mode, got %v", payload.Data["auth_enforce"])
 	}
 }
