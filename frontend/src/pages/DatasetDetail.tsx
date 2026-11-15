@@ -43,6 +43,7 @@ import { getInitialLocale, messages } from '../i18n/useLocale';
 import { resolveApiErrorMessage } from '../lib/api/errorHint';
 import { normalizeDataType } from '../lib/dataTypes';
 import { validateExpr } from '../lib/expr';
+import { roleColor } from '../lib/fieldRoleColors';
 
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
@@ -346,7 +347,7 @@ const DatasetDetailPage: React.FC = () => {
             onChange={(value) => handleColumnNameChange(record.id, value)}
             placeholder={intl.formatMessage({ id: 'field.pleaseEnterFieldName' })}
             // 与图表构建页的字段语义同源：维度蓝 / 指标绿
-            color={record.role === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)'}
+            color={roleColor(record.role)}
             testId={`field-name-${record.id}`}
             ariaLabel={intl.formatMessage({ id: 'field.name' })}
             style={{ maxWidth: 130 }}
@@ -424,11 +425,7 @@ const DatasetDetailPage: React.FC = () => {
           onChange={(checked) =>
             handleColumnRoleChange(record.id, checked ? 'metric' : 'dimension')
           }
-          style={{
-            // 角色语义色统一：指标绿 / 维度蓝（与字段名文字色、图表构建页同源），
-            // 不再让「维度」态落回 antd 默认灰——灰在本页易与禁用态混淆。
-            backgroundColor: role === 'metric' ? 'var(--dr-metric)' : 'var(--dr-dim)',
-          }}
+          style={{ backgroundColor: roleColor(role) }}
         />
       ),
     },

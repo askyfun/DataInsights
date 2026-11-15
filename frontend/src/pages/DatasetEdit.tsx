@@ -26,6 +26,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { DatasetColumn, DatasetFormData, datasetsApi, datasourcesApi, TableInfo } from '../api';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
+import { roleColor } from '../lib/fieldRoleColors';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -216,7 +217,13 @@ const DatasetEditPage: React.FC = () => {
       dataIndex: 'role',
       key: 'role',
       render: (role: string) => (
-        <Tag color={role === 'metric' ? 'blue' : 'default'}>
+        <Tag
+          style={{
+            color: '#fff',
+            backgroundColor: roleColor(role),
+            borderColor: roleColor(role),
+          }}
+        >
           {intl.formatMessage({ id: `dataset.field.role.${role}` })}
         </Tag>
       ),
