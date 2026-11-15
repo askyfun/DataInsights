@@ -34,8 +34,6 @@ cp .env.example .env    # 然后按需修改
 | `SECURITY_KEY` | 否 | 首启随机生成 | 数据源密码 AES-256-GCM 的加密密钥（64 位 hex）。**留空 = 系统首次启动随机生成（32 字节）并持久化到数据库**，重启 / 容器重建复用同一把，保证已加密密码始终可解；显式配置时环境变量优先。**生产强烈建议显式设置**。 |
 | `SENTRY_DSN` | 否 | 空 | 后端 Sentry DSN，留空 = 关闭上报。 |
 | `CORS_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔白名单；**留空 = 放开所有来源**。Bearer 令牌不会由浏览器自动携带，CORS 不构成安全边界——真正的访问面由 `AUTH_ENFORCE` 控制（见下文「鉴权开放口径」与[第一次启动](../getting-started/first-run.md)）。填非空白名单则只回显名单内来源。 |
-
-
 | `HOST_BIND` | 否 | `127.0.0.1` | **仅 docker compose 层生效**（后端进程不读）：app 端口在宿主机上的绑定地址。默认只监听本机；内网共享时设 `0.0.0.0`，并先改掉 compose 里的 PostgreSQL 演示口令、按[生产部署](../deployment/production.md)收紧访问面。数据库端口固定只绑 `127.0.0.1`，不受此变量影响。 |
 | `STATIC_DIR` | 否 | 空 | 前端构建产物目录。设置后本进程一并托管页面（未命中回落 `index.html`）；**留空 = 只提供 API**（本地开发默认形态，页面走 Vite dev server）。目录配错即启动失败。 |
 | `HEALTH_DETAIL` | 否 | 关闭 | 开启 `GET /health/detail`（版本 / 迁移水位 / DB 耗时 / 驱动数 / Sentry 与鉴权档位）。只认 `1` / `true` / `on`（大小写不敏感），其他取值或留空一律按关闭处理；关闭时该端点返回 **404**。详情不含连接串 / host / 库名 / 口令，但仍建议只在需要排障时打开。**改完需重启**。 |
@@ -54,7 +52,6 @@ cp .env.example .env    # 然后按需修改
 | `ADMIN_PASSWORD` | 否 | 空 | 与 `ADMIN_USERNAME` 配对的首管口令。注意：写进 env 意味着它会出现在 `docker inspect` / `compose config`，生产建议用 Secret 注入。 |
 | `ADMIN_RESET_TOKEN` | 否 | 空 | 管理员口令恢复令牌。**留空 = 关闭恢复通道**；非空时 `POST /api/auth/recover-admin` 可用一次性令牌重置首个有效管理员口令并撤销其全部现存会话。token 单次有效，成功后请更换环境变量值（不用时清空）。 |
 | `LOG_LEVEL` | 否 | `info` | 日志级别 `debug` / `info` / `warn` / `error`；非法值回落 `info` 并在启动时告警一次。日志为结构化 JSON、只写 stdout（不写本地文件）。 |
-| `HEALTH_DETAIL` | 否 | 空 | 设 `1` / `true` / `on` 开启 `GET /health/detail`（版本、构建/启动时间、uptime、迁移水位、DB 耗时、驱动数）。未开启时该端点返回 404；`GET /health`、`/health/ready`、`/version` 不受此开关限制。 |
 | `VITE_API_BASE_URL` | 否 | 空 | 前端 API 基础地址。未配置时：生产构建自动同源、开发回退 `http://<当前访问主机名>:23352`。**仅前后端分开部署时**才需配成非空绝对地址。 |
 | `VITE_SENTRY_DSN` | 否 | 空 | 前端 Sentry DSN。留空 = 完全跳过 `Sentry.init`，不打点也不上报。 |
 
