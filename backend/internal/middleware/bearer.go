@@ -48,6 +48,7 @@ func Bearer(svc auth.Service, allowPAT bool) gin.HandlerFunc {
 			return
 		}
 		c.Set(principalKey, principal)
+		c.Set(response.PrincipalUserIDKey, principal.UserID)
 		c.Set(rawTokenKey, raw)
 		c.Next()
 	}
@@ -78,6 +79,7 @@ func OptionalBearer(svc auth.Service) gin.HandlerFunc {
 			return
 		}
 		c.Set(principalKey, principal)
+		c.Set(response.PrincipalUserIDKey, principal.UserID)
 		c.Set(rawTokenKey, raw)
 		c.Next()
 	}

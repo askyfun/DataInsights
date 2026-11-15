@@ -26,7 +26,7 @@ func TestAllAPIRoutesClassified(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	SetupRoutes(r, db, []byte("0123456789abcdef0123456789abcdef"), extract.Guard{}, "", nil, authSvc, "off", "dev")
+	SetupRoutes(r, db, []byte("0123456789abcdef0123456789abcdef"), extract.Guard{}, "", nil, authSvc, "off", "dev", nil)
 
 	publicSeen := map[string]bool{}
 	enforced := 0

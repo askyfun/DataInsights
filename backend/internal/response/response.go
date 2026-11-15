@@ -53,6 +53,9 @@ const RequestIDKey = "request_id"
 // bizCodeKey 记录本次请求最终写出的业务码，供 access 日志区分成败。
 const bizCodeKey = "bizCode"
 
+// PrincipalUserIDKey 是 gin context 里当前已认证用户的 id 键（middleware 写入，诊断 ring buffer 读取）。
+const PrincipalUserIDKey = "authUserID"
+
 // 获取请求追踪 ID：优先读 context（requestID 中间件的写入口径），
 // 回落读入站头（覆盖未挂中间件的测试场景）。
 func getTraceID(c *gin.Context) string {
