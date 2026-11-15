@@ -45,7 +45,15 @@ func (s *authService) BootstrapStatus(ctx context.Context) (bool, string, error)
 	if err != nil {
 		return false, "", err
 	}
-	return n == 0, EnforceModeOff, nil
+	return n == 0, s.enforceModeOrOff(), nil
+}
+
+// enforceModeOrOff 返回配置的鉴权模式；空值（如测试直接用 newServiceWithGuard 构造）按 off。
+func (s *authService) enforceModeOrOff() string {
+	if s.enforceMode == "" {
+		return EnforceModeOff
+	}
+	return s.enforceMode
 }
 
 // EnsureBootstrap runs once at startup. With ADMIN_USERNAME + ADMIN_PASSWORD it

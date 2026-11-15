@@ -1,14 +1,9 @@
 package response
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
-	"strings"
 	"testing"
 
 	"tablewave/internal/query"

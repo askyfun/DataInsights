@@ -134,3 +134,18 @@ func (h *AuthHandler) Me(req router.Request[struct{}], res *router.Response[*ent
 	res.Out = out
 	return nil
 }
+
+type authConfigOut struct {
+	EnforceMode    string `json:"enforce_mode"`
+	NeedsBootstrap bool   `json:"needs_bootstrap"`
+}
+
+// Config 供前端身份壳（R-93 / #218）启动时探测鉴权模式与是否首启（匿名）。
+func (h *AuthHandler) Config(req router.Request[struct{}], res *router.Response[*authConfigOut]) error {
+	needs, mode, err := h.svc.BootstrapStatus(req.Ctx.Request.Context())
+	if err != nil {
+		return err
+	}
+	res.Out = &authConfigOut{EnforceMode: mode, NeedsBootstrap: needs}
+	return nil
+}
