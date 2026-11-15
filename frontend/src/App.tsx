@@ -33,6 +33,7 @@ import { canSeeUsers, needLogin, showUnauthBanner } from './lib/authz';
 import { type ThemeMode, useTheme } from './lib/theme';
 
 // 页面级代码分割：各路由按需加载，echarts / 图表构建等重资源不再进首屏 bundle。
+const AboutPage = lazy(() => import('./pages/About'));
 const AccountPage = lazy(() => import('./pages/Account'));
 const AlertsPage = lazy(() => import('./pages/Alerts'));
 const ChartBuilder = lazy(() => import('./pages/ChartBuilder'));
@@ -409,6 +410,7 @@ const App: React.FC = () => {
                   <Route path="/charts" element={<ChartsPage />} />
                   <Route path="/alerts" element={<AlertsPage />} />
                   <Route path="/account" element={<AccountPage />} />
+                  <Route path="/about" element={<AboutPage />} />
                 </Route>
                 <Route element={<Guard adminOnly />}>
                   <Route path="/users" element={<UsersPage />} />

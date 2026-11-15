@@ -34,6 +34,7 @@ var authzEnforcedGroups = []string{
 	"/api/sample-dataset",
 	"/api/tokens",
 	"/api/users",
+	"/api/admin",
 	"/api/auth/",
 	"/api/queries",
 }

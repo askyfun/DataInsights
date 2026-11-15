@@ -4,6 +4,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
+
+	"tablewave/internal/diag"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -105,6 +108,23 @@ func CodedFrom(err error) (*CodedError, bool) {
 
 // writeError 写错误信封：detail 由调用方决定（见 newErrorDetail / ErrorCoded）。
 func writeError(c *gin.Context, code int, msg string, detail *ErrorDetail) {
+	id := ""
+	if detail != nil {
+		id = detail.ID
+	}
+	path := c.FullPath()
+	if path == "" {
+		path = c.Request.URL.Path
+	}
+	diag.Add(diag.Entry{
+		Time:    time.Now().Format(time.RFC3339),
+		ErrorID: id,
+		Code:    code,
+		Method:  c.Request.Method,
+		Path:    path,
+		UserID:  c.GetInt(PrincipalUserIDKey),
+		Message: msg,
+	})
 	c.JSON(http.StatusOK, Response{
 		Code:  code,
 		Msg:   msg,

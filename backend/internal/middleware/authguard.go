@@ -43,6 +43,7 @@ func AuthGuard(svc auth.Service, mode string, classify func(method, fullPath str
 			principal = p
 			c.Set(principalKey, p)
 			c.Set(rawTokenKey, raw)
+			c.Set(response.PrincipalUserIDKey, p.UserID)
 		}
 
 		full := c.FullPath()

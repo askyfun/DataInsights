@@ -475,6 +475,38 @@ export interface SetupStatus {
   version: string;
 }
 
+export interface DiagnosticsBundle {
+  version: string;
+  commit: string;
+  build_time: string;
+  migration_version: number;
+  migrations_up_to_date: boolean;
+  database_connected: boolean;
+  sentry_enabled: boolean;
+  auth_enforce: string;
+  checks: Record<string, boolean>;
+  config: { name: string; set: boolean }[];
+  recent_errors: {
+    time: string;
+    error_id: string;
+    code: number;
+    method: string;
+    path: string;
+    user_id: number;
+    message: string;
+  }[];
+}
+
+export const diagnosticsApi = {
+  getJson: () => apiClient.get<ApiResponse<DiagnosticsBundle>>('/api/admin/diagnostics'),
+  download: () =>
+    apiClient.get('/api/admin/diagnostics', { params: { format: 'tar.gz' }, responseType: 'blob' }),
+};
+
+export const healthApi = {
+  ready: () => apiClient.get<ApiResponse<{ status: string }>>('/health/ready'),
+};
+
 export const setupApi = {
   status: () => apiClient.get<ApiResponse<SetupStatus>>('/api/setup/status'),
 };

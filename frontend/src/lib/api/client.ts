@@ -311,6 +311,12 @@ function createApiClient(baseURL: string): AxiosInstance {
             route: window.location.pathname,
           },
         });
+        try {
+          const _eid = error?.id ?? response.data?.error_id;
+          if (_eid) localStorage.setItem('last_error_id', String(_eid));
+        } catch {
+          /* ignore */
+        }
         if (code === 20200) {
           clearBearerToken();
           if (unauthorizedHandler) unauthorizedHandler();
@@ -382,6 +388,12 @@ function createApiClient(baseURL: string): AxiosInstance {
       // R-99：HTTP 层错误也透传信封 error{id, code, hint_key}（如有）。
       const envelopeError = error.response?.data?.error;
 
+      try {
+        const _eid = envelopeError?.id ?? errorId;
+        if (_eid) localStorage.setItem('last_error_id', String(_eid));
+      } catch {
+        /* ignore */
+      }
       throw new ApiClientError(errorMsg, {
         status,
         requestId: config?.headers?.['X-Request-ID'] as string | undefined,

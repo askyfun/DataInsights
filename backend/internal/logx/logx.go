@@ -22,6 +22,8 @@ var redactRules = []redactRule{
 	{regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^@/\s:]+):([^@/\s]+)@`), `${1}${2}:<redacted>@`},
 	// password=xxx / token=xxx（query 串与错误文本两种形态）。
 	{regexp.MustCompile(`(?i)\b(password|token)=([^\s&"']+)`), `${1}=<redacted>`},
+	// 形如 SECURITY_KEY=xxx / secret=xxx / api_key=xxx 的键值（诊断包红线要求 SECURITY_KEY= 必空）。
+	{regexp.MustCompile(`(?i)\b([a-z0-9_]*(?:key|secret))=([^\s&"']+)`), `${1}=<redacted>`},
 	// Authorization: Bearer <jwt/pat>。
 	{regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)([A-Za-z0-9._-]+)`), `${1}<redacted>`},
 	// 裸 Bearer 令牌（错误文本常丢掉 Authorization: 前缀，只剩 "Bearer <tok>"）。

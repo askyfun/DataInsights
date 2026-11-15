@@ -14,6 +14,7 @@ import (
 	"tablewave/internal/service/dashboard"
 	"tablewave/internal/service/dataset"
 	"tablewave/internal/service/datasource"
+	"tablewave/internal/service/diagnostics"
 	"tablewave/internal/service/queryrecord"
 	"tablewave/internal/service/sample"
 	"tablewave/internal/service/setup"
@@ -29,7 +30,7 @@ import (
 // 返回预警 service，供 main.go 在装配后启动后台评估 goroutine（评估间隔与
 // notifier 也由 main 注入，routes.go 不读环境变量）。databaseURL 供内置示例
 // 数据集（R-79）反查应用自身数据库。
-func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authSvc auth.Service, authEnforce string, version string) alert.Service {
+func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard extract.Guard, databaseURL string, notifier alert.Notifier, authSvc auth.Service, authEnforce string, version string, diagSvc *diagnostics.Service) alert.Service {
 	// Initialize services
 	dsSvc := datasource.NewService(db)
 	dsSvc.SetSecurityKey(securityKey)
@@ -224,6 +225,12 @@ func SetupRoutes(r *gin.Engine, db *bun.DB, securityKey []byte, extractGuard ext
 	router.RegisterPostRoute(users, "", userHandler.Create)
 	router.RegisterPutRoute(users, "/:id", userHandler.Update)
 	router.RegisterPostRoute(users, "/:id/password", userHandler.ResetPassword)
+
+	// 诊断包（R-104 / #229）：管理员专属（Bearer allowPAT=false + RequireAdmin）。
+	diagHandler := handler.NewDiagnosticsHandler(diagSvc)
+	adminGroup := api.Group("/admin")
+	adminGroup.Use(middleware.Bearer(authSvc, false), middleware.RequireAdmin())
+	adminGroup.GET("/diagnostics", diagHandler.Get)
 
 	return alertSvc
 }

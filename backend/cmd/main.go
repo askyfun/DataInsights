@@ -29,6 +29,7 @@ import (
 	"tablewave/internal/router"
 	"tablewave/internal/service/alert"
 	"tablewave/internal/service/auth"
+	"tablewave/internal/service/diagnostics"
 	"tablewave/internal/webui"
 
 	"github.com/getsentry/sentry-go"
@@ -213,7 +214,15 @@ func main() {
 	})
 
 	// 预警邮件通知：SMTP_HOST 未配置传 nil（评估照常跑，触发记录说明未通知）。
-	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, c.Database.Url, newEmailNotifier(c.Alert), authSvc, c.Auth.Enforce, version)
+	diagSvc := diagnostics.NewService(db, diagnostics.Info{
+		Version:       version,
+		Commit:        commit,
+		BuildTime:     buildTime,
+		SentryEnabled: sentryActive,
+		AuthEnforce:   c.Auth.Enforce,
+	})
+
+	alertSvc := SetupRoutes(r, db, securityKey, extractGuard, c.Database.Url, newEmailNotifier(c.Alert), authSvc, c.Auth.Enforce, version, diagSvc)
 
 	// 预警评估器：后台 goroutine 定时轮询，随主进程退出（evalCancel）而结束。
 	evalCtx, evalCancel := context.WithCancel(context.Background())
