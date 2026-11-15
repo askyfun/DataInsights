@@ -14,9 +14,15 @@
 # 反过来说，若某条 PR 用词与这里不同，会误报 MISSING —— 那就改本脚本的字面量并在文档
 # 对应行注一句，别把 MISSING 当成「对方没做」。
 #
-# 用法：bash scripts/release-gate-v0.4.0.sh   （在仓库任意位置执行均可）
+# 用法：
+#   bash scripts/release-gate-v0.4.0.sh                # 完整判据（发版前跑，须 16 项 PRESENT）
+#   bash scripts/release-gate-v0.4.0.sh --self-check   # 只验闸自身健康（CI 每次 push 跑）
 # 退出码：0 = 16 项静态痕迹齐备（仍不等于可发版）；1 = 仍有缺口。
+#         --self-check 下：0 = 闸健康（不因某项 MISSING 判红，发版期间本就有未合入项）；1 = 闸坏了。
 set -uo pipefail
+
+self_check_only=0
+[[ "${1:-}" == "--self-check" ]] && self_check_only=1
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root" || exit 1
@@ -35,13 +41,28 @@ SCAN="$(scan_files)"
 
 present=0 missing=0 rows=0 FAILED=""
 
+# hits <正则>：输出命中的文件清单（可能为空）。**判定只看输出是否为空，不看退出码。**
+#
+# 为什么不能写成 `printf … | xargs grep -lE "$pat" | grep -q .`：
+# 本脚本开着 `set -o pipefail`，而 `grep -q` 命中首行后立即退出，上游 xargs 紧接着写
+# 后续行会收到 SIGPIPE（退出码 141）；pipefail 取管道最右侧的非零状态 → 整个管道判非负。
+# 结果是**命中文件越多越容易判成「未命中」**：单文件命中时恰好赶在 SIGPIPE 之前写完，
+# 看起来正常；多文件命中就翻成 MISSING。2026-11-15 实测到 10 项假红 —— 同一份文件清单
+# 查 AUTH_ENFORCE，去掉 pipefail 时命中 16 个文件，带 pipefail 时判 no-hit。
+# 教训与本仓「判退出码绝不接管道」同源：要么取输出、要么取 ${PIPESTATUS[0]}，别读管道末段的码。
+hits() {
+  local pat="$1"
+  [[ -n "$SCAN" ]] || return 0
+  printf '%s\n' "$SCAN" | xargs grep -lE "$pat" 2>/dev/null || true
+}
+
 # static <issue> <判据说明> <正则> [...]：任一正则命中 → PRESENT，全不命中 → MISSING。
 static() {
   local issue="$1" desc="$2"; shift 2
   local pat
   rows=$((rows + 1))
   for pat in "$@"; do
-    if printf '%s\n' "$SCAN" | xargs grep -lE "$pat" 2>/dev/null | grep -q .; then
+    if [[ -n "$(hits "$pat")" ]]; then
       printf 'PRESENT  #%-4s %s\n' "$issue" "$desc"
       present=$((present + 1)); return 0
     fi
@@ -54,7 +75,7 @@ static() {
 absent() {
   local issue="$1" desc="$2" pat="$3"
   rows=$((rows + 1))
-  if printf '%s\n' "$SCAN" | xargs grep -lE "$pat" 2>/dev/null | grep -q .; then
+  if [[ -n "$(hits "$pat")" ]]; then
     printf 'MISSING  #%-4s %s\n' "$issue" "$desc"
     missing=$((missing + 1)); FAILED="$FAILED $issue"
   else
@@ -82,6 +103,17 @@ echo "== V0.4.0 发版闸 · 静态半程（实机清单见 docs/deployment/rele
 echo "   仓库：$root"
 echo
 
+# —— 负控自检（不计入 16 项判据）——
+# 拿一个「迁移文件里必然存在」的字面量跑一遍命中链，它必须命中。不命中就说明扫描集或
+# hits() 这条链本身坏了 —— 本仓真实发生过：pipefail + `grep -q` 让 10 项判成 MISSING，
+# 而读输出的人只会去怀疑「对应 PR 还没合」，白找一轮。
+# 闸坏了比闸红了更危险：红了会有人去补活，坏了会让人开始无视闸。
+if [[ -z "$(hits 'CREATE TABLE')" ]]; then
+  echo "✖ 闸自身失效：负控字面量 'CREATE TABLE' 在扫描集里查不到（扫描集或命中链坏了）" >&2
+  echo "  → 此时任何 MISSING 都不可信，先修闸，别照结论去找 PR。" >&2
+  exit 1
+fi
+
 # —— A 组 · 身份与门禁 ——
 static 202 '最小用户管理：建号/重置/禁用端点 + disabled_at 语义' 'CreateUser|DisableUser|ResetPassword' 'disabled_at'
 static 203 'R-87 认证端点限流' 'AUTH_RATE_LIMIT_PER_MINUTE' 'Retry-After'
@@ -107,6 +139,14 @@ echo "== 静态判据 ${rows} 项：PRESENT=${present} MISSING=${missing} =="
 if [[ $rows -ne 16 ]]; then
   echo "✖ 检查项数量与文档登记的 16 条不符（实到 ${rows}）—— 闸本身被改坏了，按失败处理" >&2
   exit 1
+fi
+
+# --self-check：CI 每次 push 只验闸健康（负控命中 + 项数），不因 MISSING 判红。
+# 为什么不在 CI 里要求 16 项全 PRESENT：发版窗口之间有 PR 在飞，全绿会变成常态红；
+# 而闸腐化（扫描集失效、命中链坏、判据被删）才是没人会主动发现的那类问题。
+if [[ $self_check_only -eq 1 ]]; then
+  echo "✔ 闸自检通过：负控命中正常，判据项数 = ${rows}（PRESENT=${present} MISSING=${missing} 仅供参考，本次不判红）"
+  exit 0
 fi
 
 # 迁移水位只报不判：它决定「换镜像能否直接升级」，是 Release 正文素材，不是完成度判据。
