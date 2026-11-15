@@ -361,6 +361,7 @@ describe('buildChartOption：减少动态效果（无障碍 issue #67）', () =>
   it('reducedMotion 缺省时**不带** animation 键（走 ECharts 默认，零回归）', () => {
     const option = buildChartOption('bar', axisPayload, baseStyle, {}, context);
     expect(option).not.toBeNull();
+    // biome-ignore lint/suspicious/noPrototypeBuiltins: 项目 TS lib 未开 ES2022，不能用 Object.hasOwn
     expect(Object.prototype.hasOwnProperty.call(option, 'animation')).toBe(false);
   });
 });

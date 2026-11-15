@@ -25,3 +25,22 @@ function getSnapshot(): ApiUser | null {
 export function useSessionUser(): ApiUser | null {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
+
+// 会话水合完成标志：App 启动用 sessionStorage 的令牌调用 me() 结束后置 true。
+// 身份壳守卫必须等它为 true 再判定「是否未登录」，否则会与 me() 竞态、刷新时误跳登录页。
+let ready = false;
+const readyListeners = new Set<() => void>();
+export function setSessionReady(v: boolean): void {
+  ready = v;
+  for (const l of readyListeners) l();
+}
+function subscribeReady(l: () => void): () => void {
+  readyListeners.add(l);
+  return () => readyListeners.delete(l);
+}
+function getReady(): boolean {
+  return ready;
+}
+export function useSessionReady(): boolean {
+  return useSyncExternalStore(subscribeReady, getReady, getReady);
+}

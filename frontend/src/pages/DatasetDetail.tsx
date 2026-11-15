@@ -38,10 +38,10 @@ import ClickToEdit from '../components/ClickToEdit';
 import ExpressionEditor from '../components/ExpressionEditor';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
-import { normalizeDataType } from '../lib/dataTypes';
-import { validateExpr } from '../lib/expr';
 import { getInitialLocale, messages } from '../i18n/useLocale';
 import { resolveApiErrorMessage } from '../lib/api/errorHint';
+import { normalizeDataType } from '../lib/dataTypes';
+import { validateExpr } from '../lib/expr';
 
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
@@ -128,7 +128,6 @@ const DatasetDetailPage: React.FC = () => {
       message.error(
         resolveApiErrorMessage(error, messages[getInitialLocale()]) || 'Failed to load preview'
       );
-
     } finally {
       setPreviewLoading(false);
     }

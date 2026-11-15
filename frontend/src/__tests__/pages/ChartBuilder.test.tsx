@@ -163,7 +163,6 @@ const resetChartBuilderState = () => {
 const renderChartBuilder = () => {
   return render(
     <IntlProvider locale="en" messages={messages['en-US']}>
-
       <MemoryRouter initialEntries={['/chart-builder?edit=1&datasetId=1']}>
         <LocationProbe />
         <Routes>
@@ -177,7 +176,6 @@ const renderChartBuilder = () => {
 const renderNewChartBuilder = () => {
   return render(
     <IntlProvider locale="en" messages={messages['en-US']}>
-
       <MemoryRouter initialEntries={['/chart-builder?datasetId=1']}>
         <LocationProbe />
         <Routes>
@@ -197,7 +195,6 @@ const renderNewChartBuilder = () => {
 const renderQueryRecordBuilder = (shortId: string, extraQuery = '', strict = false) => {
   const tree = (
     <IntlProvider locale="en" messages={messages['en-US']}>
-
       <MemoryRouter initialEntries={[`/chart-builder?q=${shortId}${extraQuery}`]}>
         <LocationProbe />
         <Routes>

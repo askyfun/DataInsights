@@ -67,7 +67,6 @@ const AccountPage: React.FC = () => {
         if (needs) setMode('register');
       })
       .catch(() => setNeedsBootstrap(false));
-
   }, []);
 
   const submitAuth = async () => {

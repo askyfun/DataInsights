@@ -10,13 +10,36 @@ import type { components } from '../../idls/gen_types';
 // 业务成功码（后端 response 信封约定）。其余非 2xx/业务码由拦截器统一按"非此即错"处理。
 const API_SUCCESS_CODE = 20000;
 
-// 会话 token 只存内存（#184 存储规则：人类会话 token 不得 localStorage 长期明文驻留）。
+// 会话 token 存 sessionStorage（R-93 / #218）：同标签页刷新保持登录，关闭标签即失；
+// 绝不落 localStorage 长期明文（XSS 面与持久化风险）。启动时从 sessionStorage 水合。
+const TOKEN_KEY = 'tw_session_token';
 let bearerToken = '';
+try {
+  bearerToken = sessionStorage.getItem(TOKEN_KEY) ?? '';
+} catch {
+  bearerToken = '';
+}
 export function setBearerToken(token: string): void {
   bearerToken = token;
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* 隐私模式等不可用：退化为仅内存 */
+  }
+}
+export function clearBearerToken(): void {
+  setBearerToken('');
 }
 export function getBearerToken(): string {
   return bearerToken;
+}
+
+// 20200（未认证）的全局处置：身份壳（App）注册后，收到未认证即清令牌并跳登录。
+// 20201（越权）不在此处理——留在原页提示「无权限」，两类提示不混用（#218 AC3）。
+let unauthorizedHandler: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  unauthorizedHandler = fn;
 }
 
 // Envelope from the OpenAPI schema with data re-tightened per call site.
@@ -80,7 +103,6 @@ export class ApiClientError extends Error {
   errorId?: string;
   /** 失败分型（六档之一），构造时由 resolveErrorKind 算出 */
   kind: ErrorKind;
-
 
   constructor(
     message: string,
@@ -276,7 +298,6 @@ function createApiClient(baseURL: string): AxiosInstance {
     (response: AxiosResponse<ApiResponse>) => {
       const { code, msg, error, error_id } = response.data || {};
 
-
       if (code !== undefined && code !== API_SUCCESS_CODE) {
         console.error(`API Error [${code}]: ${msg}`);
         // 业务码错误统一上报（R-98 验收 7）：带 biz_code / request_id / error_id /
@@ -290,6 +311,10 @@ function createApiClient(baseURL: string): AxiosInstance {
             route: window.location.pathname,
           },
         });
+        if (code === 20200) {
+          clearBearerToken();
+          if (unauthorizedHandler) unauthorizedHandler();
+        }
         throw new ApiClientError(msg || `API Error: ${code}`, {
           code,
           requestId: response.config.headers?.['X-Request-ID'] as string | undefined,
@@ -364,7 +389,6 @@ function createApiClient(baseURL: string): AxiosInstance {
         stableCode: envelopeError?.code,
         hintKey: envelopeError?.hint_key,
         errorId: envelopeError?.id ?? errorId,
-
       });
     }
   );
