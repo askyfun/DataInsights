@@ -85,6 +85,9 @@ const DatasetPage: React.FC = () => {
   const [queryType, setQueryType] = useState<string>('table');
   const [editingDataset, setEditingDataset] = useState<any>(null);
   const [datasetColumns, setDatasetColumns] = useState<DatasetColumn[]>([]);
+  // 「字段」步里被取消勾选的列名（按 name 记录）。勾选状态只存在这里，不写进列对象，
+  // 提交时据此过滤——取消勾选 = 真正把该字段从数据集剔除，而不是打 visible 标记。#267
+  const [excludedColumnNames, setExcludedColumnNames] = useState<string[]>([]);
   const [searchText, setSearchText] = useState('');
   // 内置示例数据集（R-79）：引导卡片状态 + 动作进行中标记。
   const [sampleStatus, setSampleStatus] = useState<SampleDatasetStatus | null>(null);
@@ -216,9 +219,14 @@ const DatasetPage: React.FC = () => {
 
       const newDataset = await addDataset(data);
 
-      // 保存字段信息
-      if (datasetColumns.length > 0) {
-        await datasetsApi.updateColumns(newDataset.id, datasetColumns);
+      // 保存字段信息：按「字段」步的勾选状态过滤，取消勾选 = 真正剔除（#267）。
+      const columnsToSave = datasetColumns.filter((col) => !excludedColumnNames.includes(col.name));
+      if (datasetColumns.length > 0 && columnsToSave.length === 0) {
+        message.warning(intl.formatMessage({ id: 'dataset.cannotDeleteLastField' }));
+        return;
+      }
+      if (columnsToSave.length > 0) {
+        await datasetsApi.updateColumns(newDataset.id, columnsToSave);
       }
 
       message.success(intl.formatMessage({ id: 'common.success' }));
@@ -446,6 +454,7 @@ const DatasetPage: React.FC = () => {
     form.setFieldValue('table_name', undefined);
     form.setFieldValue('query_sql', undefined);
     setDatasetColumns([]);
+    setExcludedColumnNames([]);
   };
 
   // Handle query type change
@@ -455,6 +464,7 @@ const DatasetPage: React.FC = () => {
     form.setFieldValue('query_sql', undefined);
     setModalPreviewData(null);
     setDatasetColumns([]);
+    setExcludedColumnNames([]);
   };
 
   // Generate default columns from table
@@ -488,6 +498,9 @@ const DatasetPage: React.FC = () => {
   // Handle table/SQL selection and fetch preview
   const handleTableOrSqlChange = async () => {
     if (!selectedDatasourceId) return;
+
+    // 来源表/SQL 变了 → 字段列表会重建，清空上一轮的取消勾选记录
+    setExcludedColumnNames([]);
 
     const tableName = form.getFieldValue('table_name');
     const querySql = form.getFieldValue('query_sql');
@@ -1236,14 +1249,13 @@ const DatasetPage: React.FC = () => {
               pagination={false}
               rowSelection={{
                 selectedRowKeys: datasetColumns
-                  .filter((c: any) => c.visible !== false)
-                  .map((c: any) => c.name),
+                  .filter((c: DatasetColumn) => !excludedColumnNames.includes(c.name))
+                  .map((c: DatasetColumn) => c.name),
                 onChange: (selectedRowKeys) => {
-                  const newColumns = datasetColumns.map((col: any) => ({
-                    ...col,
-                    visible: selectedRowKeys.includes(col.name),
-                  }));
-                  setDatasetColumns(newColumns);
+                  const keySet = new Set(selectedRowKeys as string[]);
+                  setExcludedColumnNames(
+                    datasetColumns.filter((col) => !keySet.has(col.name)).map((col) => col.name)
+                  );
                 },
               }}
               columns={[
