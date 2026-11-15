@@ -2188,4 +2188,13 @@ describe('ChartBuilder 地址栏即分享', () => {
       expect(screen.getByTestId('chart-type-boxplot')).not.toBeDisabled();
     });
   });
+  it('#269 表格行尺寸为平铺三选一（Segmented），点选即更新 chartStyle.tableRowSize', async () => {
+    renderNewChartBuilder();
+    // 默认图型为表格（resetChartBuilderState 设定），应渲染「表格行尺寸」控件
+    expect(await screen.findByText('表格行尺寸')).toBeTruthy();
+    expect(screen.getByText('紧凑')).toBeTruthy();
+    expect(screen.getByText('默认')).toBeTruthy();
+    fireEvent.click(screen.getByText('宽松'));
+    await waitFor(() => expect(useStore.getState().chartStyle.tableRowSize).toBe('large'));
+  });
 });
