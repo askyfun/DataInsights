@@ -263,7 +263,13 @@ const DatasetDetailPage: React.FC = () => {
     }
   };
 
-  const handleDeleteVirtualField = async (id: string) => {
+  // 删除字段（物理字段与虚拟字段同范式）：先 filter 剔除该列，再全量提交 updateColumns。
+  // 后端是 replace 语义，只要收到的列表里没有它，字段就会真正消失。#267
+  const handleDeleteColumn = async (id: string) => {
+    if (columns.length <= 1) {
+      message.warning(intl.formatMessage({ id: 'dataset.cannotDeleteLastField' }));
+      return;
+    }
     try {
       const updatedColumns = columns.filter((col) => col.id !== id);
       setSavingColumns(true);
@@ -448,25 +454,37 @@ const DatasetDetailPage: React.FC = () => {
       key: 'actions',
       width: 100,
       render: (_: unknown, record: DatasetColumn) => {
-        // 虚拟字段 = 表达式不等于列名本身（物理列的 expr 恰为来源列名）
-        if (!record.expr || record.expr === record.name) return null;
+        // 虚拟字段 = 表达式不等于列名本身（物理列的 expr 恰为来源列名）。
+        // 编辑仅对虚拟字段开放；删除对物理/虚拟字段都开放（#267：物理字段原本无删除入口）。
+        const isVirtual = !!record.expr && record.expr !== record.name;
         return (
           <Space size="small">
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              aria-label={intl.formatMessage({ id: 'virtualField.edit' })}
-              data-testid={`virtual-field-edit-${record.id}`}
-              onClick={() => handleOpenVirtualFieldModal(record)}
-            />
+            {isVirtual && (
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                aria-label={intl.formatMessage({ id: 'virtualField.edit' })}
+                data-testid={`virtual-field-edit-${record.id}`}
+                onClick={() => handleOpenVirtualFieldModal(record)}
+              />
+            )}
             <Popconfirm
-              title={intl.formatMessage({ id: 'virtualField.deleteConfirm' })}
-              onConfirm={() => handleDeleteVirtualField(record.id)}
+              title={intl.formatMessage({
+                id: isVirtual ? 'virtualField.deleteConfirm' : 'field.deleteConfirm',
+              })}
+              onConfirm={() => handleDeleteColumn(record.id)}
               okText={intl.formatMessage({ id: 'common.yes' })}
               cancelText={intl.formatMessage({ id: 'common.no' })}
             >
-              <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                aria-label={intl.formatMessage({ id: 'field.delete' })}
+                data-testid={`field-delete-${record.id}`}
+              />
             </Popconfirm>
           </Space>
         );
