@@ -55,6 +55,7 @@ import { ListSearch, sortOrderOf, useDebouncedValue, useServerList } from '../co
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import SampleDatasetCard from '../components/SampleDatasetCard';
+import SearchableSelect from '../components/ui/Select';
 import { DATA_TYPES, dataTypeLabel, isNumericType, normalizeDataType } from '../lib/dataTypes';
 import { roleColor } from '../lib/fieldRoleColors';
 import { formatDateTime } from '../lib/format';
@@ -1016,17 +1017,15 @@ const DatasetPage: React.FC = () => {
                 },
               ]}
             >
-              <Select
+              <SearchableSelect
                 placeholder={intl.formatMessage({ id: 'dataset.pleaseSelectDatasource' })}
                 onChange={handleDatasourceChange}
                 loading={datasources.length === 0}
-              >
-                {(Array.isArray(datasources) ? datasources : []).map((ds) => (
-                  <Select.Option key={ds.id} value={ds.id}>
-                    {ds.name}
-                  </Select.Option>
-                ))}
-              </Select>
+                options={(Array.isArray(datasources) ? datasources : []).map((ds) => ({
+                  value: ds.id,
+                  label: ds.name,
+                }))}
+              />
             </Form.Item>
 
             <Form.Item
@@ -1069,20 +1068,15 @@ const DatasetPage: React.FC = () => {
                   },
                 ]}
               >
-                <Select
+                <SearchableSelect
                   placeholder={intl.formatMessage({ id: 'dataset.selectTable' })}
                   loading={tablesLoading}
                   disabled={!selectedDatasourceId || tablesLoading}
                   onChange={() => {
                     setTimeout(handleTableOrSqlChange, 100);
                   }}
-                >
-                  {tables.map((table) => (
-                    <Select.Option key={table.name} value={table.name}>
-                      {table.name}
-                    </Select.Option>
-                  ))}
-                </Select>
+                  options={tables.map((table) => ({ value: table.name, label: table.name }))}
+                />
               </Form.Item>
             ) : (
               <Form.Item
@@ -1445,17 +1439,15 @@ const DatasetPage: React.FC = () => {
               },
             ]}
           >
-            <Select
+            <SearchableSelect
               placeholder={intl.formatMessage({ id: 'dataset.pleaseSelectDatasource' })}
               onChange={handleDatasourceChange}
               loading={datasources.length === 0}
-            >
-              {(Array.isArray(datasources) ? datasources : []).map((ds) => (
-                <Select.Option key={ds.id} value={ds.id}>
-                  {ds.name}
-                </Select.Option>
-              ))}
-            </Select>
+              options={(Array.isArray(datasources) ? datasources : []).map((ds) => ({
+                value: ds.id,
+                label: ds.name,
+              }))}
+            />
           </Form.Item>
 
           <Form.Item
@@ -1498,17 +1490,12 @@ const DatasetPage: React.FC = () => {
                 },
               ]}
             >
-              <Select
+              <SearchableSelect
                 placeholder={intl.formatMessage({ id: 'dataset.selectTable' })}
                 loading={tablesLoading}
                 disabled={!selectedDatasourceId || tablesLoading}
-              >
-                {tables.map((table) => (
-                  <Select.Option key={table.name} value={table.name}>
-                    {table.name}
-                  </Select.Option>
-                ))}
-              </Select>
+                options={tables.map((table) => ({ value: table.name, label: table.name }))}
+              />
             </Form.Item>
           ) : (
             <Form.Item

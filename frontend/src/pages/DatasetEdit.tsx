@@ -26,6 +26,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { DatasetColumn, DatasetFormData, datasetsApi, datasourcesApi, TableInfo } from '../api';
 import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
+import SearchableSelect from '../components/ui/Select';
 import { roleColor } from '../lib/fieldRoleColors';
 
 const { Title, Text } = Typography;
@@ -282,17 +283,12 @@ const DatasetEditPage: React.FC = () => {
                 },
               ]}
             >
-              <Select
+              <SearchableSelect
                 placeholder={intl.formatMessage({ id: 'dataset.datasource.placeholder' })}
                 onChange={handleDatasourceChange}
                 loading={datasources.length === 0}
-              >
-                {datasources.map((ds) => (
-                  <Select.Option key={ds.id} value={ds.id}>
-                    {ds.name}
-                  </Select.Option>
-                ))}
-              </Select>
+                options={datasources.map((ds) => ({ value: ds.id, label: ds.name }))}
+              />
             </Form.Item>
           </div>
 
@@ -334,17 +330,12 @@ const DatasetEditPage: React.FC = () => {
                   },
                 ]}
               >
-                <Select
+                <SearchableSelect
                   placeholder={intl.formatMessage({ id: 'dataset.tableName.placeholder' })}
                   loading={tablesLoading}
                   disabled={!selectedDatasourceId || tablesLoading}
-                >
-                  {tables.map((table) => (
-                    <Select.Option key={table.name} value={table.name}>
-                      {table.name}
-                    </Select.Option>
-                  ))}
-                </Select>
+                  options={tables.map((table) => ({ value: table.name, label: table.name }))}
+                />
               </Form.Item>
             ) : (
               <Form.Item
