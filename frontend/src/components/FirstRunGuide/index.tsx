@@ -6,12 +6,20 @@ import { useNavigate } from 'react-router-dom';
 import { authApi, sampleDatasetApi } from '../../api';
 import { setBearerToken } from '../../lib/api/client';
 import { setSessionUser } from '../../lib/authSession';
+import { markSetupSkipped } from '../../lib/firstRun';
 
 const { Title, Paragraph } = Typography;
 
 // 首启向导（R-101 / #226）：三步步进复用既有能力，不新造流程。
-// 完成（出第一张图 / 载示例）后写 localStorage setup_done，刷新不再出现。
-const FirstRunGuide: React.FC<{ onDone: () => void }> = ({ onDone }) => {
+// 完成（出第一张图 / 载示例）后写会话级标记（见 lib/firstRun），本次访问不再顶替列表；
+// 库里有了管理员之后 `needs_bootstrap` 自然为假，向导就不会再出现。
+//
+// allowSkip=false 用于强制鉴权（enforce=on）的部署：那时匿名"先逛逛"只会被守卫弹到登录页，
+// 给一个点了就撞墙的按钮比不给更糟。
+const FirstRunGuide: React.FC<{ onDone: () => void; allowSkip?: boolean }> = ({
+  onDone,
+  allowSkip = true,
+}) => {
   const intl = useIntl();
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
@@ -19,11 +27,7 @@ const FirstRunGuide: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   const [busy, setBusy] = useState(false);
 
   const finish = () => {
-    try {
-      localStorage.setItem('setup_done', '1');
-    } catch {
-      /* ignore */
-    }
+    markSetupSkipped();
     onDone();
   };
 
@@ -91,6 +95,9 @@ const FirstRunGuide: React.FC<{ onDone: () => void }> = ({ onDone }) => {
               <Paragraph type="secondary" style={{ marginBottom: 0 }}>
                 {intl.formatMessage({ id: 'setup.adminHint' })}
               </Paragraph>
+              <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                {intl.formatMessage({ id: 'setup.tokenHint' })}
+              </Paragraph>
               <Form layout="vertical" onFinish={createAdmin} requiredMark={false}>
                 <Form.Item
                   name="username"
@@ -109,12 +116,21 @@ const FirstRunGuide: React.FC<{ onDone: () => void }> = ({ onDone }) => {
                 <Form.Item
                   name="bootstrap_token"
                   label={intl.formatMessage({ id: 'login.bootstrapToken' })}
+                  rules={[{ required: true }]}
                 >
-                  <Input />
+                  <Input autoComplete="off" />
                 </Form.Item>
-                <Button type="primary" htmlType="submit" loading={busy}>
-                  {intl.formatMessage({ id: 'setup.createAdmin' })}
-                </Button>
+                <Space>
+                  <Button type="primary" htmlType="submit" loading={busy}>
+                    {intl.formatMessage({ id: 'setup.createAdmin' })}
+                  </Button>
+                  {/* 跳过只在本次会话生效，下次访问会再提；强制鉴权时不提供（点了也是撞登录页）。 */}
+                  {allowSkip && (
+                    <Button type="link" onClick={finish} style={{ paddingInline: 0 }}>
+                      {intl.formatMessage({ id: 'setup.skipAdmin' })}
+                    </Button>
+                  )}
+                </Space>
               </Form>
             </>
           )}

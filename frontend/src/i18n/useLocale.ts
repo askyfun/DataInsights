@@ -14,11 +14,17 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'nav.datasources': '数据源',
     'nav.account': '账号设置',
     'nav.users': '用户管理',
+    'nav.system': '系统管理',
+    'nav.about': '关于与自检',
     'nav.login': '登录',
     'nav.logout': '退出登录',
+    // 首启态（库里还没有管理员）时，右上角入口不叫「登录」而叫「初始化管理员」——
+    // 首次部署的人不该先看到一个把自己挡在外面的按钮。
+    'nav.bootstrap': '初始化管理员',
     'login.title': '登录 TableWave',
     'login.registerTitle': '初始化管理员',
-    'login.registerHint': '首次使用：请创建第一个管理员。Bootstrap 令牌见服务端启动日志。',
+    'login.registerHint':
+      '首次使用：请创建第一个管理员。Bootstrap 令牌在部署日志里：docker logs <容器名> | grep BOOTSTRAP（30 分钟内有效，过期可重启一次容器重新生成）。',
     'login.username': '用户名',
     'login.password': '密码',
     'login.bootstrapToken': 'Bootstrap 令牌',
@@ -34,7 +40,10 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'setup.stepChart': '出第一张图',
     'setup.adminHint':
       '首次使用：先创建第一个管理员账号。若部署开启了 bootstrap，请从服务端启动日志取一次性口令填入下方。',
+    'setup.tokenHint':
+      '怎么拿令牌：docker logs <容器名> | grep BOOTSTRAP。令牌 30 分钟内有效，过期了重启一次容器就会重新生成（旧令牌同时作废）。',
     'setup.createAdmin': '创建管理员并继续',
+    'setup.skipAdmin': '先逛逛，稍后再建',
     'setup.dataHint': '选一条最快出数的路径（示例数据最快）。',
     'setup.loadSample': '载入示例数据',
     'setup.upload': '上传 CSV / Excel',
@@ -649,6 +658,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'theme.light': '浅色',
     'theme.dark': '深色',
     'theme.system': '跟随系统',
+    'locale.label': '语言',
     // 指标预警（issue #155）
     'nav.alerts': '预警',
     'alert.title': '指标预警',
@@ -706,12 +716,15 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'nav.datasources': 'Data Sources',
     'nav.account': 'Account',
     'nav.users': 'Users',
+    'nav.system': 'System',
+    'nav.about': 'About & diagnostics',
     'nav.login': 'Sign in',
     'nav.logout': 'Sign out',
+    'nav.bootstrap': 'Set up administrator',
     'login.title': 'Sign in to TableWave',
     'login.registerTitle': 'Create administrator',
     'login.registerHint':
-      'First run: create the first administrator. The bootstrap token is in the server startup log.',
+      'First run: create the first administrator. The bootstrap token is in the deploy log: docker logs <container> | grep BOOTSTRAP (valid for 30 minutes; restart the container to reissue).',
     'login.username': 'Username',
     'login.password': 'Password',
     'login.bootstrapToken': 'Bootstrap token',
@@ -727,7 +740,10 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'setup.stepChart': 'First chart',
     'setup.adminHint':
       'First run: create the first administrator. If bootstrap is enforced, paste the one-time token from the server startup log.',
+    'setup.tokenHint':
+      'Where to find it: docker logs <container> | grep BOOTSTRAP. The token is valid for 30 minutes; restart the container to reissue it (the old one is revoked).',
     'setup.createAdmin': 'Create admin and continue',
+    'setup.skipAdmin': 'Browse first, set up later',
     'setup.dataHint': 'Pick the fastest path to data (the sample is quickest).',
     'setup.loadSample': 'Load sample data',
     'setup.upload': 'Upload CSV / Excel',
@@ -1361,6 +1377,7 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'theme.light': 'Light',
     'theme.dark': 'Dark',
     'theme.system': 'System',
+    'locale.label': 'Language',
     'nav.alerts': 'Alerts',
     'alert.title': 'Metric Alerts',
     'alert.manageAlerts': 'Configure threshold alert rules for chart metrics',

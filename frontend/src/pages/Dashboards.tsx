@@ -8,7 +8,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { App, Button, Card, Layout, Popconfirm, Space, Table, Tag, Typography } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { notifyApiError } from '@/lib/describeApiError';
@@ -19,13 +19,10 @@ import {
   dashboardsApi,
   type ListQuery,
   sampleDatasetApi,
-  setupApi,
 } from '../api';
 import DashboardFolderTree from '../components/DashboardFolderTree';
-import FirstRunGuide from '../components/FirstRunGuide';
 import { sortOrderOf, useServerList } from '../components/listPage';
 import PageHeader from '../components/PageHeader';
-import { useSessionUser } from '../lib/authSession';
 import type { FolderSelection } from '../lib/dashboardFolderTree';
 import { migrateDashboardLayout } from '../lib/dashboardLayoutSchema';
 import { formatDateTime } from '../lib/format';
@@ -59,35 +56,8 @@ const DashboardsPage: React.FC = () => {
   // 归档树默认展开（占位整列），可向左折叠。
   const [collapsed, setCollapsed] = useState(false);
 
-  // 首启向导（R-101 / #226）：仅「未登录 + needs_admin + 未完成过」时顶替列表。
-  const sessionUser = useSessionUser();
-  const [showWizard, setShowWizard] = useState(false);
-  // 只在首次探测时决定是否进入向导；一旦展示就一直保持，直到用户完成/跳过（onDone 收起）。
-  const wizardDecided = useRef(false);
-  useEffect(() => {
-    if (wizardDecided.current) return;
-    let cancelled = false;
-    setupApi
-      .status()
-      .then((r) => {
-        if (cancelled || wizardDecided.current) return;
-        wizardDecided.current = true;
-        let done = false;
-        try {
-          done = localStorage.getItem('setup_done') === '1';
-        } catch {
-          /* ignore */
-        }
-        setShowWizard(!!r.data.data.needs_admin && !sessionUser && !done);
-      })
-      .catch(() => {
-        wizardDecided.current = true;
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionUser]);
-
+  // 首启向导已上移到路由层的 Guard（App.tsx）：任何路由（含 /charts 这类深链）在
+  // 「库里没有管理员 + 未登录 + 本次会话没跳过」时都会先跑引导，这里不再重复判定。
   const handleLoadSample = async () => {
     try {
       await sampleDatasetApi.load();
@@ -334,10 +304,6 @@ const DashboardsPage: React.FC = () => {
       ),
     },
   ];
-
-  if (showWizard) {
-    return <FirstRunGuide onDone={() => setShowWizard(false)} />;
-  }
 
   return (
     <div className="dr-page">

@@ -87,8 +87,9 @@ const LoginPage: React.FC = () => {
             <Form.Item
               name="bootstrap_token"
               label={intl.formatMessage({ id: 'login.bootstrapToken' })}
+              rules={[{ required: true }]}
             >
-              <Input />
+              <Input autoComplete="off" />
             </Form.Item>
           )}
           <Button type="primary" htmlType="submit" block loading={loading}>
