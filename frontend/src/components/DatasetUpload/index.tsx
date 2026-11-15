@@ -16,6 +16,7 @@ import React, { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import type { Dataset, DatasetColumn } from '../../api';
 import { datasetsApi } from '../../api';
+import { roleColor } from '../../lib/fieldRoleColors';
 import ModalFooter from '../ModalFooter';
 
 const { Text } = Typography;
@@ -321,7 +322,7 @@ const DatasetUploadModal: React.FC<DatasetUploadModalProps> = ({
                       )
                     }
                     style={{
-                      backgroundColor: value === 'metric' ? 'var(--dr-metric)' : undefined,
+                      backgroundColor: roleColor(value),
                     }}
                   />
                 ),

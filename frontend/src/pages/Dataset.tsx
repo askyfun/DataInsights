@@ -56,6 +56,7 @@ import ModalFooter from '../components/ModalFooter';
 import PageHeader from '../components/PageHeader';
 import SampleDatasetCard from '../components/SampleDatasetCard';
 import { isNumericType, normalizeDataType } from '../lib/dataTypes';
+import { roleColor } from '../lib/fieldRoleColors';
 import { formatDateTime } from '../lib/format';
 import { useStore } from '../store';
 
@@ -1259,7 +1260,7 @@ const DatasetPage: React.FC = () => {
                         strong={!!record.expr}
                         // 与图表构建页的字段语义同源：维度蓝 / 指标绿
                         style={{
-                          color: record.role === 'dimension' ? 'var(--dr-dim)' : 'var(--dr-metric)',
+                          color: roleColor(record.role),
                         }}
                       >
                         {name}
@@ -1318,9 +1319,8 @@ const DatasetPage: React.FC = () => {
                         handleColumnRoleChange(record, checked ? 'metric' : 'dimension')
                       }
                       style={{
-                        // 只在「指标」态染色（指标绿）；「维度」态交回 antd 默认灰，
-                        // 否则内联色会把两个状态涂成同一个颜色、状态差异反而丢失。
-                        backgroundColor: role === 'metric' ? 'var(--dr-metric)' : undefined,
+                        // 统一语义色：维度蓝 / 指标绿（与字段名文字、图表构建页同源）
+                        backgroundColor: roleColor(role),
                       }}
                     />
                   ),
