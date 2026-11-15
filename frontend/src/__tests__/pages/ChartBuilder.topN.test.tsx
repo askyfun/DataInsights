@@ -216,7 +216,6 @@ const seedApis = (config: string) => {
 const renderBuilder = () =>
   render(
     <IntlProvider locale="en" messages={messages['en-US']}>
-
       <MemoryRouter initialEntries={['/chart-builder?edit=8&datasetId=1']}>
         <ChartBuilder />
       </MemoryRouter>
