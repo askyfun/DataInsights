@@ -121,7 +121,12 @@ static 216 '首管 bootstrap：一次性凭据 + 状态探测端点' 'bootstrap_
 static 217 'R-92 渐进开关：三态 env + shadow 日志 + 探测端点' 'AUTH_ENFORCE' 'auth_would_deny' 'auth/config'
 static 218 'R-93 前端身份壳：/login 路由 + 会话持久化' 'Route path="/login"' 'sessionStorage'
 static 219 'R-94 compose 只绑环回 + HOST_BIND' 'HOST_BIND'
-static 220 'R-95 创建人可见（归属写入的可见出口）' 'created_by|ownerName|creatorName'
+# ⚠️ 判据必须用**实现里真实存在的标识符**，不要用同义词猜。本行原为
+# 'created_by|ownerName|creatorName'，而 R-95 落地用的是 Go/TS 导出名 OwnerName
+# 与 JSON 名 owner_name —— 三个猜测串全仓零命中，那段时间的 PRESENT 实际是扫到
+# docs/deployment/release-readiness.md 自己（自指假绿），已修正。
+# 区分能力反证过：6c5ddba^（实现前）零命中，6c5ddba（实现后）5+ 文件命中。
+static 220 'R-95 创建人可见（归属写入的可见出口）' 'owner_name|OwnerName'
 static 221 'R-96 失败日志带业务码' 'biz_code'
 static 222 'R-97 错误编号与可复制报障' 'error_id|errorId'
 static 223 'R-98 非 panic 错误集中上报' 'CaptureException' 'BeforeSend'
