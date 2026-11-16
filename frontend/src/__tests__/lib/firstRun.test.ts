@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  clearSetupInProgress,
   LEGACY_SETUP_DONE_KEY,
+  markSetupInProgress,
   markSetupSkipped,
+  SETUP_IN_PROGRESS_KEY,
   SETUP_SKIPPED_KEY,
+  setupInProgress,
   setupSkipped,
   shouldShowFirstRun,
 } from '../../lib/firstRun';
@@ -42,6 +46,37 @@ describe('firstRun（首启引导判定）', () => {
     expect(sessionStorage.getItem(SETUP_SKIPPED_KEY)).toBe('1');
     // 旧键必须被清除：留着会让排查的人以为"这台机器已经配好了"。
     expect(localStorage.getItem(LEGACY_SETUP_DONE_KEY)).toBeNull();
+  });
+
+  // 回归钉子（#226 现场实测）：向导第①步建完管理员后 `hasUser` 立刻变真，
+  // 旧判据 `needsAdmin && !hasUser` 就地翻假 → 整个组件被卸载，②载示例 / ③出第一张图
+  // 两步成了死代码，新人建完号直接被丢进空列表页。修法是把「向导正跑到一半」记为独立信号，
+  // 它在本次会话内压过 hasUser，但仍然让位给「跳过」。
+  it('向导内建完管理员（hasUser 已为真）仍继续走 ②③ 步', () => {
+    expect(
+      shouldShowFirstRun({ needsAdmin: true, hasUser: true, skipped: false, inProgress: true })
+    ).toBe(true);
+  });
+
+  it('inProgress 不依赖后端 needsAdmin（探测结果在会话内不会自动刷新）', () => {
+    expect(
+      shouldShowFirstRun({ needsAdmin: false, hasUser: true, skipped: false, inProgress: true })
+    ).toBe(true);
+  });
+
+  it('跳过优先于 inProgress：点了「先进入应用」必须立刻放行', () => {
+    expect(
+      shouldShowFirstRun({ needsAdmin: true, hasUser: true, skipped: true, inProgress: true })
+    ).toBe(false);
+  });
+
+  it('inProgress 只写 sessionStorage，且可被清掉（走完向导即结束）', () => {
+    expect(setupInProgress()).toBe(false);
+    markSetupInProgress();
+    expect(sessionStorage.getItem(SETUP_IN_PROGRESS_KEY)).toBe('1');
+    expect(setupInProgress()).toBe(true);
+    clearSetupInProgress();
+    expect(setupInProgress()).toBe(false);
   });
 
   it('存储不可用时按未跳过处理（不因隐私模式而静默失去引导）', () => {

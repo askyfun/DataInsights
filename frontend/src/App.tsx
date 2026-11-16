@@ -47,7 +47,7 @@ import {
   useSessionUser,
 } from './lib/authSession';
 import { canSeeUsers, needLogin, showUnauthBanner } from './lib/authz';
-import { setupSkipped, shouldShowFirstRun } from './lib/firstRun';
+import { setupInProgress, setupSkipped, shouldShowFirstRun } from './lib/firstRun';
 import {
   ACCOUNT_NAV,
   ADMIN_NAV,
@@ -103,6 +103,11 @@ const Guard: React.FC<{ adminOnly?: boolean }> = ({ adminOnly = false }) => {
   const intl = useIntl();
   // 本次会话是否已点过「先逛逛」/走完向导。判据本身仍由后端 needs_bootstrap 决定。
   const [setupSkippedThisSession, setSetupSkippedThisSession] = useState(() => setupSkipped());
+  // 向导已经建好管理员、但 ②③ 步还没走完。没有这个信号，建号成功的瞬间
+  // hasUser 变真 → 向导被自己卸掉，载示例/出图两步永远执行不到（#226 现场）。
+  const [setupInProgressThisSession, setSetupInProgressThisSession] = useState(() =>
+    setupInProgress()
+  );
   if (cfg === null || !ready) {
     return <LoadingPlaceholder text={intl.formatMessage({ id: 'common.loading' })} />;
   }
@@ -113,11 +118,16 @@ const Guard: React.FC<{ adminOnly?: boolean }> = ({ adminOnly = false }) => {
       needsAdmin: cfg.needs_bootstrap === true,
       hasUser: !!user,
       skipped: setupSkippedThisSession,
+      inProgress: setupInProgressThisSession,
     })
   ) {
     return (
       <FirstRunGuide
-        onDone={() => setSetupSkippedThisSession(true)}
+        onDone={() => {
+          setSetupSkippedThisSession(true);
+          setSetupInProgressThisSession(false);
+        }}
+        onAdminCreated={() => setSetupInProgressThisSession(true)}
         allowSkip={cfg.enforce_mode !== 'on'}
       />
     );
