@@ -83,6 +83,8 @@
 - 数据集中 `map` / `array` 等复杂类型此前只显示英文原名：类型文案统一走单一映射入口，并补齐残缺的类型下拉选项。
 - 维度 / 指标的角色配色回退为灰色、部分场景颜色反转：收敛为「维度蓝 / 指标绿」。
 - 表格「每页条数」此前渲染成可输入框并触发浏览器密码管理器自动填充，改为只读选择。
+- **一键部署此前根本起不来**：`docker-compose.allinone.yml` 把 PostgreSQL 数据卷挂在 `/var/lib/postgresql/data`，而 `postgres:18` 起官方镜像要求挂在父目录 `/var/lib/postgresql`（数据在按大版本命名的子目录里，便于 `pg_upgrade --link`）。旧挂载点会让 entrypoint 直接报错并反复重启，表现为 `compose up` 之后 app 卡在 `dependency postgres failed to start`。已改挂载点并补注释说明。
+- compose 现在透传 `APP_ENV` 与 `AUTH_ENFORCE`：这两个变量此前只能改 compose 文件本体才能设置，导致用 compose 部署的人无法切到 `shadow` 做完迁移盘点再切 `on`。
 - 模糊测试的标识符目标不再把表达式位当作标识符位（此前会产出与真实攻击面无关的崩溃），并补充两条崩溃语料。
 - 依赖安全更新，仓库依赖告警清零（含全部 high）：`undici` → 8.12.4、`follow-redirects` → 1.16.3、`vite` → 8.3.8、`source-map-js` → 1.2.2、`vitest` → 5.1.0（连带 `@vitest/mocker` 5.1.0）、`go.opentelemetry.io/otel/trace` → 1.47.0。
   根 workspace lock 与 `frontend/pnpm-lock.yaml`（**CI 与镜像构建实际使用的那份**）均已同步；此前 dependabot 只更新根 lock，导致「CI 测过的依赖树」与「打进镜像的依赖树」不是同一份。

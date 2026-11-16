@@ -34,7 +34,13 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       # 数据落在这个命名卷里，down 不会删，只有 down -v 才清。
-      - postgres_data:/var/lib/postgresql/data
+      #
+      # ⚠️ 挂载点必须是 /var/lib/postgresql（父目录），不能是 /var/lib/postgresql/data。
+      # postgres:18 起，官方镜像把数据放在按大版本命名的子目录（/var/lib/postgresql/18/docker），
+      # 以便 pg_upgrade --link 跨版本升级；若仍挂在 /data 上，entrypoint 会直接报
+      # 「in 18+, these Docker images are configured to store database data in a format ...」
+      # 并反复重启 —— 表现为 compose up 之后 app 卡在 "dependency postgres failed to start"。
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U insights"]
       interval: 10s
@@ -58,6 +64,15 @@ services:
       # 数据源密码的 AES-256 加密密钥。留空 = 首次启动自动随机生成并持久化到数据库，
       # 容器重建也能复用；长期运行的环境建议显式设置一个固定值（openssl rand -hex 32）。
       SECURITY_KEY: ${SECURITY_KEY:-}
+      # 运行环境标记：决定 AUTH_ENFORCE 未设置时的默认值（development/dev/local/test 视为开发，
+      # 其余含留空一律按生产 = 强制鉴权）。想在本机 compose 里保留旧的匿名行为，设
+      # APP_ENV=development；生产不要设成开发值。
+      APP_ENV: ${APP_ENV:-}
+      # 资源端点强制鉴权三态：off / shadow / on。留空 = 按 APP_ENV 推导（生产 on、开发 off）。
+      # 从旧版本升级时，建议先设 shadow 跑一轮：照常解析令牌但不改变响应，只记
+      # auth_would_deny 日志，据此盘点还带匿名调用的脚本 / MCP / 监控探针，
+      # 换成 PAT 后再切 on。这两个变量此前没从 compose 透传，只能改本文件才能设。
+      AUTH_ENFORCE: ${AUTH_ENFORCE:-}
     ports:
       # 容器内监听端口与宿主机映射端口保持一致，由 PORT 统一控制。
       # 默认只绑环回；内网共享时显式 HOST_BIND=0.0.0.0（先按文件头提示收紧暴露面）。
