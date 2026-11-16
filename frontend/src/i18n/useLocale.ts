@@ -49,6 +49,10 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'setup.upload': '上传 CSV / Excel',
     'setup.connectDb': '连接我的数据库',
     'setup.chartHint': '示例数据已就绪，去搭第一张图吧。',
+    'setup.chartReady': '示例数据已经配好一张图，点开就能看到它渲染出来。',
+    'setup.chartReadyDetail':
+      '按「{dimension}」汇总「{metric}」，进去可以改图型、加筛选，满意后保存。',
+    'setup.openSampleChart': '看看这张图',
     'setup.toBuilder': '去建第一张图',
     'setup.skipToApp': '先进入应用',
     'setup.loadFailed': '载入示例数据失败',
@@ -751,6 +755,10 @@ const messages: Record<LocaleType, Record<string, string>> = {
     'setup.upload': 'Upload CSV / Excel',
     'setup.connectDb': 'Connect my database',
     'setup.chartHint': 'Sample data is ready — build your first chart.',
+    'setup.chartReady': 'We set up a chart on the sample data — open it and it renders right away.',
+    'setup.chartReadyDetail':
+      'Grouped by {dimension}, summed {metric}. Change the chart type, add filters, then save it.',
+    'setup.openSampleChart': 'Open the chart',
     'setup.toBuilder': 'Build first chart',
     'setup.skipToApp': 'Go to app',
     'setup.loadFailed': 'Failed to load sample data',
